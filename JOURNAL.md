@@ -1,0 +1,136 @@
+# LinguaLink Online — Build Journal
+
+---
+
+## Session 1 — 31 March 2026 — Environment Setup
+
+### What was built
+- GitHub repository created at github.com/LeopoldTydtgat/lingualink-lms with README, .gitignore, and MIT license
+- Main branch protected, dev branch created as the daily working branch
+- Git configured locally with name, email, and SSH authentication to GitHub
+- Project cloned to `C:\Projects\lingualink-lms` — intentionally outside OneDrive
+- PowerShell execution policy updated to allow npm scripts to run
+- Cursor Pro opened, connected to correct project folder, workspace trusted, confirmed on dev branch
+- Node.js v24.14.1 and npm v11.11.0 confirmed working
+- Vercel account connected to GitHub, lingualink-lms repository imported, auto-deploy active on dev branch
+- Supabase project confirmed, publishable and secret API keys collected
+- `.env.local` created with Supabase credentials
+- Resend account confirmed, domain lingualinkonline.com verified in EU West (Ireland) region, DNS records added, API key saved to `.env.local`
+- Sentry project created for Next.js, DSN key saved to `.env.local`
+- GitHub Actions CI workflow created at `.github/workflows/ci.yml`, pushed to dev branch, workflow triggered and passed successfully
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Project folder was inside OneDrive.
+- Cause: Folder was created in the default Windows documents location which syncs automatically to OneDrive
+- Fix: Created `C:\Projects` directory outside OneDrive and cloned the repository there instead
+- Lesson: Never put Git repositories inside OneDrive — background sync causes file conflicts and potential corruption
+
+**Issue 2**
+- Symptom: `npm --version` returned a security error — script could not be loaded
+- Cause: Windows PowerShell execution policy is set to restricted by default, blocking npm scripts from running
+- Fix: Ran `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`
+- Lesson: Windows requires explicit permission to run PowerShell scripts — this is a one-time fix per machine
+
+**Issue 3**
+- Symptom: Cursor was pointing at the old OneDrive folder, not the cloned repository
+- Cause: Cursor had been opened previously with the wrong folder path
+- Fix: File → Open Folder → navigated to `C:\Projects\lingualink-lms`
+- Lesson: Always confirm Cursor is pointing at the correct project folder at the start of each session
+
+**Issue 4**
+- Symptom: API key accidentally pasted into chat and then into the terminal instead of `.env.local`
+- Cause: Unfamiliarity with the workflow — the copied value went to the wrong destination twice
+- Fix: Deleted the exposed keys on Resend immediately, generated fresh keys, and pasted them directly into `.env.local`
+- Lesson: API keys go directly into `.env.local` only — never in chat, the terminal, or any other file
+
+**Issue 5**
+- Symptom: Confusion about whether Payfast needed to be integrated into the portal
+- Cause: The brief mentioned Payfast but Shannon's actual business flow handles payments on the existing WordPress website separately
+- Fix: Confirmed with Shannon that the portal never handles money — students pay on the website and Shannon activates accounts manually in the portal
+- Lesson: Always validate brief requirements against the actual business workflow — Shannon's confirmed process overrides what the brief says
+
+### Session result
+All development tools configured and connected end-to-end, credentials secured in `.env.local`, CI pipeline live on GitHub, and one major scope decision confirmed — the portal has no payment integration.
+
+---
+
+## Session 2 — 31 March 2026 — Next.js Initialisation
+
+### What was built
+- Backed up `.env.local` before initialisation to avoid losing credentials
+- Moved conflicting files (`.env.local`, `.github/`, `README.md`) out of the project folder temporarily to allow Next.js to initialise cleanly
+- Initialised Next.js 16.2.1 with TypeScript, Tailwind CSS, ESLint, App Router, and src directory
+- Installed Supabase packages: `@supabase/supabase-js` and `@supabase/ssr`
+- Installed Sentry: `@sentry/nextjs`
+- Initialised shadcn/ui with the Nova preset
+- Created full folder structure inside `src/`: `app/(auth)/login`, `app/(dashboard)`, `app/api`, `components/layout`, `components/shared`, `hooks`, `lib`, `types`
+- Restored `.env.local` with all 7 variables correctly named and prefixed: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY`, `SENTRY_DSN`, `NEXT_PUBLIC_APP_URL`, `NODE_ENV`
+- Confirmed app running at `localhost:3000`
+- Pushed to GitHub, CI passing green on dev branch
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: `npx create-next-app` refused to run, reporting that the directory contained conflicting files
+- Cause: `.env.local`, `.github/`, and `README.md` already existed in the project folder from the previous session
+- Fix: Used `Move-Item` in PowerShell to temporarily move all three files out of the folder, ran the initialisation, then moved them back with `Move-Item -Force`
+- Lesson: `create-next-app` cannot initialise into a folder that already contains files it expects to create — always move conflicting files out first when initialising into an existing repo
+
+**Issue 2**
+- Symptom: `mkdir` commands for `(auth)` and `(dashboard)` folders threw `CommandNotFoundException` errors
+- Cause: PowerShell interprets parentheses as command syntax, not as part of a folder name
+- Fix: Wrapped the paths in quotes: `mkdir "src/app/(auth)/login"` and `mkdir "src/app/(dashboard)"`
+- Lesson: On Windows PowerShell, any folder name containing parentheses must be quoted in mkdir commands
+
+**Issue 3**
+- Symptom: shadcn `init` stopped without completing when the Custom preset was selected
+- Cause: The Custom preset requires a pre-built configuration from the shadcn website — it cannot complete locally without that
+- Fix: Re-ran `npx shadcn@latest init` and selected the Nova preset instead. Brand colours will be applied manually in the global CSS file during the UI build phase
+- Lesson: Use an existing shadcn preset as a starting point and override colours in CSS — do not use the Custom preset without a pre-built configuration
+
+### Session result
+Next.js application successfully initialised with the full agreed stack, folder structure in place, environment variables confirmed, app running locally, and first real commit pushed to GitHub with CI passing.
+
+---
+
+## Session 3 — 31 March 2026 — Supabase Client, Database Schema & Authentication
+
+### What was built
+- Supabase browser client created at `src/lib/supabase/client.ts`
+- Supabase server client created at `src/lib/supabase/server.ts`
+- Middleware created at `src/middleware.ts` — refreshes user sessions on every request and handles route protection
+- Full database schema written and executed in Supabase SQL Editor — 13 tables created: `profiles`, `students`, `trainings`, `training_teachers`, `lessons`, `reports`, `study_sheets`, `exercises`, `assignments`, `availability_templates`, `availability_overrides`, `invoices`, `messages`
+- Row Level Security (RLS) enabled on all 13 tables with policies ensuring teachers can only access their own data
+- Automatic profile creation trigger set up — a profile row is created in the `profiles` table whenever a new auth user is added
+- Login page built at `src/app/(auth)/login/page.tsx` with Lingualink branding — orange button, Poppins font, grey background
+- Server action for authentication created at `src/app/(auth)/login/actions.ts`
+- Placeholder dashboard page created at `src/app/(dashboard)/dashboard/page.tsx`
+- Poppins font added to global layout in `src/app/layout.tsx`
+- Shannon's test user created in Supabase Auth, profile updated to role `admin`
+- Login tested and confirmed working end-to-end
+- All code committed and pushed to GitHub on dev branch
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Build error on the login page — `Module not found: Can't resolve '@/components/ui/card'`
+- Cause: shadcn/ui components are not installed automatically — each component must be added individually using the CLI
+- Fix: Ran `npx shadcn@latest add card button input label` in a second terminal while the dev server was still running in the first
+- Lesson: Always install shadcn/ui components before importing them. Initialising shadcn does not pre-install any components
+
+**Issue 2**
+- Symptom: PowerShell threw an error when running `ls src/app/(auth)/`
+- Cause: PowerShell interprets brackets as command syntax, not as part of a file path
+- Fix: Wrapped the path in single quotes — `ls 'src/app/(auth)/'`
+- Lesson: On Windows PowerShell, always quote paths that contain parentheses
+
+**Issue 3**
+- Symptom: Dashboard displayed Role: teacher for Shannon instead of Role: admin
+- Cause: The database trigger creates the profile row automatically when a user is added, but defaults the role to `teacher` — it has no way of knowing the intended role
+- Fix: Manually edited Shannon's row in the Supabase Table Editor and set the role field to `admin`
+- Lesson: After creating an admin user in Supabase Auth, always manually update their role in the profiles table immediately after
+
+### Session result
+Supabase client fully configured, all 13 database tables live, authentication working end-to-end with role-based access confirmed, login page styled in Lingualink branding, and all code pushed to GitHub.
