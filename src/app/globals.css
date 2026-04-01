@@ -5,6 +5,14 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* ── Lingualink Brand Colours ── */
+  --color-brand-orange: #FF8303;
+  --color-brand-orange-light: #FFF0E0;
+  --color-brand-red: #FD5602;
+  --color-brand-yellow: #FFB942;
+  --color-brand-yellow-light: #FFF8E8;
+  --color-brand-grey: #E0DFDC;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
