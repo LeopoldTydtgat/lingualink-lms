@@ -8,7 +8,7 @@ interface Profile { id: string; full_name: string; role: string }
 
 interface Props {
   profile: Profile
-  availability: AvailabilityRecord[]        // FULL list from parent
+  availability: AvailabilityRecord[]
   onAvailabilityChange: (records: AvailabilityRecord[]) => void
 }
 
@@ -19,37 +19,48 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
   Friday: 5, Saturday: 6, Sunday: 0,
 }
 
-const HOURS = Array.from({ length: 17 }, (_, i) => i + 6)
+// Generate slots in 30-minute increments from 06:00 to 22:30
+// Each entry is { hour: 6, minute: 0 }, { hour: 6, minute: 30 }, etc.
+const SLOTS = Array.from({ length: 34 }, (_, i) => ({
+  hour: Math.floor(i / 2) + 6,
+  minute: (i % 2) * 30,
+}))
 
-function toTimeString(hour: number) {
-  return `${String(hour).padStart(2, '0')}:00:00`
+// Convert hour + minute to a TIME string for Supabase e.g. "06:30:00"
+function toTimeString(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`
 }
 
-function isSlotActive(generalSlots: AvailabilityRecord[], dayName: string, hour: number): boolean {
+// Get the end time for a 30-minute slot
+function endTimeString(hour: number, minute: number): string {
+  if (minute === 30) return toTimeString(hour + 1, 0)
+  return toTimeString(hour, 30)
+}
+
+// Format a slot label for the left column e.g. "06:00" or "06:30"
+function slotLabel(hour: number, minute: number): string {
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+function isSlotActive(availability: AvailabilityRecord[], dayName: string, hour: number, minute: number): boolean {
   const dow = DAY_OF_WEEK_MAP[dayName]
-  return generalSlots.some(
+  return availability.some(
     a =>
       a.day_of_week === dow &&
-      a.start_time === toTimeString(hour) &&
-      a.end_time === toTimeString(hour + 1)
+      a.start_time === toTimeString(hour, minute) &&
+      a.end_time === endTimeString(hour, minute)
   )
 }
 
 export default function GeneralAvailability({ profile, availability, onAvailabilityChange }: Props) {
   const supabase = createClient()
-
-  // Filter down to just general slots for display — but we always merge
-  // back into the full list when saving so other tabs' data is preserved
   const generalSlots = availability.filter(a => a.type === 'general')
 
   const isDragging = useRef(false)
   const dragMode = useRef<'on' | 'off'>('on')
   const draggedSlots = useRef<Set<string>>(new Set())
-
-  // Local visual state for instant feedback during drag
   const [localGeneral, setLocalGeneral] = useState<AvailabilityRecord[]>(generalSlots)
 
-  // Keep local state in sync when parent availability changes
   useEffect(() => {
     setLocalGeneral(availability.filter(a => a.type === 'general'))
   }, [availability])
@@ -63,31 +74,31 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
       draggedSlots.current = new Set()
       if (slots.length === 0) return
 
-      // Get the non-general records so we can merge them back in after saving
       const otherRecords = availability.filter(a => a.type !== 'general')
 
       if (dragMode.current === 'on') {
         const inserts = slots
           .filter(slotKey => {
-            // Don't insert slots that already exist in Supabase (only temp ones)
-            const [dayName, hourStr] = slotKey.split('-')
+            const [dayName, hourStr, minuteStr] = slotKey.split('-')
             const hour = parseInt(hourStr)
+            const minute = parseInt(minuteStr)
             const dow = DAY_OF_WEEK_MAP[dayName]
             return !generalSlots.some(
               a => a.day_of_week === dow &&
-                a.start_time === toTimeString(hour) &&
-                a.end_time === toTimeString(hour + 1)
+                a.start_time === toTimeString(hour, minute) &&
+                a.end_time === endTimeString(hour, minute)
             )
           })
           .map(slotKey => {
-            const [dayName, hourStr] = slotKey.split('-')
+            const [dayName, hourStr, minuteStr] = slotKey.split('-')
             const hour = parseInt(hourStr)
+            const minute = parseInt(minuteStr)
             return {
               teacher_id: profile.id,
               type: 'general' as const,
               day_of_week: DAY_OF_WEEK_MAP[dayName],
-              start_time: toTimeString(hour),
-              end_time: toTimeString(hour + 1),
+              start_time: toTimeString(hour, minute),
+              end_time: endTimeString(hour, minute),
               is_available: true,
             }
           })
@@ -100,7 +111,6 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           .select()
 
         if (!error && data) {
-          // Merge: keep all non-general records + existing general records + new ones
           const updatedGeneral = [
             ...generalSlots.filter(a => !a.id.startsWith('temp-')),
             ...(data as AvailabilityRecord[]),
@@ -108,16 +118,16 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           onAvailabilityChange([...otherRecords, ...updatedGeneral])
         }
       } else {
-        // Delete deactivated slots
         const idsToDelete = slots
           .map(slotKey => {
-            const [dayName, hourStr] = slotKey.split('-')
+            const [dayName, hourStr, minuteStr] = slotKey.split('-')
             const hour = parseInt(hourStr)
+            const minute = parseInt(minuteStr)
             const dow = DAY_OF_WEEK_MAP[dayName]
             return generalSlots.find(
               a => a.day_of_week === dow &&
-                a.start_time === toTimeString(hour) &&
-                a.end_time === toTimeString(hour + 1)
+                a.start_time === toTimeString(hour, minute) &&
+                a.end_time === endTimeString(hour, minute)
             )?.id
           })
           .filter((id): id is string => !!id && !id.startsWith('temp-'))
@@ -140,27 +150,27 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
     return () => window.removeEventListener('mouseup', handleMouseUp)
   }, [availability])
 
-  function handleSlotMouseDown(dayName: string, hour: number) {
-    const active = isSlotActive(localGeneral, dayName, hour)
+  function handleSlotMouseDown(dayName: string, hour: number, minute: number) {
+    const active = isSlotActive(localGeneral, dayName, hour, minute)
     isDragging.current = true
     dragMode.current = active ? 'off' : 'on'
     draggedSlots.current = new Set()
-    applySlotLocally(dayName, hour)
+    applySlotLocally(dayName, hour, minute)
   }
 
-  function handleSlotMouseEnter(dayName: string, hour: number) {
+  function handleSlotMouseEnter(dayName: string, hour: number, minute: number) {
     if (!isDragging.current) return
-    applySlotLocally(dayName, hour)
+    applySlotLocally(dayName, hour, minute)
   }
 
-  function applySlotLocally(dayName: string, hour: number) {
-    const slotKey = `${dayName}-${hour}`
+  function applySlotLocally(dayName: string, hour: number, minute: number) {
+    const slotKey = `${dayName}-${hour}-${minute}`
     if (draggedSlots.current.has(slotKey)) return
     draggedSlots.current.add(slotKey)
 
     const dow = DAY_OF_WEEK_MAP[dayName]
-    const startTime = toTimeString(hour)
-    const endTime = toTimeString(hour + 1)
+    const startTime = toTimeString(hour, minute)
+    const endTime = endTimeString(hour, minute)
 
     if (dragMode.current === 'on') {
       const alreadyActive = localGeneral.some(
@@ -213,26 +223,28 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
             </tr>
           </thead>
           <tbody>
-            {HOURS.map(hour => (
-              <tr key={hour}>
-                <td style={{ padding: '2px 12px 2px 0', textAlign: 'right', fontSize: '12px', color: '#9CA3AF', whiteSpace: 'nowrap' }}>
-                  {String(hour).padStart(2, '0')}:00
+            {SLOTS.map(({ hour, minute }) => (
+              <tr key={`${hour}-${minute}`}>
+                {/* Only show the label on the hour, not on the :30 row — keeps it clean */}
+                <td style={{ padding: '1px 12px 1px 0', textAlign: 'right', fontSize: '11px', color: '#9CA3AF', whiteSpace: 'nowrap' }}>
+                  {minute === 0 ? slotLabel(hour, minute) : ''}
                 </td>
                 {DAYS.map(day => {
-                  const active = isSlotActive(localGeneral, day, hour)
+                  const active = isSlotActive(localGeneral, day, hour, minute)
                   return (
-                    <td key={day} style={{ padding: '2px 3px' }}>
+                    <td key={day} style={{ padding: '1px 3px' }}>
                       <button
-                        onMouseDown={() => handleSlotMouseDown(day, hour)}
-                        onMouseEnter={() => handleSlotMouseEnter(day, hour)}
+                        onMouseDown={() => handleSlotMouseDown(day, hour, minute)}
+                        onMouseEnter={() => handleSlotMouseEnter(day, hour, minute)}
                         onDragStart={e => e.preventDefault()}
                         style={{
-                          width: '90px', height: '32px',
-                          borderRadius: '6px',
+                          width: '90px',
+                          height: '20px', // shorter rows for 30-min increments
+                          borderRadius: '4px',
                           border: active ? '1px solid #FF8303' : '1px solid #E5E7EB',
                           backgroundColor: active ? '#FF8303' : '#F3F4F6',
                           color: active ? '#ffffff' : '#9CA3AF',
-                          fontSize: '12px', fontWeight: '500',
+                          fontSize: '10px',
                           cursor: 'pointer',
                           transition: 'background-color 0.1s ease',
                           userSelect: 'none',

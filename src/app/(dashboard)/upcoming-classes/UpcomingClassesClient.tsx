@@ -69,7 +69,7 @@ function Countdown({ startsAt }: { startsAt: string }) {
     return () => clearInterval(interval)
   }, [startsAt])
 
-  return <span className="font-mono text-sm text-orange-500">{timeLeft}</span>
+  return <span className="font-mono text-sm" style={{ color: '#FF8303' }}>{timeLeft}</span>
 }
 
 function ChevronIcon({ rotated }: { rotated: boolean }) {
@@ -95,6 +95,26 @@ function ChevronIcon({ rotated }: { rotated: boolean }) {
   )
 }
 
+function ActionButton({ label, onClick }: { label: string; onClick?: () => void }) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+      style={{
+        border: hovered ? '2px solid #FF8303' : '2px solid #d1d5db',
+        backgroundColor: 'white',
+        color: hovered ? '#FF8303' : '#374151',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
 function ClassCard({ cls }: { cls: Class }) {
   const [expanded, setExpanded] = useState(false)
   const startTime = format(new Date(cls.starts_at), 'HH:mm')
@@ -109,12 +129,18 @@ function ClassCard({ cls }: { cls: Class }) {
   }
 
   return (
-    <div className="border border-gray-200 rounded-xl bg-white shadow-md overflow-hidden">
+    <div
+      className="rounded-xl bg-white shadow-md overflow-hidden"
+      style={{ border: '2px solid #d1d5db' }}
+    >
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-4 p-4 text-left hover:bg-gray-50 transition-colors"
       >
-        <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center flex-shrink-0">
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: '#FFE8C2' }}
+        >
           {cls.student.photo_url ? (
             <img
               src={cls.student.photo_url}
@@ -122,7 +148,7 @@ function ClassCard({ cls }: { cls: Class }) {
               className="w-10 h-10 rounded-full object-cover"
             />
           ) : (
-            <span className="text-orange-500 font-semibold text-sm">
+            <span className="font-semibold text-sm" style={{ color: '#FF8303' }}>
               {cls.student.full_name.charAt(0)}
             </span>
           )}
@@ -140,7 +166,7 @@ function ClassCard({ cls }: { cls: Class }) {
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-100 p-4 space-y-4 bg-gray-50">
+        <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '2px solid #d1d5db' }}>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Lesson Notes / To-do
@@ -154,17 +180,14 @@ function ClassCard({ cls }: { cls: Class }) {
             {showJoinButton && cls.teams_link && (
               <button
                 onClick={handleJoinClass}
-                className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                className="px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors"
+                style={{ backgroundColor: '#1f2937' }}
               >
                 Join Class
               </button>
             )}
-            <button className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-white transition-colors">
-              Reschedule
-            </button>
-            <button className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-lg hover:bg-white transition-colors">
-              {'Chat with ' + cls.student.full_name.split(' ')[0]}
-            </button>
+            <ActionButton label="Reschedule" />
+            <ActionButton label={'Chat with ' + cls.student.full_name.split(' ')[0]} />
           </div>
         </div>
       )}
@@ -217,7 +240,10 @@ export default function UpcomingClassesClient({ classes, profile }: Props) {
         </div>
 
         {profile.role === 'admin' && (
-          <button className="px-4 py-2 bg-orange-500 text-white text-sm font-semibold rounded-lg hover:bg-orange-600 transition-colors">
+          <button
+            className="px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors"
+            style={{ backgroundColor: '#FF8303' }}
+          >
             + Add Class
           </button>
         )}
