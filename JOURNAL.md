@@ -1,5 +1,38 @@
 # LinguaLink Online - Build Journal
 
+
+## Session 5 - 01 April 2026 - Upcoming Classes Page with Live Data
+
+### What was built
+- `src/app/(dashboard)/upcoming-classes/page.tsx` - server component that fetches upcoming classes from Supabase and passes data to the client component
+- `src/app/(dashboard)/upcoming-classes/UpcomingClassesClient.tsx` - client component rendering collapsible day groups, class cards, live countdown timers, expand/collapse chevrons, and action buttons (Reschedule, Chat, Join Class)
+- `public.classes` table created in Supabase with RLS policies (teachers see own classes, admins see all)
+- `teacher_id` column added to existing `public.trainings` table via ALTER TABLE
+- Test data seeded: 2 students (Marie Dubois, Hans Müller), 2 trainings, 3 upcoming classes linked to the logged-in teacher
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Seed data failed with `column "teacher_id" of relation "trainings" does not exist`
+- Cause: The trainings table was created in a previous session without the teacher_id column
+- Fix: Used `ALTER TABLE public.trainings ADD COLUMN teacher_id uuid references public.profiles(id)` to add the missing column
+- Lesson: When tables already exist from a previous session, check their structure before running inserts that depend on new columns
+
+**Issue 2**
+- Symptom: Build error - `Expected a semicolon` at the href attribute inside the Join Class anchor tag
+- Cause: Pasting code from chat into Cursor corrupted the curly brace characters inside JSX attributes
+- Fix: Replaced the anchor tag with a button using `window.open()` in an onClick handler, which avoided the problematic JSX attribute syntax entirely
+- Lesson: When the same paste error occurs twice, change the approach rather than re-pasting the same code
+
+**Issue 3**
+- Symptom: Collapse chevron arrows rendering as huge oversized icons
+- Cause: Tailwind v4 does not reliably constrain SVG size with `w-4 h-4` utility classes
+- Fix: Extracted chevrons into a dedicated `ChevronIcon` component using explicit `width="16" height="16"` HTML attributes and inline `style` for rotation, bypassing Tailwind entirely for SVG sizing
+- Lesson: In Tailwind v4, always use explicit width/height attributes on SVGs rather than utility classes
+
+### Session result
+Built the first real feature page of the LinguaLink portal - the Upcoming Classes dashboard. The page fetches live data from Supabase, groups classes by day, displays collapsible day sections and individual class cards with real-time countdown timers. Three test students and classes were seeded into the database to validate the full data flow from Supabase through to the UI. All changes pushed to the dev branch on GitHub.
+
 ---
 
 ## Session 4 - 1 April 2026 - Brand Colours, Layout Shell & Navigation
