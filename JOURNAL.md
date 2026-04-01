@@ -1,5 +1,56 @@
 # LinguaLink Online - Build Journal
 
+---
+
+## Session 6 - 01 April 2026 - Schedule & Availability Page
+
+### What was built
+- `public.availability` table created in Supabase with RLS policies (teachers manage own availability, admins manage all)
+- Unique constraint added to prevent duplicate general slots per teacher/day/time
+- `src/app/(dashboard)/schedule/page.tsx` - server component fetching availability from Supabase
+- `src/app/(dashboard)/schedule/ScheduleClient.tsx` - tab shell with manual tab implementation (replaced shadcn Tabs due to Tailwind v4 incompatibility)
+- `src/app/(dashboard)/schedule/tabs/GeneralAvailability.tsx` - weekly recurring grid with click and click-drag multi-select, instant visual feedback, batch save to Supabase on mouse release
+- `src/app/(dashboard)/schedule/tabs/DayToDay.tsx` - FullCalendar week view with recurring availability as background tint, specific available/unavailable blocks, booked classes with student names, Add Availability/Unavailability mode buttons, now indicator (current time red line), 30-minute slot increments
+- `src/app/(dashboard)/schedule/tabs/Holidays.tsx` - date range picker, validation, planned unavailability list with delete, warning banner about existing bookings
+- `src/components/layout/TopHeader.tsx` - updated to solid Lingualink orange (#FF8303) background with white text and logo
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: ScheduleClient.tsx threw a parse error on load
+- Cause: Instructional text from chat was accidentally pasted into the file alongside the code
+- Fix: Replaced entire file with clean code only
+- Lesson: Always verify file contents after pasting - editor gives no warning if non-code text is present
+
+**Issue 2**
+- Symptom: shadcn Tabs component rendered unstyled with labels merging together
+- Cause: Tailwind v4 does not apply shadcn component styles reliably without additional configuration
+- Fix: Replaced shadcn Tabs with a manually built tab implementation using plain buttons and state
+- Lesson: shadcn components may need extra setup with Tailwind v4 - when a component misbehaves visually, a manual implementation is faster than debugging the CSS pipeline
+
+**Issue 3**
+- Symptom: General availability slots switching tabs wiped data from other tabs
+- Cause: Each tab was receiving only its filtered slice of the availability array and passing that slice back to the parent on save, overwriting all other records
+- Fix: All tabs now receive the full availability array and merge their changes back into the full list before calling onAvailabilityChange
+- Lesson: When multiple components share a parent state, every component must be aware of the full state - never pass a filtered subset and expect it to merge correctly on the way back up
+
+**Issue 4**
+- Symptom: General availability times appearing incorrectly on Day to Day calendar (e.g. Monday showing 6:00 - 2:00)
+- Cause: toISOString() converts dates to UTC before returning a string - in Cape Town (UTC+2) this shifts the date backward, placing slots on the wrong day and wrong time
+- Fix: Replaced toISOString() with a toLocalDateStr() function that builds the date string directly from local date parts, bypassing UTC conversion entirely. Added timeZone="local" to FullCalendar
+- Lesson: Never use toISOString() when working with local dates. Cape Town is UTC+2 so any date operation using UTC will be off by 2 hours - enough to shift a slot to the previous day late at night
+
+**Issue 5**
+- Symptom: Monday column appeared darker than other days on Day to Day calendar
+- Cause: Drag testing created duplicate general slots for Monday in the database - stacked background events multiplied the opacity of the tint
+- Fix: Deleted duplicates via SQL (keeping one record per unique teacher/day/start/end combination), then added a UNIQUE constraint to prevent recurrence
+- Lesson: Always add database-level constraints to enforce business rules - application-level checks alone are not enough if data can be written from multiple places
+
+### Session result
+Built the complete Schedule & Availability page across three tabs. General Availability uses a custom click-and-drag weekly grid that saves recurring slots directly to Supabase. Day to Day uses FullCalendar with timezone-safe date handling for Cape Town, showing recurring availability as a background tint and booked classes with student names. Holidays provides a date range picker with validation and a deletable planned unavailability list. A database unique constraint was added after duplicate slots were discovered during testing. The top header was updated to solid Lingualink orange across all pages.
+
+---
+
 
 ## Session 5 - 01 April 2026 - Upcoming Classes Page with Live Data
 
