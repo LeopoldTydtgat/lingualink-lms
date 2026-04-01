@@ -1,5 +1,52 @@
 # LinguaLink Online - Build Journal
 
+
+---
+
+## Session 7 - 01 April 2026 - Class Reports Page, Auto-Flagging, Admin Reopen & Font Switch
+
+### What was built
+- `src/app/(dashboard)/reports/page.tsx` - server component fetching reports with joined lesson, student and teacher data from Supabase
+- `src/app/(dashboard)/reports/ReportsClient.tsx` - reports list page with pending reports (soft yellow cards, deadline countdown) and completed reports (searchable, status badges)
+- `src/app/(dashboard)/reports/[id]/page.tsx` - dynamic route server component fetching a single report by ID
+- `src/app/(dashboard)/reports/[id]/ReportFormClient.tsx` - full report form with Yes/No toggle, feedback box with character counter, CEFR level assessment grid (7 skills × 11 levels), no-show type selection with business rule messages, additional details field, read-only state for submitted reports
+- `src/app/(dashboard)/reports/actions.ts` - server action for admin reopen functionality
+- RLS policies on `public.reports` table - teachers see own reports, admins see all
+- `public.flag_overdue_reports()` PostgreSQL function - flips pending reports to flagged when deadline_at has passed
+- pg_cron job `flag-overdue-reports` - runs every 15 minutes automatically, no external server required
+- `src/app/layout.tsx` - switched font from Poppins to Inter
+- `src/app/globals.css` - updated `--font-sans` to use Inter variable, set base font size to 15px
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Reports folder returned 404
+- Cause: Folder was named `Reports` with a capital R
+- Fix: Renamed to lowercase `reports`
+- Lesson: Next.js route folders must be lowercase
+
+**Issue 2**
+- Symptom: ReportsClient.tsx failed to parse with "Unexpected token" error
+- Cause: Long className string was truncated during copy-paste, breaking JSX syntax
+- Fix: Rebuilt the file with className strings split across array joins to prevent truncation
+- Lesson: For long className strings use array join pattern or inline styles - never rely on long single-line strings surviving copy-paste
+
+**Issue 3**
+- Symptom: Yes and No buttons became invisible when selected
+- Cause: Tailwind v4 does not apply dynamically constructed colour classes at runtime
+- Fix: Replaced all dynamic colour classes with inline `style` props for selected states across all interactive buttons
+- Lesson: Any button or element whose colour changes based on state must use inline styles in this project - Tailwind v4 dynamic classes are unreliable throughout
+
+**Issue 4**
+- Symptom: globals.css build error after attempting to add font size
+- Cause: `@layer base` block was accidentally placed inside the `@theme inline` block during manual editing, then the file structure was further corrupted on a second edit attempt
+- Fix: Replaced the entire globals.css file cleanly with correct structure - `@layer base` placed after the closing brace of `@theme inline`
+- Lesson: Never manually edit inside globals.css - always replace the whole file to avoid bracket mismatches
+
+### Session result
+Built the complete Class Reports feature including the reports list page, full report form with CEFR level assessment, automatic 12-hour deadline flagging via pg_cron, and admin reopen functionality. All flows tested end to end — pending reports appear correctly, the form submits and redirects, flagging works on demand and will run automatically every 15 minutes in production, and admin reopen moves a flagged report back to pending instantly. Also switched the portal font from Poppins to Inter at 15px base size, significantly improving readability and the overall professional feel of the UI.
+
+
 ---
 
 ## Session 6 - 01 April 2026 - Schedule & Availability Page
