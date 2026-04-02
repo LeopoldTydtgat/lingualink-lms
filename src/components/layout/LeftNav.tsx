@@ -1,6 +1,3 @@
-// src/components/layout/LeftNav.tsx
-// 'use client' is required because usePathname() and useRouter() are
-// client-side hooks — they read the browser URL and handle navigation.
 'use client'
 
 import Link from 'next/link'
@@ -20,8 +17,6 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-// cn() merges Tailwind classes cleanly — it comes with shadcn/ui
 
 type NavItem = {
   label: string
@@ -44,16 +39,16 @@ const navItems: NavItem[] = [
 
 type LeftNavProps = {
   userRole: string
+  // Total count of unread messages for the current user — passed from the layout
+  unreadMessageCount?: number
 }
 
-export default function LeftNav({ userRole }: LeftNavProps) {
+export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
 
   const isAdmin = userRole === 'admin'
-
-  // Hide admin-only items from regular teachers
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin)
 
   async function handleLogout() {
@@ -64,14 +59,9 @@ export default function LeftNav({ userRole }: LeftNavProps) {
 
   return (
     <nav className="w-60 bg-white border-r border-brand-grey flex flex-col shrink-0 overflow-y-auto">
-
-      {/* Nav links */}
       <ul className="flex-1 py-4 space-y-1 px-3">
         {visibleItems.map((item) => {
           const Icon = item.icon
-
-          // Highlight the active page in orange.
-          // /dashboard only matches exactly. All others match any sub-path too.
           const isActive =
             item.href === '/dashboard'
               ? pathname === '/dashboard'
@@ -94,10 +84,13 @@ export default function LeftNav({ userRole }: LeftNavProps) {
                 />
                 {item.label}
 
-                {/* Unread badge on Messages — hardcoded for now, wired up later */}
-                {item.label === 'Messages' && (
-                  <span className="ml-auto bg-brand-orange text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                    3
+                {/* Unread badge — only shown when there are unread messages */}
+                {item.label === 'Messages' && unreadMessageCount > 0 && (
+                  <span
+                    className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
+                    style={{ backgroundColor: isActive ? 'rgba(255,255,255,0.35)' : '#FF8303', fontSize: '10px' }}
+                  >
+                    {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
                   </span>
                 )}
               </Link>
@@ -106,7 +99,6 @@ export default function LeftNav({ userRole }: LeftNavProps) {
         })}
       </ul>
 
-      {/* Log Out — pinned to the bottom */}
       <div className="p-3 border-t border-brand-grey">
         <button
           onClick={handleLogout}
@@ -116,7 +108,6 @@ export default function LeftNav({ userRole }: LeftNavProps) {
           Log Out
         </button>
       </div>
-
     </nav>
   )
 }
