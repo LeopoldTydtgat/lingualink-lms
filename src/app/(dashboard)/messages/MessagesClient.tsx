@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage, markMessagesAsRead } from './actions'
@@ -52,25 +53,27 @@ interface MessagesClientProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Formats a timestamp into a human-readable short string
 function formatTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  
+    if (diffDays === 0) {
+      // Use fixed HH:MM format — avoids server/client locale mismatch
+      const h = date.getHours().toString().padStart(2, '0')
+      const m = date.getMinutes().toString().padStart(2, '0')
+      return `${h}:${m}`
+    }
+    if (diffDays === 1) return 'Yesterday'
+    if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
+    return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  }
 
-  if (diffDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
-  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
-}
-
-// Strips HTML tags for the contact list preview snippet
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
-// Returns initials avatar background — same orange as brand
 function Avatar({ name, photoUrl, size = 10 }: { name: string; photoUrl: string | null; size?: number }) {
   const sizeClass = `w-${size} h-${size}`
   if (photoUrl) {
@@ -99,25 +102,24 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
   const [showNewMessage, setShowNewMessage] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [newMsgSearch, setNewMsgSearch] = useState('')
-
+  const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Tiptap rich text editor
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      StarterKit,
-      Placeholder.configure({ placeholder: 'Write a message...' }),
-    ],
+        StarterKit.configure({ underline: false }),
+        Underline,
+        Placeholder.configure({ placeholder: 'Write a message...' }),
+      ],
     content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
   })
 
-  // Auto-scroll to the bottom whenever messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Fetches the full conversation between current user and a contact
   const fetchMessages = useCallback(async (contact: Contact) => {
     setLoadingMessages(true)
     const { data } = await supabase
@@ -132,22 +134,18 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
     setMessages(data || [])
     setLoadingMessages(false)
 
-    // Mark incoming messages from this contact as read
     await markMessagesAsRead(contact.id)
 
-    // Clear the unread badge locally
     setContacts(prev =>
       prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c)
     )
   }, [supabase, currentUser.id])
 
-  // Handles clicking a contact in the list
   const handleSelectContact = useCallback(async (contact: Contact) => {
     setSelectedContact(contact)
     await fetchMessages(contact)
   }, [fetchMessages])
 
-  // Realtime subscription: listen for new incoming messages
   useEffect(() => {
     if (!selectedContact) return
 
@@ -163,7 +161,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
         },
         async (payload) => {
           const newMsg = payload.new as Message
-          // Only append if the new message belongs to the open conversation
           if (newMsg.sender_id === selectedContact.id) {
             setMessages(prev => [...prev, newMsg])
             await markMessagesAsRead(selectedContact.id)
@@ -175,7 +172,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
     return () => { supabase.removeChannel(channel) }
   }, [selectedContact, currentUser.id, supabase])
 
-  // Sends the composed message
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
     const html = editor.getHTML()
@@ -195,7 +191,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
       return
     }
 
-    // Optimistically add the sent message to the thread
     const optimisticMsg: Message = {
       id: crypto.randomUUID(),
       sender_id: currentUser.id,
@@ -219,7 +214,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
     setSending(false)
   }
 
-  // Starts a new conversation from the picker modal
   const handleNewConversation = (student: Student) => {
     const existing = contacts.find(c => c.id === student.id)
     if (existing) {
@@ -257,8 +251,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
 
       {/* ── Left panel: contacts list ── */}
       <div className="w-72 border-r border-gray-200 flex flex-col flex-shrink-0">
-
-        {/* Header */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-base font-semibold text-gray-900">Messages</h1>
@@ -277,11 +269,9 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1"
-            style={{ ['--tw-ring-color' as any]: '#FF8303' }}
           />
         </div>
 
-        {/* Contacts */}
         <div className="flex-1 overflow-y-auto">
           {filteredContacts.length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-400">
@@ -297,7 +287,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                 className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
                 style={selectedContact?.id === contact.id ? { backgroundColor: '#FFF3E0' } : {}}
               >
-                {/* Avatar with unread badge */}
                 <div className="relative flex-shrink-0">
                   <Avatar name={contact.name} photoUrl={contact.photo_url} size={10} />
                   {contact.unreadCount > 0 && (
@@ -309,8 +298,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                     </span>
                   )}
                 </div>
-
-                {/* Name + preview */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1">
                     <span className={`text-sm truncate ${contact.unreadCount > 0 ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'}`}>
@@ -338,7 +325,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
       {/* ── Right panel: conversation ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {!selectedContact ? (
-          /* Empty state */
           <div className="flex-1 flex items-center justify-center text-gray-400">
             <div className="text-center">
               <div className="text-5xl mb-3">💬</div>
@@ -369,8 +355,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
               ) : (
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentUser.id
-
-                  // Show a date separator when the date changes between messages
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -389,7 +373,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                           <div className="flex-1 h-px bg-gray-100" />
                         </div>
                       )}
-
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
                           <div
@@ -403,7 +386,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                               color: '#111827',
                               borderBottomLeftRadius: '4px',
                             }}
-                            // Safe: content comes from our own Tiptap editor
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
                           <p className={`text-xs text-gray-400 mt-1 ${isFromMe ? 'text-right' : 'text-left'}`}>
@@ -415,7 +397,6 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                   )
                 })
               )}
-              {/* Invisible div at the bottom — we scroll to this */}
               <div ref={messagesEndRef} />
             </div>
 
@@ -438,22 +419,21 @@ export default function MessagesClient({ currentUser, contacts: initialContacts,
                   I
                 </button>
                 <button
-                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
-                  className="px-2 py-1 text-xs rounded text-gray-600 hover:bg-gray-100"
-                  style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB' } : {}}
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
+                  className="px-2 py-1 text-xs rounded text-gray-600 hover:bg-gray-100 underline"
+                  style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB' } : {}}
                 >
-                  • List
+                  U
                 </button>
               </div>
 
               {/* Editor box */}
-              {/* Editor box */}
-<div
-  className="border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 min-h-[72px] max-h-[140px] overflow-y-auto focus-within:border-orange-400 cursor-text"
-  onClick={() => editor?.commands.focus()}
->
-  <EditorContent editor={editor} />
-</div>
+              <div
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 min-h-[72px] max-h-[140px] overflow-y-auto focus-within:border-orange-400 cursor-text"
+                onClick={() => editor?.commands.focus()}
+              >
+                <EditorContent editor={editor} />
+              </div>
 
               {/* Send row */}
               <div className="flex items-center justify-between">
