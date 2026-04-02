@@ -1,6 +1,35 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 9 - 02 April 2026 - Students & Trainings
+
+### What was built
+- `src/app/(dashboard)/students/page.tsx` - server component fetching all trainings with joined student and teacher data, split into current and past, role-aware (admin sees all, teacher sees own)
+- `src/app/(dashboard)/students/StudentsClient.tsx` - two-column layout with Current Trainings and Past Trainings, student cards showing hours progress bar, package type, end date, and initials avatar, searchable per column
+- `src/app/(dashboard)/students/[id]/page.tsx` - server component fetching individual training detail with joined lessons and completed reports, access-controlled by role
+- `src/app/(dashboard)/students/[id]/StudentDetailClient.tsx` - 4-tab student detail page: General Info (hours summary cards, progress bar, training details grid, editable notes), Next Classes (upcoming lessons with Join button and status badge), Past Classes (reverse chronological with report status badges and feedback snippets), Messages (placeholder for Step 10)
+
+### Break/Fix Log
+**Issue 1**
+- Symptom: Error fetching trainings - PGRST201 ambiguous relationship between trainings and profiles
+- Cause: Two foreign key relationships exist between trainings and profiles (direct teacher_id FK and the training_teachers junction table), so Supabase could not determine which to use
+- Fix: Changed `profiles` to `profiles!trainings_teacher_id_fkey` in the Supabase select query to explicitly target the correct relationship
+- Lesson: When a table has multiple relationships to another table, Supabase requires the FK name to be specified explicitly in the select query
+
+**Issue 2**
+- Symptom: Students & Trainings page returned 0 results despite data existing in the database
+- Cause: RLS was enabled on the trainings table but no policies had been created, causing all queries to return empty silently
+- Fix: Created four RLS policies - admin select all, teacher select own, admin insert, admin update
+- Lesson: Always create RLS policies immediately after enabling RLS on a table. Missing policies fail silently and return empty results rather than an error, making them easy to overlook
+
+**Issue 3**
+- Symptom: Build error - Expected a semicolon at the href attribute of an anchor tag
+- Cause: The opening `<a` tag was dropped during copy-paste, leaving bare attributes with no element
+- Fix: Replaced the entire file using a downloaded file rather than a manual paste to eliminate copy-paste truncation risk
+- Lesson: For large files, use file download and full replacement rather than copy-paste to avoid silent truncation errors
+
+### Session result
+Built the complete Students & Trainings feature including the main two-column training list and the four-tab individual student detail page. Resolved an RLS misconfiguration that was silently blocking all training data from loading, and fixed a Supabase ambiguous relationship error by specifying the explicit foreign key name in the query. All four tabs render correctly and the page is access-controlled so teachers only see their own students while admin sees all.
 
 ---
 
