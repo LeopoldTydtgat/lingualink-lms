@@ -1,6 +1,20 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 11 - 02 April 2026 - Resend Email Integration
+
+### What was built
+- `src/lib/email/client.ts` - shared Resend client instance
+- `src/lib/email/templates.ts` - branded HTML email template builder and new message content function
+- `src/app/(dashboard)/messages/actions.ts` - updated sendMessage to trigger email notification to recipient on every new message
+
+### Break/Fix Log
+No issues this session.
+
+### Session result
+Wired up Resend as the transactional email layer. The new message notification is the first live email in the system - when a teacher sends a message, the recipient gets a branded Lingualink Online email with a direct link to the Messages page. Confirmed working via Resend dashboard showing status Sent. The same template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
+
+---
 
 ## Session 10 - 02 April 2026 - Messages Feature
 
