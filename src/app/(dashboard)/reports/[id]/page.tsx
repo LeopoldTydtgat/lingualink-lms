@@ -57,10 +57,9 @@ export default async function ReportPage({ params }: Props) {
   if (error || !report) notFound()
 
   // Supabase returns joined relations as arrays — cast to the shape we need
-  const lesson = Array.isArray(report.lesson) ? report.lesson[0] : report.lesson
-  const teacher = lesson && Array.isArray(lesson.teacher) ? lesson.teacher[0] : lesson?.teacher
-  const student = lesson && Array.isArray(lesson.student) ? lesson.student[0] : lesson?.student
-
+  const lesson = (Array.isArray(report.lesson) ? report.lesson[0] : report.lesson) as any
+  const teacher = (Array.isArray(lesson?.teacher) ? lesson.teacher[0] : lesson?.teacher) as { id: string; full_name: string } | null
+  const student = (Array.isArray(lesson?.student) ? lesson.student[0] : lesson?.student) as { id: string; full_name: string; photo_url: string | null } | null
   // Teachers can only view their own reports
   if (!isAdmin && teacher?.id !== user.id) {
     redirect('/reports')
