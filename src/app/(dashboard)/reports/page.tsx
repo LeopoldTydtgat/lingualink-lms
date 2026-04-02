@@ -5,11 +5,9 @@ import ReportsClient from './ReportsClient'
 export default async function ReportsPage() {
   const supabase = await createClient()
 
-  // Check the user is logged in
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Get the teacher's profile to check their role
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, full_name, role')
@@ -20,8 +18,6 @@ export default async function ReportsPage() {
 
   const isAdmin = profile.role === 'admin'
 
-  // Fetch reports with lesson and student details joined
-  // Admins get all reports, teachers get only their own
   const query = supabase
     .from('reports')
     .select(`
@@ -51,20 +47,30 @@ export default async function ReportsPage() {
     `)
     .order('created_at', { ascending: false })
 
-  // If not admin, filter to own reports only
   if (!isAdmin) {
     query.eq('teacher_id', user.id)
   }
 
-  const { data: reports, error } = await query
+  const { data: rawReports, error } = await query
 
   if (error) {
     console.error('Error fetching reports:', error)
   }
 
+  // Supabase returns nested joins as arrays — flatten them into single objects
+  const reports = (rawReports ?? []).map((r: any) => {
+    const lesson = Array.isArray(r.lesson) ? r.lesson[0] : r.lesson
+    const teacher = lesson && Array.isArray(lesson.teacher) ? lesson.teacher[0] : lesson?.teacher
+    const student = lesson && Array.isArray(lesson.student) ? lesson.student[0] : lesson?.student
+    return {
+      ...r,
+      lesson: lesson ? { ...lesson, teacher, student } : null,
+    }
+  })
+
   return (
     <ReportsClient
-      reports={reports ?? []}
+      reports={reports}
       profile={profile}
       isAdmin={isAdmin}
     />
