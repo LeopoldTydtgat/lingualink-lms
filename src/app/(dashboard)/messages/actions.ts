@@ -2,8 +2,9 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 
-// Sends a message from the current user to a contact
 export async function sendMessage(
   receiverId: string,
   receiverType: 'teacher' | 'admin' | 'student',
@@ -16,7 +17,7 @@ export async function sendMessage(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, full_name')
     .eq('id', user.id)
     .single()
 
@@ -24,6 +25,7 @@ export async function sendMessage(
 
   const senderType = profile.role === 'admin' ? 'admin' : 'teacher'
 
+  // Save the message to the database
   const { error } = await supabase.from('messages').insert({
     sender_id: user.id,
     sender_type: senderType,
@@ -35,11 +37,56 @@ export async function sendMessage(
 
   if (error) return { error: error.message }
 
+  // ── Send email notification to the recipient ────────────────────────────────
+  // Look up the recipient's name and email from the correct table
+  let recipientName = ''
+  let recipientEmail = ''
+
+  if (receiverType === 'student') {
+    const { data: student } = await supabase
+      .from('students')
+      .select('full_name, email')
+      .eq('id', receiverId)
+      .single()
+
+    if (student) {
+      recipientName = student.full_name
+      recipientEmail = student.email
+    }
+  } else {
+    // teacher or admin — both live in profiles
+    const { data: recipientProfile } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', receiverId)
+      .single()
+
+    if (recipientProfile) {
+      recipientName = recipientProfile.full_name
+      recipientEmail = recipientProfile.email
+    }
+  }
+
+  // Only send if we found a valid email address
+  if (recipientEmail) {
+    const subject = `Lingualink Online — New message from ${profile.full_name}`
+
+    await resend.emails.send({
+      from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+      to: recipientEmail,
+      subject,
+      html: buildEmailTemplate({
+        recipientName,
+        subject,
+        bodyHtml: newMessageEmailContent(profile.full_name),
+      }),
+    })
+  }
+
   revalidatePath('/messages')
   return { success: true }
 }
 
-// Marks all unread messages from a contact as read
 export async function markMessagesAsRead(contactId: string) {
   const supabase = await createClient()
 
