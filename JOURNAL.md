@@ -1,38 +1,15 @@
 # LinguaLink Online - Build Journal
 
 
-## Session 11 - 02 April 2026 - Resend Email Integration
-
-### What was built
-- `src/lib/email/client.ts` - shared Resend client instance
-- `src/lib/email/templates.ts` - branded HTML email template builder and new message content function
-- `src/app/(dashboard)/messages/actions.ts` - updated sendMessage to trigger email notification to recipient on every new message
-
-### Break/Fix Log
-**Issue 1**
-- Symptom: Tiptap warning - duplicate extension names for 'underline'
-- Cause: StarterKit includes its own underline extension by default
-- Fix: Added StarterKit.configure({ underline: false }) to disable the built-in one
-- Lesson: When adding individual Tiptap extensions, always check if StarterKit already includes them and disable the duplicate
-
-**Issue 2**
-- Symptom: React hydration mismatch on message timestamps
-- Cause: Server rendered time in 24hr format, client rendered in 12hr format due to locale differences
-- Fix: Replaced toLocaleTimeString() with manual HH:MM string construction using padStart
-- Lesson: Never use toLocaleTimeString() or toLocaleDateString() in components that render on both server and client - the locale can differ and cause hydration failures
-
-### Session result
-Wired up Resend as the transactional email layer. The new message notification is the first live email in the system - when a teacher sends a message, the recipient gets a branded Lingualink Online email with a direct link to the Messages page. Confirmed working via Resend dashboard showing status Sent. The same template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
-
----
-
-## Session 10 - 02 April 2026 - Messages Feature
+## Session 10 - 02 April 2026 - Messages & Email Notifications
 
 ### What was built
 - `src/app/(dashboard)/messages/page.tsx` - server component fetching message history, building contacts map with unread counts, fetching student/profile details
-- `src/app/(dashboard)/messages/MessagesClient.tsx` - full messaging UI: contacts list, conversation thread, Tiptap rich text composer, new message modal, realtime subscription via Supabase
-- `src/app/(dashboard)/messages/actions.ts` - sendMessage and markMessagesAsRead server actions
-- `src/components/layout/LeftNav.tsx` - unreadMessageCount prop wired up, badge hidden when zero
+- `src/app/(dashboard)/messages/MessagesClient.tsx` - full messaging UI: contacts list, conversation thread, Tiptap rich text composer (Bold, Italic, Underline), new message modal, realtime subscription via Supabase
+- `src/app/(dashboard)/messages/actions.ts` - sendMessage and markMessagesAsRead server actions with Resend email notification on every new message
+- `src/lib/email/client.ts` - shared Resend client instance
+- `src/lib/email/templates.ts` - branded HTML email template builder and new message content function
+- `src/components/layout/LeftNav.tsx` - unreadMessageCount prop wired to real data, badge hidden when zero
 - `src/app/(dashboard)/layout.tsx` - unread count query added, passed to LeftNav
 - RLS policies added to messages table (SELECT, INSERT, UPDATE)
 - Fixed receiver_type constraint to include 'admin'
@@ -50,8 +27,20 @@ Wired up Resend as the transactional email layer. The new message notification i
 - Fix: Added onClick={() => editor?.commands.focus()} and cursor-text to the container div
 - Lesson: When wrapping Tiptap in a styled container, always forward clicks to the editor
 
+**Issue 3**
+- Symptom: Tiptap warning — duplicate extension names for 'underline'
+- Cause: StarterKit includes its own underline extension by default
+- Fix: Added StarterKit.configure({ underline: false }) to disable the built-in one
+- Lesson: When adding individual Tiptap extensions, always check if StarterKit already includes them and disable the duplicate
+
+**Issue 4**
+- Symptom: React hydration mismatch on message timestamps
+- Cause: Server rendered time in 24hr format, client rendered in 12hr format due to locale differences
+- Fix: Replaced toLocaleTimeString() with manual HH:MM string construction using padStart
+- Lesson: Never use toLocaleTimeString() in components that render on both server and client - locale differences cause hydration failures
+
 ### Session result
-Built the full in-portal messaging system for the teacher portal. Teachers can start conversations with students, send rich text messages, and see their full message history. The contacts list updates in real time and the unread badge in the left nav reflects live data from Supabase. The Resend email notification layer (new message alerts) is scoped for a dedicated Step 10b session.
+Built the full in-portal messaging system and wired up the Resend email layer in a single session. Teachers can start conversations with students, send rich text messages with bold, italic, and underline formatting, and see their full message history with real-time updates. The unread badge in the left nav reflects live data from Supabase. On every new message, the recipient receives a branded Lingualink Online email with a direct link to the Messages page — confirmed working via the Resend dashboard. The same email template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
 
 ---
 
