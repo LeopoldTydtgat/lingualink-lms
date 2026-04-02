@@ -1,6 +1,37 @@
 # LinguaLink Online - Build Journal
 
 
+
+---
+
+## Session 8 - 02 April 2026 - CI/CD Fixes, Environment Variables and TypeScript Errors
+
+### What was built
+- Environment variables added to Vercel project settings (Production, Preview, Development)
+- Environment variables added to GitHub Actions repository secrets
+- `.github/workflows/ci.yml` updated to pass secrets to the build step
+- TypeScript array type errors fixed on `reports/page.tsx`, `reports/[id]/page.tsx`, and `upcoming-classes/page.tsx` - Supabase nested joins return arrays which needed flattening before passing to client components
+- `GeneralAvailability.tsx` fixed - missing `start_at` and `end_at` fields added to temp record type
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: CI pipeline failing on every push, Vercel deployment failing
+- Cause: Neither GitHub Actions nor Vercel had the environment variables needed to build the app
+- Fix: Added all five variables to Vercel via import, added all five as GitHub Actions repository secrets, updated ci.yml to pass them to the build step
+- Lesson: Environment variables must be explicitly configured in every environment the app runs in - local, CI, and hosting
+
+**Issue 2**
+- Symptom: TypeScript build errors on reports and upcoming classes pages
+- Cause: Supabase returns nested joined relations as arrays even when only one record is expected - our types assumed single objects
+- Fix: Added flattening logic using `Array.isArray()` checks before passing data to client components
+- Lesson: Always flatten Supabase nested joins before using them - treat all joined relations as potentially arrays regardless of the relationship type
+
+### Session result
+Fixed the CI/CD pipeline which had been failing since the Class Reports build. Root causes were missing environment variables in both Vercel and GitHub Actions, and TypeScript type mismatches caused by Supabase returning nested joins as arrays. All issues resolved - CI is now green and Vercel preview deployments are working correctly on every push to dev.
+
+
+
 ---
 
 ## Session 7 - 01 April 2026 - Class Reports Page, Auto-Flagging, Admin Reopen & Font Switch
