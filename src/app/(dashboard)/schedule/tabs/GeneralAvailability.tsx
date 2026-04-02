@@ -185,6 +185,8 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           start_time: startTime,
           end_time: endTime,
           is_available: true,
+          start_at: null,
+  end_at: null,
         }
         setLocalGeneral(prev => [...prev, tempRecord])
       }
