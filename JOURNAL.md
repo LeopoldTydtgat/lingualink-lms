@@ -1,6 +1,36 @@
 # LinguaLink Online - Build Journal
 
 
+
+## Session 10 - 02 April 2026 - Messages Feature
+
+### What was built
+- `src/app/(dashboard)/messages/page.tsx` - server component fetching message history, building contacts map with unread counts, fetching student/profile details
+- `src/app/(dashboard)/messages/MessagesClient.tsx` - full messaging UI: contacts list, conversation thread, Tiptap rich text composer, new message modal, realtime subscription via Supabase
+- `src/app/(dashboard)/messages/actions.ts` - sendMessage and markMessagesAsRead server actions
+- `src/components/layout/LeftNav.tsx` - unreadMessageCount prop wired up, badge hidden when zero
+- `src/app/(dashboard)/layout.tsx` - unread count query added, passed to LeftNav
+- RLS policies added to messages table (SELECT, INSERT, UPDATE)
+- Fixed receiver_type constraint to include 'admin'
+
+### Break/Fix Log
+**Issue 1**
+- Symptom: Tiptap SSR hydration mismatch error on page load
+- Cause: useEditor runs during server-side render without immediatelyRender: false set
+- Fix: Added immediatelyRender: false to useEditor config
+- Lesson: Always set immediatelyRender: false when using Tiptap in Next.js App Router
+
+**Issue 2**
+- Symptom: Clicking empty space in message composer box did not focus the editor
+- Cause: Tiptap EditorContent only occupies the text content area, not the full container div
+- Fix: Added onClick={() => editor?.commands.focus()} and cursor-text to the container div
+- Lesson: When wrapping Tiptap in a styled container, always forward clicks to the editor
+
+### Session result
+Built the full in-portal messaging system for the teacher portal. Teachers can start conversations with students, send rich text messages, and see their full message history. The contacts list updates in real time and the unread badge in the left nav reflects live data from Supabase. The Resend email notification layer (new message alerts) is scoped for a dedicated Step 10b session.
+
+---
+
 ## Session 9 - 02 April 2026 - Students & Trainings
 
 ### What was built
