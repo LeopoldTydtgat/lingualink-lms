@@ -10,7 +10,7 @@
 
 ### Break/Fix Log
 **Issue 1**
-- Symptom: Tiptap warning — duplicate extension names for 'underline'
+- Symptom: Tiptap warning - duplicate extension names for 'underline'
 - Cause: StarterKit includes its own underline extension by default
 - Fix: Added StarterKit.configure({ underline: false }) to disable the built-in one
 - Lesson: When adding individual Tiptap extensions, always check if StarterKit already includes them and disable the duplicate
@@ -19,7 +19,7 @@
 - Symptom: React hydration mismatch on message timestamps
 - Cause: Server rendered time in 24hr format, client rendered in 12hr format due to locale differences
 - Fix: Replaced toLocaleTimeString() with manual HH:MM string construction using padStart
-- Lesson: Never use toLocaleTimeString() or toLocaleDateString() in components that render on both server and client — the locale can differ and cause hydration failures
+- Lesson: Never use toLocaleTimeString() or toLocaleDateString() in components that render on both server and client - the locale can differ and cause hydration failures
 
 ### Session result
 Wired up Resend as the transactional email layer. The new message notification is the first live email in the system - when a teacher sends a message, the recipient gets a branded Lingualink Online email with a direct link to the Messages page. Confirmed working via Resend dashboard showing status Sent. The same template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
