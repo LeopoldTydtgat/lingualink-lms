@@ -10,11 +10,9 @@ export default async function ReportPage({ params }: Props) {
   const { id } = await params
   const supabase = await createClient()
 
-  // Check the user is logged in
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Get the teacher's profile
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, full_name, role')
@@ -25,7 +23,6 @@ export default async function ReportPage({ params }: Props) {
 
   const isAdmin = profile.role === 'admin'
 
-  // Fetch the report with lesson and student details
   const { data: report, error } = await supabase
     .from('reports')
     .select(`
@@ -59,14 +56,25 @@ export default async function ReportPage({ params }: Props) {
 
   if (error || !report) notFound()
 
+  // Supabase returns joined relations as arrays — cast to the shape we need
+  const lesson = Array.isArray(report.lesson) ? report.lesson[0] : report.lesson
+  const teacher = lesson && Array.isArray(lesson.teacher) ? lesson.teacher[0] : lesson?.teacher
+  const student = lesson && Array.isArray(lesson.student) ? lesson.student[0] : lesson?.student
+
   // Teachers can only view their own reports
-  if (!isAdmin && report.lesson?.teacher?.id !== user.id) {
+  if (!isAdmin && teacher?.id !== user.id) {
     redirect('/reports')
+  }
+
+  // Build a clean report object with correct types
+  const cleanReport = {
+    ...report,
+    lesson: lesson ? { ...lesson, teacher, student } : null,
   }
 
   return (
     <ReportFormClient
-      report={report}
+      report={cleanReport as any}
       profile={profile}
       isAdmin={isAdmin}
     />
