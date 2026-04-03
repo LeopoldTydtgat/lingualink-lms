@@ -56,14 +56,23 @@ export default async function ReportPage({ params }: Props) {
 
   if (error || !report) notFound()
 
-  // Supabase returns joined relations as arrays — cast to the shape we need
+  // Supabase returns joined relations as arrays — flatten to single objects
   const lesson = (Array.isArray(report.lesson) ? report.lesson[0] : report.lesson) as any
   const teacher = (Array.isArray(lesson?.teacher) ? lesson.teacher[0] : lesson?.teacher) as { id: string; full_name: string } | null
   const student = (Array.isArray(lesson?.student) ? lesson.student[0] : lesson?.student) as { id: string; full_name: string; photo_url: string | null } | null
+
   // Teachers can only view their own reports
   if (!isAdmin && teacher?.id !== user.id) {
     redirect('/reports')
   }
+
+  // Fetch study sheets already assigned for this lesson
+  const { data: assignments } = await supabase
+    .from('assignments')
+    .select('study_sheet_id')
+    .eq('lesson_id', lesson?.id ?? '')
+
+  const assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
 
   // Build a clean report object with correct types
   const cleanReport = {
@@ -76,6 +85,7 @@ export default async function ReportPage({ params }: Props) {
       report={cleanReport as any}
       profile={profile}
       isAdmin={isAdmin}
+      assignedSheetIds={assignedSheetIds}
     />
   )
 }
