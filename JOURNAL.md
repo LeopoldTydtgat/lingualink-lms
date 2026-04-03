@@ -1,6 +1,44 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 12 - 03 April 2026 - Billing & Invoices
+
+### What was built
+- `src/app/(dashboard)/billing/page.tsx` - server component, fetches profile and passes to client
+- `src/app/(dashboard)/billing/BillingClient.tsx` - full billing UI with three views: My Invoices, My Billing Info (read-only), Admin View
+- `invoices` table - added `reference_number` unique column
+- `profiles` table - added billing info columns: `preferred_payment_type`, `paypal_email`, `iban`, `bic`, `tax_number`, `street_address`, `area_code`, `city`
+- `profiles` table - added `hourly_rate numeric` column for auto-calculating invoice amounts
+- `settings` table - created with RLS policies for admin-managed key/value config (used for invoice template path)
+- Supabase Storage - created `invoices` (private) and `templates` (public) buckets with full RLS policies
+- Invoice amount auto-calculation: `(duration_minutes / 60) × hourly_rate` summed across all billable lessons per month, written to `amount_eur` on every page load
+- System auto-generates a unique reference number (e.g. `INV-202604-XXXX`) for each teacher on the 1st of every month
+- PDF upload flow: teachers upload invoice PDF within 1st–10th window; stored at `invoices/{teacher_id}/{year}-{month}.pdf`
+- PDF viewing via Supabase signed URLs (60-second expiry) for both teachers and admin
+- Admin View: Shannon sees all teachers' invoices grouped by teacher, can view PDFs, mark invoices as paid with auto-calculated amount confirmation
+- Admin template management: Shannon uploads Lingualink branded PDF template; stored in public `templates` bucket, path saved in `settings` table
+- My Billing Info: read-only display for teachers; editing deferred to Step 13 teacher profile
+
+### Break/Fix Log
+
+**Issue 1: Invoice amount required manual entry**
+- Symptom: Original design asked teachers to type their invoice total before uploading
+- Cause: No hourly rate stored in the system; no auto-calculation logic
+- Fix: Added `hourly_rate numeric` to profiles table; rewrote billing logic to calculate amounts automatically from completed and student_no_show lessons × hourly rate; removed amount input entirely
+- Lesson: Always trace where a displayed number comes from before building the UI around it
+
+**Issue 2: Billing info was editable by teachers**
+- Symptom: First version included an editable form for IBAN, BIC, PayPal etc.
+- Cause: Brief says Shannon updates billing info per teacher - not teachers themselves
+- Fix: Replaced editable form with read-only display; billing info editing moved to teacher profile in Step 13
+- Lesson: Re-read who owns each piece of data before building edit controls
+
+### Session result
+Step 12 is complete. The billing system auto-generates monthly invoice records with unique reference numbers, calculates amounts live from lesson data using each teacher's hourly rate, handles PDF uploads within the correct window, and gives Shannon a clean admin view to manage all teacher invoices and mark payments. The `hourly_rate` field exists in the schema but will be populated through the teacher profile UI in Step 13, at which point invoice amounts will calculate correctly for all teachers.
+
+---
+
+
 ## Session 11 - 3 April 2026 - Study Sheets & Exercises
 
 ### What was built
