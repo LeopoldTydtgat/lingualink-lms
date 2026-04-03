@@ -1,6 +1,38 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 11 - 3 April 2026 - Study Sheets & Exercises
+
+### What was built
+- `src/app/(dashboard)/study-sheets/page.tsx` - server component fetching all active study sheets
+- `src/app/(dashboard)/study-sheets/StudySheetsClient.tsx` - list page with search, level filter, category filter, chilli pepper difficulty display, and row navigation
+- `src/app/(dashboard)/study-sheets/[id]/page.tsx` - server component fetching individual sheet and its exercises
+- `src/app/(dashboard)/study-sheets/[id]/StudySheetDetailClient.tsx` - detail page with vocabulary table, exercise cards with multiple choice interactions, correct/incorrect colour states, and amber explanation box
+- `src/app/(dashboard)/study-sheets/new/page.tsx` - admin-only guard page for content creation
+- `src/app/(dashboard)/study-sheets/new/StudySheetFormClient.tsx` - full content creation form for Shannon: title, category, level, difficulty, vocabulary word rows, and multiple choice exercise builder with radio button correct answer selection
+- `src/components/shared/AssignStudySheetsModal.tsx` - shared modal component for assigning study sheets to a student from within a class report; supports search, category and level filters, multi-select with checkbox UI, preview link per sheet, and saves/removes assignments to the assignments table
+- `src/app/(dashboard)/reports/[id]/ReportFormClient.tsx` - updated to accept assignedSheetIds prop, wire in the assignment modal, and display assigned sheet count
+- `src/app/(dashboard)/reports/[id]/page.tsx` - updated to query existing assignments for the lesson and pass IDs to the form
+- RLS policies added: INSERT/UPDATE/DELETE on study_sheets and exercises for admins; SELECT/INSERT/DELETE on assignments for authenticated users
+
+### Break/Fix Log
+**Issue 1: Build errors from corrupted special characters**
+- Symptom: "Unexpected token. Did you mean {'>'} or &gt;?" on multiple files
+- Cause: Special characters (← arrow, opening `<a` tags) were dropped or corrupted during copy-paste from chat into Cursor
+- Fix: Generated clean file downloads instead of relying on copy-paste; replaced files directly from download
+- Lesson: For large files with special characters, always download and replace rather than copy-paste from chat
+
+**Issue 2: No pending report available for testing**
+- Symptom: Only a flagged report existed in the database; could not test the assignment modal
+- Cause: Test data was insufficient
+- Fix: Manually inserted a test lesson and pending report via Supabase SQL editor
+- Lesson: Keep at least one pending report in the test dataset at all times during active development
+
+### Session result
+Step 11 is complete. The study sheets library is fully functional - Shannon can create vocabulary and grammar sheets with exercises via the admin form, teachers can browse and filter the library, and the assignment modal is wired into the class report form allowing teachers to assign sheets to students mid-report. All data is persisted correctly to Supabase with RLS policies in place. The next step is Step 12 - Billing & Invoices.
+
+---
+
 ## Session 10 - 02 April 2026 - Messages & Email Notifications
 
 ### What was built
