@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 
 // --- Types ---
 
@@ -39,9 +40,9 @@ type Props = {
   report: Report
   profile: { id: string; full_name: string; role: string }
   isAdmin: boolean
+  assignedSheetIds: string[]
 }
 
-// CEFR level options in order
 const CEFR_LEVELS = [
   'A1', 'A1+',
   'A2', 'A2+',
@@ -51,7 +52,6 @@ const CEFR_LEVELS = [
   'C2',
 ]
 
-// Skills to assess
 const SKILLS = [
   { key: 'grammar', label: 'Grammar' },
   { key: 'expression', label: 'Expression' },
@@ -62,7 +62,6 @@ const SKILLS = [
   { key: 'overall_written', label: 'Overall Written Level' },
 ]
 
-// CEFR level descriptions shown below the grid
 const CEFR_DESCRIPTIONS: Record<string, string> = {
   A1: 'Can understand and use very basic expressions. Introduces themselves and asks/answers simple questions.',
   A2: 'Can understand sentences on familiar topics. Communicates in simple routine tasks.',
@@ -72,51 +71,38 @@ const CEFR_DESCRIPTIONS: Record<string, string> = {
   C2: 'Can understand virtually everything heard or read. Expresses themselves spontaneously, very fluently and precisely.',
 }
 
-export default function ReportFormClient({ report, profile, isAdmin }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
   const lesson = report.lesson
   const student = lesson?.student
 
-  // Form state
-  const [didClassHappen, setDidClassHappen] = useState<boolean | null>(
-    report.did_class_happen
-  )
-  const [noShowType, setNoShowType] = useState<string>(
-    report.no_show_type ?? ''
-  )
+  const [didClassHappen, setDidClassHappen] = useState<boolean | null>(report.did_class_happen)
+  const [noShowType, setNoShowType] = useState<string>(report.no_show_type ?? '')
   const [feedbackText, setFeedbackText] = useState(report.feedback_text ?? '')
-  const [additionalDetails, setAdditionalDetails] = useState(
-    report.additional_details ?? ''
-  )
-  const [levelData, setLevelData] = useState<Record<string, string>>(
-    report.level_data ?? {}
-  )
+  const [additionalDetails, setAdditionalDetails] = useState(report.additional_details ?? '')
+  const [levelData, setLevelData] = useState<Record<string, string>>(report.level_data ?? {})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showAssignModal, setShowAssignModal] = useState(false)
+  const [currentAssignedIds, setCurrentAssignedIds] = useState<string[]>(assignedSheetIds)
 
-  // Whether the form is editable
-  const isEditable =
-    report.status === 'pending' || report.status === 'reopened'
+  const isEditable = report.status === 'pending' || report.status === 'reopened'
 
-  // Update a single skill level
   function setSkillLevel(skillKey: string, level: string) {
     setLevelData(prev => ({ ...prev, [skillKey]: level }))
   }
 
-  // Save the report
   async function handleSave() {
     if (didClassHappen === null) {
       setError('Please select whether the class took place.')
       return
     }
-
     if (!didClassHappen && !noShowType) {
       setError('Please select what happened.')
       return
     }
-
     if (!didClassHappen && !additionalDetails.trim()) {
       setError('Please provide additional details about what happened.')
       return
@@ -154,12 +140,11 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
   return (
     <div className="p-6 max-w-3xl mx-auto">
 
-      {/* Back link */}
       <a
         href="/reports"
         className="text-sm text-gray-500 hover:text-gray-700 mb-6 inline-block"
       >
-        ← Back to reports
+        &larr; Back to reports
       </a>
 
       {/* Student header */}
@@ -187,14 +172,10 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
             {lesson?.duration_minutes ?? 60} min
           </p>
           {report.status === 'reopened' && (
-            <span className="text-xs text-orange-600 font-medium">
-              Reopened by admin
-            </span>
+            <span className="text-xs text-orange-600 font-medium">Reopened by admin</span>
           )}
           {report.status === 'flagged' && (
-            <span className="text-xs text-red-600 font-medium">
-              Flagged — report overdue
-            </span>
+            <span className="text-xs text-red-600 font-medium">Flagged — report overdue</span>
           )}
         </div>
       </div>
@@ -213,12 +194,8 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
 
       {/* Did the class take place? */}
       <section className="mb-8">
-        <h2 className="text-base font-semibold text-gray-800 mb-3">
-          Did the class take place?
-        </h2>
+        <h2 className="text-base font-semibold text-gray-800 mb-3">Did the class take place?</h2>
         <div className="flex gap-3">
-
-          {/* Yes button — inline style handles selected state due to Tailwind v4 dynamic class limitations */}
           <button
             disabled={!isEditable}
             onClick={() => setDidClassHappen(true)}
@@ -231,8 +208,6 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
           >
             Yes
           </button>
-
-          {/* No button */}
           <button
             disabled={!isEditable}
             onClick={() => setDidClassHappen(false)}
@@ -245,7 +220,6 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
           >
             No
           </button>
-
         </div>
       </section>
 
@@ -273,26 +247,42 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
                 !isEditable ? 'bg-gray-50 text-gray-500' : '',
               ].join(' ')}
             />
-            <p className="text-xs text-gray-400 text-right mt-1">
-              {feedbackText.length} / 2000
+            <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 2000</p>
+          </section>
+
+          {/* Study sheet assignment */}
+          <section className="mb-8">
+            <h2 className="text-base font-semibold text-gray-800 mb-1">Study Sheets for Next Time</h2>
+            <p className="text-xs text-gray-500 mb-3">
+              Assign vocabulary or grammar sheets for the student to review.
             </p>
+            {currentAssignedIds.length > 0 && (
+              <p className="text-sm text-gray-600 mb-3">
+                <span className="font-semibold" style={{ color: '#FF8303' }}>
+                  {currentAssignedIds.length}
+                </span>
+                {' '}sheet{currentAssignedIds.length !== 1 ? 's' : ''} assigned
+              </p>
+            )}
+            {isEditable && (
+              <button
+                onClick={() => setShowAssignModal(true)}
+                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-colors"
+                style={{ color: '#FF8303', borderColor: '#FF8303', backgroundColor: '#fff7ed' }}
+              >
+                + Assign Study Sheets
+              </button>
+            )}
           </section>
 
           {/* Student level assessment */}
           <section className="mb-8">
-            <h2 className="text-base font-semibold text-gray-800 mb-1">
-              Student Level Assessment
-            </h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Select a CEFR level for each skill.
-            </p>
-
+            <h2 className="text-base font-semibold text-gray-800 mb-1">Student Level Assessment</h2>
+            <p className="text-xs text-gray-500 mb-4">Select a CEFR level for each skill.</p>
             <div className="flex flex-col gap-4">
               {SKILLS.map(skill => (
                 <div key={skill.key}>
-                  <p className="text-sm font-medium text-gray-700 mb-2">
-                    {skill.label}
-                  </p>
+                  <p className="text-sm font-medium text-gray-700 mb-2">{skill.label}</p>
                   <div className="flex flex-wrap gap-2">
                     {CEFR_LEVELS.map(level => (
                       <button
@@ -316,9 +306,7 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
 
             {/* CEFR guidance */}
             <div className="mt-6 bg-gray-50 border border-gray-200 rounded-xl p-4">
-              <p className="text-xs font-semibold text-gray-600 mb-3 uppercase tracking-wide">
-                CEFR Level Guide
-              </p>
+              <p className="text-xs font-semibold text-gray-600 mb-3 uppercase tracking-wide">CEFR Level Guide</p>
               <div className="flex flex-col gap-2">
                 {Object.entries(CEFR_DESCRIPTIONS).map(([level, desc]) => (
                   <div key={level} className="flex gap-3 text-xs text-gray-600">
@@ -335,13 +323,8 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
       {/* NO — class did not happen */}
       {didClassHappen === false && (
         <section className="mb-8">
-          <h2 className="text-base font-semibold text-gray-800 mb-3">
-            What happened?
-          </h2>
-
+          <h2 className="text-base font-semibold text-gray-800 mb-3">What happened?</h2>
           <div className="flex flex-col gap-3 mb-4">
-
-            {/* Student no-show option */}
             <button
               disabled={!isEditable}
               onClick={() => setNoShowType('student')}
@@ -354,8 +337,6 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
             >
               <p className="font-semibold text-gray-800">Student no-show</p>
             </button>
-
-            {/* Teacher no-show option */}
             <button
               disabled={!isEditable}
               onClick={() => setNoShowType('teacher')}
@@ -368,42 +349,33 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
             >
               <p className="font-semibold text-gray-800">Teacher no-show</p>
             </button>
-
           </div>
-
-          {/* Message shown after selecting no-show type */}
           {noShowType === 'student' && (
             <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm text-orange-800 mb-4">
-              Your student did not attend this class. You will still be paid
-              for this session. Please contact your student as soon as possible
-              to follow up and ensure this does not happen again. You are
-              required to complete this report as confirmation that you were
-              present and ready for the class.
+              Your student did not attend this class. You will still be paid for this session.
+              Please contact your student as soon as possible to follow up and ensure this does
+              not happen again. You are required to complete this report as confirmation that
+              you were present and ready for the class.
             </div>
           )}
-
           {noShowType === 'teacher' && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 mb-4">
-              Please contact your student immediately to apologise for missing
-              the class and to explain what happened.
+              Please contact your student immediately to apologise for missing the class and
+              to explain what happened.
             </div>
           )}
         </section>
       )}
 
-      {/* Additional details — shown for both Yes and No */}
+      {/* Additional details */}
       {didClassHappen !== null && (
         <section className="mb-8">
           <h2 className="text-base font-semibold text-gray-800 mb-1">
             Additional Details
-            {didClassHappen === false && (
-              <span className="text-red-500 ml-1">*</span>
-            )}
+            {didClassHappen === false && <span className="text-red-500 ml-1">*</span>}
           </h2>
           {didClassHappen === false && (
-            <p className="text-xs text-gray-500 mb-3">
-              Required — please document what happened.
-            </p>
+            <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}
           <textarea
             disabled={!isEditable}
@@ -437,6 +409,18 @@ export default function ReportFormClient({ report, profile, isAdmin }: Props) {
         >
           {saving ? 'Saving...' : 'Submit Report'}
         </button>
+      )}
+
+      {/* Assignment modal */}
+      {showAssignModal && student && (
+        <AssignStudySheetsModal
+          studentName={student.full_name}
+          lessonId={lesson.id}
+          studentId={student.id}
+          alreadyAssigned={currentAssignedIds}
+          onClose={() => setShowAssignModal(false)}
+          onSaved={(ids) => setCurrentAssignedIds(ids)}
+        />
       )}
 
     </div>
