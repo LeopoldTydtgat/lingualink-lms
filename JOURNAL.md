@@ -1,6 +1,48 @@
 # LinguaLink Online - Build Journal
 
 
+---
+
+## Session 13 - 03 April 2026 - My Account
+
+### What was built
+- `src/app/(dashboard)/account/page.tsx` - server component fetching profile, resources, and reviews for the current user
+- `src/app/(dashboard)/account/AccountClient.tsx` - full My Account page with four tabs: General Info, Professional Info, Useful Resources, Student Feedback
+- `resources` table - admin-managed useful links with RLS policies (all authenticated users read, admin manages)
+- `reviews` table - student feedback and star ratings per teacher with RLS policies
+- `avatars` Supabase Storage bucket — public bucket for profile photos with per-user upload policies
+- Profile photo upload - validates type (JPG/PNG/WebP) and size (max 2MB), stores at `avatars/{userId}/avatar.{ext}`, cache-busts URL on upload
+- Tag input component - keyboard-friendly add/remove for teaching and speaking languages (stored as arrays)
+- Timezone selector - drives all class time display for the teacher
+- Student feedback tab - average rating summary card, per-review cards with student photo and date
+- "See My Public Profile" button in page header - opens a modal showing exactly what students will see: photo, name, star rating, languages, bio, and up to 3 reviews. Modal reflects unsaved changes in real time
+- Toast notification system - success and error feedback on all save actions
+
+### Break/Fix Log
+Issue 1: Missing shadcn textarea component
+- Symptom: Build error - `Module not found: Can't resolve '@/components/ui/textarea'`
+- Cause: `textarea` shadcn component had not been added to the project
+- Fix: Ran `npx shadcn@latest add textarea` in Terminal 2
+- Lesson: shadcn components must be explicitly added before use - they are not auto-available from the package install
+
+Issue 2: Console warning on tab buttons
+- Symptom: React warning about conflicting `borderBottom` shorthand and `borderBottomWidth`/`borderBottomStyle` properties on tab buttons
+- Cause: Both the shorthand `borderBottom` and individual `borderBottom*` properties were set simultaneously in the same style object
+- Fix: Removed the shorthand entirely, replaced with explicit `borderTop/Left/Right: 'none'` and individual `borderBottomWidth`, `borderBottomStyle`, `borderBottomColor` properties
+- Lesson: Never mix CSS shorthand and longhand properties for the same value in React inline styles
+
+Issue 3: Security tab removed per the client's request
+- Symptom: The client does not want teachers to be able to change their own passwords
+- Cause: Business decision - if a teacher leaves the company, the client needs control over account access
+- Fix: Removed Security tab entirely. Password changes will be handled by the client via admin controls in a future session
+- Lesson: Always confirm with the client before building self-service features that could affect account security
+
+### Session result
+Step 13 is complete. Teachers can now manage their own profile including photo upload, timezone, teaching languages, bio, and view their public-facing profile preview. The Useful Resources and Student Feedback tabs are wired to live database tables and will populate as the client adds resources and students leave reviews. Password management is admin-only by design. Microsoft 365 subscription noted as needing upgrade from Family to Business Standard before the Teams Graph API integration can be built in the Student Portal phase.
+
+---
+
+
 ## Session 12 - 03 April 2026 - Billing & Invoices
 
 ### What was built
@@ -15,8 +57,8 @@
 - System auto-generates a unique reference number (e.g. `INV-202604-XXXX`) for each teacher on the 1st of every month
 - PDF upload flow: teachers upload invoice PDF within 1st–10th window; stored at `invoices/{teacher_id}/{year}-{month}.pdf`
 - PDF viewing via Supabase signed URLs (60-second expiry) for both teachers and admin
-- Admin View: Shannon sees all teachers' invoices grouped by teacher, can view PDFs, mark invoices as paid with auto-calculated amount confirmation
-- Admin template management: Shannon uploads Lingualink branded PDF template; stored in public `templates` bucket, path saved in `settings` table
+- Admin View: the client sees all teachers' invoices grouped by teacher, can view PDFs, mark invoices as paid with auto-calculated amount confirmation
+- Admin template management: the client uploads Lingualink branded PDF template; stored in public `templates` bucket, path saved in `settings` table
 - My Billing Info: read-only display for teachers; editing deferred to Step 13 teacher profile
 
 ### Break/Fix Log
@@ -29,12 +71,12 @@
 
 **Issue 2: Billing info was editable by teachers**
 - Symptom: First version included an editable form for IBAN, BIC, PayPal etc.
-- Cause: Brief says Shannon updates billing info per teacher - not teachers themselves
+- Cause: Brief says that the client updates billing info per teacher - not teachers themselves
 - Fix: Replaced editable form with read-only display; billing info editing moved to teacher profile in Step 13
 - Lesson: Re-read who owns each piece of data before building edit controls
 
 ### Session result
-Step 12 is complete. The billing system auto-generates monthly invoice records with unique reference numbers, calculates amounts live from lesson data using each teacher's hourly rate, handles PDF uploads within the correct window, and gives Shannon a clean admin view to manage all teacher invoices and mark payments. The `hourly_rate` field exists in the schema but will be populated through the teacher profile UI in Step 13, at which point invoice amounts will calculate correctly for all teachers.
+Step 12 is complete. The billing system auto-generates monthly invoice records with unique reference numbers, calculates amounts live from lesson data using each teacher's hourly rate, handles PDF uploads within the correct window, and gives the client a clean admin view to manage all teacher invoices and mark payments. The `hourly_rate` field exists in the schema but will be populated through the teacher profile UI in Step 13, at which point invoice amounts will calculate correctly for all teachers.
 
 ---
 
@@ -47,7 +89,7 @@ Step 12 is complete. The billing system auto-generates monthly invoice records w
 - `src/app/(dashboard)/study-sheets/[id]/page.tsx` - server component fetching individual sheet and its exercises
 - `src/app/(dashboard)/study-sheets/[id]/StudySheetDetailClient.tsx` - detail page with vocabulary table, exercise cards with multiple choice interactions, correct/incorrect colour states, and amber explanation box
 - `src/app/(dashboard)/study-sheets/new/page.tsx` - admin-only guard page for content creation
-- `src/app/(dashboard)/study-sheets/new/StudySheetFormClient.tsx` - full content creation form for Shannon: title, category, level, difficulty, vocabulary word rows, and multiple choice exercise builder with radio button correct answer selection
+- `src/app/(dashboard)/study-sheets/new/StudySheetFormClient.tsx` - full content creation form for the client: title, category, level, difficulty, vocabulary word rows, and multiple choice exercise builder with radio button correct answer selection
 - `src/components/shared/AssignStudySheetsModal.tsx` - shared modal component for assigning study sheets to a student from within a class report; supports search, category and level filters, multi-select with checkbox UI, preview link per sheet, and saves/removes assignments to the assignments table
 - `src/app/(dashboard)/reports/[id]/ReportFormClient.tsx` - updated to accept assignedSheetIds prop, wire in the assignment modal, and display assigned sheet count
 - `src/app/(dashboard)/reports/[id]/page.tsx` - updated to query existing assignments for the lesson and pass IDs to the form
@@ -67,7 +109,7 @@ Step 12 is complete. The billing system auto-generates monthly invoice records w
 - Lesson: Keep at least one pending report in the test dataset at all times during active development
 
 ### Session result
-Step 11 is complete. The study sheets library is fully functional - Shannon can create vocabulary and grammar sheets with exercises via the admin form, teachers can browse and filter the library, and the assignment modal is wired into the class report form allowing teachers to assign sheets to students mid-report. All data is persisted correctly to Supabase with RLS policies in place. The next step is Step 12 - Billing & Invoices.
+Step 11 is complete. The study sheets library is fully functional - the client can create vocabulary and grammar sheets with exercises via the admin form, teachers can browse and filter the library, and the assignment modal is wired into the class report form allowing teachers to assign sheets to students mid-report. All data is persisted correctly to Supabase with RLS policies in place. The next step is Step 12 - Billing & Invoices.
 
 ---
 
@@ -339,7 +381,7 @@ Built the first real feature page of the LinguaLink portal - the Upcoming Classe
 - Lesson: Always pull before pushing if you have edited any files directly on GitHub
 
 ### Session result
-Brand colours registered and available across the entire project, layout shell fully built and confirmed working in the browser with correct Lingualink branding, role-based nav filtering working correctly for Shannon's admin account, and all code pushed to GitHub on the dev branch.
+Brand colours registered and available across the entire project, layout shell fully built and confirmed working in the browser with correct Lingualink branding, role-based nav filtering working correctly for the client's admin account, and all code pushed to GitHub on the dev branch.
 
 ---
 
@@ -356,7 +398,7 @@ Brand colours registered and available across the entire project, layout shell f
 - Server action for authentication created at `src/app/(auth)/login/actions.ts`
 - Placeholder dashboard page created at `src/app/(dashboard)/dashboard/page.tsx`
 - Poppins font added to global layout in `src/app/layout.tsx`
-- Shannon's test user created in Supabase Auth, profile updated to role `admin`
+- The client's test user created in Supabase Auth, profile updated to role `admin`
 - Login tested and confirmed working end-to-end
 - All code committed and pushed to GitHub on dev branch
 
@@ -375,9 +417,9 @@ Brand colours registered and available across the entire project, layout shell f
 - Lesson: On Windows PowerShell, always quote paths that contain parentheses
 
 **Issue 3**
-- Symptom: Dashboard displayed Role: teacher for Shannon instead of Role: admin
+- Symptom: Dashboard displayed Role: teacher for the client instead of Role: admin
 - Cause: The database trigger creates the profile row automatically when a user is added, but defaults the role to `teacher` - it has no way of knowing the intended role
-- Fix: Manually edited Shannon's row in the Supabase Table Editor and set the role field to `admin`
+- Fix: Manually edited the client's row in the Supabase Table Editor and set the role field to `admin`
 - Lesson: After creating an admin user in Supabase Auth, always manually update their role in the profiles table immediately after
 
 ### Session result
@@ -469,9 +511,9 @@ Next.js application successfully initialised with the full agreed stack, folder 
 
 **Issue 5**
 - Symptom: Confusion about whether Payfast needed to be integrated into the portal
-- Cause: The brief mentioned Payfast but Shannon's actual business flow handles payments on the existing WordPress website separately
-- Fix: Confirmed with Shannon that the portal never handles money - students pay on the website and Shannon activates accounts manually in the portal
-- Lesson: Always validate brief requirements against the actual business workflow - Shannon's confirmed process overrides what the brief says
+- Cause: The brief mentioned Payfast but the client's actual business flow handles payments on the existing WordPress website separately
+- Fix: Confirmed with the client that the portal never handles money - students pay on the website and the client activates accounts manually in the portal
+- Lesson: Always validate brief requirements against the actual business workflow - the client's confirmed process overrides what the brief says
 
 ### Session result
 All development tools configured and connected end-to-end, credentials secured in `.env.local`, CI pipeline live on GitHub, and one major scope decision confirmed - the portal has no payment integration.
