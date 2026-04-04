@@ -1,8 +1,8 @@
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,38 +16,61 @@ export async function proxy(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
-          supabaseResponse = NextResponse.next({ request })
+          response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            response.cookies.set(name, value, options)
           )
         },
       },
     }
   )
 
-  // This refreshes the user's session on every request — do not remove
-  const { data: { user } } = await supabase.auth.getUser()
+  // getUser() validates the session on every request
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  // Not logged in and trying to reach the dashboard — send to login
-  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
+  const { pathname } = request.nextUrl
+
+  // ── Teacher / Admin routes (root-level dashboard pages) ────────────
+  const teacherPaths = [
+    '/dashboard',
+    '/upcoming-classes',
+    '/reports',
+    '/schedule',
+    '/students',
+    '/messages',
+    '/study-sheets',
+    '/billing',
+    '/account',
+  ]
+  const isTeacherRoute = teacherPaths.some(
+    (p) => pathname === p || pathname.startsWith(p + '/')
+  )
+
+  if (isTeacherRoute && !user) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Already logged in and visiting /login — send to dashboard
-  if (user && request.nextUrl.pathname === '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
+  // ── Student routes (all /student/* except the login page) ──────────
+  const isStudentRoute =
+    pathname.startsWith('/student/') && pathname !== '/student/login'
+
+  if (isStudentRoute && !user) {
+    return NextResponse.redirect(new URL('/student/login', request.url))
   }
 
-  return supabaseResponse
+  // ── Redirect already-authenticated users away from login pages ──────
+  if (user && pathname === '/login') {
+    return NextResponse.redirect(new URL('/upcoming-classes', request.url))
+  }
+
+  return response
 }
 
-// Which routes this proxy runs on — excludes static files and images
 export const config = {
   matcher: [
+    // Match all routes except Next.js internals and static files
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
