@@ -11,7 +11,6 @@ export default async function StudentDashboardLayout({
 }) {
   const supabase = await createClient()
 
-  // Validate the session
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -20,15 +19,17 @@ export default async function StudentDashboardLayout({
     redirect('/student/login')
   }
 
-  // Look up the student record by their Supabase auth user ID
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, email, photo_url')
+    .select('id, full_name, email, photo_url, is_active')
     .eq('auth_user_id', user.id)
     .single()
 
-  // If there's an auth user but no matching student record, send them to login
   if (!student) {
+    redirect('/student/login')
+  }
+
+  if (!student.is_active) {
     redirect('/student/login')
   }
 
