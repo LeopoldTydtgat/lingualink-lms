@@ -8,7 +8,7 @@
 - `src/app/(student-auth)/student/forgot-password/actions.ts` - sends Supabase password reset email with redirect to `/student/reset-password`; always returns success regardless of whether email exists (security best practice)
 - `src/app/(student-auth)/student/forgot-password/page.tsx` - forgot password page with success state
 - `src/app/(student-auth)/student/reset-password/page.tsx` - reset password page; client component that listens for Supabase `PASSWORD_RECOVERY` event before showing form; handles first-time password setup for new students Shannon invites
-- `src/proxy.ts` — updated to exclude `/student/forgot-password` and `/student/reset-password` from auth protection; removed authenticated-student redirect that was causing a redirect loop
+- `src/proxy.ts` - updated to exclude `/student/forgot-password` and `/student/reset-password` from auth protection; removed authenticated-student redirect that was causing a redirect loop
 - `src/app/(student)/student/layout.tsx` - added `is_active` check; deactivated students redirected to login even with a valid session
 - `src/components/student/layout/StudentLeftNav.tsx` - corrected nav colours to match teacher portal (white background, grey border, dark text)
 - `src/components/student/layout/StudentRightPanel.tsx` - corrected Chat with Admin button from black to #FF8303
