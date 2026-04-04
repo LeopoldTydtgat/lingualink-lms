@@ -1,5 +1,41 @@
 # LinguaLink Online - Build Journal
 
+
+## Session 16 - 04 April 2026 - Student Portal Steps 3-5
+
+### What was built
+- Step 3: Database schema updates - added 6 new columns to `students` table
+  (`language_preference`, `learning_goals`, `interests`, `self_assessed_level`,
+  `placement_test_result`, `placement_test_taken_at`); altered existing `reviews`
+  table to add `class_id`, `moderated_by_admin`, `admin_edited_text` rather than
+  creating a duplicate table; created `exercise_completions` table with RLS and
+  4 policies; added 2 student-facing RLS policies to `reviews`
+- Step 4: Verified layout shell was already complete from Step 2 - no changes needed
+- Step 5: `src/app/(student)/student/my-classes/page.tsx` - server component
+  fetching upcoming lessons with teacher info, last completed lesson feedback
+- Step 5: `src/app/(student)/student/my-classes/MyClassesClient.tsx` - full
+  client component with next class card, real-time countdown, join class button
+  (active 15 min before), reschedule/cancel with 24-hour rule, inline warning
+  modal for within-24hr cancellations, grouped upcoming classes list with
+  expand/collapse, hide cancelled toggle
+- Step 5: `src/app/(student)/student/layout.tsx` - updated to fetch next lesson,
+  active training, and exercise counts for right panel
+- Step 5: `src/components/student/layout/StudentRightPanel.tsx` - live data wired
+  in: real-time countdown, join button, hours remaining with low balance warning,
+  training end date, exercises progress bar
+
+### Break/Fix Log
+No issues this session.
+
+### Session result
+Completed database schema updates for the Student Portal and built the My Classes
+dashboard. The page renders correctly with empty state handling for students with
+no active training or upcoming lessons. All cancellation logic and 24-hour rule
+enforcement is in place. Booking flow (Step 6) is next.
+
+---
+
+
 ## Session 15 - 04 April 2026 - Student Portal Step 2: Authentication
 
 ### What was built
