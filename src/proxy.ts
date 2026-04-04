@@ -52,15 +52,27 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // ── Student routes (all /student/* except the login page) ──────────
+  // ── Student public pages (no auth required) ─────────────────────────
+  // Login, forgot password, and reset password must stay accessible
+  // to unauthenticated users
+  const studentPublicPaths = [
+    '/student/login',
+    '/student/forgot-password',
+    '/student/reset-password',
+  ]
+  const isStudentPublicPage = studentPublicPaths.some(
+    (p) => pathname === p || pathname.startsWith(p + '/')
+  )
+
+  // ── Student protected routes ─────────────────────────────────────────
   const isStudentRoute =
-    pathname.startsWith('/student/') && pathname !== '/student/login'
+    pathname.startsWith('/student/') && !isStudentPublicPage
 
   if (isStudentRoute && !user) {
     return NextResponse.redirect(new URL('/student/login', request.url))
   }
 
-  // ── Redirect already-authenticated users away from login pages ──────
+  // ── Redirect already-authenticated users away from login pages ───────
   if (user && pathname === '/login') {
     return NextResponse.redirect(new URL('/upcoming-classes', request.url))
   }
@@ -70,7 +82,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match all routes except Next.js internals and static files
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

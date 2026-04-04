@@ -25,7 +25,7 @@ export default function StudentRightPanel({
         flexShrink: 0,
       }}
     >
-      {/* ── Next Class ──────────────────────────────────────────────── */}
+      {/* Next Class */}
       <div>
         <p
           style={{
@@ -40,14 +40,14 @@ export default function StudentRightPanel({
           Next Class
         </p>
         <p style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>
-          —
+          --
         </p>
         <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
           No upcoming classes
         </p>
       </div>
 
-      {/* ── Hours Remaining ─────────────────────────────────────────── */}
+      {/* Hours Remaining */}
       <div>
         <p
           style={{
@@ -62,11 +62,11 @@ export default function StudentRightPanel({
           Hours Remaining
         </p>
         <p style={{ fontSize: '18px', fontWeight: '700', color: '#111827' }}>
-          —
+          --
         </p>
       </div>
 
-      {/* ── Training End Date ────────────────────────────────────────── */}
+      {/* Training End Date */}
       <div>
         <p
           style={{
@@ -80,10 +80,10 @@ export default function StudentRightPanel({
         >
           Training Ends
         </p>
-        <p style={{ fontSize: '13px', color: '#6b7280' }}>—</p>
+        <p style={{ fontSize: '13px', color: '#6b7280' }}>--</p>
       </div>
 
-      {/* ── Exercises Progress ───────────────────────────────────────── */}
+      {/* Exercises Progress */}
       <div>
         <p
           style={{
@@ -98,7 +98,6 @@ export default function StudentRightPanel({
           My Exercises
         </p>
 
-        {/* Progress bar */}
         <div
           style={{
             height: '6px',
@@ -141,7 +140,7 @@ export default function StudentRightPanel({
         </a>
       </div>
 
-      {/* ── Help & Support ───────────────────────────────────────────── */}
+      {/* Help and Support */}
       <div style={{ borderTop: '1px solid #E0DFDC', paddingTop: '16px' }}>
         <p
           style={{
@@ -153,17 +152,16 @@ export default function StudentRightPanel({
             marginBottom: '8px',
           }}
         >
-          Help & Support
+          Help and Support
         </p>
         <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>
           Questions? Contact admin.
         </p>
-        {/* Chat with Admin wired up in Admin Controls phase */}
         <button
           style={{
             width: '100%',
             padding: '7px 12px',
-            backgroundColor: '#1a1a1a',
+            backgroundColor: '#FF8303',
             color: '#ffffff',
             border: 'none',
             borderRadius: '6px',

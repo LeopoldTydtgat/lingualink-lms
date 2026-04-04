@@ -37,14 +37,14 @@ export default function StudentLeftNav() {
       style={{
         width: '220px',
         minWidth: '220px',
-        backgroundColor: '#1a1a1a',
+        backgroundColor: '#ffffff',
+        borderRight: '1px solid #E0DFDC',
         display: 'flex',
         flexDirection: 'column',
         padding: '16px 0',
         flexShrink: 0,
       }}
     >
-      {/* Nav items */}
       <div style={{ flex: 1 }}>
         {navItems.map((item) => {
           const isActive =
@@ -59,29 +59,29 @@ export default function StudentLeftNav() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                padding: '10px 8px',
+                padding: '10px 12px',
                 margin: '2px 8px',
                 fontSize: '14px',
-                fontWeight: isActive ? '600' : '400',
-                color: isActive ? '#ffffff' : '#9ca3af',
-                // Active background uses inline style — Tailwind v4 cannot apply
-                // dynamically constructed colour classes at runtime
+                fontWeight: isActive ? '600' : '500',
+                color: isActive ? '#ffffff' : '#4b5563',
                 backgroundColor: isActive ? '#FF8303' : 'transparent',
                 textDecoration: 'none',
                 borderRadius: '6px',
               }}
             >
-              <Icon size={16} />
+              <Icon
+                size={16}
+                style={{ color: isActive ? '#ffffff' : '#9ca3af' }}
+              />
               {item.label}
             </Link>
           )
         })}
       </div>
 
-      {/* Log out */}
       <div
         style={{
-          borderTop: '1px solid #2d2d2d',
+          borderTop: '1px solid #E0DFDC',
           padding: '8px 8px 0',
         }}
       >
@@ -91,10 +91,11 @@ export default function StudentLeftNav() {
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
-            padding: '10px 8px',
+            padding: '10px 12px',
             width: '100%',
             fontSize: '14px',
-            color: '#9ca3af',
+            fontWeight: '500',
+            color: '#4b5563',
             background: 'none',
             border: 'none',
             borderRadius: '6px',
@@ -102,7 +103,7 @@ export default function StudentLeftNav() {
             textAlign: 'left',
           }}
         >
-          <LogOut size={16} />
+          <LogOut size={16} style={{ color: '#9ca3af' }} />
           Log Out
         </button>
       </div>
