@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import {
   User,
   ChevronDown,
@@ -13,6 +12,7 @@ import {
   XCircle,
   Plus,
 } from 'lucide-react'
+import { cancelLessonAction } from './actions'
 
 interface Teacher {
   id: string
@@ -100,7 +100,6 @@ export default function MyClassesClient({
   studentTimezone,
 }: MyClassesClientProps) {
   const router = useRouter()
-  const supabase = createClient()
 
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
@@ -160,19 +159,15 @@ export default function MyClassesClient({
     setCancellingId(lessonId)
     setShowCancelWarning(null)
 
-    // Update lesson status
-    // TODO (Step 6): move this into a server action that also handles
-    // hours refund (within24 = no refund, otherwise decrement hours_consumed on trainings)
-    await supabase
-      .from('lessons')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancellation_reason: 'Cancelled by student',
-      })
-      .eq('id', lessonId)
+    // Server action handles cancellation + hours refund logic atomically.
+    // If >24hrs before class: hours_consumed is decremented (refund).
+    // If <24hrs before class: hours_consumed is unchanged (no refund).
+    const result = await cancelLessonAction(lessonId)
 
     setCancellingId(null)
+    if (result.error) {
+      console.error('Cancel failed:', result.error)
+    }
     router.refresh()
   }
 
