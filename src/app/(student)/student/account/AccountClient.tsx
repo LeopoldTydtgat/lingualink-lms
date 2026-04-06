@@ -346,7 +346,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ maxWidth: '720px' }}>
+    <div style={{ maxWidth: '720px', margin: '0 auto' }}>
 
       {/* Page title */}
       <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>

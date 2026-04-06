@@ -174,7 +174,7 @@ export default function MyClassesClient({
   const scheduledCount = lessons.filter((l) => l.status === 'scheduled').length
 
   return (
-    <div style={{ maxWidth: '800px' }}>
+    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
 
       {/* Page header */}
       <div style={{

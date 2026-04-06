@@ -145,7 +145,7 @@ export default function StudySheetClient({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-6 max-w-3xl mx-auto">
       {/* Back button */}
       <button
         onClick={() => router.back()}
