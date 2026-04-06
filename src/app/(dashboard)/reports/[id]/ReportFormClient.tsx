@@ -30,6 +30,8 @@ type Report = {
   feedback_text: string | null
   additional_details: string | null
   level_data: Record<string, string> | null
+  student_confirmed: boolean | null
+  impersonation_note: string | null
   deadline_at: string | null
   completed_at: string | null
   flagged_at: string | null
@@ -83,6 +85,12 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   const [feedbackText, setFeedbackText] = useState(report.feedback_text ?? '')
   const [additionalDetails, setAdditionalDetails] = useState(report.additional_details ?? '')
   const [levelData, setLevelData] = useState<Record<string, string>>(report.level_data ?? {})
+  const [studentConfirmed, setStudentConfirmed] = useState<boolean>(
+    report.student_confirmed ?? true
+  )
+  const [impersonationNote, setImpersonationNote] = useState<string>(
+    report.impersonation_note ?? ''
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showAssignModal, setShowAssignModal] = useState(false)
@@ -107,6 +115,11 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       setError('Please provide additional details about what happened.')
       return
     }
+    // If teacher unchecked the confirmation, require a note
+    if (didClassHappen && !studentConfirmed && !impersonationNote.trim()) {
+      setError('Please provide a note about who attended the class.')
+      return
+    }
 
     setSaving(true)
     setError(null)
@@ -119,6 +132,8 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
         feedback_text: didClassHappen ? feedbackText : null,
         additional_details: additionalDetails || null,
         level_data: didClassHappen ? levelData : null,
+        student_confirmed: didClassHappen ? studentConfirmed : null,
+        impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
         status: 'completed',
         completed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -226,6 +241,49 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       {/* YES — class happened */}
       {didClassHappen === true && (
         <>
+          {/* Student identity confirmation */}
+          <section className="mb-8">
+            <h2 className="text-base font-semibold text-gray-800 mb-3">Student Confirmation</h2>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                disabled={!isEditable}
+                checked={studentConfirmed}
+                onChange={e => {
+                  setStudentConfirmed(e.target.checked)
+                  if (e.target.checked) setImpersonationNote('')
+                }}
+                className="mt-0.5 w-4 h-4 rounded accent-orange-500 cursor-pointer"
+              />
+              <span className="text-sm text-gray-700">
+                I confirm that <strong>{student?.full_name ?? 'the student'}</strong> personally
+                attended this class.
+              </span>
+            </label>
+
+            {/* Note field — shown only when unchecked */}
+            {!studentConfirmed && (
+              <div className="mt-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 mb-3">
+                  Please make a note of who attended and report this to admin or your teacher
+                  advisor as soon as possible.
+                </div>
+                <textarea
+                  disabled={!isEditable}
+                  value={impersonationNote}
+                  onChange={e => setImpersonationNote(e.target.value)}
+                  rows={3}
+                  placeholder="Who attended this class instead? Please provide as much detail as possible..."
+                  className={[
+                    'w-full border border-amber-300 rounded-xl px-4 py-3 text-sm',
+                    'focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none',
+                    !isEditable ? 'bg-gray-50 text-gray-500' : 'bg-white',
+                  ].join(' ')}
+                />
+              </div>
+            )}
+          </section>
+
           {/* Feedback box */}
           <section className="mb-8">
             <h2 className="text-base font-semibold text-gray-800 mb-1">
