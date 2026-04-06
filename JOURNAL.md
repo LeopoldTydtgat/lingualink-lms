@@ -1,6 +1,27 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 23 - 06 April 2026 - Student Portal Layout Fixes & Centering Pass
+
+### What was built
+- Centred all student portal page layouts by adding `margin: '0 auto'` or `mx-auto` to the outermost wrapper div on affected pages
+- `MyClassesClient.tsx` - added `margin: '0 auto'` to outer div
+- `StudyClient.tsx` - added `mx-auto` to outer div
+- `StudySheetClient.tsx` - added `mx-auto` to outer div
+- `AccountClient.tsx` - added `margin: '0 auto'` to outer div
+- `PastClassesClient.tsx` - already centred, no change needed
+- `ProgressClient.tsx` - already centred, no change needed
+- `StudentMessagesClient.tsx` - intentionally full width, no change needed
+
+### Break/Fix Log
+Issue 1: All student portal pages were left-pinned rather than centred / Pages had a maxWidth set but no margin auto, causing content to sit hard against the left edge / Added margin: '0 auto' or mx-auto to the outermost wrapper div on each affected page / Always pair maxWidth with margin auto when centering a constrained content area
+
+### Session result
+Quick polish pass to fix the layout alignment across all student portal pages. All pages with constrained content widths are now properly centred in the available space. The messages page was correctly left as full width as it uses a two-panel chat layout that should fill the content area. The student portal is now visually consistent across all pages.
+
+---
+
+
 ## Session 22 - 06 April 2026 - Student Portal Steps 11 & 12: My Account and Email Notifications
 
 ### What was built
