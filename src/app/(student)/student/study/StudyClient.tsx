@@ -106,7 +106,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
   }
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6 max-w-4xl mx-auto">
       {/* Page title */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Study</h1>
