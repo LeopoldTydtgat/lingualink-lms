@@ -575,7 +575,7 @@ function StepDateTime({
                     {formatDayLabel(day, studentTimezone).split(' ')[0]}
                   </p>
                   <p style={{ fontSize: '13px', fontWeight: '700', color: isPast ? '#d1d5db' : '#111827' }}>
-                    {day.getDate()}
+                  {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
                   </p>
                 </div>
 
@@ -809,7 +809,7 @@ export default function BookingClient({
   const router = useRouter()
 
   // If only one teacher, skip teacher selection step — steps are 3 not 4
-  const skipTeacherStep = teachers.length === 1
+  const skipTeacherStep = false
   const totalSteps = skipTeacherStep ? 3 : 4
 
   // Step numbering: if skipping teacher step, step 1=Duration, 2=DateTime, 3=Confirm

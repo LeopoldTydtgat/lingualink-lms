@@ -87,7 +87,7 @@ function getSecondsUntil(isoString: string, now: number): number {
 }
 
 function isJoinable(isoString: string, now: number): boolean {
-  return getSecondsUntil(isoString, now) <= 900 // 15 minutes
+  return getSecondsUntil(isoString, now) <= 600 // 10 minutes
 }
 
 function isWithin24Hours(isoString: string, now: number): boolean {
@@ -323,7 +323,7 @@ export default function MyClassesClient({
                     <Video size={16} />
                     {mounted && isJoinable(nextLesson.scheduled_at, now)
                       ? 'Join Class'
-                      : 'Join Class (available 15 min before)'}
+                      : 'Join Class (available 10 min before)'}
                   </a>
                 ) : (
                   <span style={{ fontSize: '13px', color: '#9ca3af' }}>

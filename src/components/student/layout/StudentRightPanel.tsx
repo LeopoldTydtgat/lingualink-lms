@@ -48,7 +48,7 @@ function formatEndDate(isoDate: string): string {
 
 function isJoinable(isoString: string, now: number): boolean {
   const secondsUntil = Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
-  return secondsUntil <= 900 // 15 minutes
+  return secondsUntil <= 600 // 10 minutes
 }
 
 const SECTION_LABEL: React.CSSProperties = {
@@ -126,7 +126,7 @@ export default function StudentRightPanel({
               {nextLesson.duration_minutes} min class
             </p>
 
-            {/* Join button — active 15 min before */}
+            {/* Join button — active 10 min before */}
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (
                 <a
