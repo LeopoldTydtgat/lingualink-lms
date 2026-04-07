@@ -32,6 +32,24 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
+  // ── Admin routes ─────────────────────────────────────────────────────
+  if (pathname.startsWith('/admin')) {
+    if (!user) {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    if (profile?.role !== 'admin') {
+      // Authenticated but not admin — send to teacher dashboard
+      return NextResponse.redirect(new URL('/upcoming-classes', request.url))
+    }
+  }
+
   // ── Teacher / Admin routes (root-level dashboard pages) ────────────
   const teacherPaths = [
     '/dashboard',
@@ -53,8 +71,6 @@ export async function proxy(request: NextRequest) {
   }
 
   // ── Student public pages (no auth required) ─────────────────────────
-  // Login, forgot password, and reset password must stay accessible
-  // to unauthenticated users
   const studentPublicPaths = [
     '/student/login',
     '/student/forgot-password',
