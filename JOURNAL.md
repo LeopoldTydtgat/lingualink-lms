@@ -1,6 +1,36 @@
 # LinguaLink Online - Build Journal
 
 
+
+---
+
+## Session 28 - 07 April 2026 - Admin Portal Step 5: Student Management (Part 1)
+
+### What was built
+- `src/app/(admin)/admin/students/page.tsx` - student list server component with company, training hours, and assigned teachers via nested joins
+- `src/app/(admin)/admin/students/StudentsListClient.tsx` - searchable, filterable student table with status badges, hours badges, teacher tags, and low-hours quick filter
+- `src/app/(admin)/admin/students/new/page.tsx` - create student server component fetching companies and teachers for dropdowns
+- `src/app/(admin)/admin/students/new/CreateStudentClient.tsx` - four-section create form (Personal Info, Learning Info, Training Setup, Notes) with admin-only field labelling and cancellation policy toggle
+- `src/app/api/admin/students/route.ts` - POST route: creates Supabase auth user, upserts student row, creates training record, inserts training_teachers rows, sends welcome email via Resend
+- `src/app/(admin)/admin/students/[id]/page.tsx` - student detail server component with separate queries for student, training, lessons, hours log, reports, and reviews
+- `src/app/(admin)/admin/students/[id]/StudentDetailClient.tsx` - six-tab detail view: Overview, Classes, Hours Log (with Add/Remove), Reports, Messages (placeholder), Reviews
+- `src/app/api/admin/students/[id]/hours/route.ts` - POST route: adds or removes hours by updating training record and writing to hours_log table
+
+### Break/Fix Log
+Issue 1: Student detail page returning 404 / Symptom: clicking student name in list returned 404. Cause: Next.js dynamic route folder was created as `` `[id`] `` (with literal backticks) instead of `[id]` due to PowerShell escaping behaviour in `New-Item`. Fix: stopped dev server, used `Rename-Item -LiteralPath` to rename folder to `[id]`. Lesson: `New-Item` accepts square brackets without escaping - never use backticks when creating dynamic route folders.
+
+Issue 2: Same backtick folder problem on API route / Symptom: Add Hours returned "Unexpected token '<'" JSON parse error - Next.js was returning an HTML 404 page instead of the API response. Cause: same `[id]` folder naming issue on `src/app/api/admin/students/[id]/hours/`. Fix: same rename approach after stopping dev server.
+
+Issue 3: Duplicate file in Downloads causing stale copy to be deployed / Symptom: `StudentDetailClient.tsx` showed 2026/04/02 date after copy. Cause: browser saved new download as `StudentDetailClient (1).tsx` without overwriting the old file. Fix: copied the `(1)` version explicitly. Lesson: delete all `.tsx` and `.ts` files from Downloads after each session to prevent this.
+
+### Session result
+Student Management for the Admin Portal is now partially complete. The student list, create student flow, and student detail page are all working end to end. A new student can be created with full personal, learning, training, and notes data — the auth user, student row, training record, and teacher assignments all save correctly in one API call. The student detail page shows all data across six tabs, and the Hours Log tab supports adding and removing hours with full transaction history. The next session will continue with Edit Student and then move on to the remaining Admin Portal steps.
+
+---
+
+Go to your JOURNAL.md on GitHub, paste this at the top, and then sync locally with `git pull origin dev`.
+
+
 ## Session 27 - 07 April 2026 - Admin Portal Step 4: Teacher Management
 
 ### What was built
