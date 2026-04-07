@@ -3,6 +3,33 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import AdminLayoutClient from './AdminLayoutClient'
 
+// ── date helpers ──────────────────────────────────────────────────────────────
+// Never use toISOString() for local date construction.
+
+function utcTimestamp(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.000Z`
+  )
+}
+
+function getTodayUTCRange() {
+  const now = new Date()
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+  return { start: utcTimestamp(start), end: utcTimestamp(end) }
+}
+
+export interface RightPanelStats {
+  classesTodayCount: number
+  pendingCount: number
+  flaggedCount: number
+  lowHoursCount: number
+  invoicesToReviewCount: number
+  activeAnnouncementText: string | null
+}
+
 export default async function AdminLayout({
   children,
 }: {
@@ -15,18 +42,13 @@ export default async function AdminLayout({
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
+        getAll() { return cookieStore.getAll() },
         setAll() {},
       },
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   const { data: profile } = await supabase
@@ -37,8 +59,76 @@ export default async function AdminLayout({
 
   if (profile?.role !== 'admin') redirect('/dashboard')
 
+  // ── right panel stats ─────────────────────────────────────────────────────
+  const { start: todayStart, end: todayEnd } = getTodayUTCRange()
+
+  const [
+    todayRes,
+    pendingRes,
+    flaggedRes,
+    trainingsRes,
+    invoicesRes,
+    announcementRes,
+  ] = await Promise.all([
+    // Classes today (excluding cancelled)
+    supabase
+      .from('lessons')
+      .select('id, status')
+      .gte('scheduled_at', todayStart)
+      .lt('scheduled_at', todayEnd),
+
+    // Pending reports
+    supabase
+      .from('reports')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending'),
+
+    // Flagged reports
+    supabase
+      .from('reports')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'flagged'),
+
+    // Active trainings — for low hours count (balance < 2h)
+    supabase
+      .from('trainings')
+      .select('total_hours, hours_consumed')
+      .eq('status', 'active'),
+
+    // Invoices uploaded but not yet marked paid
+    supabase
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'uploaded'),
+
+    // First active announcement text (if any)
+    supabase
+      .from('announcements')
+      .select('message')
+      .eq('is_active', true)
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  const classesTodayCount = (todayRes.data ?? []).filter(
+    (l) => l.status !== 'cancelled'
+  ).length
+
+  const lowHoursCount = (trainingsRes.data ?? []).filter(
+    (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
+  ).length
+
+  const rightPanelStats: RightPanelStats = {
+    classesTodayCount,
+    pendingCount:          pendingRes.count  ?? 0,
+    flaggedCount:          flaggedRes.count  ?? 0,
+    lowHoursCount,
+    invoicesToReviewCount: invoicesRes.count ?? 0,
+    activeAnnouncementText: announcementRes.data?.message ?? null,
+  }
+
   return (
-    <AdminLayoutClient profile={profile}>
+    <AdminLayoutClient profile={profile} rightPanelStats={rightPanelStats}>
       {children}
     </AdminLayoutClient>
   )
