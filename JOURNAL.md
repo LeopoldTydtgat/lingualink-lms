@@ -23,6 +23,8 @@ Issue 2: Same backtick folder problem on API route / Symptom: Add Hours returned
 
 Issue 3: Duplicate file in Downloads causing stale copy to be deployed / Symptom: `StudentDetailClient.tsx` showed 2026/04/02 date after copy. Cause: browser saved new download as `StudentDetailClient (1).tsx` without overwriting the old file. Fix: copied the `(1)` version explicitly. Lesson: delete all `.tsx` and `.ts` files from Downloads after each session to prevent this.
 
+Issue 4: Admin portal content not centred / Symptom: all admin pages rendered left-aligned instead of centred like the teacher and student portals. Cause: `<main>` in `AdminLayoutClient.tsx` had no max-width or margin auto. Fix: wrapped `{children}` in `<div className="max-w-6xl mx-auto">`. Lesson: layout-level centring belongs in the shell, not individual pages.
+
 ### Session result
 Student Management for the Admin Portal is now partially complete. The student list, create student flow, and student detail page are all working end to end. A new student can be created with full personal, learning, training, and notes data — the auth user, student row, training record, and teacher assignments all save correctly in one API call. The student detail page shows all data across six tabs, and the Hours Log tab supports adding and removing hours with full transaction history. The next session will continue with Edit Student and then move on to the remaining Admin Portal steps.
 
