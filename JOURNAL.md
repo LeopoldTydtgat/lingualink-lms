@@ -1,6 +1,22 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 26 - 07 April 2026 - Admin Portal Step 3: Dashboard
+
+### What was built
+- `src/app/(admin)/admin/page.tsx` - server component fetching all dashboard data in parallel
+- `src/app/(admin)/admin/DashboardClient.tsx` - client component rendering dashboard UI
+- `src/app/(admin)/layout.tsx` - updated to fetch right panel stats and pass as props
+- `src/app/(admin)/AdminLayoutClient.tsx` - right panel wired with live counts
+
+### Break/Fix Log
+Issue 1: Teacher names missing in Today's Classes feed / Test lesson records had a student auth_user_id in the teacher_id column / Updated the lesson records in Supabase to point to the correct profiles row / Always verify test data FK relationships before debugging code
+
+### Session result
+The admin dashboard is fully live. Six stat cards show real-time counts for classes today, pending reports, flagged reports (red when > 0), low hours students, invoices to review, and active announcements. The live classes feed shows today's classes with computed status badges. The pending reports panel surfaces flagged reports first in red with reopen links. The alerts panel flags zero-balance students with upcoming classes and classes missing a Teams link. The right panel is wired across the entire admin shell. Auto-refresh runs every 30 seconds via router.refresh().
+
+---
+
 
 ## Session 25 - 07 April 2026 - Admin Portal Step 2: Database Schema
 
