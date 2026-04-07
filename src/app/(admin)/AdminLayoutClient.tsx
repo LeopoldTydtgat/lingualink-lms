@@ -20,8 +20,8 @@ import {
   ArrowLeft,
   LogOut,
   Menu,
-  X,
 } from 'lucide-react'
+import type { RightPanelStats } from './layout'
 
 interface Profile {
   id: string
@@ -32,6 +32,7 @@ interface Profile {
 
 interface AdminLayoutClientProps {
   profile: Profile
+  rightPanelStats: RightPanelStats
   children: React.ReactNode
 }
 
@@ -52,6 +53,7 @@ const navItems = [
 
 export default function AdminLayoutClient({
   profile,
+  rightPanelStats,
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
@@ -99,20 +101,17 @@ export default function AdminLayoutClient({
 
   const Sidebar = () => (
     <div className="flex flex-col h-full">
-      {/* Logo area */}
       <div className="px-4 py-5 border-b border-gray-700">
         <span className="text-white font-bold text-lg">Admin Portal</span>
         <p className="text-gray-400 text-xs mt-0.5">Lingualink Online</p>
       </div>
 
-      {/* Nav items */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
       </nav>
 
-      {/* Bottom actions */}
       <div className="px-3 py-4 border-t border-gray-700 space-y-1">
         <Link
           href="/dashboard"
@@ -133,6 +132,40 @@ export default function AdminLayoutClient({
       </div>
     </div>
   )
+
+  // ── right panel widget definitions ────────────────────────────────────────
+  const panelWidgets = [
+    {
+      label: 'Classes Today',
+      value: rightPanelStats.classesTodayCount,
+      href: '/admin/classes',
+      alert: false,
+    },
+    {
+      label: 'Pending Reports',
+      value: rightPanelStats.pendingCount,
+      href: '/admin/reports?filter=pending',
+      alert: false,
+    },
+    {
+      label: 'Flagged Reports',
+      value: rightPanelStats.flaggedCount,
+      href: '/admin/reports?filter=flagged',
+      alert: rightPanelStats.flaggedCount > 0,
+    },
+    {
+      label: 'Low Hours Students',
+      value: rightPanelStats.lowHoursCount,
+      href: '/admin/students?filter=low_hours',
+      alert: false,
+    },
+    {
+      label: 'Invoices to Review',
+      value: rightPanelStats.invoicesToReviewCount,
+      href: '/admin/billing',
+      alert: false,
+    },
+  ]
 
   return (
     <div className="flex h-screen bg-gray-100 overflow-hidden">
@@ -162,7 +195,6 @@ export default function AdminLayoutClient({
           style={{ backgroundColor: '#FF8303' }}
         >
           <div className="flex items-center gap-3">
-            {/* Mobile menu button */}
             <button
               className="lg:hidden text-white"
               onClick={() => setSidebarOpen(true)}
@@ -205,35 +237,40 @@ export default function AdminLayoutClient({
               At a Glance
             </h3>
 
-            {/* Placeholder widgets — wired up in Step 3 (Dashboard) */}
             <div className="space-y-3">
-              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                <p className="text-xs text-gray-500">Classes Today</p>
-                <p className="text-xl font-bold text-gray-800">—</p>
-              </div>
-              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                <p className="text-xs text-gray-500">Pending Reports</p>
-                <p className="text-xl font-bold text-gray-800">—</p>
-              </div>
-              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                <p className="text-xs text-gray-500">Flagged Reports</p>
-                <p className="text-xl font-bold text-gray-800">—</p>
-              </div>
-              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                <p className="text-xs text-gray-500">Low Hours Students</p>
-                <p className="text-xl font-bold text-gray-800">—</p>
-              </div>
-              <div className="rounded-lg p-3 bg-gray-50 border border-gray-200">
-                <p className="text-xs text-gray-500">Invoices to Review</p>
-                <p className="text-xl font-bold text-gray-800">—</p>
-              </div>
+              {panelWidgets.map((w) => (
+                <Link key={w.label} href={w.href}>
+                  <div className="rounded-lg p-3 bg-gray-50 border border-gray-200 hover:border-orange-200 transition-colors">
+                    <p className="text-xs text-gray-500">{w.label}</p>
+                    <p
+                      className="text-xl font-bold mt-0.5"
+                      style={{ color: w.alert ? '#dc2626' : '#111827' }}
+                    >
+                      {w.value}
+                    </p>
+                  </div>
+                </Link>
+              ))}
             </div>
 
-            <div className="mt-6 pt-4 border-t border-gray-200">
-              <p className="text-xs text-gray-400">
-                Right panel widgets are wired up in Dashboard step.
-              </p>
-            </div>
+            {/* Active announcement snippet */}
+            {rightPanelStats.activeAnnouncementText && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Announcement
+                </p>
+                <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">
+                  {rightPanelStats.activeAnnouncementText}
+                </p>
+                <Link
+                  href="/admin/announcements"
+                  className="text-xs mt-1 inline-block hover:underline"
+                  style={{ color: '#FF8303' }}
+                >
+                  Manage →
+                </Link>
+              </div>
+            )}
           </aside>
         </div>
       </div>
