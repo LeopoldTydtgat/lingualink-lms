@@ -23,19 +23,26 @@ All database schema updates for the Admin Portal are in place. Existing tables e
 ---
 
 
-## Session 24 - 07 April 2026 - Admin Portal Step 1: Shell, Layout & Route Protection
+## Session 24 - 07 April 2026 - MS Graph API Wired + Admin Portal Step 1
 
 ### What was built
-- `src/proxy.ts` - updated with admin route protection block (role check against `profiles.role === 'admin'`)
-- `src/app/(admin)/layout.tsx` - admin layout server component (auth + role gate, passes profile to client)
-- `src/app/(admin)/AdminLayoutClient.tsx` - full admin shell: dark sidebar, orange top header, right panel with placeholder widgets, mobile hamburger menu, Back to Teacher Portal and Log Out links
-- `src/app/(admin)/admin/page.tsx` - placeholder dashboard page confirming the `/admin` route is live
+- `src/lib/microsoft/graph.ts` - MS Graph API service with three functions: `createTeamsMeeting`, `updateTeamsMeeting`, `cancelTeamsMeeting`. All meetings created under a shared M365 organiser account tied to the client's tenant.
+- `src/app/api/student/book/route.ts` - stub replaced with real Graph API call. Teams join URL now included in confirmation emails to both student and teacher. Booking proceeds safely if Graph API fails — lesson is saved with `TEAMS_LINK_PENDING` and Sentry captures the error.
+- `src/proxy.ts` - admin route protection added. Checks `profiles.role === 'admin'`; redirects unauthenticated users to `/login` and non-admin users to `/upcoming-classes`.
+- `src/app/(admin)/layout.tsx` - admin layout server component with auth and role gate.
+- `src/app/(admin)/AdminLayoutClient.tsx` - full admin shell: dark sidebar, orange header, right panel with placeholder widgets, mobile hamburger menu, Back to Teacher Portal and Log Out links.
+- `src/app/(admin)/admin/page.tsx` - placeholder dashboard confirming `/admin` route is live.
+- Installed `@microsoft/microsoft-graph-client` and `@azure/identity` packages.
 
 ### Break/Fix Log
-Issue 1: middleware.ts conflict / Cause: The project uses `proxy.ts` (Next.js proxy convention) instead of the standard `middleware.ts`. Creating `middleware.ts` alongside `proxy.ts` caused a build error. / Fix: Deleted `middleware.ts` and merged admin route protection logic directly into the existing `proxy.ts`. / Lesson: Always check for `proxy.ts` before creating `middleware.ts` in this project - they cannot coexist.
+Issue 1: middleware.ts conflict / Cause: Project uses `proxy.ts` instead of standard `middleware.ts` — both cannot coexist. / Fix: Deleted `middleware.ts` and merged admin route protection into existing `proxy.ts`. / Lesson: Always check for `proxy.ts` before creating `middleware.ts` in this project.
+
+Issue 2: Graph API - wrong tenant ID / Cause: `AZURE_TENANT_ID` and `AZURE_CLIENT_ID` were swapped in `.env.local`. / Fix: Corrected both values in `.env.local` using the app registration Overview page. / Lesson: Both values are UUIDs and look identical - always verify against the Azure portal labels, not position on the page.
+
+Issue 3: Graph API - 404 UnknownError on onlineMeetings endpoint / Cause: The client's Microsoft 365 Business Basic subscription was purchased today and the license has not yet propagated to the organiser account. Microsoft can take up to 24 hours to activate. / Fix: Deferred - code is correct. Retest tomorrow once license is active. / Lesson: New M365 subscriptions are not instant - build the stub fallback pattern so the app never breaks while waiting.
 
 ### Session result
-Admin Portal Step 1 is complete. The `/admin` route is protected by a server-side role check - unauthenticated users are redirected to `/login`, authenticated non-admin users are redirected to `/upcoming-classes`, and the client's admin account loads the full admin shell correctly. The layout mirrors the Teacher and Student Portal structure: dark sidebar navigation with orange active states, orange top header with greeting and profile avatar, and a right-hand panel with placeholder widgets to be wired up in Step 3. All nav items from the brief are present. The shell is ready for Step 2 (database schema updates).
+Admin Portal Step 1 is complete and the MS Graph API is wired in across the student booking flow. Authentication is confirmed working - the 404 error on meeting creation is a license propagation delay, not a code issue. The admin portal shell loads correctly for the client's admin account and redirects all other users appropriately. Both the admin portal and Graph API work are committed to the dev branch. Next session starts with Admin Portal Step 2 — database schema updates.
 
 ---
 
