@@ -9,11 +9,13 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@azure/identity": "^4.13.1",
     "@fullcalendar/core": "^6.1.20",
     "@fullcalendar/daygrid": "^6.1.20",
     "@fullcalendar/interaction": "^6.1.20",
     "@fullcalendar/react": "^6.1.20",
     "@fullcalendar/timegrid": "^6.1.20",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
     "@sentry/nextjs": "^10.47.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.0",
