@@ -2,6 +2,27 @@
 
 
 
+## Session 25 - 07 April 2026 - Admin Portal Step 2: Database Schema
+
+### What was built
+- Added admin columns to `profiles` table: contract_start, orientation_date, observed_lesson_date, vat_required, account_types, teacher_type, status, follow_up_date, follow_up_reason, admin_notes, native_languages, specialties, quote, video_url
+- Added admin columns to `students` table: company_id, cancellation_policy, customer_number, is_private, academic_advisor_id, status, follow_up_date, follow_up_reason, admin_notes, teacher_notes
+- Added columns to `study_sheets` table: allowed_roles, intro_text
+- Created six new tables: companies, hours_log, announcements, announcement_dismissals, admin_tasks, teacher_history_log
+- Enabled RLS on all new tables with policies created immediately
+- Created `is_admin()` helper function used across RLS policies
+- Set the client's account_types to ['teacher', 'school_admin']
+
+### Break/Fix Log
+None - both migration scripts ran cleanly first time.
+
+### Session result
+All database schema updates for the Admin Portal are in place. Existing tables extended with admin-specific columns, six new tables created, and RLS policies applied immediately. The client's profile correctly carries the school_admin account type. Ready for Admin Portal Step 3: Dashboard.
+
+
+---
+
+
 ## Session 24 - 07 April 2026 - Admin Portal Step 1: Shell, Layout & Route Protection
 
 ### What was built
