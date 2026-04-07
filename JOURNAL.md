@@ -1,6 +1,24 @@
 # LinguaLink Online - Build Journal
 
 
+
+## Session 24 - 07 April 2026 - Admin Portal Step 1: Shell, Layout & Route Protection
+
+### What was built
+- `src/proxy.ts` - updated with admin route protection block (role check against `profiles.role === 'admin'`)
+- `src/app/(admin)/layout.tsx` - admin layout server component (auth + role gate, passes profile to client)
+- `src/app/(admin)/AdminLayoutClient.tsx` - full admin shell: dark sidebar, orange top header, right panel with placeholder widgets, mobile hamburger menu, Back to Teacher Portal and Log Out links
+- `src/app/(admin)/admin/page.tsx` - placeholder dashboard page confirming the `/admin` route is live
+
+### Break/Fix Log
+Issue 1: middleware.ts conflict / Cause: The project uses `proxy.ts` (Next.js proxy convention) instead of the standard `middleware.ts`. Creating `middleware.ts` alongside `proxy.ts` caused a build error. / Fix: Deleted `middleware.ts` and merged admin route protection logic directly into the existing `proxy.ts`. / Lesson: Always check for `proxy.ts` before creating `middleware.ts` in this project - they cannot coexist.
+
+### Session result
+Admin Portal Step 1 is complete. The `/admin` route is protected by a server-side role check - unauthenticated users are redirected to `/login`, authenticated non-admin users are redirected to `/upcoming-classes`, and the client's admin account loads the full admin shell correctly. The layout mirrors the Teacher and Student Portal structure: dark sidebar navigation with orange active states, orange top header with greeting and profile avatar, and a right-hand panel with placeholder widgets to be wired up in Step 3. All nav items from the brief are present. The shell is ready for Step 2 (database schema updates).
+
+---
+
+
 ## Session 23 - 06 April 2026 - Student Portal Layout Fixes & Centering Pass
 
 ### What was built
