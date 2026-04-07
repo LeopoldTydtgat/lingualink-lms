@@ -14,7 +14,10 @@
 - Set the client's account_types to ['teacher', 'school_admin']
 
 ### Break/Fix Log
-None - both migration scripts ran cleanly first time.
+Issue 1: Student cancellation action returned success but lessons remained as 'scheduled' in the UI.
+Cause: No UPDATE RLS policy on the `lessons` table - Supabase blocked the write silently with no error.
+Fix: Added "Students can cancel their own lessons" UPDATE policy scoped to the student's own records.
+Lesson: RLS can block UPDATE while allowing SELECT on the same table - always audit all CRUD operations, not just reads.
 
 ### Session result
 All database schema updates for the Admin Portal are in place. Existing tables extended with admin-specific columns, six new tables created, and RLS policies applied immediately. The client's profile correctly carries the school_admin account type. Ready for Admin Portal Step 3: Dashboard.
