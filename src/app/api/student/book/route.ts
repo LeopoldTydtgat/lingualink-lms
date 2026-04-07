@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
+import { createTeamsMeeting } from '@/lib/microsoft/graph'
 
-// ─── Email content builders ───────────────────────────────────────────────────
-// These follow the same pattern as newMessageEmailContent in templates.ts
-// They will be moved to templates.ts during the email cleanup pass (Step 12)
+// ── Email content builders ────────────────────────────────────────────────────
 
 function bookingConfirmationStudentEmail(
   teacherName: string,
   dateTimeFormatted: string,
-  durationMinutes: number
+  durationMinutes: number,
+  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -31,22 +31,26 @@ function bookingConfirmationStudentEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      Your Microsoft Teams link will be available in your portal 15 minutes before the class starts.
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      Use the button below to join your class on Microsoft Teams:
     </p>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+    
+      href="${teamsJoinUrl}"
+      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;margin-bottom:24px;"
     >
-      View My Classes
+      Join Class on Teams
     </a>
+    <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
+      The Join Class button in your portal also activates 15 minutes before the class starts.
+    </p>
   `
 }
 
 function bookingNotificationTeacherEmail(
   studentName: string,
   dateTimeFormatted: string,
-  durationMinutes: number
+  durationMinutes: number,
+  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -67,11 +71,11 @@ function bookingNotificationTeacherEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/dashboard/upcoming-classes"
+    
+      href="${teamsJoinUrl}"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
-      View Upcoming Classes
+      Join Class on Teams
     </a>
   `
 }
@@ -79,7 +83,8 @@ function bookingNotificationTeacherEmail(
 function rescheduleConfirmationStudentEmail(
   teacherName: string,
   dateTimeFormatted: string,
-  durationMinutes: number
+  durationMinutes: number,
+  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -100,19 +105,17 @@ function rescheduleConfirmationStudentEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
+    
+      href="${teamsJoinUrl}"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
-      View My Classes
+      Join Class on Teams
     </a>
   `
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Formats a UTC ISO string as a readable date/time in a given timezone
-// e.g. "Monday, 7 April 2026 at 10:00"
 function formatDateTime(isoString: string, timezone: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'long',
@@ -126,7 +129,7 @@ function formatDateTime(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
-// ─── POST /api/student/book ───────────────────────────────────────────────────
+// ── POST /api/student/book ────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
@@ -202,7 +205,6 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 5. If rescheduling — cancel the old lesson ────────────────────────────
-    // No hours are deducted or refunded on a reschedule — it is purely a date change
     if (rescheduleId) {
       const { error: cancelError } = await supabase
         .from('lessons')
@@ -213,7 +215,7 @@ export async function POST(req: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', rescheduleId)
-        .eq('student_id', studentId) // safety check — student can only cancel their own lessons
+        .eq('student_id', studentId)
 
       if (cancelError) {
         console.error('Failed to cancel old lesson during reschedule:', cancelError)
@@ -221,27 +223,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 6. MS Graph API — Teams meeting creation ──────────────────────────────
-    // TODO: Replace TEAMS_LINK_PENDING with a real Graph API call once
-    // Shannon's Microsoft 365 Business Basic subscription is active and
-    // the app is registered in Microsoft Entra ID.
-    //
-    // The call will go here:
-    //   const { joinUrl, meetingId } = await createTeamsMeeting({
-    //     subject: `Lingualink class — ${studentRow.full_name} with ${teacher.full_name}`,
-    //     startTime: scheduledAt,
-    //     durationMinutes,
-    //   })
-    //
-    // Then store joinUrl in teams_join_url and meetingId in teams_meeting_id below.
-    const teamsJoinUrl = 'TEAMS_LINK_PENDING'
-    const teamsMeetingId = null
+    // ── 6. MS Graph API — create Teams meeting ────────────────────────────────
+    // Meeting is created under the shared organiser account.
+    // The join URL is tied to the lesson slot — not the teacher —
+    // so teacher swaps never break the student's link.
+    let teamsJoinUrl = 'TEAMS_LINK_PENDING'
+    let teamsMeetingId: string | null = null
+
+    try {
+      const meeting = await createTeamsMeeting({
+        subject: `Lingualink class — ${studentRow.full_name} with ${teacher.full_name}`,
+        startTime: scheduledAt,
+        durationMinutes,
+      })
+      teamsJoinUrl = meeting.joinUrl
+      teamsMeetingId = meeting.meetingId
+    } catch (graphError) {
+      // Log the error but don't block the booking —
+      // admin can manually fix the link if Graph API fails.
+      // Sentry will capture this.
+      console.error('MS Graph API failed — booking will proceed without Teams link:', graphError)
+    }
 
     // ── 7. Create the new lesson record ──────────────────────────────────────
-    // scheduled_at is a UTC ISO string sent from the client
-    // end time is calculated by adding durationMinutes
     const startTime = new Date(scheduledAt)
-    const endTime = new Date(startTime.getTime() + durationMinutes * 60 * 1000)
 
     const { data: newLesson, error: lessonError } = await supabase
       .from('lessons')
@@ -272,13 +277,10 @@ export async function POST(req: NextRequest) {
       .eq('id', trainingId)
 
     if (hoursError) {
-      // Lesson was created but hours failed to deduct — log this for admin to fix manually
-      // We don't roll back the lesson as that would be worse UX; Sentry will catch this
       console.error('CRITICAL: Lesson created but hours deduction failed. Lesson ID:', newLesson.id, hoursError)
     }
 
     // ── 9. Send confirmation emails ───────────────────────────────────────────
-    // Format the date/time in each recipient's own timezone
     const isReschedule = !!rescheduleId
     const studentTimezone = studentRow.timezone ?? 'Europe/London'
     const teacherTimezone = teacher.timezone ?? 'Africa/Johannesburg'
@@ -286,26 +288,22 @@ export async function POST(req: NextRequest) {
     const studentDateTime = formatDateTime(startTime.toISOString(), studentTimezone)
     const teacherDateTime = formatDateTime(startTime.toISOString(), teacherTimezone)
 
-    // Email to student
     const studentSubject = isReschedule
       ? 'Lingualink Online — Your class has been rescheduled'
       : 'Lingualink Online — Your class is confirmed'
 
     const studentBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
-      : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
+      ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
+      : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
 
-    // Email to teacher
     const teacherSubject = isReschedule
       ? `Lingualink Online — Class rescheduled by ${studentRow.full_name}`
       : `Lingualink Online — New class booked with ${studentRow.full_name}`
 
     const teacherBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes)
-      : bookingNotificationTeacherEmail(studentRow.full_name, teacherDateTime, durationMinutes)
+      ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes, teamsJoinUrl)
+      : bookingNotificationTeacherEmail(studentRow.full_name, teacherDateTime, durationMinutes, teamsJoinUrl)
 
-    // Fire both emails — we don't block the response on email success
-    // If either fails, Sentry will catch it; the booking itself is already saved
     await Promise.allSettled([
       resend.emails.send({
         from: 'no-reply@lingualinkonline.com',
