@@ -10,7 +10,7 @@
 - Created `/app/(admin)/admin/settings/page.tsx` - server component that fetches all settings from the `settings` key/value table and passes them to the client form
 - Created `/app/(admin)/admin/settings/SettingsClient.tsx` - client component with a fully configurable settings form covering six platform-wide settings: admin support email, minimum teacher availability hours, invoice upload window (start and end day of month), payment timeline in days, student low-balance warning threshold, and default cancellation window (24hr / 48hr toggle)
 - Created `/app/api/admin/settings/route.ts` - GET and POST API route with admin role verification; POST uses Supabase upsert on the `key` conflict target so settings are created on first save and updated on all subsequent saves
-- Fixed save feedback visibility — initial implementation placed the success banner at the top of the page which was off-screen when the user scrolled to the Save button; moved inline feedback directly beside the Save button so it is always visible regardless of scroll position
+- Fixed save feedback visibility - initial implementation placed the success banner at the top of the page which was off-screen when the user scrolled to the Save button; moved inline feedback directly beside the Save button so it is always visible regardless of scroll position
 
 ### Break/Fix Log
 
