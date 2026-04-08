@@ -5,9 +5,10 @@ import { ClientSecretCredential } from '@azure/identity'
 // All Teams meetings are created under this account.
 // Meeting links are tied to the lesson slot, not the teacher —
 // so if a teacher swap occurs, the student's join link never changes.
+// To switch to a shared mailbox later, change this one value only.
 const ORGANISER_UPN = 'Admin@LingualinkOnline.onmicrosoft.com'
 
-// ── Build an authenticated Graph client ─────────────────────────────────────
+// ── Build an authenticated Graph client ──────────────────────────────────────
 function getGraphClient(): Client {
   const credential = new ClientSecretCredential(
     process.env.AZURE_TENANT_ID!,
@@ -28,9 +29,10 @@ function getGraphClient(): Client {
 }
 
 // ── Create a Teams meeting ───────────────────────────────────────────────────
-// Called on every new class booking.
-// Returns the join URL (stored in lessons.teams_join_url)
-// and the meeting ID (stored in lessons.teams_meeting_id for future updates).
+// Uses the Calendar Events endpoint (/users/{UPN}/events with isOnlineMeeting)
+// instead of /onlineMeetings — this works with Microsoft 365 Business Basic.
+// The Teams join URL is returned in onlineMeeting.joinUrl on the event object.
+// meetingId here is the calendar event ID — used for updates and cancellations.
 export async function createTeamsMeeting({
   subject,
   startTime,
@@ -45,17 +47,34 @@ export async function createTeamsMeeting({
   const start = new Date(startTime)
   const end = new Date(start.getTime() + durationMinutes * 60 * 1000)
 
-  const meeting = await client
-    .api(`/users/${ORGANISER_UPN}/onlineMeetings`)
+  const event = await client
+    .api(`/users/${ORGANISER_UPN}/events`)
     .post({
       subject,
-      startDateTime: start.toISOString(),
-      endDateTime: end.toISOString(),
+      start: {
+        dateTime: start.toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: end.toISOString(),
+        timeZone: 'UTC',
+      },
+      // This is what tells Graph to create a Teams meeting link
+      isOnlineMeeting: true,
+      onlineMeetingProvider: 'teamsForBusiness',
     })
 
+  const joinUrl = event?.onlineMeeting?.joinUrl
+
+  if (!joinUrl) {
+    throw new Error(
+      'Teams meeting created but no join URL was returned. Check that the organiser account has a valid Teams licence.'
+    )
+  }
+
   return {
-    joinUrl: meeting.joinWebUrl,
-    meetingId: meeting.id,
+    joinUrl,
+    meetingId: event.id,  // Calendar event ID — used for updates/cancellations
   }
 }
 
@@ -77,19 +96,26 @@ export async function updateTeamsMeeting({
   const end = new Date(start.getTime() + durationMinutes * 60 * 1000)
 
   await client
-    .api(`/users/${ORGANISER_UPN}/onlineMeetings/${meetingId}`)
+    .api(`/users/${ORGANISER_UPN}/events/${meetingId}`)
     .patch({
-      startDateTime: start.toISOString(),
-      endDateTime: end.toISOString(),
+      start: {
+        dateTime: start.toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: end.toISOString(),
+        timeZone: 'UTC',
+      },
     })
 }
 
 // ── Cancel a Teams meeting ───────────────────────────────────────────────────
 // Called when a class is cancelled.
+// Deletes the calendar event — the Teams meeting link becomes inactive.
 export async function cancelTeamsMeeting(meetingId: string): Promise<void> {
   const client = getGraphClient()
 
   await client
-    .api(`/users/${ORGANISER_UPN}/onlineMeetings/${meetingId}`)
+    .api(`/users/${ORGANISER_UPN}/events/${meetingId}`)
     .delete()
 }
