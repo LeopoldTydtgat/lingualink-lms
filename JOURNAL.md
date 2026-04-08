@@ -19,7 +19,7 @@ No issues. Worked on first test after adding the GET handlers.
 
 ### Session result
 
-The Data Exports page is now fully usable in production. The client can filter any export by teacher or student name without needing to know or paste UUIDs. The autocomplete debounces at 250ms and limits results to 50 — performant at any scale.
+The Data Exports page is now fully usable in production. The client can filter any export by teacher or student name without needing to know or paste UUIDs. The autocomplete debounces at 250ms and limits results to 50 - performant at any scale.
 
 ---
 
