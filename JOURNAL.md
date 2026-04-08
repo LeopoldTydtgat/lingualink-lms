@@ -1,6 +1,56 @@
 # LinguaLink Online - Build Journal
 
 
+
+---
+
+## Session 34 - 08 April 2026 - MS Graph API Integration + Admin Portal Step 11: Announcements
+
+### What was built
+
+- Resolved MS Graph API integration — switched from `/onlineMeetings` endpoint to Calendar Events endpoint (`/users/{UPN}/events` with `isOnlineMeeting: true`) to work within Microsoft 365 Business Basic licence constraints
+- Configured Azure application access policy via Teams PowerShell (`New-CsApplicationAccessPolicy`, `Grant-CsApplicationAccessPolicy`, `Grant-CsTeamsMeetingPolicy`) - all policies confirmed on organiser account
+- Rewrote `src/lib/microsoft/graph.ts` to use Calendar Events endpoint - same function signatures, same inputs and outputs, no changes required anywhere else in the codebase
+- Confirmed end-to-end Teams meeting creation returning a valid `joinUrl` and `meetingId`
+- Built Admin Portal Step 11 - Announcements in full:
+  - `src/app/(admin)/admin/announcements/page.tsx` - server component list page
+  - `src/app/(admin)/admin/announcements/AnnouncementsClient.tsx` - list with quick activate/deactivate toggle, edit, delete
+  - `src/app/(admin)/admin/announcements/AnnouncementForm.tsx` - shared create/edit form with all fields from brief
+  - `src/app/(admin)/admin/announcements/new/page.tsx` - create page
+  - `src/app/(admin)/admin/announcements/[id]/edit/page.tsx` - edit page
+  - `src/components/AnnouncementBanner.tsx` - client banner component with dismiss support
+  - `src/app/api/announcements/dismiss/route.ts` - API route persisting dismissals to `announcement_dismissals` table
+  - Modified `src/app/(dashboard)/layout.tsx` - teacher portal layout now fetches and renders active announcements
+  - Modified `src/app/(student)/student/layout.tsx` - student portal layout now fetches and renders active announcements
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: MS Graph API returning 404 UnknownError on `/users/{UPN}/onlineMeetings`
+- Cause: Microsoft 365 Business Basic does not support the `/onlineMeetings` Graph API endpoint regardless of API permissions or PowerShell policies assigned
+- Fix: Switched to Calendar Events endpoint (`/users/{UPN}/events`) with `isOnlineMeeting: true` and `onlineMeetingProvider: teamsForBusiness` - produces identical Teams join URL
+- Lesson: The `/onlineMeetings` Graph API endpoint requires Business Standard or higher. Always verify licence tier compatibility before building against a specific Graph API endpoint. The Calendar Events approach is a clean equivalent and works with Basic.
+
+**Issue 2**
+- Symptom: Announcement form returning `null value in column "created_by" violates not-null constraint`
+- Cause: `AnnouncementForm.tsx` was not fetching the current user ID and not including `created_by` in the insert payload
+- Fix: Added `useEffect` to fetch the current auth user on mount via `supabase.auth.getUser()` and included `created_by: currentUserId` in the payload
+- Lesson: Always include required non-null database columns in insert payloads. Client components cannot access the server session directly — must use `supabase.auth.getUser()` on the browser client.
+
+**Issue 3**
+- Symptom: Announcement banner blending into the orange top header — visually indistinct
+- Cause: Banner used the same `#FF8303` background as the header
+- Fix: Changed banner style to dark charcoal background (`#1f2937`) with orange left border (`4px solid #FF8303`) — clearly distinct from header while remaining on-brand
+- Lesson: Notification banners directly below a coloured header must use a contrasting background to be readable and visually intentional.
+
+### Session result
+
+The MS Graph API integration is fully operational after resolving a Microsoft 365 licence constraint — the Calendar Events endpoint is now used instead of the dedicated onlineMeetings endpoint, producing identical Teams join URLs with no impact on the rest of the codebase. The organiser account (`Admin@LingualinkOnline.onmicrosoft.com`) can be swapped to a dedicated shared mailbox at any time by changing a single constant in `graph.ts`. Admin Portal Step 11 (Announcements) is complete and fully tested — admins can create, edit, toggle, and delete announcements, banners appear correctly on both the Teacher and Student portals, and dismissals are persisted per user. Remaining Admin Portal steps are 12 (Tasks), 13 (Exports), 14 (Settings), and 15 (Testing & Hardening).
+
+---
+
+
+
 ## Session 33 - 08 April 2026 - Admin Portal Step 10: Study Library
 
 ### What was built
