@@ -8,10 +8,10 @@
 - Admin Billing page with three tabs: Teacher Invoices, Student Billing, and Company Billing
 - Teacher Invoices tab: filterable by teacher, month, and status; invoice template upload and management; expandable invoice rows showing itemised lesson list with billability labels and subtotal; Mark Paid flow with confirmation modal; View PDF button (signed URL); Export CSV
 - Student Billing tab: filter by student and date range, on-demand load, summary bar showing total classes and billable total, lessons table with billability flag per row
-- Company Billing tab: filter by company and date range, on-demand load, lessons grouped by company, 48hr policy cancellations surfaced in an orange callout — visible in admin only, never exposed to teachers or students
+- Company Billing tab: filter by company and date range, on-demand load, lessons grouped by company, 48hr policy cancellations surfaced in an orange callout - visible in admin only, never exposed to teachers or students
 - Billability logic implemented consistently across UI and CSV export: `completed` → billable, `student_no_show` → billable, `cancelled` with less than 24hr notice → billable, `teacher_no_show` → not billable, `cancelled` with more than 24hr notice → not billable, `cancelled` between 24–48hr where student `cancellation_policy = '48hr'` → 48hr B2B flag (not billable to teacher, flagged for company billing only)
 - Mark Paid API route: PATCH `/api/admin/billing/mark-paid` with admin role check
-- CSV export API route: GET `/api/admin/billing/export` supporting 6 export types — teacher invoices, teacher earnings summary, student hours usage, company billing report, student progress report, pending reports log
+- CSV export API route: GET `/api/admin/billing/export` supporting 6 export types - teacher invoices, teacher earnings summary, student hours usage, company billing report, student progress report, pending reports log
 - 4 files delivered: `src/app/api/admin/billing/mark-paid/route.ts`, `src/app/api/admin/billing/export/route.ts`, `src/app/(admin)/admin/billing/page.tsx`, `src/app/(admin)/admin/billing/BillingAdminClient.tsx`
 
 ### Break/Fix Log
