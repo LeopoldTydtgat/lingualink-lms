@@ -1,8 +1,11 @@
+// src/app/(student)/student/layout.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
+import AnnouncementBanner from '@/components/AnnouncementBanner'
+import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 
 export default async function StudentDashboardLayout({
   children,
@@ -10,11 +13,9 @@ export default async function StudentDashboardLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
-
   const {
     data: { user },
   } = await supabase.auth.getUser()
-
   if (!user) redirect('/student/login')
 
   const { data: student } = await supabase
@@ -61,6 +62,30 @@ export default async function StudentDashboardLayout({
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
 
+  // ── Announcements ───────────────────────────────────────────────────────────
+  // Fetch announcements this student has already dismissed
+  const { data: dismissals } = await supabase
+    .from('announcement_dismissals')
+    .select('announcement_id')
+    .eq('user_id', student.id)
+    .eq('user_type', 'student')
+
+  const dismissedIds = (dismissals ?? []).map((d: { announcement_id: string }) => d.announcement_id)
+
+  // Fetch all active announcements and filter for students
+  const { data: allAnnouncements } = await supabase
+    .from('announcements')
+    .select('id, title, message, is_dismissable, target_audience, target_id')
+    .eq('is_active', true)
+
+  const announcements: AnnouncementItem[] = (allAnnouncements ?? []).filter((a) => {
+    if (dismissedIds.includes(a.id)) return false
+    if (a.target_audience === 'everyone') return true
+    if (a.target_audience === 'all_students') return true
+    if (a.target_audience === 'specific_student' && a.target_id === student.id) return true
+    return false
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <StudentTopHeader
@@ -74,10 +99,17 @@ export default async function StudentDashboardLayout({
             flex: 1,
             overflowY: 'auto',
             backgroundColor: '#f9fafb',
-            padding: '32px',
           }}
         >
-          {children}
+          {/* Announcement banners sit above page content */}
+          <AnnouncementBanner
+            announcements={announcements}
+            userType="student"
+            userId={student.id}
+          />
+          <div style={{ padding: '32px' }}>
+            {children}
+          </div>
         </main>
         <StudentRightPanel
           studentId={student.id}
