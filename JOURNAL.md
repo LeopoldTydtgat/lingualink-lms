@@ -1,6 +1,30 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 30 - 08 April 2026 - Admin Portal Step 7: Classes
+
+### What was built
+- `src/app/api/admin/classes/route.ts` - GET list + POST create
+- `src/app/api/admin/classes/[id]/route.ts` - GET detail + PATCH edit/cancel
+- `src/app/(admin)/admin/classes/page.tsx` - server component
+- `src/app/(admin)/admin/classes/ClassesListClient.tsx` - list UI with filters and status tags
+- `src/app/(admin)/admin/classes/new/page.tsx` - booking flow server wrapper
+- `src/app/(admin)/admin/classes/new/BookingFlowClient.tsx` - 5-step booking flow
+- `src/app/(admin)/admin/classes/[id]/page.tsx` - detail server component
+- `src/app/(admin)/admin/classes/[id]/ClassDetailClient.tsx` - detail UI with cancel modal
+- `src/app/(admin)/admin/classes/[id]/edit/page.tsx` - edit server component
+- `src/app/(admin)/admin/classes/[id]/edit/EditClassClient.tsx` - edit form
+
+### Break/Fix Log
+Issue 1: Class detail page threw "Failed to parse URL from undefined" / Server components were fetching from the API using NEXT_PUBLIC_SITE_URL which is not set in dev / Replaced API fetch with direct Supabase queries in both detail and edit server components / Always query Supabase directly in server components - never self-fetch API routes
+Issue 2: Cancel modal confirmed but class status did not update / RLS had no UPDATE policy covering admin users — Supabase silently updated 0 rows and returned 200 / Added "Admins can update lessons" RLS policy / Always audit UPDATE policies separately from SELECT - missing UPDATE policies fail silently with no error
+
+### Session result
+Admin Portal Step 7 complete. The Classes section gives the client full visibility and control over all lessons across all teachers — list view with filters, manual booking flow, class detail with cancellation, and edit capabilities with no time restrictions.
+
+---
+
+
 ## Session 29 - 08 April 2026 - Admin Portal Steps 5 & 6: Edit Student + Companies
 
 ### What was built
