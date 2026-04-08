@@ -4,6 +4,46 @@
 
 ---
 
+## Session 35 - 08 April 2026 - Admin Portal Steps 12 & 13: Tasks and Data Exports
+
+### What was built
+
+- **Step 12: Tasks** - Full internal task management system for Shannon and staff
+  - `GET /api/admin/tasks` - filterable task list with resolved names for assigned user, linked entity, and creator
+  - `POST /api/admin/tasks` - create task with validation
+  - `PATCH /api/admin/tasks/[id]` - complete, reopen, or edit a task
+  - `DELETE /api/admin/tasks/[id]` - admin-only delete
+  - `GET /api/admin/staff` - returns all admin-role profiles for the Assigned To dropdown
+  - `TaskForm.tsx` - shared create/edit form component; accepts prefill props for launching from teacher or student detail pages
+  - `TasksMini.tsx` - compact embeddable panel for showing open tasks on teacher/student detail pages; includes quick complete button and Add Task shortcut
+  - `/admin/tasks/page.tsx` - full tasks list with filters (status, priority, linked entity), overdue highlighting, priority-coloured left borders, and complete/reopen/edit/delete actions
+  - `/admin/tasks/new/page.tsx` and `/admin/tasks/[id]/edit/page.tsx` - thin wrappers around TaskForm
+
+- **Step 13: Data Exports** - All six CSV exports from the brief
+  - Single API route `GET /api/admin/exports/[type]/route.ts` handles all six export types
+  - `/admin/exports/page.tsx` - export cards with per-card date range and entity filters, column previews, and browser-triggered CSV downloads
+  - **All Classes Report** - every lesson with teacher, student, company, status, report status, and teacher billability flag
+  - **Teacher Earnings Summary** - grouped by teacher × month; calculates billable classes × hourly rate with invoice upload status
+  - **Student Hours Usage** - training package hours consumed and remaining per student
+  - **Company Billing Report** - B2B classes with standard billability and 48hr cancellation policy flag (admin-only field, never exposed to teachers or students)
+  - **Student Progress Report** - level data from every completed report across all skills
+  - **Pending Reports Log** - all pending and flagged reports with hours-since-class counter
+
+### Break/Fix Log
+
+No issues this session. All features worked on first test.
+
+### Session result
+
+Admin Portal Steps 12 and 13 are complete and tested. The Tasks system is fully functional - Shannon can create, assign, prioritise, complete, and delete internal follow-up tasks, with the TasksMini component ready to embed into teacher and student detail pages when those are revisited. All six Data Exports produce correct CSVs and download cleanly in the browser. The Admin Portal now has one step remaining: Step 14 Settings, followed by the Admin Controls phase and the final hardening pass before go-live.
+
+---
+
+Once that's pushed, start a fresh chat and paste the handover brief from that session.
+
+
+---
+
 ## Session 34 - 08 April 2026 - MS Graph API Integration + Admin Portal Step 11: Announcements
 
 ### What was built
