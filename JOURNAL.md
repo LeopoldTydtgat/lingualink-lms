@@ -1,6 +1,27 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 29 - 08 April 2026 - Admin Portal Steps 5 & 6: Edit Student + Companies
+
+### What was built
+- `src/app/(admin)/admin/students/[id]/edit/page.tsx` - server component pre-fetching student, active training, assigned teacher IDs, companies, and teachers
+- `src/app/(admin)/admin/students/[id]/edit/EditStudentClient.tsx` - four-section pre-populated edit form (Personal Info, Learning Info, Training Setup, Notes); email read-only; no temp password field
+- `src/app/api/admin/students/[id]/route.ts` - PATCH handler updating students table, active training record, and training_teachers (delete + re-insert on teacher change)
+- `src/app/(admin)/admin/companies/page.tsx` - companies list server component
+- `src/app/(admin)/admin/companies/CompaniesListClient.tsx` - searchable/filterable table with status and cancellation policy display
+- `src/app/(admin)/admin/companies/new/page.tsx` + `CreateCompanyClient.tsx` - create company form
+- `src/app/(admin)/admin/companies/[id]/page.tsx` - detail server component fetching company, students, hours remaining, and assigned teachers
+- `src/app/(admin)/admin/companies/[id]/CompanyDetailClient.tsx` - three-tab detail view: General Info, Students, Notes
+- `src/app/(admin)/admin/companies/[id]/edit/page.tsx` + `EditCompanyClient.tsx` - edit form pre-populated from existing data
+- `src/app/api/admin/companies/route.ts` - POST handler
+- `src/app/api/admin/companies/[id]/route.ts` - PATCH handler
+
+### Break/Fix Log
+No issues.
+
+### Session result
+Two admin steps completed in one session. Edit Student is fully functional - the form pre-populates from existing data and saves changes across the students, trainings, and training_teachers tables in a single PATCH call. The Companies module is fully functional - the client can create, view, edit, and manage B2B companies, with a Students tab showing hours remaining, assigned teachers, and cancellation policy per student. Admin Portal Steps 5 and 6 are complete.
+
 
 ---
 
