@@ -69,7 +69,7 @@ Once that's pushed, start a fresh chat and paste the handover brief from that se
 
 ### What was built
 
-- Resolved MS Graph API integration — switched from `/onlineMeetings` endpoint to Calendar Events endpoint (`/users/{UPN}/events` with `isOnlineMeeting: true`) to work within Microsoft 365 Business Basic licence constraints
+- Resolved MS Graph API integration - switched from `/onlineMeetings` endpoint to Calendar Events endpoint (`/users/{UPN}/events` with `isOnlineMeeting: true`) to work within Microsoft 365 Business Basic licence constraints
 - Configured Azure application access policy via Teams PowerShell (`New-CsApplicationAccessPolicy`, `Grant-CsApplicationAccessPolicy`, `Grant-CsTeamsMeetingPolicy`) - all policies confirmed on organiser account
 - Rewrote `src/lib/microsoft/graph.ts` to use Calendar Events endpoint - same function signatures, same inputs and outputs, no changes required anywhere else in the codebase
 - Confirmed end-to-end Teams meeting creation returning a valid `joinUrl` and `meetingId`
