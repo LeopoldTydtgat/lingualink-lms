@@ -3,6 +3,31 @@
 
 ---
 
+## Session 37 - 08 April 2026 - Admin Portal Step 14: Settings Page
+
+### What was built
+
+- Created `/app/(admin)/admin/settings/page.tsx` - server component that fetches all settings from the `settings` key/value table and passes them to the client form
+- Created `/app/(admin)/admin/settings/SettingsClient.tsx` - client component with a fully configurable settings form covering six platform-wide settings: admin support email, minimum teacher availability hours, invoice upload window (start and end day of month), payment timeline in days, student low-balance warning threshold, and default cancellation window (24hr / 48hr toggle)
+- Created `/app/api/admin/settings/route.ts` - GET and POST API route with admin role verification; POST uses Supabase upsert on the `key` conflict target so settings are created on first save and updated on all subsequent saves
+- Fixed save feedback visibility — initial implementation placed the success banner at the top of the page which was off-screen when the user scrolled to the Save button; moved inline feedback directly beside the Save button so it is always visible regardless of scroll position
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Save Settings returned HTTP 200 and data persisted correctly in Supabase, but no visual confirmation appeared after clicking Save
+- Cause: Success banner was rendered at the top of the component, above all the setting sections. The user naturally scrolls down to reach the Save button at the bottom of the page, so the banner rendered entirely off-screen
+- Fix: Removed the top banner entirely and replaced it with inline feedback text rendered directly beside the Save button in the same flex row
+- Lesson: On long forms, always place save feedback adjacent to the action that triggers it - never assume the user's scroll position
+
+### Session result
+
+Admin Portal Step 14 is complete, and with it the entire Admin Portal build is done - all 14 steps across Steps 1 through 14 are fully built and tested. The Settings page allows the client to configure all key platform thresholds from a single screen without touching the database directly. The `settings` key/value table was already in place from earlier in the build; this step wires the admin UI on top of it. Next session will begin the Admin Controls phase: wiring the "Chat with Admin" button and "What's New" notifications in the teacher and student RightPanel components.
+
+
+---
+
+
 ## Session 36 - 08 April 2026 - Data Exports Autocomplete
 
 ### What was built
