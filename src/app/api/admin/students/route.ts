@@ -6,6 +6,59 @@ import { Resend } from 'resend'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
+// ─── GET — list students (supports ?minimal=true&search=name) ─────────────────
+export async function GET(req: NextRequest) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll() {},
+      },
+    }
+  )
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_types, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    profile?.role === 'admin' ||
+    (profile?.account_types ?? []).includes('school_admin') ||
+    (profile?.account_types ?? []).includes('staff') ||
+    (profile?.account_types ?? []).includes('hr_admin')
+
+  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { searchParams } = new URL(req.url)
+  const minimal = searchParams.get('minimal') === 'true'
+  const search = searchParams.get('search') ?? ''
+
+  let query = supabase
+    .from('students')
+    .select(minimal ? 'id, full_name' : 'id, full_name, email, status, company_id, photo_url')
+    .order('full_name')
+
+  if (search) {
+    query = query.ilike('full_name', `%${search}%`)
+  }
+
+  if (minimal) query = query.limit(50)
+
+  const { data: students, error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ students: students ?? [] })
+}
+
+// ─── POST — create student (unchanged) ───────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -43,16 +96,15 @@ export async function POST(req: NextRequest) {
     }
 
     // --- 2. Create the Supabase auth user using the service role key ---
-    // Service role bypasses RLS — only used server-side, never exposed to client
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({ 
       email: body.email,
       password: body.temp_password,
-      email_confirm: true, // skip email confirmation — we send our own welcome email
+      email_confirm: true,
     })
 
     if (createError || !newUser.user) {
@@ -66,7 +118,6 @@ export async function POST(req: NextRequest) {
     const newUserId = newUser.user.id
 
     // --- 3. Upsert the student row ---
-    // Always upsert (not insert) — Supabase may auto-create a row on auth user creation
     const { data: studentRow, error: studentError } = await adminClient
       .from('students')
       .upsert({
@@ -87,7 +138,7 @@ export async function POST(req: NextRequest) {
         learning_language: body.learning_language || null,
         current_fluency_level: body.current_fluency_level || null,
         self_assessed_level: body.self_assessed_level || null,
-        self_reported_level: body.self_assessed_level || null, // keep both in sync
+        self_reported_level: body.self_assessed_level || null,
         learning_goals: body.learning_goals || null,
         interests: body.interests || null,
         cancellation_policy: body.cancellation_policy || '24hr',
@@ -98,7 +149,6 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (studentError || !studentRow) {
-      // Roll back the auth user if student row insert fails
       await adminClient.auth.admin.deleteUser(newUserId)
       console.error('Student row error:', studentError)
       return NextResponse.json(
@@ -115,7 +165,7 @@ export async function POST(req: NextRequest) {
       .insert({
         student_id: studentId,
         package_name: body.package_name,
-        package_type: body.package_name, // mirror to package_type for backwards compat
+        package_type: body.package_name,
         total_hours: body.total_hours,
         hours_consumed: 0,
         end_date: body.end_date,
@@ -126,7 +176,6 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (trainingError || !trainingRow) {
-      // Roll back student row and auth user
       await adminClient.from('students').delete().eq('id', studentId)
       await adminClient.auth.admin.deleteUser(newUserId)
       console.error('Training insert error:', trainingError)
@@ -138,25 +187,19 @@ export async function POST(req: NextRequest) {
 
     const trainingId = trainingRow.id
 
-    // --- 5. Insert training_teachers rows for each assigned teacher ---
+    // --- 5. Insert training_teachers rows ---
     if (body.assigned_teacher_ids?.length > 0) {
       const ttRows = body.assigned_teacher_ids.map((teacherId: string) => ({
         training_id: trainingId,
         teacher_id: teacherId,
       }))
-
       const { error: ttError } = await adminClient
         .from('training_teachers')
         .insert(ttRows)
-
-      if (ttError) {
-        // Non-fatal — log but don't roll back. Student and training are created.
-        // Admin can fix assignments from the student detail page.
-        console.error('training_teachers insert error:', ttError)
-      }
+      if (ttError) console.error('training_teachers insert error:', ttError)
     }
 
-    // --- 6. Send welcome email with password reset link ---
+    // --- 6. Send welcome email ---
     const { data: resetData, error: resetError } =
       await adminClient.auth.admin.generateLink({
         type: 'recovery',
