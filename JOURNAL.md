@@ -1,6 +1,30 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 33 - 08 April 2026 - Admin Portal Step 10: Study Library
+
+### What was built
+- `src/app/(admin)/admin/library/page.tsx` - server component with admin auth guard
+- `src/app/(admin)/admin/library/LibraryAdminClient.tsx` - full list view with search, five filters (title, category, level, difficulty, access), checkbox bulk selection, bulk access change, bulk delete with confirmation
+- `src/app/(admin)/admin/library/SheetFormModal.tsx` - create/edit modal with four tabs: Metadata (title, category, level, difficulty selector with chilli icons, intro text), Vocabulary (dynamic add/remove/reorder word rows storing to JSONB `{ words: [] }`), Exercises (full MCQ builder per question: question text, four options, correct answer selector, explanation), Access (radio selection: All Teachers / Teacher+Exam Only / Admin Only)
+- `src/app/(admin)/admin/library/AssignSheetModal.tsx` - assign any sheet to any student directly without a lesson link (admin-only flow)
+- `src/app/api/admin/library/route.ts` - GET all sheets, POST create
+- `src/app/api/admin/library/[id]/route.ts` - PATCH update, DELETE single
+- `src/app/api/admin/library/assign/route.ts` - POST direct admin assignment (lesson_id nullable)
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Edit sheet returned 500 - `PATCH /api/admin/library/[id]` failing
+- Cause: Next.js 15 changed dynamic route `params` to a Promise; accessing `params.id` synchronously throws at runtime
+- Fix: Changed both `PATCH` and `DELETE` signatures to `{ params }: { params: Promise<{ id: string }> }` and added `const { id } = await params` before use
+- Lesson: All `[id]` route handlers in Next.js 15 must await params - apply this pattern to any future dynamic routes without exception
+
+### Session result
+Admin Portal Step 10 is fully complete. The client can create, edit, and delete study sheets from the admin portal, with a full vocabulary word table editor and MCQ exercise builder built into the form modal. Access control per sheet (All Teachers / Teacher+Exam Only / Admin Only) is working. Bulk actions for access change and delete are functional. Direct sheet assignment to students from admin is wired up. Began investigating MS Graph API integration for Teams meeting creation but deferred - dev server was not running at time of test. Azure credentials are confirmed in `.env.local` and the `graph.ts` stub is fully written; Azure API permissions still need to be verified before a live test can be run.
+
+---
+
 
 ## Session 32 - 08 April 2026 - Admin Portal Step 9: Billing
 
