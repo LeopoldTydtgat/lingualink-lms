@@ -6,6 +6,64 @@ import { Resend } from 'resend'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
+// ─── GET — list teachers (supports ?minimal=true&search=name) ─────────────────
+export async function GET(req: NextRequest) {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll() {},
+      },
+    }
+  )
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_types, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    profile?.role === 'admin' ||
+    (profile?.account_types ?? []).includes('school_admin') ||
+    (profile?.account_types ?? []).includes('staff') ||
+    (profile?.account_types ?? []).includes('hr_admin')
+
+  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { searchParams } = new URL(req.url)
+  const minimal = searchParams.get('minimal') === 'true'
+  const search = searchParams.get('search') ?? ''
+
+  let query = supabase
+    .from('profiles')
+    .select(minimal ? 'id, full_name' : 'id, full_name, email, status, account_types, hourly_rate, photo_url')
+    .not('account_types', 'is', null)
+    .order('full_name')
+
+  // Only return actual teachers (not pure admin/HR accounts)
+  query = query.contains('account_types', ['teacher'])
+
+  if (search) {
+    query = query.ilike('full_name', `%${search}%`)
+  }
+
+  // For minimal mode (autocomplete) limit results
+  if (minimal) query = query.limit(50)
+
+  const { data: teachers, error } = await query
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ teachers: teachers ?? [] })
+}
+
+// ─── POST — create teacher (unchanged) ───────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -43,16 +101,15 @@ export async function POST(req: NextRequest) {
     }
 
     // --- 2. Create the Supabase auth user using the service role key ---
-    // Service role bypasses RLS — only use server-side, never expose to client
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({ 
       email: body.email,
       password: body.temp_password,
-      email_confirm: true, // skip confirmation email — we send our own
+      email_confirm: true,
     })
 
     if (createError || !newUser.user) {
@@ -104,7 +161,6 @@ export async function POST(req: NextRequest) {
       })
 
     if (profileError) {
-      // Roll back the auth user if profile insert fails
       await adminClient.auth.admin.deleteUser(newUserId)
       console.error('Profile insert error:', profileError)
       return NextResponse.json(
