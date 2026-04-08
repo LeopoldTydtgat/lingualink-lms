@@ -1,8 +1,29 @@
 # LinguaLink Online - Build Journal
 
 
+---
+
+## Session 36 - 08 April 2026 - Data Exports Autocomplete
+
+### What was built
+
+- Added `GET` handler to `/api/admin/teachers/route.ts` - supports `?minimal=true&search=name` for autocomplete lookups
+- Added `GET` handler to `/api/admin/students/route.ts` - same pattern
+- Added `GET` handler to `/api/admin/companies/route.ts` - supports `?minimal=true` for dropdown list
+- Replaced UUID text inputs on the Exports page with a reusable `AutocompleteInput` component - type a name, get a live dropdown, select to filter, pill shows the selection with a clear button
+- Companies use a simple dropdown (small list); teachers and students use the debounced autocomplete (scales to any size)
+
+### Break/Fix Log
+
+No issues. Worked on first test after adding the GET handlers.
+
+### Session result
+
+The Data Exports page is now fully usable in production. The client can filter any export by teacher or student name without needing to know or paste UUIDs. The autocomplete debounces at 250ms and limits results to 50 — performant at any scale.
 
 ---
+
+
 
 ## Session 35 - 08 April 2026 - Admin Portal Steps 12 & 13: Tasks and Data Exports
 
