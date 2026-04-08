@@ -1,6 +1,45 @@
 # LinguaLink Online - Build Journal
 
 
+
+## Session 31 - 08 April 2026 - Admin Portal Step 8: Reports
+
+### What was built
+- All Reports list page with status filters (All / Pending / Completed / Flagged), teacher filter, class type filter, and date range filter
+- Colour-coded rows: soft yellow for pending reports, soft red for flagged reports
+- Flagged reports show time elapsed since flagging (e.g. "Flagged 109h 25m ago") in red
+- Reopen button on flagged reports with confirmation modal - sets report back to pending so teacher can submit late
+- Report Detail page (read-only): class info, date/time, duration, did class take place, flagged timestamp, teacher and student participant cards, feedback text, additional details, SVG radar chart for student level assessment, assigned study sheets
+- Live Classes Trace tab: last 50 lessons in reverse chronological order, polling every 30 seconds, auto-refresh timestamp, lesson status badges, report status badges, View report links
+- 7 files delivered: `src/app/api/admin/reports/route.ts`, `src/app/api/admin/reports/[id]/route.ts`, `src/app/api/admin/reports/live-trace/route.ts`, `src/app/(admin)/admin/reports/page.tsx`, `src/app/(admin)/admin/reports/ReportsClient.tsx`, `src/app/(admin)/admin/reports/[id]/page.tsx`, `src/app/(admin)/admin/reports/[id]/ReportDetailClient.tsx`
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Reports list showed "No reports match these filters" despite the right panel showing 3 flagged reports
+- Cause: Three-level nested Supabase join (`reports → lessons → students`) causes silent empty results — Supabase returns no rows without any error when a join is nested this deeply
+- Fix: Split into two queries — Query 1 fetches reports + lessons + teacher profile (two levels), Query 2 fetches students by their IDs collected from Query 1 results using `.in('id', studentIds)`
+- Lesson: Never nest Supabase joins more than two levels deep. Always use the two-query pattern when a student or third entity needs to be resolved
+
+**Issue 2**
+- Symptom: API route returned 500 with `column lessons_1.start_time does not exist`
+- Cause: The `lessons` table uses `scheduled_at`, not `start_time` — assumed the wrong column name without verifying schema first
+- Fix: Queried `information_schema.columns` for the `lessons` table, confirmed correct column name, updated all 7 files
+- Lesson: Always run the schema verification query before writing any database-connected code. The `lessons` table uses `scheduled_at` (not `start_time`) and `teams_join_url` (not `teams_link`)
+
+**Issue 3**
+- Symptom: API route returned 500 with `column profiles_1.avatar_url does not exist`
+- Cause: The `profiles` table uses `photo_url`, not `avatar_url` - same assumption error as Issue 2
+- Fix: Queried `information_schema.columns` for `profiles` and `students`, confirmed both use `photo_url`, updated all 7 files
+- Lesson: The photo field is `photo_url` on both `profiles` and `students` - never assume `avatar_url`
+
+### Session result
+Admin Portal Step 8 is fully complete. The Reports section gives the client full visibility over all class reports - pending, completed, and flagged. The reopen flow works correctly, updating the list in real time after a flagged report is set back to pending. The Live Classes Trace tab loads all lessons with their report status and auto-refreshes every 30 seconds. Three schema debugging cycles were required due to unverified column name assumptions, reinforcing the rule to always query the schema before writing any database-connected code.
+
+---
+
+
+
 ## Session 30 - 08 April 2026 - Admin Portal Step 7: Classes
 
 ### What was built
