@@ -95,7 +95,7 @@ export default function SettingsClient({ initialSettings }: Props) {
             onChange={e => handleChange('admin_email', e.target.value)}
             placeholder="e.g. support@lingualinkonline.com"
             className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-            style={{ focusRingColor: '#FF8303' }}
+            
           />
         </SettingRow>
       </SettingSection>
