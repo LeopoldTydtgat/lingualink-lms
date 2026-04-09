@@ -4,6 +4,7 @@
 // so this component never imports from a portal-specific path.
 'use client'
 
+import Image from 'next/image'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'lucide-react'
@@ -479,3 +480,5 @@ export default function ChatWidget({
     </div>
   )
 }
+
+

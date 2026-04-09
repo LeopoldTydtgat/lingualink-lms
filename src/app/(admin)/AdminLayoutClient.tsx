@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import Link from 'next/link'
@@ -21,6 +21,7 @@ import {
   LogOut,
   Menu,
 } from 'lucide-react'
+import Image from 'next/image'
 import type { RightPanelStats } from './layout'
 
 interface Profile {
@@ -133,7 +134,7 @@ export default function AdminLayoutClient({
     </div>
   )
 
-  // ── right panel widget definitions ────────────────────────────────────────
+  // â”€â”€ right panel widget definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const panelWidgets = [
     {
       label: 'Classes Today',
@@ -191,8 +192,7 @@ export default function AdminLayoutClient({
       <div className="flex flex-col flex-1 min-w-0">
         {/* Top header */}
         <header
-          className="flex items-center justify-between px-6 py-3 flex-shrink-0"
-          style={{ backgroundColor: '#FF8303' }}
+          className="flex items-center justify-between px-6 flex-shrink-0" style={{ backgroundColor: '#FF8303', height: '72px' }}
         >
           <div className="flex items-center gap-3">
             <button
@@ -201,9 +201,7 @@ export default function AdminLayoutClient({
             >
               <Menu size={22} />
             </button>
-            <span className="text-white font-bold text-base">
-              Lingualink Online — Admin
-            </span>
+            <Image src="/lingualink-logo.svg" alt="Lingualink Online" width={180} height={103} style={{ height: '48px', width: 'auto' }} priority />
           </div>
 
           <div className="flex items-center gap-3">
@@ -271,7 +269,7 @@ export default function AdminLayoutClient({
                   className="text-xs mt-1 inline-block hover:underline"
                   style={{ color: '#FF8303' }}
                 >
-                  Manage →
+                  Manage â†’
                 </Link>
               </div>
             )}
@@ -281,3 +279,5 @@ export default function AdminLayoutClient({
     </div>
   )
 }
+
+
