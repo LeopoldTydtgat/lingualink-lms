@@ -7,7 +7,7 @@ import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/template
 
 export async function sendMessage(
   receiverId: string,
-  receiverType: 'teacher' | 'admin',
+  receiverType: 'teacher' | 'admin' | 'student',
   content: string
 ) {
   const supabase = await createClient()
@@ -82,3 +82,4 @@ export async function markMessagesAsRead(contactId: string) {
     .eq('sender_id', contactId)
     .is('read_at', null)
 }
+

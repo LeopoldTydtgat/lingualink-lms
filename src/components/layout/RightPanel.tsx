@@ -108,13 +108,13 @@ export default function RightPanel({
             <p className="text-sm text-gray-500">No upcoming classes</p>
           ) : (
             <>
-              {/* Countdown — "Next class from 28m 45s" style */}
+              {/* Countdown — "Next class in 28m 45s" style */}
               <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                 {mounted && secondsUntil !== null
                   ? secondsUntil <= 0
                     ? 'Class is starting now'
-                    : `Next class from ${formatCountdown(secondsUntil)}`
-                  : 'Next class from –'}
+                    : `Next class in ${formatCountdown(secondsUntil)}`
+                  : 'Next class in –'}
               </p>
 
               {/* Date and time range */}
@@ -217,3 +217,4 @@ export default function RightPanel({
     </aside>
   )
 }
+

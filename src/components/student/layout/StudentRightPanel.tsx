@@ -1,5 +1,5 @@
-// src/components/student/layout/StudentRightPanel.tsx
-// Help & Support section removed — the ChatWidget floating bubble replaces it.
+﻿// src/components/student/layout/StudentRightPanel.tsx
+// Help & Support section removed â€” the ChatWidget floating bubble replaces it.
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -106,7 +106,7 @@ export default function StudentRightPanel({
       }}
     >
 
-      {/* ── Next Class ── */}
+      {/* â”€â”€ Next Class â”€â”€ */}
       <div>
         <p style={SECTION_LABEL}>Next Class</p>
 
@@ -140,7 +140,7 @@ export default function StudentRightPanel({
                     display: 'block',
                     padding: '7px 12px',
                     backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, now)
-                      ? '#111827'
+                      ? '#FF8303'
                       : '#E0DFDC',
                     color: mounted && isJoinable(nextLesson.scheduled_at, now)
                       ? '#ffffff'
@@ -169,7 +169,7 @@ export default function StudentRightPanel({
           </>
         ) : (
           <>
-            <p style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>--</p>
+            <p style={{ fontSize: '22px', fontWeight: '700', color: '#FF8303' }}>--</p>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
               No upcoming classes
             </p>
@@ -177,14 +177,14 @@ export default function StudentRightPanel({
         )}
       </div>
 
-      {/* ── Hours Remaining ── */}
+      {/* â”€â”€ Hours Remaining â”€â”€ */}
       <div>
         <p style={SECTION_LABEL}>Hours Remaining</p>
 
         <p style={{
           fontSize: '18px',
           fontWeight: '700',
-          color: lowHours ? '#FD5602' : '#111827',
+          color: lowHours ? '#FD5602' : '#FF8303',
           marginBottom: '2px',
         }}>
           {formatHours(hoursRemaining)}
@@ -192,7 +192,7 @@ export default function StudentRightPanel({
 
         {lowHours && hoursRemaining > 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
-            Running low — contact admin to purchase more hours.
+            Running low â€” contact admin to purchase more hours.
           </p>
         )}
         {hoursRemaining === 0 && (
@@ -202,7 +202,7 @@ export default function StudentRightPanel({
         )}
       </div>
 
-      {/* ── Training End Date ── */}
+      {/* â”€â”€ Training End Date â”€â”€ */}
       <div>
         <p style={SECTION_LABEL}>Training Ends</p>
         <p style={{ fontSize: '13px', color: '#6b7280' }}>
@@ -210,7 +210,7 @@ export default function StudentRightPanel({
         </p>
       </div>
 
-      {/* ── Exercises Progress ── */}
+      {/* â”€â”€ Exercises Progress â”€â”€ */}
       <div>
         <p style={SECTION_LABEL}>My Exercises</p>
 
@@ -255,3 +255,4 @@ export default function StudentRightPanel({
     </aside>
   )
 }
+
