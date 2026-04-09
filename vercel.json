@@ -1,0 +1,13 @@
+{
+    "crons": [
+      {
+        "path": "/api/cron/class-reminders",
+        "schedule": "*/15 * * * *"
+      },
+      {
+        "path": "/api/cron/low-hours-warning",
+        "schedule": "0 8 * * *"
+      }
+    ]
+  }
+  
