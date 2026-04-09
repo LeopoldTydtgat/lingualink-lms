@@ -1,3 +1,5 @@
+// src/components/student/layout/StudentRightPanel.tsx
+// Help & Support section removed — the ChatWidget floating bubble replaces it.
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -126,7 +128,6 @@ export default function StudentRightPanel({
               {nextLesson.duration_minutes} min class
             </p>
 
-            {/* Join button — active 10 min before */}
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (
                 <a
@@ -189,7 +190,6 @@ export default function StudentRightPanel({
           {formatHours(hoursRemaining)}
         </p>
 
-        {/* Low balance warning */}
         {lowHours && hoursRemaining > 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
             Running low — contact admin to purchase more hours.
@@ -252,29 +252,6 @@ export default function StudentRightPanel({
         </Link>
       </div>
 
-      {/* ── Help and Support ── */}
-      <div style={{ borderTop: '1px solid #E0DFDC', paddingTop: '16px' }}>
-        <p style={SECTION_LABEL}>Help and Support</p>
-        <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '10px' }}>
-          Questions? Contact admin.
-        </p>
-        {/* Chat with Admin wired up during Admin Controls phase */}
-        <button
-          style={{
-            width: '100%',
-            padding: '7px 12px',
-            backgroundColor: '#FF8303',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '6px',
-            fontSize: '13px',
-            fontWeight: '500',
-            cursor: 'pointer',
-          }}
-        >
-          Chat with Admin
-        </button>
-      </div>
     </aside>
   )
 }

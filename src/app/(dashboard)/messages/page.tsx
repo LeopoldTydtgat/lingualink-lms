@@ -1,10 +1,15 @@
+// src/app/(dashboard)/messages/page.tsx
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
 
-export default async function MessagesPage() {
-  const supabase = await createClient()
+interface PageProps {
+  // Next.js 15 — searchParams is a Promise, must be awaited
+  searchParams: Promise<{ openAdmin?: string; adminId?: string }>
+}
 
+export default async function MessagesPage({ searchParams }: PageProps) {
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -16,6 +21,43 @@ export default async function MessagesPage() {
 
   if (!profile) redirect('/login')
 
+  // ── Pre-open admin conversation ──────────────────────────────────────────
+  // When the teacher clicks "Message admin" in the RightPanel, they arrive here
+  // with ?openAdmin=true&adminId={id}. We read those params and fetch the admin
+  // profile so MessagesClient can auto-select the conversation immediately.
+  const { openAdmin, adminId } = await searchParams
+
+  let adminContact: {
+    id: string
+    type: string
+    name: string
+    email: string
+    photo_url: string | null
+    latestMessage: null
+    unreadCount: number
+  } | null = null
+
+  if (openAdmin === 'true' && adminId) {
+    const { data: adminProfile } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, photo_url')
+      .eq('id', adminId)
+      .single()
+
+    if (adminProfile) {
+      adminContact = {
+        id: adminProfile.id,
+        type: adminProfile.role, // 'admin'
+        name: adminProfile.full_name,
+        email: '',
+        photo_url: adminProfile.photo_url ?? null,
+        latestMessage: null,
+        unreadCount: 0,
+      }
+    }
+  }
+
+  // ── Build contacts list ──────────────────────────────────────────────────
   // Fetch all messages involving this user, newest first
   const { data: messages } = await supabase
     .from('messages')
@@ -38,7 +80,6 @@ export default async function MessagesPage() {
     const contactType = isFromMe ? msg.receiver_type : msg.sender_type
 
     if (!contactMap.has(contactId)) {
-      // First message found = latest (since we ordered desc)
       contactMap.set(contactId, {
         id: contactId,
         type: contactType,
@@ -46,7 +87,6 @@ export default async function MessagesPage() {
         unreadCount: 0,
       })
     }
-
     // Count messages sent TO me that have not been read
     if (!isFromMe && !msg.read_at) {
       contactMap.get(contactId)!.unreadCount++
@@ -110,6 +150,9 @@ export default async function MessagesPage() {
       currentUser={profile}
       contacts={contacts}
       allStudents={allStudents || []}
+      // Pass the pre-resolved admin contact if the URL requested it.
+      // MessagesClient will auto-select this conversation on mount.
+      initialContact={adminContact}
     />
   )
 }

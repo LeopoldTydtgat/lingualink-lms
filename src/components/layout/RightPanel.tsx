@@ -1,54 +1,98 @@
 // src/components/layout/RightPanel.tsx
-// 'use client' is required because the countdown timer updates every second
-// using setInterval, which only works in the browser.
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
 
-type RightPanelProps = {
-  teacherId: string | null
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface AnnouncementItem {
+  id: string
+  title: string
+  message: string
+  is_dismissable: boolean
 }
 
-// Converts a number of seconds into HH:MM:SS format
+interface NextLesson {
+  id: string
+  scheduled_at: string
+  duration_minutes: number
+  teams_join_url: string | null
+  student_name: string
+}
+
+type RightPanelProps = {
+  teacherId: string | null
+  announcements?: AnnouncementItem[]
+  nextLesson?: NextLesson | null
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function formatCountdown(totalSeconds: number): string {
   if (totalSeconds <= 0) return '00:00:00'
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
-  return [hours, minutes, seconds]
-    .map(n => String(n).padStart(2, '0'))
-    .join(':')
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
+  }
+  return `${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
 }
 
-export default function RightPanel({ teacherId }: RightPanelProps) {
-  const [secondsUntilNextClass, setSecondsUntilNextClass] = useState<number | null>(null)
-  const [showJoinButton, setShowJoinButton] = useState(false)
+// Format: "Thu 09 Apr, 10:00 – 11:00"
+// Uses manual construction — never toLocaleTimeString() to avoid hydration mismatch
+function formatClassTime(isoString: string, durationMinutes: number): string {
+  const date = new Date(isoString)
+
+  const weekday = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()]
+
+  const startH = String(date.getHours()).padStart(2, '0')
+  const startM = String(date.getMinutes()).padStart(2, '0')
+
+  const endDate = new Date(date.getTime() + durationMinutes * 60 * 1000)
+  const endH = String(endDate.getHours()).padStart(2, '0')
+  const endM = String(endDate.getMinutes()).padStart(2, '0')
+
+  return `${weekday} ${day} ${month}, ${startH}:${startM} – ${endH}:${endM}`
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function RightPanel({
+  teacherId,
+  announcements = [],
+  nextLesson = null,
+}: RightPanelProps) {
+  const router = useRouter()
+  const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    // Placeholder: 2 hours until next class
-    // This will be replaced with real Supabase data when we build
-    // the Upcoming Classes page
-    const placeholderSeconds = 2 * 60 * 60
-    setSecondsUntilNextClass(placeholderSeconds)
+    setMounted(true)
+
+    if (!nextLesson) {
+      setSecondsUntil(null)
+      return
+    }
+
+    const calc = () =>
+      Math.max(0, Math.floor((new Date(nextLesson.scheduled_at).getTime() - Date.now()) / 1000))
+
+    setSecondsUntil(calc())
 
     const timer = setInterval(() => {
-      setSecondsUntilNextClass(prev => {
-        if (prev === null || prev <= 0) {
-          clearInterval(timer)
-          return 0
-        }
-        const next = prev - 1
-        // Show the Join button when 15 minutes or less remain
-        setShowJoinButton(next <= 15 * 60)
-        return next
-      })
+      setSecondsUntil(calc())
     }, 1000)
 
-    // Stop the timer when this component is removed from the page
     return () => clearInterval(timer)
-  }, [teacherId])
+  }, [teacherId, nextLesson])
+
+  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 15 * 60
 
   return (
     <aside className="w-72 bg-white border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto">
@@ -56,39 +100,59 @@ export default function RightPanel({ teacherId }: RightPanelProps) {
 
         {/* ── NEXT CLASS ── */}
         <section className="bg-gray-50 rounded-xl p-4 border border-brand-grey">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
             Next Class
           </p>
-          {secondsUntilNextClass !== null ? (
-            <>
-              <p className="text-2xl font-bold text-gray-900 font-mono tracking-tight">
-                {formatCountdown(secondsUntilNextClass)}
-              </p>
-              <p className="text-xs text-gray-500 mt-0.5">hours : mins : secs</p>
-            </>
-          ) : (
+
+          {!nextLesson ? (
             <p className="text-sm text-gray-500">No upcoming classes</p>
-          )}
+          ) : (
+            <>
+              {/* Countdown — "Next class from 28m 45s" style */}
+              <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
+                {mounted && secondsUntil !== null
+                  ? secondsUntil <= 0
+                    ? 'Class is starting now'
+                    : `Next class from ${formatCountdown(secondsUntil)}`
+                  : 'Next class from –'}
+              </p>
 
-          {/* Only appears 15 minutes before class */}
-          {showJoinButton && (
-            <Button
-              className="mt-3 w-full bg-gray-900 hover:bg-gray-700 text-white text-sm font-semibold"
-              size="sm"
-            >
-              <Video size={14} className="mr-2" />
-              Join Class
-            </Button>
-          )}
+              {/* Date and time range */}
+              <p className="text-xs text-gray-500 mb-0.5">
+                {formatClassTime(nextLesson.scheduled_at, nextLesson.duration_minutes)}
+              </p>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-2 w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange"
-          >
-            <BookOpen size={14} className="mr-2" />
-            See Training
-          </Button>
+              {/* Student name */}
+              <p className="text-xs text-gray-500 mb-3">
+                with {nextLesson.student_name}
+              </p>
+
+              {/* See Training button — always visible */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange mb-2"
+                onClick={() => router.push('/students')}
+              >
+                <BookOpen size={14} className="mr-2" />
+                See Training
+              </Button>
+
+              {/* Join Class — only appears 15 minutes before class */}
+              {isJoinable && nextLesson.teams_join_url && (
+                <a
+                  href={nextLesson.teams_join_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ backgroundColor: '#111827' }}
+                >
+                  <Video size={14} />
+                  Join Class
+                </a>
+              )}
+            </>
+          )}
         </section>
 
         {/* ── BILLING SUMMARY ── */}
@@ -99,19 +163,20 @@ export default function RightPanel({ teacherId }: RightPanelProps) {
           <div className="space-y-1">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Current month</span>
-              <span className="font-semibold text-gray-900">€ —</span>
+              <span className="font-semibold text-gray-900">€ –</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Projected</span>
-              <span className="font-semibold text-gray-900">€ —</span>
+              <span className="font-semibold text-gray-900">€ –</span>
             </div>
           </div>
           <Button
             variant="outline"
             size="sm"
             className="mt-3 w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange"
+            onClick={() => router.push('/billing')}
           >
-            Billing & Invoices
+            Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
           </Button>
         </section>
@@ -123,24 +188,29 @@ export default function RightPanel({ teacherId }: RightPanelProps) {
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
               What&apos;s New
             </p>
+            {announcements.length > 0 && (
+              <span
+                className="ml-auto text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: '#FF8303', fontSize: '10px' }}
+              >
+                {announcements.length > 9 ? '9+' : announcements.length}
+              </span>
+            )}
           </div>
-          <p className="text-sm text-gray-400 italic">No new notifications</p>
-        </section>
 
-        {/* ── HELP ── */}
-        <section className="bg-brand-orange-light rounded-xl p-4 border border-orange-100">
-          <p className="text-xs font-semibold text-brand-orange uppercase tracking-wider mb-1">
-            Help & Support
-          </p>
-          <p className="text-sm text-gray-600 mb-2">
-            Questions? Contact admin or browse the FAQs.
-          </p>
-          <Button
-            size="sm"
-            className="w-full bg-brand-orange hover:bg-orange-600 text-white text-sm"
-          >
-            Chat with Admin
-          </Button>
+          {announcements.length === 0 ? (
+            <p className="text-sm text-gray-400 italic">No new notifications</p>
+          ) : (
+            <div className="space-y-3">
+              {announcements.map((a, index) => (
+                <div key={a.id}>
+                  {index > 0 && <div className="h-px bg-gray-200 mb-3" />}
+                  <p className="text-xs font-semibold text-gray-800">{a.title}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{a.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
       </div>
