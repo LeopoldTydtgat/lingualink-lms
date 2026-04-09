@@ -1,6 +1,50 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 39 - 09 April 2026 — Logo and header styling across all three portals
+
+### What was built
+- Added the official LinguaLink Online logo SVG to all three portals (teacher, student, admin)
+- Created `/public/lingualink-logo.svg` - one-colour white version, viewBox tightly cropped to content, no background rect, renders cleanly on the orange header
+- Created `/public/lingualink-chat-icon.svg` and `/public/lingualink-logo-white.svg` as supporting assets
+- Updated `TopHeader.tsx` (teacher portal) - header height increased to 72px, logo at 52px height, greeting text corrected to white, avatar placeholder updated to white semi-transparent style
+- Updated `StudentTopHeader.tsx` (student portal) - same header treatment applied
+- Updated `AdminLayoutClient.tsx` - replaced plain text "Lingualink Online — Admin" with the logo SVG, header height aligned to 72px
+- Fixed `ChatWidget.tsx` type error - `sendMessageAction` receiver type extended to include `'student'` in student messages `actions.ts`
+- Fixed student portal Join Class button colour from black (`#111827`) to orange (`#FF8303`)
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Logo appeared tiny and faded on the orange header
+- Cause: Original SVG had a white background rect baked in covering the full 394×225 canvas, leaving the actual logo content occupying a small fraction of the rendered area
+- Fix: Stripped the white background rect and rewrote the SVG with a cropped viewBox (`28 26 348 172`) tightly around the actual content, all fills set to white
+- Lesson: Always check SVG viewBox and background rects before placing a logo on a coloured background — dead space in the viewBox causes the logo to render smaller than expected
+
+**Issue 2**
+- Symptom: Multiple logo approaches tried (outlined stroke, pill background, white version) all looked poor on the orange header at various sizes
+- Cause: The original logo uses orange and black - both problematic on an orange background. The correct solution is always the one-colour white reversed variant for use on brand-colour backgrounds
+- Fix: Used the one-colour white SVG supplied by the client, stripped background rect, applied to all portals
+- Lesson: Never alter a brand logo to work on a background - change the background or use the correct logo variant instead
+
+**Issue 3**
+- Symptom: `ChatWidget.tsx` showed a red TypeScript underline in the student layout
+- Cause: The `sendMessageAction` prop type in `ChatWidget` accepted `'teacher' | 'admin' | 'student'` but the student `actions.ts` only declared `'teacher' | 'admin'`
+- Fix: Added `'student'` to the receiver type union in the student messages `actions.ts`
+- Lesson: When the same component is shared across portals with portal-specific server actions, the action signatures must match the component's expected types exactly
+
+**Issue 4**
+- Symptom: Admin portal header still showed plain text after logo update commands
+- Cause: The admin header lives in `AdminLayoutClient.tsx` not a separate `TopHeader` component — regex replacement targeted the wrong file initially
+- Fix: Located the correct file path `src/app/(admin)/AdminLayoutClient.tsx`, added `Image` import, replaced the text span with an `Image` tag
+- Lesson: Always confirm which component owns the header for each portal before writing replacement commands
+
+### Session result
+All three portals now display the official LinguaLink Online logo in the top header bar. The teacher and student portals use a white one-colour SVG on the orange header at 52px height in a 72px bar. The admin portal header matches. The student portal Join Class button is now correctly orange.
+
+---
+
+
 ## Session 38 - 09 April 2026 - Admin Controls Phase & Messaging Polish
 
 ### What was built
