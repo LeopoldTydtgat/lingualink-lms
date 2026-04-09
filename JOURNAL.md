@@ -1,6 +1,58 @@
 # LinguaLink Online - Build Journal
 
 
+
+---
+
+## Session 40 - 09 April 2026 - Portal UI overhaul: headers, login pages, and nav layout
+
+### What was built
+- Restructured all three portals (teacher, student, admin) so the left sidebar extends full height - logo sits in the sidebar on a white background, orange header spans only the right side
+- Created `lingualink-logo-clean.svg` - stripped white background rect from the original SVG, cropped viewBox to content only, renders cleanly on white
+- Created `lingualink-logo-white.svg` - all-white version for use on the admin black sidebar
+- Applied gradient top band across teacher and student portals - logo area fades `#ffffff → #fff3e8`, header fades `#fff3e8 → #FF8303 40%`, creating a seamless unified top strip
+- Removed grey dividing line between logo area and nav items - gradient flows cleanly into nav
+- Fixed active nav state - `Upcoming Classes` now correctly highlights on `/upcoming-classes` and `/dashboard` using `matchPaths` array
+- Redesigned teacher and student login pages - split panel layout, white form on left with full-colour logo, dark `#111827` panel on right with orange accent bar and brand tagline
+- Login tagline agreed with client: "Better English. Better opportunities." with subtext "Personalised online English lessons for business professionals, everyday learners, and students of all levels."
+- Admin portal sidebar updated - white logo area at top replaced with full black sidebar, white logo version used
+- Fixed `suppressHydrationWarning` on root layout - resolves browser extension hydration mismatch error
+- Fixed `layout.tsx` encoding issue - replaced em dash with hyphen in metadata title to prevent UTF-8 parse failure
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Logo invisible in sidebar after restructure
+- Cause: Original SVG had a white background rect filling the entire canvas - on white sidebar, logo was white on white
+- Fix: Created `lingualink-logo-clean.svg` with background rect removed and viewBox cropped to content
+- Lesson: Always inspect SVG structure before placing on coloured or matching backgrounds - background rects are commonly baked in
+
+**Issue 2**
+- Symptom: `Set-Content` with here-strings silently failing on paths containing parentheses
+- Cause: PowerShell here-strings and `-LiteralPath` don't always cooperate with special characters in directory names like `(auth)` and `(student-auth)`
+- Fix: Used `[System.IO.File]::WriteAllText()` with explicit UTF8 encoding — bypasses PowerShell string handling entirely
+- Lesson: For any file path containing parentheses, always use `[System.IO.File]::WriteAllText()` instead of `Set-Content`
+
+**Issue 3**
+- Symptom: Login page form not vertically centred - sitting in upper portion of the panel
+- Cause: Browser default body margin pushing content down; outer div not truly filling the viewport
+- Fix: Used `position: fixed; top: 0; left: 0; right: 0; bottom: 0` on outer container and added `html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }` via inline style tag
+- Lesson: For full-viewport login layouts, `position: fixed; inset: 0` is more reliable than `min-height: 100vh`
+
+**Issue 4**
+- Symptom: Active nav state disappearing after page load on Upcoming Classes
+- Cause: Nav item href was `/dashboard` but the actual route is `/upcoming-classes` - `pathname.startsWith('/dashboard')` never matched
+- Fix: Added `matchPaths` array to nav item type, Upcoming Classes now matches both `/upcoming-classes` and `/dashboard`
+- Lesson: Always verify nav hrefs match actual Next.js route paths — mismatches cause active state failures silently
+
+### Session result
+All three portals now have a cohesive, professional look. The gradient top band unifies the sidebar and header into one visual element. The login pages are a significant upgrade - split panel with dark brand panel makes a strong first impression. Active nav states are reliable. The build is in a clean.
+
+
+---
+
+
+
 ## Session 39 - 09 April 2026 — Logo and header styling across all three portals
 
 ### What was built
