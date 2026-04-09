@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -32,7 +32,7 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  // ── Admin routes ─────────────────────────────────────────────────────
+  // â”€â”€ Admin routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (pathname.startsWith('/admin')) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url))
@@ -45,12 +45,12 @@ export async function proxy(request: NextRequest) {
       .single()
 
     if (profile?.role !== 'admin') {
-      // Authenticated but not admin — send to teacher dashboard
+      // Authenticated but not admin â€” send to teacher dashboard
       return NextResponse.redirect(new URL('/upcoming-classes', request.url))
     }
   }
 
-  // ── Teacher / Admin routes (root-level dashboard pages) ────────────
+  // â”€â”€ Teacher / Admin routes (root-level dashboard pages) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const teacherPaths = [
     '/dashboard',
     '/upcoming-classes',
@@ -70,7 +70,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // ── Student public pages (no auth required) ─────────────────────────
+  // â”€â”€ Student public pages (no auth required) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const studentPublicPaths = [
     '/student/login',
     '/student/forgot-password',
@@ -80,7 +80,7 @@ export async function proxy(request: NextRequest) {
     (p) => pathname === p || pathname.startsWith(p + '/')
   )
 
-  // ── Student protected routes ─────────────────────────────────────────
+  // â”€â”€ Student protected routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const isStudentRoute =
     pathname.startsWith('/student/') && !isStudentPublicPage
 
@@ -88,7 +88,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/student/login', request.url))
   }
 
-  // ── Redirect already-authenticated users away from login pages ───────
+  // â”€â”€ Redirect already-authenticated users away from login pages â”€â”€â”€â”€â”€â”€â”€
   if (user && pathname === '/login') {
     return NextResponse.redirect(new URL('/upcoming-classes', request.url))
   }
