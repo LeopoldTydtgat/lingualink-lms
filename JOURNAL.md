@@ -1,6 +1,44 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 38 - 09 April 2026 - Admin Controls Phase & Messaging Polish
+
+### What was built
+
+- **ChatWidget** - built a floating Intercom-style chat bubble (fixed bottom-right) that appears on every page of both the teacher and student portals. The widget has two tabs: Messages (pre-connected to Shannon's admin account) and FAQ (portal-specific content). Teacher and student portals pass their own server actions as props, keeping the component fully portal-agnostic. FAQ content is stored in named arrays (`TEACHER_FAQS`, `STUDENT_FAQS`) at the top of the file - The client can update the wording without touching component code.
+- **What's New** - wired the RightPanel What's New section to real announcement data fetched and filtered in the layout. An orange badge shows the count when active announcements exist.
+- **Teacher RightPanel next class** - replaced the placeholder countdown with real data fetched from the `lessons` table. Now displays "Next class from Xh Xm Xs", the date and time range, and the student name — matching the LearnCube reference style. Join Class button appears 15 minutes before the class start time.
+- **Message bubble redesign** - sent messages are #FF8303 orange with white text; received messages are #1F2937 dark charcoal with white text. Applied consistently across the teacher MessagesClient, student StudentMessagesClient, and the ChatWidget.
+- **Read ticks** - added WhatsApp-style read receipts to both MessagesClient and StudentMessagesClient. Single grey tick = sent. Double orange tick = read. Ticks update in real time via Supabase Realtime UPDATE subscriptions without a page refresh.
+- **Composer fix** - removed the box-within-a-box issue in the Tiptap editor by adding a scoped `<style>` tag that suppresses ProseMirror's own default focus border. One clean rounded container remains.
+- **RLS policy fixes** - fixed the messages table policies to cover both teacher auth (auth.uid() maps directly to profiles.id) and student auth (auth.uid() maps via students.auth_user_id to students.id). Added `REPLICA IDENTITY FULL` on the messages table to enable real-time UPDATE event tracking for read receipts.
+- **StudentRightPanel** - removed the old Help & Support section and button. The ChatWidget floating bubble replaces it entirely.
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: Student could not send messages - "new row violates row-level security policy for table messages"
+- Cause: The INSERT policy on messages only covered teachers (auth.uid() = sender_id). Students have a different auth structure - their sender_id is students.id, not auth.uid()
+- Fix: Added a dedicated INSERT policy using `SELECT id FROM students WHERE auth_user_id = auth.uid()` to resolve the student's sender_id correctly
+- Lesson: Any RLS policy on a shared table must account for both auth patterns — teacher (profiles) and student (students with auth_user_id)
+
+**Issue 2**
+- Symptom: Read ticks were not updating in real time on either portal despite the UPDATE subscription being in place
+- Cause: Supabase Realtime UPDATE events only broadcast changed columns by default - without REPLICA IDENTITY FULL, the full row is not sent and the subscription receives no usable payload
+- Fix: `ALTER TABLE messages REPLICA IDENTITY FULL` - run once, applies to all users and all portals permanently
+- Lesson: Any table using real-time UPDATE subscriptions requires REPLICA IDENTITY FULL or the subscription will silently receive incomplete payloads
+
+**Issue 3**
+- Symptom: Read ticks updated for students but not for teachers even after REPLICA IDENTITY FULL was set
+- Cause: The SELECT policy "Users see their own messages" only matched `auth.uid() = sender_id`, which works for teachers but not students. When Supabase tried to return the updated row to the student's real-time subscription, the SELECT policy blocked it
+- Fix: Dropped and rewrote both the SELECT and UPDATE policies to include the student auth lookup pattern on sender_id, receiver_id, and the admin role check
+- Lesson: REPLICA IDENTITY FULL is necessary but not sufficient — the SELECT policy must also permit the subscribing user to read the updated row or the event is silently dropped
+
+### Session result
+
+The Admin Controls phase is complete. Both portals now have a fully working floating chat widget connected to Shannon's admin account, with an FAQ tab that can be updated without code changes. The messaging system is polished across all three portals - consistent bubble colours, real-time read receipts, and a clean composer. RLS policies on the messages table now correctly cover every user type. The project is ready to move into the Step 14 hardening pass.
+
+
 ---
 
 ## Session 37 - 08 April 2026 - Admin Portal Step 14: Settings Page
