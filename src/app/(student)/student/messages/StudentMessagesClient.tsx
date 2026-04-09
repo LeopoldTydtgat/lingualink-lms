@@ -1,3 +1,4 @@
+// src/app/(student)/student/messages/StudentMessagesClient.tsx
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -73,7 +74,11 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
-function Avatar({ name, photoUrl, size = 10 }: { name: string; photoUrl: string | null; size?: number }) {
+function Avatar({ name, photoUrl, size = 10 }: {
+  name: string
+  photoUrl: string | null
+  size?: number
+}) {
   const sizeClass = `w-${size} h-${size}`
   if (photoUrl) {
     return <img src={photoUrl} alt={name} className={`${sizeClass} rounded-full object-cover`} />
@@ -88,9 +93,39 @@ function Avatar({ name, photoUrl, size = 10 }: { name: string; photoUrl: string 
   )
 }
 
+// ─── Read ticks ───────────────────────────────────────────────────────────────
+// Single grey tick = sent. Double orange tick = read.
+// Only shown on messages sent by the current user.
+function ReadTicks({ readAt }: { readAt: string | null }) {
+  if (readAt) {
+    return (
+      <span className="inline-flex items-center gap-0.5 ml-1" aria-label="Read">
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
+          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center ml-1" aria-label="Sent">
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </span>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function StudentMessagesClient({ currentStudent, contacts: initialContacts, assignedTeachers }: Props) {
+export default function StudentMessagesClient({
+  currentStudent,
+  contacts: initialContacts,
+  assignedTeachers,
+}: Props) {
   const supabase = useMemo(() => createClient(), [])
 
   const [contacts, setContacts] = useState<Contact[]>(initialContacts)
@@ -141,7 +176,7 @@ export default function StudentMessagesClient({ currentStudent, contacts: initia
     await fetchMessages(contact)
   }, [fetchMessages])
 
-  // Real-time: listen for new incoming messages
+  // Real-time: new incoming messages + read receipt updates
   useEffect(() => {
     if (!selectedContact) return
 
@@ -160,6 +195,25 @@ export default function StudentMessagesClient({ currentStudent, contacts: initia
           if (newMsg.sender_id === selectedContact.id) {
             setMessages(prev => [...prev, newMsg])
             await markMessagesAsRead(selectedContact.id)
+          }
+        }
+      )
+      .on(
+        // When the teacher reads the student's messages, read_at gets set.
+        // Listen for UPDATEs on messages this student sent to flip the tick.
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `sender_id=eq.${currentStudent.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as Message
+          if (updated.read_at) {
+            setMessages(prev =>
+              prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+            )
           }
         }
       )
@@ -364,22 +418,23 @@ export default function StudentMessagesClient({ currentStudent, contacts: initia
                       )}
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
+                          {/* Sent: #FF8303 orange. Received: #1F2937 dark charcoal.
+                              Both white text — immediately clear who said what. */}
                           <div
                             className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={isFromMe ? {
-                              backgroundColor: '#FF8303',
-                              color: 'white',
-                              borderBottomRightRadius: '4px',
-                            } : {
-                              backgroundColor: '#F3F4F6',
-                              color: '#111827',
-                              borderBottomLeftRadius: '4px',
-                            }}
+                            style={isFromMe
+                              ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                              : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                            }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
-                          <p className={`text-xs text-gray-400 mt-1 ${isFromMe ? 'text-right' : 'text-left'}`}>
-                            {formatTime(msg.created_at)}
-                          </p>
+                          {/* Timestamp + read ticks */}
+                          <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
+                            <span className="text-xs text-gray-400">
+                              {formatTime(msg.created_at)}
+                            </span>
+                            {isFromMe && <ReadTicks readAt={msg.read_at} />}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -389,32 +444,45 @@ export default function StudentMessagesClient({ currentStudent, contacts: initia
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Composer */}
-            <div className="border-t border-gray-200 p-4 flex-shrink-0">
-              <div className="flex items-center gap-1 mb-2">
+            {/* ── Composer ── */}
+            <div className="border-t border-gray-200 flex-shrink-0 bg-white">
+              {/* The style tag kills ProseMirror's own inner border so there is
+                  one clean box, not a box-within-a-box */}
+              <style>{`
+                .student-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
+                .student-composer .ProseMirror:focus { outline: none !important; border: none !important; }
+                .student-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+              `}</style>
+
+              {/* Formatting toolbar */}
+              <div className="flex items-center gap-1 px-4 pt-3 pb-1">
                 <button
                   onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
-                  className="px-2 py-1 text-xs rounded font-bold text-gray-600 hover:bg-gray-100"
-                  style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB' } : {}}
+                  className="px-2 py-1 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                 >B</button>
                 <button
                   onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
-                  className="px-2 py-1 text-xs rounded italic text-gray-600 hover:bg-gray-100"
-                  style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB' } : {}}
+                  className="px-2 py-1 text-xs rounded italic text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                 >I</button>
                 <button
                   onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
-                  className="px-2 py-1 text-xs rounded underline text-gray-600 hover:bg-gray-100"
-                  style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB' } : {}}
+                  className="px-2 py-1 text-xs rounded underline text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                 >U</button>
               </div>
+
+              {/* Editor — one clean bordered box, ProseMirror inner border suppressed */}
               <div
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm mb-3 min-h-[72px] max-h-[140px] overflow-y-auto focus-within:border-orange-400 cursor-text"
+                className="student-composer mx-4 mb-2 rounded-xl border border-gray-200 px-3 py-2 text-sm min-h-[72px] max-h-[120px] overflow-y-auto cursor-text focus-within:border-orange-300 transition-colors"
                 onClick={() => editor?.commands.focus()}
               >
                 <EditorContent editor={editor} />
               </div>
-              <div className="flex items-center justify-between">
+
+              {/* Send row */}
+              <div className="flex items-center justify-between px-4 pb-3 pt-1">
                 <span className="text-xs text-gray-400">📎 File attachments — coming soon</span>
                 <button
                   onClick={handleSend}

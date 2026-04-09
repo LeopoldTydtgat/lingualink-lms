@@ -6,6 +6,8 @@ import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
+import ChatWidget, { STUDENT_FAQS } from '@/components/ChatWidget'
+import { sendMessage, markMessagesAsRead } from '@/app/(student)/student/messages/actions'
 
 export default async function StudentDashboardLayout({
   children,
@@ -62,17 +64,24 @@ export default async function StudentDashboardLayout({
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
 
-  // ── Announcements ───────────────────────────────────────────────────────────
-  // Fetch announcements this student has already dismissed
+  // Admin profile ID — used by ChatWidget to pre-connect to Shannon's conversation
+  const { data: adminProfile } = await supabase
+    .from('profiles')
+    .select('id, full_name, photo_url')
+    .eq('role', 'admin')
+    .single()
+
+  // ── Announcements ────────────────────────────────────────────────────────
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
     .eq('user_id', student.id)
     .eq('user_type', 'student')
 
-  const dismissedIds = (dismissals ?? []).map((d: { announcement_id: string }) => d.announcement_id)
+  const dismissedIds = (dismissals ?? []).map(
+    (d: { announcement_id: string }) => d.announcement_id
+  )
 
-  // Fetch all active announcements and filter for students
   const { data: allAnnouncements } = await supabase
     .from('announcements')
     .select('id, title, message, is_dismissable, target_audience, target_id')
@@ -101,7 +110,6 @@ export default async function StudentDashboardLayout({
             backgroundColor: '#f9fafb',
           }}
         >
-          {/* Announcement banners sit above page content */}
           <AnnouncementBanner
             announcements={announcements}
             userType="student"
@@ -111,6 +119,8 @@ export default async function StudentDashboardLayout({
             {children}
           </div>
         </main>
+        {/* Help & Support section removed from StudentRightPanel —
+            the ChatWidget floating bubble handles it now */}
         <StudentRightPanel
           studentId={student.id}
           nextLesson={nextLesson ?? null}
@@ -120,6 +130,17 @@ export default async function StudentDashboardLayout({
           completedExercises={completedCount ?? 0}
         />
       </div>
+      {/* Floating chat widget — student portal server actions passed as props */}
+      <ChatWidget
+        currentUserId={student.id}
+        currentUserName={student.full_name}
+        adminProfileId={adminProfile?.id ?? null}
+        adminName={adminProfile?.full_name ?? 'Admin'}
+        adminPhotoUrl={adminProfile?.photo_url ?? null}
+        faqs={STUDENT_FAQS}
+        sendMessageAction={sendMessage}
+        markAsReadAction={markMessagesAsRead}
+      />
     </div>
   )
 }
