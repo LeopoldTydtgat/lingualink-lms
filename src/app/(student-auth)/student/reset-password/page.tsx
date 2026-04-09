@@ -131,7 +131,7 @@ export default function ResetPasswordPage() {
               lineHeight: '1.5',
             }}
           >
-            Your password has been updated. Redirecting you to sign in…
+            Your password has been updated. Redirecting you to sign inâ€¦
           </div>
 
         ) : !sessionReady ? (
@@ -144,7 +144,7 @@ export default function ResetPasswordPage() {
               padding: '24px 0',
             }}
           >
-            Verifying your reset link…
+            Verifying your reset linkâ€¦
           </div>
 
         ) : (
@@ -257,7 +257,7 @@ export default function ResetPasswordPage() {
                   transition: 'background-color 0.15s',
                 }}
               >
-                {isPending ? 'Saving…' : 'Set password'}
+                {isPending ? 'Savingâ€¦' : 'Set password'}
               </button>
             </form>
           </>
