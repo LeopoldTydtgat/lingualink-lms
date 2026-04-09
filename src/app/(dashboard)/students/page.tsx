@@ -4,7 +4,6 @@ import StudentsClient from './StudentsClient'
 
 export default async function StudentsPage() {
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -38,9 +37,9 @@ export default async function StudentsPage() {
         self_reported_level
       ),
       profiles!trainings_teacher_id_fkey (
-  id,
-  full_name
-)
+        id,
+        full_name
+      )
     `)
     .order('start_date', { ascending: false })
 
@@ -54,9 +53,16 @@ export default async function StudentsPage() {
     console.error('Error fetching trainings:', error)
   }
 
+  // Supabase returns nested joins as arrays â€” flatten students and profiles to single objects
+  const flatTrainings = (trainings ?? []).map(t => ({
+    ...t,
+    students: Array.isArray(t.students) ? t.students[0] : t.students,
+    profiles: Array.isArray(t.profiles) ? t.profiles[0] : t.profiles,
+  }))
+
   // Split into current and past
-  const currentTrainings = trainings?.filter(t => t.status === 'active') ?? []
-  const pastTrainings = trainings?.filter(t => t.status !== 'active') ?? []
+  const currentTrainings = flatTrainings.filter(t => t.status === 'active')
+  const pastTrainings = flatTrainings.filter(t => t.status !== 'active')
 
   return (
     <StudentsClient

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
 
 interface PageProps {
-  // Next.js 15 — searchParams is a Promise, must be awaited
+  // Next.js 15 â€” searchParams is a Promise, must be awaited
   searchParams: Promise<{ openAdmin?: string; adminId?: string }>
 }
 
@@ -21,7 +21,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
 
   if (!profile) redirect('/login')
 
-  // ── Pre-open admin conversation ──────────────────────────────────────────
+  // â”€â”€ Pre-open admin conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
   // with ?openAdmin=true&adminId={id}. We read those params and fetch the admin
   // profile so MessagesClient can auto-select the conversation immediately.
@@ -57,7 +57,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     }
   }
 
-  // ── Build contacts list ──────────────────────────────────────────────────
+  // â”€â”€ Build contacts list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Fetch all messages involving this user, newest first
   const { data: messages } = await supabase
     .from('messages')
@@ -111,10 +111,11 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     : { data: [] }
 
   // Fetch profile details for teacher/admin contacts
+  // email is included so the union type with studentDetails is consistent
   const { data: profileDetails } = profileContactIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, full_name, role, photo_url')
+        .select('id, full_name, role, photo_url, email')
         .in('id', profileContactIds)
     : { data: [] }
 
@@ -138,7 +139,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     new Date(a.latestMessage.created_at).getTime()
   )
 
-  // All active students — used for the "New Message" picker
+  // All active students â€” used for the "New Message" picker
   const { data: allStudents } = await supabase
     .from('students')
     .select('id, full_name, email, photo_url')

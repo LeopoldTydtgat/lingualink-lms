@@ -4,7 +4,6 @@ import AccountClient from './AccountClient'
 
 export default async function AccountPage() {
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -38,11 +37,17 @@ export default async function AccountPage() {
     .eq('is_visible', true)
     .order('created_at', { ascending: false })
 
+  // Supabase returns nested joins as arrays â€” flatten students to a single object
+  const flatReviews = (reviews ?? []).map(r => ({
+    ...r,
+    students: Array.isArray(r.students) ? r.students[0] : r.students,
+  }))
+
   return (
     <AccountClient
       profile={profile}
       resources={resources ?? []}
-      reviews={reviews ?? []}
+      reviews={flatReviews}
       userId={user.id}
     />
   )

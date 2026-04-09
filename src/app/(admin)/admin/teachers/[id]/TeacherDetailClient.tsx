@@ -65,7 +65,7 @@ function StatusBadge({ status }: { status: string | null }) {
 
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={colour}>
-      {STATUS_LABEL[status ?? ''] ?? status ?? '—'}
+      {STATUS_LABEL[status ?? ''] ?? status ?? 'â€“'}
     </span>
   )
 }
@@ -107,7 +107,7 @@ function InfoRow({ label, value, adminOnly }: {
           </span>
         )}
       </span>
-      <span className="text-sm text-gray-800">{value || '—'}</span>
+      <span className="text-sm text-gray-800">{value || 'â€“'}</span>
     </div>
   )
 }
@@ -156,7 +156,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
         onClick={() => router.push('/admin/teachers')}
         className="text-sm text-gray-500 hover:text-gray-700 mb-4 block"
       >
-        ← Teachers
+        â† Teachers
       </button>
 
       {/* Top card */}
@@ -257,8 +257,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <InfoRow label="Contract Start" value={teacher.contract_start as string} />
             <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
             <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
-            <InfoRow label="Hourly Rate (€)"
-              value={teacher.hourly_rate != null ? `€${teacher.hourly_rate}` : null}
+            <InfoRow label="Hourly Rate (â‚¬)"
+              value={teacher.hourly_rate != null ? `â‚¬${teacher.hourly_rate}` : null}
               adminOnly />
             <InfoRow label="VAT Required"
               value={teacher.vat_required ? 'Yes' : 'No'}
@@ -284,19 +284,19 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               value={teacher.follow_up_reason as string} adminOnly />
           </div>
 
-          {/* Admin notes — full width, amber background */}
+          {/* Admin notes â€” full width, amber background */}
           <div className="col-span-2 rounded-xl border p-5 space-y-2"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔒 Admin Notes — Not visible to teacher
+              ðŸ”’ Admin Notes â€” Not visible to teacher
             </h2>
             <p className="text-sm" style={{ color: '#78350f' }}>
               {(teacher.admin_notes as string) || 'No admin notes.'}
             </p>
           </div>
 
-          {/* Bio */}
-          {teacher.bio && (
+          {/* Bio â€” cast to string and use !! to avoid unknown being treated as ReactNode */}
+          {!!(teacher.bio as string) && (
             <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5 space-y-2">
               <h2 className="font-semibold text-gray-800">Bio</h2>
               <p className="text-sm text-gray-600">{teacher.bio as string}</p>
@@ -312,7 +312,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Student</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Date &amp; Time</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
               </tr>
@@ -371,11 +371,11 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                   <tr key={inv.id} className="border-b border-gray-50">
                     <td className="px-4 py-3 text-gray-800">{inv.month}</td>
                     <td className="px-4 py-3 text-gray-600">
-                      {inv.total_amount != null ? `€${inv.total_amount}` : '—'}
+                      {inv.total_amount != null ? `â‚¬${inv.total_amount}` : 'â€“'}
                     </td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">
-                        {inv.status ?? '—'}
+                        {inv.status ?? 'â€“'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
@@ -417,8 +417,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                     <td className="px-4 py-3 font-medium text-gray-800">
                       {entry.field_name.replace(/_/g, ' ')}
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{entry.old_value || '—'}</td>
-                    <td className="px-4 py-3 text-gray-800">{entry.new_value || '—'}</td>
+                    <td className="px-4 py-3 text-gray-500">{entry.old_value || 'â€“'}</td>
+                    <td className="px-4 py-3 text-gray-800">{entry.new_value || 'â€“'}</td>
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(entry.changed_at).toLocaleString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',

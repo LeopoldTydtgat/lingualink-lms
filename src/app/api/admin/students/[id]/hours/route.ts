@@ -35,9 +35,14 @@ export async function POST(
       .eq('id', user.id)
       .single()
 
+    // adminProfile could be null if the query returns no row â€” guard here
+    if (!adminProfile) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
     const isAdmin =
-      adminProfile?.role === 'admin' ||
-      (adminProfile?.account_types ?? []).includes('school_admin')
+      adminProfile.role === 'admin' ||
+      (adminProfile.account_types ?? []).includes('school_admin')
 
     if (!isAdmin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -83,10 +88,10 @@ export async function POST(
     if (action === 'add') {
       newTotalHours = newTotalHours + amount
     } else {
-      // 'remove' — deduct from available balance by increasing hours_consumed
+      // 'remove' â€” deduct from available balance by increasing hours_consumed
       if (amount > currentBalance) {
         return NextResponse.json(
-          { error: `Cannot remove ${amount}h — only ${currentBalance}h available.` },
+          { error: `Cannot remove ${amount}h â€” only ${currentBalance}h available.` },
           { status: 400 }
         )
       }
@@ -120,11 +125,11 @@ export async function POST(
         balance_after: newBalance,
         invoice_reference: invoice_reference ?? null,
         notes: notes ?? null,
-        created_by: adminProfile.id,
+        created_by: adminProfile.id, // safe â€” null guard is above
       })
 
     if (logError) {
-      // Non-fatal — training is already updated. Log the error but don't fail.
+      // Non-fatal â€” training is already updated. Log the error but don't fail.
       console.error('hours_log insert error:', logError)
     }
 
