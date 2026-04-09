@@ -13,17 +13,9 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
 
   return (
     <header
-      className="flex items-center justify-between px-6 shrink-0 z-10"
-      style={{ backgroundColor: '#FF8303', height: '72px', borderBottom: '3px solid #FF8303' }}
+      className="flex items-center justify-end px-6 shrink-0 z-10"
+      style={{ background: 'linear-gradient(to right, #fff3e8, #FF8303 40%)', height: '72px' }}
     >
-      <Image
-        src="/lingualink-logo.svg"
-        alt="Lingualink Online"
-        width={220}
-        height={126}
-        style={{ height: '52px', width: 'auto' }}
-        priority
-      />
       <div className="flex items-center gap-4">
         <span className="text-sm font-medium" style={{ color: '#ffffff' }}>
           Hello {firstName}!
@@ -32,7 +24,7 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
           {teacherPhotoUrl ? (
             <Image
               src={teacherPhotoUrl}
-              alt={`${teacherName}'s profile photo`}
+              alt={`${teacherName} profile photo`}
               width={36}
               height={36}
               className="rounded-full object-cover border-2 border-white hover:border-orange-100 transition-colors"
@@ -50,4 +42,5 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
     </header>
   )
 }
+
 

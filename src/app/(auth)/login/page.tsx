@@ -1,11 +1,10 @@
-'use client'
+﻿'use client'
 
 import { useState } from 'react'
 import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
@@ -14,10 +13,7 @@ export default function LoginPage() {
   async function handleSubmit(formData: FormData) {
     setError(null)
     setLoading(true)
-
     const result = await signIn(formData)
-
-    // signIn either redirects on success, or returns an error object
     if (result?.error) {
       setError(result.error)
       setLoading(false)
@@ -25,77 +21,126 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#E0DFDC]">
-      <Card className="w-full max-w-md shadow-lg border-0">
-        <CardHeader className="text-center pb-2 pt-8">
+    <>
+      <style>{`html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }`}</style>
+      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', fontFamily: 'Inter, sans-serif' }}>
 
-          {/* Logo placeholder — swap this out when Shannon supplies the SVG */}
-          <div className="flex justify-center mb-6">
-            <div className="text-2xl font-bold text-[#FF8303] tracking-tight">
-              LinguaLink Online
+        {/* Orange accent stripe — left edge */}
+        <div style={{ width: '4px', backgroundColor: '#FF8303', flexShrink: 0 }} />
+
+        {/* Left — white form panel */}
+        <div style={{
+          width: 'calc(48% - 4px)',
+          backgroundColor: '#ffffff',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '0 56px',
+          flexShrink: 0,
+        }}>
+          <div style={{ width: '100%', maxWidth: '380px' }}>
+
+            <div style={{ marginBottom: '48px' }}>
+              <img
+                src="/lingualink-logo-clean.svg"
+                alt="Lingualink Online"
+                style={{ height: '72px', width: 'auto' }}
+              />
             </div>
+
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>
+              Sign in
+            </h1>
+            <p style={{ fontSize: '14px', color: '#6b7280', margin: '0 0 32px' }}>
+              Teacher Portal — enter your credentials
+            </p>
+
+            <form action={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <Label htmlFor="email" style={{ fontSize: '14px', fontWeight: 500, color: '#374151' }}>
+                  Email address
+                </Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  placeholder="you@lingualinkonline.com"
+                  required
+                  autoComplete="email"
+                  style={{ height: '44px', fontSize: '14px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <Label htmlFor="password" style={{ fontSize: '14px', fontWeight: 500, color: '#374151' }}>
+                  Password
+                </Label>
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  placeholder="••••••••"
+                  required
+                  autoComplete="current-password"
+                  style={{ height: '44px', fontSize: '14px' }}
+                />
+              </div>
+
+              {error && (
+                <p style={{ fontSize: '13px', color: '#FD5602', backgroundColor: '#fff4f0', padding: '10px 14px', borderRadius: '6px', margin: 0 }}>
+                  {error}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                disabled={loading}
+                style={{
+                  height: '44px',
+                  backgroundColor: loading ? '#ffb366' : '#FF8303',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  fontSize: '15px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  width: '100%',
+                  marginTop: '4px',
+                }}
+              >
+                {loading ? 'Signing in...' : 'Sign in'}
+              </Button>
+            </form>
+
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
+              Forgot your password? Contact{' '}
+              <span style={{ color: '#FF8303', fontWeight: 500 }}>admin@lingualinkonline.com</span>
+            </p>
           </div>
+        </div>
 
-          <h1 className="text-xl font-semibold text-black">
-            Teacher Portal
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Sign in to your account
+        {/* Right — dark brand panel */}
+        <div style={{
+          flex: 1,
+          backgroundColor: '#111827',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-start',
+          justifyContent: 'flex-end',
+          padding: '56px 56px',
+        }}>
+          <div style={{ width: '52px', height: '4px', backgroundColor: '#FF8303', borderRadius: '2px', marginBottom: '24px' }} />
+          <p style={{ color: '#ffffff', fontSize: '32px', fontWeight: 700, lineHeight: 1.3, margin: '0 0 16px' }}>
+            Better English.<br />
+            <span style={{ color: '#FF8303' }}>Better opportunities.</span>
           </p>
-        </CardHeader>
-
-        <CardContent className="px-8 pb-8 pt-4">
-          <form action={handleSubmit} className="space-y-4">
-
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Email address</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="you@lingualinkonline.com"
-                required
-                autoComplete="email"
-                className="h-10"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="••••••••"
-                required
-                autoComplete="current-password"
-                className="h-10"
-              />
-            </div>
-
-            {/* Only shows if login fails */}
-            {error && (
-              <p className="text-sm text-[#FD5602] bg-red-50 px-3 py-2 rounded-md">
-                {error}
-              </p>
-            )}
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="w-full h-10 bg-[#FF8303] hover:bg-[#e67300] text-white font-medium mt-2"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </Button>
-
-          </form>
-
-          <p className="text-center text-xs text-gray-400 mt-6">
-            Forgot your password? Contact{' '}
-            <span className="text-[#FF8303]">admin@lingualinkonline.com</span>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '15px', lineHeight: 1.8, margin: 0, maxWidth: '340px' }}>
+            Personalised online English lessons for business professionals, everyday learners, and students of all levels.
           </p>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+
+      </div>
+    </>
   )
 }

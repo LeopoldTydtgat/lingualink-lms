@@ -29,7 +29,6 @@ export default async function StudentDashboardLayout({
   if (!student) redirect('/student/login')
   if (!student.is_active) redirect('/student/login')
 
-  // Next scheduled lesson — for countdown and join button in right panel
   const { data: nextLesson } = await supabase
     .from('lessons')
     .select('scheduled_at, teams_join_url, duration_minutes')
@@ -39,7 +38,6 @@ export default async function StudentDashboardLayout({
     .limit(1)
     .maybeSingle()
 
-  // Active training — for hours balance and end date
   const { data: training } = await supabase
     .from('trainings')
     .select('total_hours, hours_consumed, end_date')
@@ -49,7 +47,6 @@ export default async function StudentDashboardLayout({
     .limit(1)
     .maybeSingle()
 
-  // Exercise counts — assigned vs completed
   const { count: assignedCount } = await supabase
     .from('assignments')
     .select('*', { count: 'exact', head: true })
@@ -64,14 +61,12 @@ export default async function StudentDashboardLayout({
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
 
-  // Admin profile ID — used by ChatWidget to pre-connect to Shannon's conversation
   const { data: adminProfile } = await supabase
     .from('profiles')
     .select('id, full_name, photo_url')
     .eq('role', 'admin')
     .single()
 
-  // ── Announcements ────────────────────────────────────────────────────────
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
@@ -96,41 +91,38 @@ export default async function StudentDashboardLayout({
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <StudentTopHeader
-        studentName={student.full_name}
-        photoUrl={student.photo_url ?? null}
-      />
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <StudentLeftNav />
-        <main
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            backgroundColor: '#f9fafb',
-          }}
-        >
-          <AnnouncementBanner
-            announcements={announcements}
-            userType="student"
-            userId={student.id}
-          />
-          <div style={{ padding: '32px' }}>
-            {children}
-          </div>
-        </main>
-        {/* Help & Support section removed from StudentRightPanel —
-            the ChatWidget floating bubble handles it now */}
-        <StudentRightPanel
-          studentId={student.id}
-          nextLesson={nextLesson ?? null}
-          hoursRemaining={hoursRemaining}
-          trainingEndDate={training?.end_date ?? null}
-          assignedExercises={assignedCount ?? 0}
-          completedExercises={completedCount ?? 0}
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      {/* Sidebar runs full height - logo lives here */}
+      <StudentLeftNav />
+
+      {/* Right side: header on top, then content row below */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        <StudentTopHeader
+          studentName={student.full_name}
+          photoUrl={student.photo_url ?? null}
         />
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          <main style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
+            <AnnouncementBanner
+              announcements={announcements}
+              userType="student"
+              userId={student.id}
+            />
+            <div style={{ padding: '32px' }}>
+              {children}
+            </div>
+          </main>
+          <StudentRightPanel
+            studentId={student.id}
+            nextLesson={nextLesson ?? null}
+            hoursRemaining={hoursRemaining}
+            trainingEndDate={training?.end_date ?? null}
+            assignedExercises={assignedCount ?? 0}
+            completedExercises={completedCount ?? 0}
+          />
+        </div>
       </div>
-      {/* Floating chat widget — student portal server actions passed as props */}
+
       <ChatWidget
         currentUserId={student.id}
         currentUserName={student.full_name}

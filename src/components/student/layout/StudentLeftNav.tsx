@@ -1,6 +1,7 @@
-'use client'
+﻿'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -38,14 +39,30 @@ export default function StudentLeftNav() {
         width: '220px',
         minWidth: '220px',
         backgroundColor: '#ffffff',
-        borderRight: '1px solid #E0DFDC',
+        borderRight: 'none',
         display: 'flex',
         flexDirection: 'column',
-        padding: '16px 0',
         flexShrink: 0,
+        height: '100vh',
       }}
     >
-      <div style={{ flex: 1 }}>
+      {/* Logo area - matches the height of the orange header on the right */}
+      <div
+        style={{
+          height: '72px', background: 'linear-gradient(to right, #ffffff, #fff3e8)',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 16px', justifyContent: 'center',
+          
+          flexShrink: 0,
+        }}
+      >
+        <Link href="/student/my-classes" style={{ display: 'flex' }}>
+          <img src="/lingualink-logo-clean.svg" alt="Lingualink Online" style={{ height: '56px', width: 'auto' }} />
+        </Link>
+      </div>
+
+      <div style={{ flex: 1, padding: '12px 0', overflowY: 'auto', borderRight: '1px solid #E0DFDC', borderTop: 'none' }}>
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + '/')
@@ -81,7 +98,7 @@ export default function StudentLeftNav() {
 
       <div
         style={{
-          borderTop: '1px solid #E0DFDC',
+          borderTop: '1px solid #E0DFDC', borderRight: '1px solid #E0DFDC',
           padding: '8px 8px 0',
         }}
       >
@@ -110,3 +127,10 @@ export default function StudentLeftNav() {
     </nav>
   )
 }
+
+
+
+
+
+
+

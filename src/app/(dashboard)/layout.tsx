@@ -24,9 +24,6 @@ export default async function DashboardLayout({
     .eq('id', user.id)
     .single()
 
-  // ── Next lesson for this teacher ─────────────────────────────────────────
-  // Fetch the soonest upcoming scheduled lesson, joined to the student name.
-  // Two-query pattern to avoid ambiguous nested join issues.
   const { data: lessonRow } = await supabase
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, teams_join_url, student_id')
@@ -55,21 +52,18 @@ export default async function DashboardLayout({
     }
   }
 
-  // ── Unread message count ─────────────────────────────────────────────────
   const { count: unreadCount } = await supabase
     .from('messages')
     .select('*', { count: 'exact', head: true })
     .eq('receiver_id', user.id)
     .is('read_at', null)
 
-  // ── Admin profile ────────────────────────────────────────────────────────
   const { data: adminProfile } = await supabase
     .from('profiles')
     .select('id, full_name, photo_url')
     .eq('role', 'admin')
     .single()
 
-  // ── Announcements ────────────────────────────────────────────────────────
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
@@ -94,32 +88,38 @@ export default async function DashboardLayout({
   })
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 font-sans">
-      <TopHeader
-        teacherName={profile?.full_name ?? 'Teacher'}
-        teacherPhotoUrl={profile?.photo_url ?? null}
+    <div className="flex h-screen bg-gray-50 font-sans overflow-hidden">
+      {/* Sidebar runs full height - logo lives here */}
+      <LeftNav
+        userRole={profile?.role ?? 'teacher'}
+        unreadMessageCount={unreadCount ?? 0}
       />
-      <div className="flex flex-1 overflow-hidden">
-        <LeftNav
-          userRole={profile?.role ?? 'teacher'}
-          unreadMessageCount={unreadCount ?? 0}
+
+      {/* Right side: header on top, then content row below */}
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <TopHeader
+          teacherName={profile?.full_name ?? 'Teacher'}
+          teacherPhotoUrl={profile?.photo_url ?? null}
         />
-        <main className="flex-1 overflow-y-auto bg-gray-50">
-          <AnnouncementBanner
+        <div className="flex flex-1 overflow-hidden">
+          <main className="flex-1 overflow-y-auto bg-gray-50">
+            <AnnouncementBanner
+              announcements={announcements}
+              userType="teacher"
+              userId={user.id}
+            />
+            <div className="p-6">
+              {children}
+            </div>
+          </main>
+          <RightPanel
+            teacherId={profile?.id ?? null}
             announcements={announcements}
-            userType="teacher"
-            userId={user.id}
+            nextLesson={nextLesson}
           />
-          <div className="p-6">
-            {children}
-          </div>
-        </main>
-        <RightPanel
-          teacherId={profile?.id ?? null}
-          announcements={announcements}
-          nextLesson={nextLesson}
-        />
+        </div>
       </div>
+
       <ChatWidget
         currentUserId={profile?.id ?? ''}
         currentUserName={profile?.full_name ?? 'Teacher'}

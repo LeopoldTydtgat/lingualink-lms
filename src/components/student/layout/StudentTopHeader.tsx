@@ -15,17 +15,16 @@ export default function StudentTopHeader({
 
   return (
     <header
-      className="flex items-center justify-between px-6 shrink-0 z-10"
-      style={{ backgroundColor: '#FF8303', height: '72px', borderBottom: '3px solid #FF8303' }}
+      style={{
+        background: 'linear-gradient(to right, #fff3e8, #FF8303 40%)',
+        height: '72px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        padding: '0 24px',
+        flexShrink: 0,
+      }}
     >
-      <Image
-        src="/lingualink-logo.svg"
-        alt="Lingualink Online"
-        width={220}
-        height={126}
-        style={{ height: '52px', width: 'auto' }}
-        priority
-      />
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>
           Hello {firstName}!
@@ -65,3 +64,5 @@ export default function StudentTopHeader({
     </header>
   )
 }
+
+
