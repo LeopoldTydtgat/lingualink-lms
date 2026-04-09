@@ -69,7 +69,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
           </button>
           <span className="text-gray-300">/</span>
           <h1 className="text-2xl font-bold text-gray-900">{company.name as string}</h1>
-          {company.status && (
+          {(company.status as string) && (
             <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
               style={{ backgroundColor: '#dcfce7', color: '#166534' }}>
               {company.status as string}

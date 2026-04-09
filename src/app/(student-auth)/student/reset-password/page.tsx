@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createBrowserSupabaseClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/client'
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -13,7 +13,7 @@ export default function ResetPasswordPage() {
   const [sessionReady, setSessionReady] = useState(false)
   const [isPending, startTransition] = useTransition()
 
-  const supabase = createBrowserSupabaseClient()
+  const supabase = createClient()
 
   // Supabase automatically exchanges the token in the URL hash for a session
   // We wait for that to happen before showing the form

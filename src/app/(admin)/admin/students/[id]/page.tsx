@@ -61,7 +61,7 @@ export default async function StudentDetailPage({
 
   // Flatten training — use active training or most recent
   const trainingsArr = Array.isArray(student.trainings) ? student.trainings : []
-  const activeTrain = trainingsArr.find((t) => t.status === 'active') ?? trainingsArr[0] ?? null
+  const activeTrain = trainingsArr.find((t: any) => t.status === 'active') ?? trainingsArr[0] ?? null
 
   // Flatten assigned teachers from training_teachers
   const assignedTeachers: { id: string; full_name: string }[] = []
