@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function formatDateTimeCSV(dateStr: string): string {
   const d = new Date(dateStr)
@@ -72,7 +72,7 @@ function lessonAmount(durationMinutes: number, hourlyRate: number): number {
   return Math.round((durationMinutes / 60) * hourlyRate * 100) / 100
 }
 
-// ── Route ─────────────────────────────────────────────────────────────────
+// â”€â”€ Route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
   let csv = ''
   let filename = 'export.csv'
 
-  // ── 1. Teacher Invoice Summary ────────────────────────────────────────
+  // â”€â”€ 1. Teacher Invoice Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (type === 'teacher_invoices') {
     let query = supabase
       .from('invoices')
@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
 
     const { data: invoices } = await query
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount (€)', 'Status', 'Uploaded At', 'Paid At']
+    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount (â‚¬)', 'Status', 'Uploaded At', 'Paid At']
     const rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return [
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
     filename = 'teacher-invoices.csv'
   }
 
-  // ── 2. Teacher Earnings Summary ───────────────────────────────────────
+  // â”€â”€ 2. Teacher Earnings Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   else if (type === 'teacher_earnings') {
     const { data: teachers } = await supabase
       .from('profiles')
@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    // Group lessons by teacher × month
+    // Group lessons by teacher Ã— month
     const earningsMap: Record<string, {
       teacherName: string
       teacherEmail: string
@@ -197,7 +197,7 @@ export async function GET(req: NextRequest) {
       entry.totalOwed += lessonAmount(lesson.duration_minutes, teacher.hourly_rate || 0)
     }
 
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed (€)']
+    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (â‚¬)', 'Total Owed (â‚¬)']
     const rows = Object.values(earningsMap).map(e => [
       e.teacherName,
       e.teacherEmail,
@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
     filename = 'teacher-earnings.csv'
   }
 
-  // ── 3. Student Hours Usage ────────────────────────────────────────────
+  // â”€â”€ 3. Student Hours Usage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   else if (type === 'student_hours') {
     let studentsQuery = supabase
       .from('students')
@@ -250,7 +250,7 @@ export async function GET(req: NextRequest) {
     filename = 'student-hours.csv'
   }
 
-  // ── 4. Company Billing Report ─────────────────────────────────────────
+  // â”€â”€ 4. Company Billing Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   else if (type === 'company_billing') {
     let companiesQuery = supabase
       .from('companies')
@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount (€)']
+    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount (â‚¬)']
     const rows: (string | number | boolean | null)[][] = []
 
     for (const company of (companies || [])) {
@@ -300,8 +300,6 @@ export async function GET(req: NextRequest) {
 
           const teacher = Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
 
-          // We need the teacher's hourly rate for the amount
-          // Amount is only shown for billable-to-teacher rows; 48hr rows show 0 (teacher not paid)
           rows.push([
             company.name,
             student.full_name,
@@ -320,7 +318,7 @@ export async function GET(req: NextRequest) {
     filename = 'company-billing.csv'
   }
 
-  // ── 5. Student Progress Report ────────────────────────────────────────
+  // â”€â”€ 5. Student Progress Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   else if (type === 'student_progress') {
     let reportsQuery = supabase
       .from('reports')
@@ -336,13 +334,17 @@ export async function GET(req: NextRequest) {
     const headers = ['Student', 'Class Date', 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
     const rows = (reports || []).map(r => {
       const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
-      const teacher = lesson ? (Array.isArray((lesson as { profiles: unknown }).profiles) ? (lesson as { profiles: { full_name: string }[] }).profiles[0] : (lesson as { profiles: { full_name: string } }).profiles) : null
+      // Use unknown as intermediate to safely bridge the arrayâ†’object cast for nested profiles
+      const lessonWithProfiles = lesson as unknown as { scheduled_at: string; profiles: { full_name: string }[] } | null
+      const teacher = lessonWithProfiles
+        ? (Array.isArray(lessonWithProfiles.profiles) ? lessonWithProfiles.profiles[0] : null)
+        : null
       const student = Array.isArray(r.students) ? r.students[0] : r.students
       const ld = (r.level_data as Record<string, string>) || {}
       return [
         (student as { full_name: string } | null)?.full_name || '',
-        lesson?.scheduled_at ? formatDateTimeCSV(lesson.scheduled_at) : '',
-        (teacher as { full_name: string } | null)?.full_name || '',
+        lessonWithProfiles?.scheduled_at ? formatDateTimeCSV(lessonWithProfiles.scheduled_at) : '',
+        teacher?.full_name || '',
         ld.grammar || '',
         ld.expression || '',
         ld.comprehension || '',
@@ -357,7 +359,7 @@ export async function GET(req: NextRequest) {
     filename = 'student-progress.csv'
   }
 
-  // ── 6. Pending Reports Log ────────────────────────────────────────────
+  // â”€â”€ 6. Pending Reports Log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   else if (type === 'pending_reports') {
     let query = supabase
       .from('lessons')
