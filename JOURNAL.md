@@ -4,6 +4,53 @@
 
 ---
 
+## Session 41 - 10 April 2026 - Step 14 Hardening Pass (Items 1–8)
+
+### What was built
+
+- **Item 1 (carried over):** Fixed all TypeScript errors across 8 files, removed `ignoreBuildErrors` and ESLint suppression flags from `next.config.ts`. Clean `tsc --noEmit` and clean `npx next build` achieved.
+- **Item 2 - Server-side input validation:** Created `src/lib/validation/schemas.ts` using Zod 4 with schemas for `CreateTeacherSchema`, `CreateStudentSchema`, `HoursAdjustmentSchema`, and `BookClassSchema`. Applied to four high-priority API routes: `admin/teachers`, `admin/students`, `admin/students/[id]/hours`, and `student/book`. Raw `body` is no longer passed directly to Supabase in any of these routes — all input flows through `parsed.data`.
+- **Item 3 - File upload restrictions:** Audited all upload handlers across the codebase. Teacher and student photo uploads already had type and size checks. Added missing 10MB size check to `handleTemplateUpload` in both `BillingClient.tsx` and `BillingAdminClient.tsx`.
+- **Item 4 - Rate limiting on login:** Created `src/lib/rate-limit.ts` - an in-memory rate limiter tracking failed attempts per IP. Applied to both teacher (`/login/actions.ts`) and student (`/student/login/actions.ts`) login actions. 5 failed attempts within 15 minutes triggers a 15-minute lockout. Also fixed the teacher login action which was previously returning raw Supabase error messages to the browser, leaking whether an email address exists.
+- **Item 5 - Security headers:** Updated `next.config.ts` with a full security header set: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Strict-Transport-Security`, `Permissions-Policy`, and a Content Security Policy covering `script-src`, `style-src`, `font-src`, `img-src`, `connect-src`, `form-action`, and `frame-ancestors`. Supabase hostname derived dynamically from `NEXT_PUBLIC_SUPABASE_URL`.
+- **Item 6 - RLS policy audit:** Full audit of all 26 tables. Fixed 4 critical issues (profiles exposed to all users, students exposed to all authenticated users, all lessons visible to all users, students could insert lessons with any field values), 5 high issues (student_reviews ownership gaps, training_teachers fully exposed, students had no UPDATE policy, availability_overrides and availability_templates had zero policies), and multiple medium issues (duplicate policies, public-role policies). Strengthened `is_admin()` function to also check `account_types` array for `school_admin`.
+- **Item 7 - Security gap review:** Identified that column-level REVOKE was being silently ignored due to table-level grants. Created `src/lib/supabase/admin.ts` - a service role client factory for server-only admin operations. Migrated 7 admin server component pages from anon key to service role key. Created `/api/admin/billing/entities/route.ts` - a new API route that serves `hourly_rate` (teachers) and `cancellation_policy` (students) server-side only, replacing direct browser client queries in `BillingAdminClient.tsx`. Applied column-level REVOKE on `students` (blocking SELECT on `admin_notes`, `cancellation_policy`, `follow_up_date`, `follow_up_reason`) and `profiles` (blocking SELECT on `admin_notes`, `hourly_rate`, `follow_up_date`, `follow_up_reason`, `date_of_birth`, `contract_start`, `orientation_date`, `observed_lesson_date`, `vat_required`) for the authenticated role. Verified with SQL that sensitive columns no longer appear in authenticated SELECT grants.
+- **Item 8 - NEXT_PUBLIC_SITE_URL:** Added `NEXT_PUBLIC_SITE_URL=https://lingualink-lms.vercel.app` to Vercel environment variables across all environments.
+- **Production deployment fix:** Merged `dev` into `main` and pushed to GitHub, triggering a Vercel production build. Previously the production URL was returning 404 on all routes.
+
+### Break/Fix Log
+
+**Issue 1**
+- Symptom: `npx tsc --noEmit` returned 2 errors after placing `schemas.ts` — `errorMap` property not recognised on `z.enum()` and `z.union()`
+- Cause: Zod v4 renamed `errorMap` to `error` in the params object
+- Fix: Replaced `{ errorMap: () => ({ message: '...' }) }` with `{ error: '...' }` in both locations
+- Lesson: Always check breaking changes when a major version is already installed. Zod v4 has several API differences from v3.
+
+**Issue 2**
+- Symptom: Column-level REVOKE on `students` did not remove SELECT from the authenticated role - sensitive columns remained readable
+- Cause: PostgreSQL ignores column-level REVOKEs when a table-level SELECT grant exists. The table-level grant takes precedence.
+- Fix: REVOKE ALL on the table first, then GRANT back only the safe columns explicitly
+- Lesson: Column-level security in PostgreSQL requires revoking the table-level grant first. REVOKE on individual columns alone has no effect if a blanket table grant is in place.
+
+**Issue 3**
+- Symptom: PowerShell regex replacement of template upload size check failed silently across two attempts
+- Cause: Line ending mismatch between PowerShell's multiline regex and the file's actual `\n` endings
+- Fix: Made the edit manually in Cursor - two-line addition in each file
+- Lesson: For small targeted edits in files with bracket paths or line ending sensitivity, direct editor edits are faster than PowerShell regex
+
+**Issue 4**
+- Symptom: Git merge opened vim editor mid-PowerShell session
+- Cause: Merge commit required a message and git's default editor is vim
+- Fix: Typed `:wq` to save and exit vim
+- Lesson: For future merges without a message prompt, use `git merge dev --no-edit`
+
+### Session result
+
+This session completed items 1 through 8 of the Step 14 hardening pass. The most significant work was the security audit - the RLS policy review uncovered four critical gaps that would have allowed any authenticated user to read sensitive admin data including `admin_notes`, `cancellation_policy`, and `hourly_rate` directly from the browser. These were resolved through a combination of corrected RLS policies, a new service role client architecture for admin server components, a dedicated billing entities API route, and PostgreSQL column-level grants. The production deployment issue that had been blocking go-live testing since the previous session was also resolved by merging `dev` into `main`. Items 9 (responsive pass) and 10 (class reminder modal) remain, followed by the client's UI fix list.
+
+
+---
+
 ## Session 40 - 09 April 2026 - Portal UI overhaul: headers, login pages, and nav layout
 
 ### What was built
