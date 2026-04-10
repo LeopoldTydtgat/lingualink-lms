@@ -94,15 +94,20 @@ function getStudentName(lesson: Lesson): string {
 }
 
 // Calculate the billable amount for a set of lessons at a given hourly rate
-// Formula: (duration_minutes / 60) × hourly_rate, summed across all lessons
 function calculateAmount(lessons: Lesson[], hourlyRate: number): number {
   const total = lessons.reduce((sum, lesson) => {
     return sum + (lesson.duration_minutes / 60) * hourlyRate
   }, 0)
-  return Math.round(total * 100) / 100 // round to 2 decimal places
+  return Math.round(total * 100) / 100
 }
 
-export default function BillingClient({ profile }: { profile: Profile }) {
+export default function BillingClient({
+  profile,
+  billingInfo: initialBillingInfo,
+}: {
+  profile: Profile
+  billingInfo: BillingInfoDisplay | null
+}) {
   const supabase = createClient()
   const isAdmin = profile.role === 'admin'
 
@@ -113,20 +118,18 @@ export default function BillingClient({ profile }: { profile: Profile }) {
   const [activeView, setActiveView] = useState<'billing' | 'billingInfo' | 'admin'>('billing')
   const [allInvoices, setAllInvoices] = useState<Invoice[]>([])
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null)
-  // All lessons pre-loaded and grouped by billing month key (YYYY-MM-01)
   const [lessonsByMonth, setLessonsByMonth] = useState<Record<string, Lesson[]>>({})
 
-  // Single hidden file input shared across all upload buttons
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [targetInvoice, setTargetInvoice] = useState<{ id: string; billing_month: string } | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null)
 
-  const [billingInfo, setBillingInfo] = useState<BillingInfoDisplay | null>(null)
+  // FIX: initialised from server-side prop instead of fetched client-side
+  const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
 
-  // Admin
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
     { teacher: { id: string; full_name: string; email: string }; invoices: Invoice[] }[]
   >([])
@@ -135,7 +138,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
 
-  // ─── Auto-create invoice record for current month ─────────────────────
   const ensureCurrentInvoice = useCallback(async () => {
     const { data: existing } = await supabase
       .from('invoices')
@@ -155,30 +157,18 @@ export default function BillingClient({ profile }: { profile: Profile }) {
     }
   }, [profile.id, currentMonthDate])
 
-  // ─── Main data load ───────────────────────────────────────────────────
   const loadData = useCallback(async () => {
     await ensureCurrentInvoice()
 
-    // Fetch invoices and profile (including hourly_rate) in parallel
-    const [{ data: invoicesData }, { data: profileData }] = await Promise.all([
-      supabase
-        .from('invoices')
-        .select('*')
-        .eq('teacher_id', profile.id)
-        .order('billing_month', { ascending: false }),
-      supabase
-        .from('profiles')
-        .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate')
-        .eq('id', profile.id)
-        .single(),
-    ])
+    // FIX: removed profiles fetch from here — billingInfo now comes from server as prop
+    const { data: invoicesData } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('teacher_id', profile.id)
+      .order('billing_month', { ascending: false })
 
-    if (profileData) setBillingInfo(profileData)
+    const hourlyRate = billingInfo?.hourly_rate ?? 0
 
-    const hourlyRate = profileData?.hourly_rate ?? 0
-
-    // Load ALL billable lessons in a single query — grouped client-side by month.
-    // This avoids multiple per-month queries and makes "See Detail" instant.
     const { data: allLessons } = await supabase
       .from('lessons')
       .select('id, scheduled_at, duration_minutes, status, students(full_name)')
@@ -186,7 +176,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
       .in('status', ['completed', 'student_no_show'])
       .order('scheduled_at', { ascending: true })
 
-    // Group lessons by billing month key (first day of that month, YYYY-MM-01)
     const grouped: Record<string, Lesson[]> = {}
     for (const lesson of (allLessons as Lesson[]) || []) {
       const d = new Date(lesson.scheduled_at)
@@ -196,15 +185,11 @@ export default function BillingClient({ profile }: { profile: Profile }) {
     }
     setLessonsByMonth(grouped)
 
-    // Auto-calculate and save amount_eur for every invoice.
-    // This runs on every page load so the current month's total stays live
-    // and past months stay accurate in case a report was ever corrected.
     if (hourlyRate > 0 && invoicesData) {
       const updates = invoicesData
         .map(invoice => {
           const lessons = grouped[invoice.billing_month] || []
           const calculated = calculateAmount(lessons, hourlyRate)
-          // Only write if the stored value differs (avoids unnecessary DB writes)
           if (invoice.amount_eur === calculated) return null
           return supabase
             .from('invoices')
@@ -215,7 +200,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
 
       if (updates.length > 0) {
         await Promise.all(updates)
-        // Reload invoices so the UI shows the freshly calculated amounts
         const { data: refreshed } = await supabase
           .from('invoices')
           .select('*')
@@ -229,7 +213,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
       setAllInvoices(invoicesData || [])
     }
 
-    // Invoice template download URL
     const { data: settingsData } = await supabase
       .from('settings')
       .select('value')
@@ -240,12 +223,12 @@ export default function BillingClient({ profile }: { profile: Profile }) {
       const { data: urlData } = supabase.storage.from('templates').getPublicUrl(settingsData.value)
       setTemplateUrl(urlData.publicUrl)
     }
-  }, [profile.id, currentMonthDate])
+  }, [profile.id, currentMonthDate, billingInfo])
 
-  // ─── Load admin data ──────────────────────────────────────────────────
   const loadAdminData = useCallback(async () => {
     if (!isAdmin) return
 
+    // FIX: removed profiles fetch — use server-side data where possible
     const { data: teachers } = await supabase
       .from('profiles')
       .select('id, full_name, email')
@@ -270,7 +253,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (activeView === 'admin') loadAdminData() }, [activeView, loadAdminData])
 
-  // ─── Upload: set target invoice then open file picker ─────────────────
   const triggerUpload = (invoiceId: string, billingMonth: string) => {
     setTargetInvoice({ id: invoiceId, billing_month: billingMonth })
     setUploadError(null)
@@ -321,7 +303,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
-  // ─── Admin: template upload ───────────────────────────────────────────
   const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || file.type !== 'application/pdf') return
@@ -342,8 +323,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
     setUploadingTemplate(false)
   }
 
-  // ─── Admin: mark invoice as paid ─────────────────────────────────────
-  // Amount is already calculated automatically — Shannon just confirms payment
   const handleMarkPaid = async (invoiceId: string) => {
     setSavingPaid(true)
     await supabase
@@ -355,7 +334,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
     await loadAdminData()
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────
   return (
     <div className="p-6 max-w-5xl">
 
@@ -397,7 +375,7 @@ export default function BillingClient({ profile }: { profile: Profile }) {
         </div>
       </div>
 
-      {/* ── MY INVOICES ─────────────────────────────────────────────────── */}
+      {/* ── MY INVOICES ─────────────────────────────────────────────────────── */}
       {activeView === 'billing' && (
         <div>
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 mb-4">
@@ -418,7 +396,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
             )}
           </div>
 
-          {/* Invoice cards */}
           {allInvoices.map(invoice => {
             const isCurrentMonth = invoice.billing_month === currentMonthDate
             const isExpanded = expandedInvoice === invoice.id
@@ -433,7 +410,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                   ? { borderColor: '#FF8303', backgroundColor: '#fff9f5' }
                   : { borderColor: '#e5e7eb', backgroundColor: 'white' }}
               >
-                {/* Top: ref, month, amount, status, See Detail */}
                 <div className="p-4">
                   <div className="flex items-start justify-between">
                     <div>
@@ -448,7 +424,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      {/* Amount — auto-calculated from lessons × hourly rate */}
                       <span className="text-base font-medium text-gray-700">
                         {invoice.amount_eur != null
                           ? `€${Number(invoice.amount_eur).toFixed(2)}`
@@ -470,7 +445,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                   </div>
                 </div>
 
-                {/* Expanded: itemised lesson list */}
                 {isExpanded && (
                   <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
                     {lessons.length === 0 ? (
@@ -499,7 +473,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                   </div>
                 )}
 
-                {/* Bottom: upload / view actions */}
                 <div className="border-t border-gray-100 px-4 py-3 flex items-center gap-4">
                   {invoice.file_path ? (
                     <>
@@ -537,7 +510,7 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                       </button>
                       <div className="flex items-center gap-1.5 text-sm text-gray-400">
                         <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                         </svg>
                         Please upload your invoice
                       </div>
@@ -563,7 +536,7 @@ export default function BillingClient({ profile }: { profile: Profile }) {
         </div>
       )}
 
-      {/* ── MY BILLING INFO (read-only) ──────────────────────────────────── */}
+      {/* ── MY BILLING INFO ──────────────────────────────────────────────────── */}
       {activeView === 'billingInfo' && (
         <div className="bg-white border border-gray-200 rounded-lg p-6 max-w-lg">
           <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
@@ -624,7 +597,7 @@ export default function BillingClient({ profile }: { profile: Profile }) {
         </div>
       )}
 
-      {/* ── ADMIN VIEW ───────────────────────────────────────────────────── */}
+      {/* ── ADMIN VIEW ───────────────────────────────────────────────────────── */}
       {activeView === 'admin' && isAdmin && (
         <div className="space-y-6">
 
@@ -672,7 +645,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                               {invoice.reference_number || '—'}
                             </span>
                             <span className="font-medium text-gray-900">{formatMonth(invoice.billing_month)}</span>
-                            {/* Amount is auto-calculated — no manual entry needed */}
                             <span className="text-gray-700">
                               {invoice.amount_eur != null ? `€${Number(invoice.amount_eur).toFixed(2)}` : '€0.00'}
                             </span>
@@ -710,7 +682,6 @@ export default function BillingClient({ profile }: { profile: Profile }) {
                           </div>
                         </div>
 
-                        {/* Confirm paid — no amount input needed, it's already calculated */}
                         {markingPaidId === invoice.id && (
                           <div className="mt-3 flex items-center gap-3">
                             <p className="text-sm text-gray-600">
