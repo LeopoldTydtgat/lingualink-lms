@@ -4,7 +4,6 @@ import UpcomingClassesClient from './UpcomingClassesClient'
 
 export default async function UpcomingClassesPage() {
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -13,6 +12,8 @@ export default async function UpcomingClassesPage() {
     .select('*')
     .eq('id', user.id)
     .single()
+
+  if (!profile) redirect('/login')
 
   const { data: rawClasses, error } = await supabase
     .from('classes')
@@ -38,7 +39,6 @@ export default async function UpcomingClassesPage() {
     console.error('Error fetching classes:', error)
   }
 
-  // Supabase returns nested joins as arrays — flatten to single objects
   const classes = (rawClasses ?? []).map((c: any) => ({
     ...c,
     student: Array.isArray(c.student) ? c.student[0] : c.student,

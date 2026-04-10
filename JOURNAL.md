@@ -1,6 +1,27 @@
 # LinguaLink Online - Build Journal
 
+## Session 42 - 10 April 2026 — Vercel 404 Fix
 
+### What was built
+- Diagnosed and resolved Vercel production 404 error affecting all routes (root, /login, /student/login)
+- Merged dev branch into main to sync latest commits (ClassReminderModal, root redirect)
+
+### Break/Fix Log
+
+**Issue 1**
+- **Symptom:** All routes on lingualink-lms.vercel.app returned 404 NOT_FOUND. Vercel logs showed "Middleware: 404 Not Found" even though no middleware file existed. Build logs showed all routes compiled successfully.
+- **Cause:** Vercel Framework Preset was set to "Other" instead of "Next.js". Without the correct preset, Vercel did not know how to serve the Next.js build output, so every route returned 404 despite a successful build.
+- **Fix:** Changed Framework Preset from "Other" to "Next.js" in Vercel → Settings → Build and Deployment, then redeployed without build cache.
+- **Lesson:** Always verify the Vercel Framework Preset matches the actual framework. A successful build does not guarantee correct serving — Vercel needs the preset to know how to route requests to the build output.
+
+**Issue 2**
+- **Symptom:** Latest code changes (root redirect, ClassReminderModal) were not on the production deployment.
+- **Cause:** Commits were on the dev branch but had not been merged into main. Vercel deploys from main.
+- **Fix:** Ran `git checkout main && git merge dev && git push origin main`.
+- **Lesson:** Always merge dev into main before expecting changes on production.
+
+### Session result
+Short diagnostic session focused on resolving the Vercel 404 that was blocking all access to the live deployment. Root cause was the Framework Preset misconfiguration - likely set incorrectly during initial Vercel project setup. Both the teacher portal (/login) and student portal (/student/login) now load correctly on the production URL. No code changes were needed.
 
 ---
 
