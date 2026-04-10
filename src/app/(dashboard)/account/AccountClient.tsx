@@ -24,7 +24,7 @@ import {
 interface Profile {
   id: string
   email: string
-  full_name: string
+  full_name: string | null  // FIX: was string, must be nullable
   role: string
   photo_url: string | null
   timezone: string | null
@@ -351,7 +351,7 @@ function PublicProfileModal({
               {profile.photo_url ? (
                 <img
                   src={profile.photo_url}
-                  alt={profile.full_name}
+                  alt={profile.full_name ?? ''}  // FIX: null-safe
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
@@ -360,7 +360,7 @@ function PublicProfileModal({
             </div>
             <div>
               <h3 style={{ fontSize: '20px', fontWeight: 700, color: '#111', marginBottom: '6px' }}>
-                {profile.full_name}
+                {profile.full_name ?? ''}  {/* FIX: null-safe */}
               </h3>
               {avgRating !== null ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
