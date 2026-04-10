@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import CompanyDetailClient from './CompanyDetailClient'
 
 export default async function CompanyDetailPage({
@@ -9,18 +8,7 @@ export default async function CompanyDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const cookieStore = await cookies()
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
+  const supabase = createAdminClient()
 
   const { data: company, error } = await supabase
     .from('companies')
@@ -31,6 +19,7 @@ export default async function CompanyDetailPage({
   if (error || !company) notFound()
 
   // Fetch students belonging to this company with their active training hours
+  // cancellation_policy is included here — admin-only view of company billing terms
   const { data: students } = await supabase
     .from('students')
     .select(`
@@ -63,7 +52,6 @@ export default async function CompanyDetailPage({
       ? Number(active.total_hours) - Number(active.hours_consumed)
       : null
 
-    // Get assigned teacher names via training_teachers
     const ttArr = Array.isArray(s.training_teachers) ? s.training_teachers : []
     const teacherNames = ttArr
       .map((tt) => {

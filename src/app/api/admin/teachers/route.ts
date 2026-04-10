@@ -3,10 +3,11 @@ import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
+import { CreateTeacherSchema } from '@/lib/validation/schemas'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-// ─── GET — list teachers (supports ?minimal=true&search=name) ─────────────────
+// ─── GET – list teachers (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -63,12 +64,20 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ teachers: teachers ?? [] })
 }
 
-// ─── POST — create teacher (unchanged) ───────────────────────────────────────
+// ─── POST – create teacher ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    // --- 1. Verify the requesting user is an admin ---
+    // ── 1. Validate input ────────────────────────────────────────────────────
+    const parsed = CreateTeacherSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
+      return NextResponse.json({ error: firstError.message }, { status: 400 })
+    }
+    const data = parsed.data
+
+    // ── 2. Verify the requesting user is an admin ────────────────────────────
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -100,15 +109,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // --- 2. Create the Supabase auth user using the service role key ---
+    // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({ 
-      email: body.email,
-      password: body.temp_password,
+    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+      email: data.email,
+      password: data.temp_password,
       email_confirm: true,
     })
 
@@ -122,42 +131,42 @@ export async function POST(req: NextRequest) {
 
     const newUserId = newUser.user.id
 
-    // --- 3. Insert the profile row ---
+    // ── 4. Insert the profile row ────────────────────────────────────────────
     const { error: profileError } = await adminClient
       .from('profiles')
       .upsert({
         id: newUserId,
-        email: body.email,
-        full_name: body.full_name,
-        role: body.account_types.includes('school_admin') ? 'admin' : 'teacher',
-        timezone: body.timezone || 'Africa/Johannesburg',
-        bio: body.bio || null,
-        teaching_languages: body.teaching_languages ?? [],
-        speaking_languages: body.native_languages ?? [],
+        email: data.email,
+        full_name: data.full_name,
+        role: data.account_types.includes('school_admin') ? 'admin' : 'teacher',
+        timezone: data.timezone,
+        bio: data.bio ?? null,
+        teaching_languages: data.teaching_languages ?? [],
+        speaking_languages: data.native_languages ?? [],
         is_active: true,
         preferred_payment_type: null,
-        paypal_email: body.paypal_email || null,
-        iban: body.iban || null,
-        bic: body.bic || null,
-        tax_number: body.tax_number || null,
-        street_address: body.street_address || null,
-        area_code: body.area_code || null,
-        city: body.city || null,
-        hourly_rate: body.hourly_rate ?? null,
-        contract_start: body.contract_start || null,
-        orientation_date: body.orientation_date || null,
-        observed_lesson_date: body.observed_lesson_date || null,
-        vat_required: body.vat_required ?? false,
-        account_types: body.account_types ?? ['teacher'],
-        teacher_type: body.account_types.includes('teacher_exam') ? 'teacher_exam' : 'teacher',
-        status: body.status || 'current',
-        follow_up_date: body.follow_up_date || null,
-        follow_up_reason: body.follow_up_reason || null,
-        admin_notes: body.admin_notes || null,
-        native_languages: body.native_languages ?? [],
-        specialties: body.specialties || null,
-        quote: body.quote || null,
-        video_url: body.video_url || null,
+        paypal_email: data.paypal_email ?? null,
+        iban: data.iban ?? null,
+        bic: data.bic ?? null,
+        tax_number: data.tax_number ?? null,
+        street_address: data.street_address ?? null,
+        area_code: data.area_code ?? null,
+        city: data.city ?? null,
+        hourly_rate: data.hourly_rate ?? null,
+        contract_start: data.contract_start ?? null,
+        orientation_date: data.orientation_date ?? null,
+        observed_lesson_date: data.observed_lesson_date ?? null,
+        vat_required: data.vat_required ?? false,
+        account_types: data.account_types,
+        teacher_type: data.account_types.includes('teacher_exam') ? 'teacher_exam' : 'teacher',
+        status: data.status,
+        follow_up_date: data.follow_up_date ?? null,
+        follow_up_reason: data.follow_up_reason ?? null,
+        admin_notes: data.admin_notes ?? null,
+        native_languages: data.native_languages ?? [],
+        specialties: data.specialties ?? null,
+        quote: data.quote ?? null,
+        video_url: data.video_url ?? null,
       })
 
     if (profileError) {
@@ -169,25 +178,25 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // --- 4. Send welcome email with password reset link ---
+    // ── 5. Send welcome email with password reset link ───────────────────────
     const { data: resetData, error: resetError } =
       await adminClient.auth.admin.generateLink({
         type: 'recovery',
-        email: body.email,
+        email: data.email,
       })
 
     if (!resetError && resetData?.properties?.action_link) {
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',
-        to: body.email,
-        subject: 'Welcome to Lingualink Online — Set Your Password',
+        to: data.email,
+        subject: 'Welcome to Lingualink Online – Set Your Password',
         html: `
           <div style="font-family: Inter, sans-serif; max-width: 560px; margin: 0 auto;">
             <div style="background-color: #FF8303; padding: 24px; border-radius: 8px 8px 0 0;">
               <h1 style="color: white; margin: 0; font-size: 20px;">Welcome to Lingualink Online</h1>
             </div>
             <div style="padding: 24px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-              <p style="color: #374151;">Dear ${body.full_name},</p>
+              <p style="color: #374151;">Dear ${data.full_name},</p>
               <p style="color: #374151;">Your teacher account has been created. Please click the button below to set your password and access the portal.</p>
               <a href="${resetData.properties.action_link}"
                 style="display: inline-block; background-color: #FF8303; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">

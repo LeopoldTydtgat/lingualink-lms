@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import EditTeacherClient from './EditTeacherClient'
 
 export default async function EditTeacherPage({
@@ -12,19 +11,9 @@ export default async function EditTeacherPage({
 }) {
   const { id } = await params
   const { section } = await searchParams
-  const cookieStore = await cookies()
+  const supabase = createAdminClient()
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
+  // Fetch teacher profile — includes sensitive admin-only fields
   const { data: teacher, error } = await supabase
     .from('profiles')
     .select('*')
