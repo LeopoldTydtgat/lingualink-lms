@@ -13,6 +13,8 @@ export default async function AccountPage() {
     .eq('id', user.id)
     .single()
 
+  if (!profile) redirect('/login')
+
   const { data: resources } = await supabase
     .from('resources')
     .select('*')
@@ -37,7 +39,6 @@ export default async function AccountPage() {
     .eq('is_visible', true)
     .order('created_at', { ascending: false })
 
-  // Supabase returns nested joins as arrays â€” flatten students to a single object
   const flatReviews = (reviews ?? []).map(r => ({
     ...r,
     students: Array.isArray(r.students) ? r.students[0] : r.students,
