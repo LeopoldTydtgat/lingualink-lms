@@ -325,6 +325,7 @@ export default function BillingClient({ profile }: { profile: Profile }) {
   const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || file.type !== 'application/pdf') return
+    if (file.size > 10 * 1024 * 1024) return
     setUploadingTemplate(true)
     const { error } = await supabase.storage
       .from('templates')

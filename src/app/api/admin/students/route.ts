@@ -3,10 +3,11 @@ import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
+import { CreateStudentSchema } from '@/lib/validation/schemas'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-// ─── GET — list students (supports ?minimal=true&search=name) ─────────────────
+// ─── GET – list students (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -58,12 +59,20 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ students: students ?? [] })
 }
 
-// ─── POST — create student (unchanged) ───────────────────────────────────────
+// ─── POST – create student ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    // --- 1. Verify the requesting user is an admin ---
+    // ── 1. Validate input ────────────────────────────────────────────────────
+    const parsed = CreateStudentSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
+      return NextResponse.json({ error: firstError.message }, { status: 400 })
+    }
+    const data = parsed.data
+
+    // ── 2. Verify the requesting user is an admin ────────────────────────────
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -95,15 +104,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // --- 2. Create the Supabase auth user using the service role key ---
+    // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
     )
 
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({ 
-      email: body.email,
-      password: body.temp_password,
+    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+      email: data.email,
+      password: data.temp_password,
       email_confirm: true,
     })
 
@@ -117,33 +126,33 @@ export async function POST(req: NextRequest) {
 
     const newUserId = newUser.user.id
 
-    // --- 3. Upsert the student row ---
+    // ── 4. Upsert the student row ────────────────────────────────────────────
     const { data: studentRow, error: studentError } = await adminClient
       .from('students')
       .upsert({
         auth_user_id: newUserId,
-        full_name: body.full_name,
-        email: body.email,
-        timezone: body.timezone || 'Europe/Paris',
-        language_preference: body.language_preference || null,
-        status: body.status || 'current',
+        full_name: data.full_name,
+        email: data.email,
+        timezone: data.timezone,
+        language_preference: data.language_preference ?? null,
+        status: data.status,
         is_active: true,
-        is_private: body.is_private ?? true,
-        company_id: body.company_id || null,
-        academic_advisor_id: body.academic_advisor_id || null,
-        customer_number: body.customer_number || null,
-        date_of_birth: body.date_of_birth || null,
-        phone: body.phone || null,
-        native_language: body.native_language || null,
-        learning_language: body.learning_language || null,
-        current_fluency_level: body.current_fluency_level || null,
-        self_assessed_level: body.self_assessed_level || null,
-        self_reported_level: body.self_assessed_level || null,
-        learning_goals: body.learning_goals || null,
-        interests: body.interests || null,
-        cancellation_policy: body.cancellation_policy || '24hr',
-        admin_notes: body.admin_notes || null,
-        teacher_notes: body.teacher_notes || null,
+        is_private: data.is_private ?? true,
+        company_id: data.company_id ?? null,
+        academic_advisor_id: data.academic_advisor_id ?? null,
+        customer_number: data.customer_number ?? null,
+        date_of_birth: data.date_of_birth ?? null,
+        phone: data.phone ?? null,
+        native_language: data.native_language ?? null,
+        learning_language: data.learning_language ?? null,
+        current_fluency_level: data.current_fluency_level ?? null,
+        self_assessed_level: data.self_assessed_level ?? null,
+        self_reported_level: data.self_assessed_level ?? null,
+        learning_goals: data.learning_goals ?? null,
+        interests: data.interests ?? null,
+        cancellation_policy: data.cancellation_policy,
+        admin_notes: data.admin_notes ?? null,
+        teacher_notes: data.teacher_notes ?? null,
       })
       .select('id')
       .single()
@@ -159,16 +168,16 @@ export async function POST(req: NextRequest) {
 
     const studentId = studentRow.id
 
-    // --- 4. Create the training record ---
+    // ── 5. Create the training record ────────────────────────────────────────
     const { data: trainingRow, error: trainingError } = await adminClient
       .from('trainings')
       .insert({
         student_id: studentId,
-        package_name: body.package_name,
-        package_type: body.package_name,
-        total_hours: body.total_hours,
+        package_name: data.package_name,
+        package_type: data.package_name,
+        total_hours: data.total_hours,
         hours_consumed: 0,
-        end_date: body.end_date,
+        end_date: data.end_date,
         status: 'active',
         low_hours_warning_sent: false,
       })
@@ -187,9 +196,9 @@ export async function POST(req: NextRequest) {
 
     const trainingId = trainingRow.id
 
-    // --- 5. Insert training_teachers rows ---
-    if (body.assigned_teacher_ids?.length > 0) {
-      const ttRows = body.assigned_teacher_ids.map((teacherId: string) => ({
+    // ── 6. Insert training_teachers rows ─────────────────────────────────────
+    if (data.assigned_teacher_ids.length > 0) {
+      const ttRows = data.assigned_teacher_ids.map((teacherId: string) => ({
         training_id: trainingId,
         teacher_id: teacherId,
       }))
@@ -199,25 +208,25 @@ export async function POST(req: NextRequest) {
       if (ttError) console.error('training_teachers insert error:', ttError)
     }
 
-    // --- 6. Send welcome email ---
+    // ── 7. Send welcome email ────────────────────────────────────────────────
     const { data: resetData, error: resetError } =
       await adminClient.auth.admin.generateLink({
         type: 'recovery',
-        email: body.email,
+        email: data.email,
       })
 
     if (!resetError && resetData?.properties?.action_link) {
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',
-        to: body.email,
-        subject: 'Welcome to Lingualink Online — Set Your Password',
+        to: data.email,
+        subject: 'Welcome to Lingualink Online – Set Your Password',
         html: `
           <div style="font-family: Inter, sans-serif; max-width: 560px; margin: 0 auto;">
             <div style="background-color: #FF8303; padding: 24px; border-radius: 8px 8px 0 0;">
               <h1 style="color: white; margin: 0; font-size: 20px;">Welcome to Lingualink Online</h1>
             </div>
             <div style="padding: 24px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-              <p style="color: #374151;">Dear ${body.full_name},</p>
+              <p style="color: #374151;">Dear ${data.full_name},</p>
               <p style="color: #374151;">Your student account has been created. Please click the button below to set your password and access the portal.</p>
               <a href="${resetData.properties.action_link}"
                 style="display: inline-block; background-color: #FF8303; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">

@@ -1,22 +1,10 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createAdminClient } from '@/lib/supabase/admin'
 import TeachersListClient from './TeachersListClient'
 
 export default async function TeachersPage() {
-  const cookieStore = await cookies()
+  const supabase = createAdminClient()
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
-  // Fetch all teachers with their class counts
+  // Fetch all teachers — hourly_rate is admin-only and served via service role
   const { data: teachers, error } = await supabase
     .from('profiles')
     .select(`
