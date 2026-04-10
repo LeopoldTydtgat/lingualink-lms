@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
+import { BookClassSchema } from '@/lib/validation/schemas'
 
 // ── Email content builders ────────────────────────────────────────────────────
 
@@ -34,7 +35,7 @@ function bookingConfirmationStudentEmail(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Use the button below to join your class on Microsoft Teams:
     </p>
-    
+    <a
       href="${teamsJoinUrl}"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;margin-bottom:24px;"
     >
@@ -71,7 +72,7 @@ function bookingNotificationTeacherEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    
+    <a
       href="${teamsJoinUrl}"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
@@ -105,7 +106,7 @@ function rescheduleConfirmationStudentEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    
+    <a
       href="${teamsJoinUrl}"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
@@ -137,15 +138,13 @@ export async function POST(req: NextRequest) {
 
     // ── 1. Parse and validate request body ───────────────────────────────────
     const body = await req.json()
-    const { trainingId, teacherId, studentId, durationMinutes, scheduledAt, rescheduleId } = body
 
-    if (!trainingId || !teacherId || !studentId || !durationMinutes || !scheduledAt) {
-      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
+    const parsed = BookClassSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
+      return NextResponse.json({ error: firstError.message }, { status: 400 })
     }
-
-    if (![30, 60, 90].includes(durationMinutes)) {
-      return NextResponse.json({ error: 'Invalid duration. Must be 30, 60, or 90 minutes.' }, { status: 400 })
-    }
+    const { trainingId, teacherId, studentId, durationMinutes, scheduledAt, rescheduleId } = parsed.data
 
     // ── 2. Verify the student is authenticated and matches the studentId ──────
     const { data: { user }, error: authError } = await supabase.auth.getUser()
@@ -167,7 +166,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorised.' }, { status: 401 })
     }
 
-    // ── 3. Load the training and check hours balance ──────────────────────────
+    // ── 3. Load the training and check hours balance ───────────────────────────
     const { data: training, error: trainingError } = await supabase
       .from('trainings')
       .select('id, total_hours, hours_consumed, status')
@@ -204,7 +203,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
-    // ── 5. If rescheduling — cancel the old lesson ────────────────────────────
+    // ── 5. If rescheduling – cancel the old lesson ────────────────────────────
     if (rescheduleId) {
       const { error: cancelError } = await supabase
         .from('lessons')
@@ -223,29 +222,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 6. MS Graph API — create Teams meeting ────────────────────────────────
+    // ── 6. MS Graph API – create Teams meeting ────────────────────────────────
     // Meeting is created under the shared organiser account.
-    // The join URL is tied to the lesson slot — not the teacher —
+    // The join URL is tied to the lesson slot – not the teacher –
     // so teacher swaps never break the student's link.
     let teamsJoinUrl = 'TEAMS_LINK_PENDING'
     let teamsMeetingId: string | null = null
 
     try {
       const meeting = await createTeamsMeeting({
-        subject: `Lingualink class — ${studentRow.full_name} with ${teacher.full_name}`,
+        subject: `Lingualink class – ${studentRow.full_name} with ${teacher.full_name}`,
         startTime: scheduledAt,
         durationMinutes,
       })
       teamsJoinUrl = meeting.joinUrl
       teamsMeetingId = meeting.meetingId
     } catch (graphError) {
-      // Log the error but don't block the booking —
+      // Log the error but don't block the booking –
       // admin can manually fix the link if Graph API fails.
       // Sentry will capture this.
-      console.error('MS Graph API failed — booking will proceed without Teams link:', graphError)
+      console.error('MS Graph API failed – booking will proceed without Teams link:', graphError)
     }
 
-    // ── 7. Create the new lesson record ──────────────────────────────────────
+    // ── 7. Create the new lesson record ───────────────────────────────────────
     const startTime = new Date(scheduledAt)
 
     const { data: newLesson, error: lessonError } = await supabase
@@ -289,16 +288,16 @@ export async function POST(req: NextRequest) {
     const teacherDateTime = formatDateTime(startTime.toISOString(), teacherTimezone)
 
     const studentSubject = isReschedule
-      ? 'Lingualink Online — Your class has been rescheduled'
-      : 'Lingualink Online — Your class is confirmed'
+      ? 'Lingualink Online – Your class has been rescheduled'
+      : 'Lingualink Online – Your class is confirmed'
 
     const studentBodyHtml = isReschedule
       ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
       : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
 
     const teacherSubject = isReschedule
-      ? `Lingualink Online — Class rescheduled by ${studentRow.full_name}`
-      : `Lingualink Online — New class booked with ${studentRow.full_name}`
+      ? `Lingualink Online – Class rescheduled by ${studentRow.full_name}`
+      : `Lingualink Online – New class booked with ${studentRow.full_name}`
 
     const teacherBodyHtml = isReschedule
       ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes, teamsJoinUrl)
