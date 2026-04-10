@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import EditStudentClient from './EditStudentClient'
 
 export default async function EditStudentPage({
@@ -9,20 +8,9 @@ export default async function EditStudentPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const cookieStore = await cookies()
+  const supabase = createAdminClient()
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
-  // Fetch the student row
+  // Fetch the student row — includes sensitive admin-only fields
   const { data: student, error } = await supabase
     .from('students')
     .select('*')
