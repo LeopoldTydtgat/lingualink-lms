@@ -35,7 +35,7 @@ export async function signIn(formData: FormData) {
 
   // Success — clear any accumulated attempt count for this IP
   clearAttempts(ip)
-  redirect('/dashboard')
+  redirect('/upcoming-classes')
 }
 
 export async function signOut() {
