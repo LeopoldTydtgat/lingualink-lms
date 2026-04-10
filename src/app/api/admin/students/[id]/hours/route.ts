@@ -2,6 +2,8 @@ import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
+import { HoursAdjustmentSchema } from '@/lib/validation/schemas'
 
 export async function POST(
   req: NextRequest,
@@ -9,9 +11,32 @@ export async function POST(
 ) {
   try {
     const { id: studentId } = await params
+
+    // ── 1. Validate the studentId URL param is a UUID ────────────────────────
+    const uuidResult = z.string().uuid().safeParse(studentId)
+    if (!uuidResult.success) {
+      return NextResponse.json({ error: 'Invalid student ID.' }, { status: 400 })
+    }
+
     const body = await req.json()
 
-    // --- 1. Verify admin ---
+    // ── 2. Validate the request body ─────────────────────────────────────────
+    const parsed = HoursAdjustmentSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0]
+      return NextResponse.json({ error: firstError.message }, { status: 400 })
+    }
+    const data = parsed.data
+
+    // Business rule: notes are required when removing hours
+    if (data.action === 'remove' && !data.notes?.trim()) {
+      return NextResponse.json(
+        { error: 'Notes are required when removing hours.' },
+        { status: 400 }
+      )
+    }
+
+    // ── 3. Verify admin ───────────────────────────────────────────────────────
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,7 +60,6 @@ export async function POST(
       .eq('id', user.id)
       .single()
 
-    // adminProfile could be null if the query returns no row â€” guard here
     if (!adminProfile) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
@@ -48,20 +72,7 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { action, amount, invoice_reference, notes, training_id } = body
-
-    if (!action || !amount || !training_id) {
-      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 })
-    }
-
-    if (action === 'remove' && !notes?.trim()) {
-      return NextResponse.json(
-        { error: 'Notes are required when removing hours.' },
-        { status: 400 }
-      )
-    }
-
-    // --- 2. Fetch current training balance ---
+    // ── 4. Fetch current training balance ─────────────────────────────────────
     const adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -70,7 +81,7 @@ export async function POST(
     const { data: training, error: trainError } = await adminClient
       .from('trainings')
       .select('id, total_hours, hours_consumed')
-      .eq('id', training_id)
+      .eq('id', data.training_id)
       .eq('student_id', studentId)
       .single()
 
@@ -85,22 +96,21 @@ export async function POST(
     let newTotalHours = Number(training.total_hours)
     let newHoursConsumed = Number(training.hours_consumed)
 
-    if (action === 'add') {
-      newTotalHours = newTotalHours + amount
+    if (data.action === 'add') {
+      newTotalHours = newTotalHours + data.amount
     } else {
-      // 'remove' â€” deduct from available balance by increasing hours_consumed
-      if (amount > currentBalance) {
+      if (data.amount > currentBalance) {
         return NextResponse.json(
-          { error: `Cannot remove ${amount}h â€” only ${currentBalance}h available.` },
+          { error: `Cannot remove ${data.amount}h — only ${currentBalance}h available.` },
           { status: 400 }
         )
       }
-      newHoursConsumed = newHoursConsumed + amount
+      newHoursConsumed = newHoursConsumed + data.amount
     }
 
     const newBalance = newTotalHours - newHoursConsumed
 
-    // --- 3. Update the training record ---
+    // ── 5. Update the training record ─────────────────────────────────────────
     const { error: updateError } = await adminClient
       .from('trainings')
       .update({
@@ -108,28 +118,28 @@ export async function POST(
         hours_consumed: newHoursConsumed,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', training_id)
+      .eq('id', data.training_id)
 
     if (updateError) {
       console.error('Training update error:', updateError)
       return NextResponse.json({ error: 'Failed to update training.' }, { status: 500 })
     }
 
-    // --- 4. Write to hours_log ---
+    // ── 6. Write to hours_log ─────────────────────────────────────────────────
     const { error: logError } = await adminClient
       .from('hours_log')
       .insert({
         student_id: studentId,
-        type: action === 'add' ? 'add' : 'deduct',
-        amount_hours: action === 'add' ? amount : -amount,
+        type: data.action === 'add' ? 'add' : 'deduct',
+        amount_hours: data.action === 'add' ? data.amount : -data.amount,
         balance_after: newBalance,
-        invoice_reference: invoice_reference ?? null,
-        notes: notes ?? null,
-        created_by: adminProfile.id, // safe â€” null guard is above
+        invoice_reference: data.invoice_reference ?? null,
+        notes: data.notes ?? null,
+        created_by: adminProfile.id,
       })
 
     if (logError) {
-      // Non-fatal â€” training is already updated. Log the error but don't fail.
+      // Non-fatal — training is already updated. Log the error but don't fail.
       console.error('hours_log insert error:', logError)
     }
 
