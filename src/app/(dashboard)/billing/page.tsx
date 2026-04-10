@@ -4,7 +4,6 @@ import BillingClient from './BillingClient'
 
 export default async function BillingPage() {
   const supabase = await createClient()
-
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -16,5 +15,12 @@ export default async function BillingPage() {
 
   if (!profile) redirect('/login')
 
-  return <BillingClient profile={profile} />
+  // Fetch billing info server-side to avoid client 403
+  const { data: billingInfo } = await supabase
+    .from('profiles')
+    .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate')
+    .eq('id', user.id)
+    .single()
+
+  return <BillingClient profile={profile} billingInfo={billingInfo ?? null} />
 }
