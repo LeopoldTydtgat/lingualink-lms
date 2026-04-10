@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import StudentDetailClient from './StudentDetailClient'
 
 export default async function StudentDetailPage({
@@ -9,18 +8,7 @@ export default async function StudentDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const cookieStore = await cookies()
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
+  const supabase = createAdminClient()
 
   // Fetch student with company and active training + assigned teachers
   const { data: student, error } = await supabase

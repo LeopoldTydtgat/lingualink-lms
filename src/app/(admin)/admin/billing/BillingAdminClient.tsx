@@ -1,9 +1,8 @@
 'use client'
-
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Invoice {
   id: string
@@ -17,11 +16,13 @@ interface Invoice {
   reference_number: string | null
 }
 
+// hourly_rate is intentionally excluded here — it is fetched on-demand via
+// the /api/admin/billing/entities route and never exposed to the browser client
+// through a direct Supabase query.
 interface TeacherProfile {
   id: string
   full_name: string
   email: string
-  hourly_rate: number | null
 }
 
 interface Company {
@@ -29,12 +30,12 @@ interface Company {
   name: string
 }
 
+// cancellation_policy is intentionally excluded here — same reason as hourly_rate above.
 interface StudentRow {
   id: string
   full_name: string
   email: string
   company_id: string | null
-  cancellation_policy: string | null
 }
 
 interface LessonRow {
@@ -56,7 +57,7 @@ interface LessonRow {
 
 type ActiveTab = 'teacher_invoices' | 'student_billing' | 'company_billing'
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatMonth(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00Z')
@@ -136,21 +137,46 @@ function getMonthOptions(invoices: Invoice[]): string[] {
   return Array.from(seen).sort((a, b) => b.localeCompare(a))
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Server-side entity fetcher ─────────────────────────────────────────────────
+// Fetches hourly_rate (teachers) and cancellation_policy (students) via an
+// API route that uses the service role key. These fields are restricted at the
+// database level for the authenticated role and cannot be fetched directly
+// from the browser client.
+
+async function fetchBillingEntities(
+  teacherIds: string[],
+  studentIds: string[]
+): Promise<{
+  teachers: { id: string; full_name: string; hourly_rate: number | null }[]
+  students: { id: string; full_name: string; company_id: string | null; cancellation_policy: string | null }[]
+}> {
+  const res = await fetch('/api/admin/billing/entities', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teacherIds, studentIds }),
+  })
+  if (!res.ok) {
+    console.error('fetchBillingEntities failed:', res.status)
+    return { teachers: [], students: [] }
+  }
+  return res.json()
+}
+
+// ── Component ──────────────────────────────────────────────────────────────────
 
 export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const supabase = createClient()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
 
-  // ── Shared reference data ──────────────────────────────────────────────
+  // ── Shared reference data ──────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<TeacherProfile[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
   const templateInputRef = useRef<HTMLInputElement>(null)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
 
-  // ── Teacher Invoices tab ───────────────────────────────────────────────
+  // ── Teacher Invoices tab ───────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [invoiceFilterTeacher, setInvoiceFilterTeacher] = useState('')
   const [invoiceFilterMonth, setInvoiceFilterMonth] = useState('')
@@ -158,11 +184,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
-  // Lessons per billing_month key for the expanded detail view
   const [invoiceLessons, setInvoiceLessons] = useState<Record<string, LessonRow[]>>({})
   const [loadingLessons, setLoadingLessons] = useState<string | null>(null)
 
-  // ── Student Billing tab ────────────────────────────────────────────────
+  // ── Student Billing tab ────────────────────────────────────────────────────
   const [students, setStudents] = useState<StudentRow[]>([])
   const [sbFilterStudent, setSbFilterStudent] = useState('')
   const [sbFilterDateFrom, setSbFilterDateFrom] = useState('')
@@ -171,7 +196,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const [sbLoading, setSbLoading] = useState(false)
   const [sbLoaded, setSbLoaded] = useState(false)
 
-  // ── Company Billing tab ────────────────────────────────────────────────
+  // ── Company Billing tab ────────────────────────────────────────────────────
   const [cbFilterCompany, setCbFilterCompany] = useState('')
   const [cbFilterDateFrom, setCbFilterDateFrom] = useState('')
   const [cbFilterDateTo, setCbFilterDateTo] = useState('')
@@ -179,13 +204,15 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const [cbLoading, setCbLoading] = useState(false)
   const [cbLoaded, setCbLoaded] = useState(false)
 
-  // ── Load shared reference data on mount ───────────────────────────────
+  // ── Load shared reference data on mount ───────────────────────────────────
+  // Teachers and companies are fetched without sensitive fields — hourly_rate
+  // is fetched on-demand in hydrateLessons via the entities API route.
   const loadBaseData = useCallback(async () => {
     const [{ data: teacherData }, { data: companyData }, { data: invoiceData }, { data: settingsData }] =
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, email, hourly_rate')
+          .select('id, full_name, email')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
@@ -205,17 +232,20 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
   useEffect(() => { loadBaseData() }, [loadBaseData])
 
-  // Load students list for the Student Billing filter dropdown
+  // Load students list for the Student Billing filter dropdown.
+  // cancellation_policy is intentionally omitted — it is fetched server-side
+  // via the entities API route only when building billing calculations.
   useEffect(() => {
     supabase
       .from('students')
-      .select('id, full_name, email, company_id, cancellation_policy')
+      .select('id, full_name, email, company_id')
       .order('full_name')
       .then(({ data }) => setStudents(data || []))
   }, [])
 
-  // ── Hydrate a raw lessons result with teacher/student/company names ────
-  // Uses two-query pattern — no more than two join levels
+  // ── Hydrate a raw lessons result with teacher/student/company names ─────────
+  // Sensitive fields (hourly_rate, cancellation_policy) are fetched via the
+  // /api/admin/billing/entities route — never directly from the browser client.
   const hydrateLessons = useCallback(async (rawLessons: {
     id: string
     teacher_id: string
@@ -230,12 +260,11 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     const teacherIds = [...new Set(rawLessons.map(l => l.teacher_id))]
     const studentIds = [...new Set(rawLessons.map(l => l.student_id))]
 
-    const [{ data: tProfiles }, { data: sRows }] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, hourly_rate').in('id', teacherIds),
-      supabase.from('students').select('id, full_name, company_id, cancellation_policy').in('id', studentIds),
-    ])
+    // Fetch sensitive fields via server-side API route
+    const { teachers: tProfiles, students: sRows } = await fetchBillingEntities(teacherIds, studentIds)
 
-    const companyIds = [...new Set((sRows || []).map(s => s.company_id).filter(Boolean))] as string[]
+    // Fetch company names directly — companies table has no sensitive columns
+    const companyIds = [...new Set(sRows.map(s => s.company_id).filter(Boolean))] as string[]
     let companyMap: Record<string, string> = {}
     if (companyIds.length) {
       const { data: cData } = await supabase.from('companies').select('id, name').in('id', companyIds)
@@ -243,10 +272,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     }
 
     const teacherMap: Record<string, { full_name: string; hourly_rate: number }> = {}
-    for (const t of tProfiles || []) teacherMap[t.id] = { full_name: t.full_name, hourly_rate: t.hourly_rate || 0 }
+    for (const t of tProfiles) teacherMap[t.id] = { full_name: t.full_name, hourly_rate: t.hourly_rate || 0 }
 
     const studentMap: Record<string, { full_name: string; company_id: string | null; cancellation_policy: string | null }> = {}
-    for (const s of sRows || []) studentMap[s.id] = { full_name: s.full_name, company_id: s.company_id, cancellation_policy: s.cancellation_policy }
+    for (const s of sRows) studentMap[s.id] = { full_name: s.full_name, company_id: s.company_id, cancellation_policy: s.cancellation_policy }
 
     return rawLessons.map(l => {
       const t = teacherMap[l.teacher_id] || { full_name: 'Unknown', hourly_rate: 0 }
@@ -265,7 +294,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     })
   }, [])
 
-  // ── Load lessons for an expanded invoice (teacher + month) ────────────
+  // ── Load lessons for an expanded invoice (teacher + month) ────────────────
   const loadInvoiceLessons = useCallback(async (teacherId: string, billingMonth: string) => {
     const key = `${teacherId}_${billingMonth}`
     if (invoiceLessons[key]) return // already loaded
@@ -276,9 +305,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     const year = d.getUTCFullYear()
     const month = d.getUTCMonth()
 
-    // First day of the month
     const fromDate = `${year}-${String(month + 1).padStart(2, '0')}-01`
-    // First day of next month
     const toDate = month === 11
       ? `${year + 1}-01-01`
       : `${year}-${String(month + 2).padStart(2, '0')}-01`
@@ -296,7 +323,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setLoadingLessons(null)
   }, [invoiceLessons, hydrateLessons])
 
-  // ── Mark invoice as paid ───────────────────────────────────────────────
+  // ── Mark invoice as paid ───────────────────────────────────────────────────
   const handleMarkPaid = async (invoiceId: string) => {
     setSavingPaid(true)
     await fetch('/api/admin/billing/mark-paid', {
@@ -309,13 +336,13 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     await loadBaseData()
   }
 
-  // ── View invoice PDF (signed URL) ─────────────────────────────────────
+  // ── View invoice PDF (signed URL) ──────────────────────────────────────────
   const handleViewInvoice = async (filePath: string) => {
     const { data } = await supabase.storage.from('invoices').createSignedUrl(filePath, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
-  // ── Template upload ────────────────────────────────────────────────────
+  // ── Template upload ────────────────────────────────────────────────────────
   const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || file.type !== 'application/pdf') return
@@ -336,7 +363,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setUploadingTemplate(false)
   }
 
-  // ── Load Student Billing lessons ───────────────────────────────────────
+  // ── Load Student Billing lessons ───────────────────────────────────────────
   const loadStudentBilling = useCallback(async () => {
     setSbLoading(true)
     setSbLoaded(false)
@@ -358,12 +385,11 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setSbLoaded(true)
   }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, hydrateLessons])
 
-  // ── Load Company Billing lessons ───────────────────────────────────────
+  // ── Load Company Billing lessons ───────────────────────────────────────────
   const loadCompanyBilling = useCallback(async () => {
     setCbLoading(true)
     setCbLoaded(false)
 
-    // Get student IDs for the selected company (or all companies)
     let studentsQuery = supabase
       .from('students')
       .select('id')
@@ -398,13 +424,13 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setCbLoaded(true)
   }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, hydrateLessons])
 
-  // ── CSV export helper ──────────────────────────────────────────────────
+  // ── CSV export helper ──────────────────────────────────────────────────────
   const downloadCSV = (type: string, extraParams: Record<string, string> = {}) => {
     const params = new URLSearchParams({ type, ...extraParams })
     window.open(`/api/admin/billing/export?${params.toString()}`, '_blank')
   }
 
-  // ── Filtered invoices ──────────────────────────────────────────────────
+  // ── Filtered invoices ──────────────────────────────────────────────────────
   const filteredInvoices = invoices.filter(inv => {
     if (invoiceFilterTeacher && inv.teacher_id !== invoiceFilterTeacher) return false
     if (invoiceFilterMonth && inv.billing_month !== invoiceFilterMonth) return false
@@ -414,13 +440,13 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
   const monthOptions = getMonthOptions(invoices)
 
-  // ── Student billing totals ─────────────────────────────────────────────
+  // ── Student billing totals ─────────────────────────────────────────────────
   const sbBillableTotal = sbLessons.reduce((sum, l) => {
     const { billableToTeacher } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
     return billableToTeacher ? sum + lessonAmount(l.duration_minutes, l.hourlyRate) : sum
   }, 0)
 
-  // ── Company billing: group by company then student ─────────────────────
+  // ── Company billing: group by company then student ─────────────────────────
   const cbByCompany: Record<string, { companyName: string; lessons: LessonRow[] }> = {}
   for (const l of cbLessons) {
     const key = l.companyId || 'unknown'
@@ -428,7 +454,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     cbByCompany[key].lessons.push(l)
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   const tabs: { key: ActiveTab; label: string }[] = [
     { key: 'teacher_invoices', label: 'Teacher Invoices' },
     { key: 'student_billing', label: 'Student Billing' },
@@ -460,7 +486,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
         ))}
       </div>
 
-      {/* ── TEACHER INVOICES ───────────────────────────────────────────── */}
+      {/* ── TEACHER INVOICES ──────────────────────────────────────────────────── */}
       {activeTab === 'teacher_invoices' && (
         <div className="space-y-5">
 
@@ -577,7 +603,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                               {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
                             </span>
 
-                            {/* View PDF */}
                             {inv.file_path && (
                               <button
                                 onClick={() => handleViewInvoice(inv.file_path!)}
@@ -588,7 +613,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                               </button>
                             )}
 
-                            {/* Mark Paid */}
                             {inv.status !== 'paid' && markingPaidId !== inv.id && (
                               <button
                                 onClick={() => setMarkingPaidId(inv.id)}
@@ -604,7 +628,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                               </span>
                             )}
 
-                            {/* Expand detail */}
                             <button
                               onClick={() => {
                                 const opening = expandedInvoiceId !== inv.id
@@ -648,7 +671,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                             <p className="text-sm text-gray-400">No classes found for this period.</p>
                           ) : (
                             <>
-                              {/* Column headers */}
                               <div className="grid grid-cols-6 gap-3 text-xs font-medium text-gray-400 uppercase mb-2">
                                 <span className="col-span-2">Student</span>
                                 <span>Date &amp; Time</span>
@@ -673,7 +695,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                                   </div>
                                 )
                               })}
-                              {/* Subtotal */}
                               <div className="flex justify-end mt-3 pt-2 border-t border-gray-200">
                                 <span className="text-sm font-semibold text-gray-900">
                                   Total: €{lessonData.reduce((sum, l) => {
@@ -695,11 +716,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
         </div>
       )}
 
-      {/* ── STUDENT BILLING ────────────────────────────────────────────── */}
+      {/* ── STUDENT BILLING ───────────────────────────────────────────────────── */}
       {activeTab === 'student_billing' && (
         <div className="space-y-5">
 
-          {/* Filters */}
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Student</label>
@@ -763,7 +783,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
           {sbLoaded && sbLessons.length > 0 && (
             <>
-              {/* Summary bar */}
               <div className="flex gap-6 bg-white border border-gray-200 rounded-lg px-5 py-3">
                 <div>
                   <p className="text-xs text-gray-400">Total classes</p>
@@ -775,7 +794,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 </div>
               </div>
 
-              {/* Lessons table */}
               <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="grid grid-cols-6 gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100">
                   <span className="col-span-2">Student / Teacher</span>
@@ -786,7 +804,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 </div>
                 <div className="divide-y divide-gray-50">
                   {sbLessons.map(l => {
-                    const { billableToTeacher, label, labelColor } = getBillability(
+                    const { label, labelColor } = getBillability(
                       l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy
                     )
                     return (
@@ -811,11 +829,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
         </div>
       )}
 
-      {/* ── COMPANY BILLING ────────────────────────────────────────────── */}
+      {/* ── COMPANY BILLING ───────────────────────────────────────────────────── */}
       {activeTab === 'company_billing' && (
         <div className="space-y-5">
 
-          {/* Filters */}
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="block text-xs text-gray-500 mb-1">Company</label>
@@ -882,7 +899,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
           {cbLoaded && Object.keys(cbByCompany).length > 0 && (
             <div className="space-y-5">
               {Object.entries(cbByCompany).map(([companyId, { companyName, lessons }]) => {
-                // Count 48hr billable cancellations
                 const flags48hr = lessons.filter(l => {
                   const { billable48hr } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
                   return billable48hr
@@ -897,7 +913,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
                 return (
                   <div key={companyId} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                    {/* Company header */}
                     <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                       <div>
                         <h3 className="font-semibold text-gray-900">{companyName}</h3>
@@ -911,7 +926,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                       </div>
                     </div>
 
-                    {/* 48hr flag callout — only shown when relevant */}
                     {flags48hr.length > 0 && (
                       <div className="px-5 py-3 border-b border-orange-100" style={{ backgroundColor: '#fff9f5' }}>
                         <p className="text-xs font-medium" style={{ color: '#FF8303' }}>
@@ -930,9 +944,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                       </div>
                     )}
 
-                    {/* All lessons for this company */}
                     <div className="divide-y divide-gray-50">
-                      {/* Column headers */}
                       <div className="grid grid-cols-6 gap-3 px-5 py-2 text-xs font-medium text-gray-400 uppercase">
                         <span className="col-span-2">Student / Teacher</span>
                         <span>Date &amp; Time</span>
