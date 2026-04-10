@@ -7,6 +7,7 @@ import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget, { STUDENT_FAQS } from '@/components/ChatWidget'
+import ClassReminderModal from '@/components/student/ClassReminderModal'
 import { sendMessage, markMessagesAsRead } from '@/app/(student)/student/messages/actions'
 
 export default async function StudentDashboardLayout({
@@ -133,6 +134,9 @@ export default async function StudentDashboardLayout({
         sendMessageAction={sendMessage}
         markAsReadAction={markMessagesAsRead}
       />
+
+      {/* Class reminder modal — renders on all student pages */}
+      <ClassReminderModal studentId={student.id} />
     </div>
   )
 }
