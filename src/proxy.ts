@@ -25,7 +25,10 @@ export async function proxy(request: NextRequest) {
     }
   )
 
-return response
+  // Refresh the session — writes updated auth cookies onto the response
+  await supabase.auth.getUser()
+
+  return response
 }
 
 export const config = {
@@ -33,4 +36,3 @@ export const config = {
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
-
