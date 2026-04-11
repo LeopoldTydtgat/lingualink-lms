@@ -17,6 +17,11 @@ export default function LoginPage() {
     if (result?.error) {
       setError(result.error)
       setLoading(false)
+      return
+    }
+    if (result?.success) {
+      // Hard redirect — full page reload bypasses all RSC/router caching
+      window.location.href = '/upcoming-classes'
     }
   }
 
