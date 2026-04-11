@@ -1,8 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 
-// Use this in Server Components, Server Actions, and Route Handlers
-export async function createClient() {
+// cache() ensures the layout and page share the same Supabase client
+// within a single request — prevents token refresh conflicts
+export const createClient = cache(async () => {
   const cookieStore = await cookies()
 
   return createServerClient(
@@ -25,4 +27,4 @@ export async function createClient() {
       },
     }
   )
-}
+})
