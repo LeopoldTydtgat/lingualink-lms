@@ -13,7 +13,8 @@ export default async function UpcomingClassesPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  // Do NOT redirect to /login if profile is null — the layout already
+  // verified authentication. A missing profile is a data issue, not an auth issue.
 
   const { data: rawClasses, error } = await supabase
     .from('classes')
@@ -47,7 +48,7 @@ export default async function UpcomingClassesPage() {
   return (
     <UpcomingClassesClient
       classes={classes}
-      profile={profile}
+      profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
     />
   )
 }
