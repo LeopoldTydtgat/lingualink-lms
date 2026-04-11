@@ -1,4 +1,4 @@
-﻿import Link from 'next/link'
+import Link from 'next/link'
 import Image from 'next/image'
 import { User } from 'lucide-react'
 
@@ -29,7 +29,7 @@ export default function StudentTopHeader({
         <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>
           Hello {firstName}!
         </span>
-        <Link href="/student/account" style={{ display: 'flex' }}>
+        <Link href="/student/account" prefetch={false} style={{ display: 'flex' }}>
           {photoUrl ? (
             <Image
               src={photoUrl}
@@ -64,5 +64,3 @@ export default function StudentTopHeader({
     </header>
   )
 }
-
-
