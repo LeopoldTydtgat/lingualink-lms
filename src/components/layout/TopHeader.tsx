@@ -1,4 +1,4 @@
-﻿// src/components/layout/TopHeader.tsx
+// src/components/layout/TopHeader.tsx
 import Link from 'next/link'
 import Image from 'next/image'
 import { UserCircle } from 'lucide-react'
@@ -20,7 +20,7 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
         <span className="text-sm font-medium" style={{ color: '#ffffff' }}>
           Hello {firstName}!
         </span>
-        <Link href="/account" className="shrink-0">
+        <Link href="/account" prefetch={false} className="shrink-0">
           {teacherPhotoUrl ? (
             <Image
               src={teacherPhotoUrl}
@@ -42,5 +42,3 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
     </header>
   )
 }
-
-
