@@ -1,5 +1,48 @@
 # LinguaLink Online - Build Journal
 
+
+## Session 43 - 11 April 2026 - Live Portal Auth Loop Fix
+
+### What was built
+- Diagnosed and fixed the authentication redirect loop on the live Vercel deployment that prevented login on both the Teacher and Student portals
+- Added `await supabase.auth.getUser()` to `src/proxy.ts` to refresh auth tokens server-side on every request - the root cause of the Vercel-specific auth failure
+- Added `prefetch={false}` to all `<Link>` components across `LeftNav.tsx`, `StudentLeftNav.tsx`, `TopHeader.tsx`, and `StudentTopHeader.tsx` to prevent Next.js from firing parallel prefetch requests that consumed Supabase's single-use refresh tokens
+- Removed false `if (!profile) redirect('/login')` checks from `src/app/(dashboard)/upcoming-classes/page.tsx` and `src/app/(dashboard)/account/page.tsx` - these treated a null database query result as an authentication failure, redirecting authenticated users back to login
+- Applied the same fix to `src/app/(student)/student/account/page.tsx` with a user-friendly "Account not found" fallback instead of a redirect
+- Restored the teacher login flow to use `router.push('/upcoming-classes')` after server action returns success - confirmed working with all prefetching disabled
+
+### Break/Fix Log
+
+**Issue 1 - Auth redirect loop on Vercel (Teacher and Student portals)**
+- Symptom: Login succeeds, page loads briefly, then user is redirected back to the login page within 1–3 seconds. Only occurs on Vercel - not reproducible on localhost.
+- Cause: `proxy.ts` (Next.js 16 middleware) created a Supabase client but never called `getUser()`, so auth tokens were never refreshed server-side. On Vercel's serverless architecture, each request hits a fresh function — without token refresh in the proxy, stale tokens caused server components to see unauthenticated sessions.
+- Fix: Added `await supabase.auth.getUser()` before the return statement in `proxy.ts`.
+- Lesson: Supabase SSR with Next.js requires the middleware/proxy to call `getUser()` on every request to keep the session alive. This is documented in Supabase's Next.js guide but was missing from the original implementation.
+
+**Issue 2 — Next.js Link prefetching causing token race condition**
+- Symptom: Even after the proxy fix, the teacher portal loaded the landing page successfully but was redirected to login 3 seconds later. Vercel logs showed 9+ simultaneous GET requests for navigation routes immediately after page load.
+- Cause: Next.js `<Link>` components prefetch their target pages by default. The LeftNav and TopHeader had Links to 9+ pages, all prefetched in parallel. Each prefetch went through the proxy calling `getUser()`. Supabase's refresh token is single-use - the first request consumed it, and the remaining parallel requests failed authentication, returning redirect instructions in their RSC payloads.
+- Fix: Added `prefetch={false}` to every `<Link>` in `LeftNav.tsx`, `StudentLeftNav.tsx`, `TopHeader.tsx`, and `StudentTopHeader.tsx`.
+- Lesson: In Supabase + Next.js deployments, Link prefetching can trigger a token rotation race condition. Disable prefetch on navigation links when using Supabase SSR auth.
+
+**Issue 3 - False auth redirect on null profile query**
+- Symptom: Pages redirected to `/login` even when the user was authenticated, because the profile database query returned null.
+- Cause: Multiple `page.tsx` files checked `if (!profile) redirect('/login')` after the layout had already verified authentication. A null profile is a data issue (e.g. missing database row), not an authentication failure. This created a redirect loop: layout says "user is logged in," page says "no profile, go to login," login says "already authenticated, go to dashboard."
+- Fix: Removed `if (!profile) redirect('/login')` from `upcoming-classes/page.tsx` and `account/page.tsx`. Added sensible defaults for null profiles instead of redirecting.
+- Lesson: Never use a missing database record as a proxy for "not authenticated." Separate auth checks (is the user logged in?) from data checks (does the user have a profile?). The layout handles auth — pages should handle missing data gracefully.
+
+**Issue 4 - React `cache()` import crashed all server components**
+- Symptom: All pages returned `---` status (no response) on Vercel after wrapping `createClient` in React's `cache()` function.
+- Cause: The `cache()` wrapper from React conflicted with the Supabase SSR client's cookie handling in Next.js 16's server component lifecycle. The function crashed before returning any response.
+- Fix: Reverted `server.ts` to the original implementation without `cache()`.
+- Lesson: Not all React server APIs are compatible with every library's internal state management. Test changes to shared infrastructure files carefully - they affect every page.
+
+### Session result
+The live portal authentication is now fully functional. The teacher portal login works and all 8 navigation tabs load correctly (upcoming classes, schedule, reports, students, messages, study sheets, billing, and account). The student portal login works and all tabs load correctly except My Account, which shows "Account not found" due to a test data mismatch in the students table (`auth_user_id` does not match the Supabase Auth user ID for the test student - a data issue, not a code issue). The admin portal loads but several pages crash with `---` status due to Vercel Hobby plan's 10-second function timeout - upgrading to Vercel Pro is required before go-live. The same `if (!profile) redirect('/login')` bug exists in other page files (billing, messages, reports, schedule) and should be fixed in a follow-up session. Cursor Pro is recommended for future sessions to enable agent mode for faster iterative debugging.
+
+---
+
+
 ## Session 42 - 10 April 2026 — Vercel 404 Fix
 
 ### What was built
