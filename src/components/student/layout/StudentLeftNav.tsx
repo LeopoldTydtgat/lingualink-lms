@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import Link from 'next/link'
 import Image from 'next/image'
@@ -57,7 +57,7 @@ export default function StudentLeftNav() {
           flexShrink: 0,
         }}
       >
-        <Link href="/student/my-classes" style={{ display: 'flex' }}>
+        <Link href="/student/my-classes" prefetch={false} style={{ display: 'flex' }}>
           <img src="/lingualink-logo-clean.svg" alt="Lingualink Online" style={{ height: '56px', width: 'auto' }} />
         </Link>
       </div>
@@ -72,6 +72,7 @@ export default function StudentLeftNav() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -127,10 +128,3 @@ export default function StudentLeftNav() {
     </nav>
   )
 }
-
-
-
-
-
-
-
