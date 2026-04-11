@@ -25,7 +25,7 @@ export async function signIn(formData: FormData) {
     return { error: 'Incorrect email address or password.' }
   }
   clearAttempts(ip)
-  redirect('/upcoming-classes')
+  return { success: true }
 }
 
 export async function signOut() {
