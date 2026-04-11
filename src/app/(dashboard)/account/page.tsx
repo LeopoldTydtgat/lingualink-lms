@@ -13,7 +13,8 @@ export default async function AccountPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  // Do NOT redirect to /login if profile is null — the layout already
+  // verified authentication. A missing profile is a data issue, not an auth issue.
 
   const { data: resources } = await supabase
     .from('resources')
@@ -44,9 +45,30 @@ export default async function AccountPage() {
     students: Array.isArray(r.students) ? r.students[0] : r.students,
   }))
 
+  // Provide sensible defaults if profile is null
+  const safeProfile = profile ?? {
+    id: user.id,
+    full_name: user.email ?? 'Teacher',
+    email: user.email ?? '',
+    role: 'teacher',
+    photo_url: null,
+    timezone: 'UTC',
+    bio: '',
+    teaching_language: '',
+    speaking_languages: [],
+    title: '',
+    gender: '',
+    nationality: '',
+    phone: '',
+    address_street: '',
+    address_city: '',
+    address_country: '',
+    address_postcode: '',
+  }
+
   return (
     <AccountClient
-      profile={profile}
+      profile={safeProfile}
       resources={resources ?? []}
       reviews={flatReviews}
       userId={user.id}
