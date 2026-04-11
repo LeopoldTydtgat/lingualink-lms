@@ -16,7 +16,18 @@ export default async function StudentAccountPage() {
     .eq('auth_user_id', user.id)
     .single()
 
-  if (!student) redirect('/student/login')
+  // Do NOT redirect to /student/login if student is null — the layout already
+  // verified authentication. A missing student record is a data issue, not auth.
+  if (!student) {
+    return (
+      <div style={{ padding: '32px', textAlign: 'center', color: '#6b7280' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
+          Account not found
+        </h2>
+        <p>Your student profile could not be loaded. Please contact admin.</p>
+      </div>
+    )
+  }
 
   // Get all trainings for this student, newest first
   const { data: trainings } = await supabase
