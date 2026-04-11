@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -71,7 +71,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavPro
         className="flex items-center justify-center px-4 shrink-0"
         style={{ height: '72px', background: 'linear-gradient(to right, #ffffff, #fff3e8)' }}
       >
-        <Link href="/upcoming-classes">
+        <Link href="/upcoming-classes" prefetch={false}>
           <img src="/lingualink-logo-clean.svg" alt="Lingualink Online" style={{ height: '56px', width: 'auto' }} />
         </Link>
       </div>
@@ -85,6 +85,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavPro
             <li key={item.href}>
               <Link
                 href={item.href}
+                prefetch={false}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
