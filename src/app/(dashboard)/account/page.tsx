@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import AccountClient from './AccountClient'
 
@@ -7,9 +8,15 @@ export default async function AccountPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  // Use the admin client to bypass RLS — the user's identity has already been
+  // verified above. The regular server client cannot reliably read the profiles
+  // row (column-level REVOKEs on admin-only fields cause PostgREST to deny the
+  // wildcard, returning null data).
+  const admin = createAdminClient()
+
+  const { data: profileRow } = await admin
     .from('profiles')
-    .select('*')
+    .select('id, full_name, role, photo_url, timezone, bio, teaching_languages, speaking_languages, preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate')
     .eq('id', user.id)
     .single()
 
@@ -45,25 +52,27 @@ export default async function AccountPage() {
     students: Array.isArray(r.students) ? r.students[0] : r.students,
   }))
 
-  // Provide sensible defaults if profile is null
-  const safeProfile = profile ?? {
+  // Provide sensible defaults if profile is null; always overlay email from
+  // auth.users since it is not stored in the profiles table.
+  const safeProfile = {
     id: user.id,
-    full_name: user.email ?? 'Teacher',
     email: user.email ?? '',
-    role: 'teacher',
-    photo_url: null,
-    timezone: 'UTC',
-    bio: '',
-    teaching_language: '',
-    speaking_languages: [],
-    title: '',
-    gender: '',
-    nationality: '',
-    phone: '',
-    address_street: '',
-    address_city: '',
-    address_country: '',
-    address_postcode: '',
+    full_name: profileRow?.full_name ?? null,
+    role: profileRow?.role ?? 'teacher',
+    photo_url: profileRow?.photo_url ?? null,
+    timezone: profileRow?.timezone ?? null,
+    bio: profileRow?.bio ?? null,
+    teaching_languages: profileRow?.teaching_languages ?? [],
+    speaking_languages: profileRow?.speaking_languages ?? [],
+    preferred_payment_type: profileRow?.preferred_payment_type ?? null,
+    paypal_email: profileRow?.paypal_email ?? null,
+    iban: profileRow?.iban ?? null,
+    bic: profileRow?.bic ?? null,
+    tax_number: profileRow?.tax_number ?? null,
+    street_address: profileRow?.street_address ?? null,
+    area_code: profileRow?.area_code ?? null,
+    city: profileRow?.city ?? null,
+    hourly_rate: profileRow?.hourly_rate ?? null,
   }
 
   return (

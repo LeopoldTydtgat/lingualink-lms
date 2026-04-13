@@ -14,9 +14,7 @@ export default async function ReportsPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
-
-  const isAdmin = profile.role === 'admin'
+  const isAdmin = profile?.role === 'admin'
 
   const query = supabase
     .from('reports')
@@ -71,7 +69,7 @@ export default async function ReportsPage() {
   return (
     <ReportsClient
       reports={reports}
-      profile={profile}
+      profile={profile ?? { id: '', full_name: '', role: '' }}
       isAdmin={isAdmin}
     />
   )

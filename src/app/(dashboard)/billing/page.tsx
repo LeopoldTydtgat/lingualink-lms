@@ -13,7 +13,7 @@ export default async function BillingPage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  if (!profile) return null
 
   // Fetch billing info server-side to avoid client 403
   const { data: billingInfo } = await supabase
