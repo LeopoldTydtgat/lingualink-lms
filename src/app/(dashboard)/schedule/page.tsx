@@ -16,7 +16,7 @@ export default async function SchedulePage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  if (!profile) return null
 
   // Fetch existing availability for this teacher
   const { data: availability } = await supabase

@@ -19,9 +19,7 @@ export default async function ReportPage({ params }: Props) {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
-
-  const isAdmin = profile.role === 'admin'
+  const isAdmin = profile?.role === 'admin'
 
   const { data: report, error } = await supabase
     .from('reports')
@@ -83,7 +81,7 @@ export default async function ReportPage({ params }: Props) {
   return (
     <ReportFormClient
       report={cleanReport as any}
-      profile={profile}
+      profile={profile ?? { id: '', full_name: '', role: '' }}
       isAdmin={isAdmin}
       assignedSheetIds={assignedSheetIds}
     />

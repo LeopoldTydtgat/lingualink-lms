@@ -1,11 +1,13 @@
 ﻿'use client'
 
 import { useState, useTransition } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import { studentLoginAction } from './actions'
 
 export default function StudentLoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const [showPassword, setShowPassword] = useState(false)
 
   function handleSubmit(formData: FormData) {
     setError(null)
@@ -77,15 +79,25 @@ export default function StudentLoginPage() {
                 <label htmlFor="password" style={{ fontSize: '14px', fontWeight: 500, color: '#374151' }}>
                   Password
                 </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  style={{ width: '100%', padding: '11px 14px', fontSize: '14px', border: '1px solid #E0DFDC', borderRadius: '8px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#111827' }}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    style={{ width: '100%', padding: '11px 44px 11px 14px', fontSize: '14px', border: '1px solid #E0DFDC', borderRadius: '8px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#111827' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
               <div style={{ textAlign: 'right', marginTop: '-6px' }}>
