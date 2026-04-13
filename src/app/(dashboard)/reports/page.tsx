@@ -69,7 +69,7 @@ export default async function ReportsPage() {
   return (
     <ReportsClient
       reports={reports}
-      profile={profile}
+      profile={profile ?? { id: '', full_name: '', role: '' }}
       isAdmin={isAdmin}
     />
   )
