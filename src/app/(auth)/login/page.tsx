@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
 import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +11,7 @@ import { Label } from '@/components/ui/label'
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
 
   async function handleSubmit(formData: FormData) {
@@ -82,15 +84,25 @@ export default function LoginPage() {
                 <Label htmlFor="password" style={{ fontSize: '14px', fontWeight: 500, color: '#374151' }}>
                   Password
                 </Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="••••••••"
-                  required
-                  autoComplete="current-password"
-                  style={{ height: '44px', fontSize: '14px' }}
-                />
+                <div style={{ position: 'relative' }}>
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="current-password"
+                    style={{ height: '44px', fontSize: '14px', paddingRight: '44px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
               {error && (

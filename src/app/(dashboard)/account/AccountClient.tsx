@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -234,7 +235,8 @@ function Toast({ message, type }: { message: string; type: 'success' | 'error' }
       style={{
         position: 'fixed',
         bottom: '24px',
-        right: '24px',
+        left: '50%',
+        transform: 'translateX(-50%)',
         backgroundColor: type === 'success' ? '#f0fdf4' : '#fef2f2',
         border: `1px solid ${type === 'success' ? '#86efac' : '#fca5a5'}`,
         borderRadius: '8px',
@@ -395,7 +397,6 @@ function PublicProfileModal({
                           borderRadius: '999px',
                           padding: '3px 12px',
                           fontSize: '13px',
-                          fontWeight: 500,
                         }}
                       >
                         {lang}
@@ -414,9 +415,9 @@ function PublicProfileModal({
                       <span
                         key={lang}
                         style={{
-                          backgroundColor: '#f3f4f6',
+                          backgroundColor: '#f9fafb',
                           border: '1px solid #e0dfdc',
-                          color: '#374151',
+                          color: '#6b7280',
                           borderRadius: '999px',
                           padding: '3px 12px',
                           fontSize: '13px',
@@ -437,7 +438,7 @@ function PublicProfileModal({
               <p style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
                 About
               </p>
-              <p style={{ fontSize: '14px', color: '#374151', lineHeight: 1.7 }}>
+              <p style={{ fontSize: '14px', color: '#374151', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
                 {profile.bio}
               </p>
             </div>
@@ -470,7 +471,7 @@ function PublicProfileModal({
                         <StarRating rating={review.rating} />
                       </div>
                       {review.review_text && (
-                        <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: 1.6 }}>
+                        <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: 1.5 }}>
                           {review.review_text}
                         </p>
                       )}
@@ -482,7 +483,7 @@ function PublicProfileModal({
           )}
         </div>
 
-        {/* Footer note */}
+        {/* Modal footer */}
         <div
           style={{
             padding: '14px 24px',
@@ -503,7 +504,10 @@ function PublicProfileModal({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AccountClient({ profile, resources, reviews, userId }: Props) {
+  // supabase browser client is used only for storage (photo upload/URL).
+  // All profile table writes go through /api/profile to bypass RLS.
   const supabase = createClient()
+  const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [activeTab, setActiveTab] = useState('general')
@@ -561,16 +565,21 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
       const { data } = supabase.storage.from('avatars').getPublicUrl(path)
       const publicUrl = `${data.publicUrl}?t=${Date.now()}`
 
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ photo_url: publicUrl, updated_at: new Date().toISOString() })
-        .eq('id', userId)
-
-      if (updateError) throw updateError
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photo_url: publicUrl }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.error ?? 'Failed to save photo URL')
+      }
 
       setPhotoUrl(publicUrl)
       showToast('Profile photo updated.', 'success')
-    } catch {
+      router.refresh()
+    } catch (err) {
+      console.error('handlePhotoUpload error:', err)
       showToast('Failed to upload photo. Please try again.', 'error')
     } finally {
       setUploadingPhoto(false)
@@ -586,18 +595,22 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
     }
     setSaving(true)
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           full_name: fullName.trim(),
           timezone: timezone || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-
-      if (error) throw error
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.error ?? 'Save failed')
+      }
       showToast('General info saved.', 'success')
-    } catch {
+      router.refresh()
+    } catch (err) {
+      console.error('saveGeneralInfo error:', err)
       showToast('Failed to save. Please try again.', 'error')
     } finally {
       setSaving(false)
@@ -609,19 +622,23 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   async function saveProfessionalInfo() {
     setSaving(true)
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
+      const res = await fetch('/api/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           bio: bio.trim() || null,
           teaching_languages: teachingLanguages,
           speaking_languages: speakingLanguages,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-
-      if (error) throw error
+        }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json.error ?? 'Save failed')
+      }
       showToast('Professional info saved.', 'success')
-    } catch {
+      router.refresh()
+    } catch (err) {
+      console.error('saveProfessionalInfo error:', err)
       showToast('Failed to save. Please try again.', 'error')
     } finally {
       setSaving(false)
