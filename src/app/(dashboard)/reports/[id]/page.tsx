@@ -81,7 +81,7 @@ export default async function ReportPage({ params }: Props) {
   return (
     <ReportFormClient
       report={cleanReport as any}
-      profile={profile}
+      profile={profile ?? { id: '', full_name: '', role: '' }}
       isAdmin={isAdmin}
       assignedSheetIds={assignedSheetIds}
     />
