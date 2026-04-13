@@ -19,7 +19,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     .eq('id', user.id)
     .single()
 
-  if (!profile) redirect('/login')
+  if (!profile) return null
 
   // â”€â”€ Pre-open admin conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
