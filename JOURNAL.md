@@ -1,6 +1,31 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 44 - 13 April 2026 - Claude Code Setup & Account Page Fixes
+
+### What was built
+- Installed and configured Claude Code (CLI) as the primary development tool going forward
+- Created CLAUDE.md with full project rules, architecture notes, and critical never-break constraints
+- Added password visibility toggle (eye icon) to both teacher and student login pages
+- Fixed next/image hostname error by adding Supabase storage domain to next.config.ts
+- Fixed false `if (!profile) redirect('/login')` pattern in billing, messages, reports, and schedule pages
+- Fixed My Account page data not saving - root cause was missing RLS UPDATE policy silently blocking writes; resolved by routing saves through a new server-side API route `/api/profile` using the admin client
+- Fixed My Account page not loading saved data - root cause was column-level REVOKEs blocking `select('*')` reads; resolved by switching to `createAdminClient()` with an explicit column list
+- Moved success toast on My Account from bottom right to bottom center
+
+### Break/Fix Log
+Issue 1: Password field had no visibility toggle / Usability gap / Added Eye/EyeOff icons from lucide-react to both login pages / Always use type="button" on toggle to prevent accidental form submission
+
+Issue 2: next/image blocking page render / Supabase storage hostname not whitelisted in next.config.ts / Added remotePatterns entry for varrxikjrbycpobydlev.supabase.co / Always add image hostnames to next.config.ts when using Supabase Storage
+
+Issue 3: My Account saves silently failing / No RLS UPDATE policy on profiles table - PostgREST returns no error but writes 0 rows / Created /api/profile PATCH route using admin client with field whitelist / Never use browser Supabase client for writes on tables with restrictive RLS - route through admin API instead
+
+Issue 4: My Account fields empty on load / Column-level REVOKEs blocking select('*') and returning null profile / Switched page.tsx to createAdminClient() with explicit safe column list / Never use select('*') on tables with column-level privilege restrictions
+
+### Session result
+Claude Code is now the primary development tool for this project, replacing the Cursor Agent workflow. CLAUDE.md locks in all critical project rules so every session starts with full context. Four real bugs fixed and confirmed working on localhost. A new working principle was established: one fix must never cause another problem - no ripple effect of bugs.
+
+
 ## Session 43 - 11 April 2026 - Live Portal Auth Loop Fix
 
 ### What was built
