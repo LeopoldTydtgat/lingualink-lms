@@ -37,6 +37,7 @@ interface MyClassesClientProps {
   lessons: Lesson[]
   lastFeedback: string | null
   studentTimezone: string
+  profileCompleted: boolean
 }
 
 // Format a date for display — uses Intl with explicit timezone, safe on client
@@ -98,9 +99,11 @@ export default function MyClassesClient({
   lessons,
   lastFeedback,
   studentTimezone,
+  profileCompleted,
 }: MyClassesClientProps) {
   const router = useRouter()
 
+  const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
@@ -175,6 +178,47 @@ export default function MyClassesClient({
 
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+
+      {/* Profile completion banner */}
+      {showProfileBanner && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#FFF7ED',
+          borderLeft: '4px solid #FF8303',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          marginBottom: '24px',
+          gap: '12px',
+        }}>
+          <p style={{ margin: 0, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>
+            Complete your profile to get the most out of your portal.{' '}
+            <a
+              href="/student/account"
+              style={{ color: '#FF8303', fontWeight: 600, textDecoration: 'none' }}
+            >
+              Complete now →
+            </a>
+          </p>
+          <button
+            onClick={() => setShowProfileBanner(false)}
+            aria-label="Dismiss"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '18px',
+              color: '#9ca3af',
+              lineHeight: 1,
+              padding: '0 4px',
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Page header */}
       <div style={{

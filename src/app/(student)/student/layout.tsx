@@ -1,6 +1,7 @@
 // src/app/(student)/student/layout.tsx
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -16,19 +17,21 @@ export default async function StudentDashboardLayout({
   children: React.ReactNode
 }) {
   const supabase = await createClient()
+  const admin = createAdminClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/student/login')
 
-  const { data: student } = await supabase
+  const { data: student } = await admin
     .from('students')
-    .select('id, full_name, email, photo_url, is_active, timezone')
+    .select('id, full_name, email, photo_url, is_active, timezone, must_change_password')
     .eq('auth_user_id', user.id)
     .single()
 
   if (!student) redirect('/student/login')
   if (!student.is_active) redirect('/student/login')
+  if (student.must_change_password) redirect('/student/change-password')
 
   const { data: nextLesson } = await supabase
     .from('lessons')
