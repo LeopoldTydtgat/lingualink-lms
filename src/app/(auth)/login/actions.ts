@@ -2,14 +2,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
-import { checkRateLimit, recordFailedAttempt, clearAttempts, getClientIp } from '@/lib/rate-limit'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 export async function signIn(formData: FormData) {
   const headersList = await headers()
-  const ip = getClientIp(headersList)
-  const rateLimitError = checkRateLimit(ip)
-  if (rateLimitError) {
-    return { error: rateLimitError }
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const isBlocked = await checkRateLimit(ip, 'teacher')
+  if (isBlocked) {
+    return { error: 'Too many login attempts. Please wait 10 minutes before trying again.' }
   }
   const email = (formData.get('email') as string)?.trim().toLowerCase()
   const password = formData.get('password') as string
@@ -19,12 +19,8 @@ export async function signIn(formData: FormData) {
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithPassword({ email, password })
   if (error) {
-    if (error.status === 400) {
-      recordFailedAttempt(ip)
-    }
     return { error: 'Incorrect email address or password.' }
   }
-  clearAttempts(ip)
   return { success: true }
 }
 

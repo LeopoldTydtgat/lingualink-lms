@@ -19,10 +19,10 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
   Friday: 5, Saturday: 6, Sunday: 0,
 }
 
-// Generate slots in 30-minute increments from 06:00 to 22:30
+// Generate slots in 30-minute increments from 00:00 to 23:30
 // Each entry is { hour: 6, minute: 0 }, { hour: 6, minute: 30 }, etc.
-const SLOTS = Array.from({ length: 34 }, (_, i) => ({
-  hour: Math.floor(i / 2) + 6,
+const SLOTS = Array.from({ length: 48 }, (_, i) => ({
+  hour: Math.floor(i / 2),
   minute: (i % 2) * 30,
 }))
 
@@ -59,7 +59,14 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   const isDragging = useRef(false)
   const dragMode = useRef<'on' | 'off'>('on')
   const draggedSlots = useRef<Set<string>>(new Set())
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [localGeneral, setLocalGeneral] = useState<AvailabilityRecord[]>(generalSlots)
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 264
+    }
+  }, [])
 
   useEffect(() => {
     setLocalGeneral(availability.filter(a => a.type === 'general'))
@@ -209,15 +216,15 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         </p>
       </div>
 
-      <div className="overflow-x-auto select-none">
+      <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'auto' }}>
           <thead>
             <tr>
-              <th style={{ width: '64px' }} />
+              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', borderBottom: '2px solid #E5E7EB' }} />
               {DAYS.map(day => (
                 <th
                   key={day}
-                  style={{ width: '96px', padding: '8px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#374151' }}
+                  style={{ width: '96px', padding: '8px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#374151', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', borderRight: '1px solid #E5E7EB', borderBottom: '2px solid #E5E7EB' }}
                 >
                   {day.slice(0, 3)}
                 </th>
@@ -234,7 +241,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                 {DAYS.map(day => {
                   const active = isSlotActive(localGeneral, day, hour, minute)
                   return (
-                    <td key={day} style={{ padding: '1px 3px' }}>
+                    <td key={day} style={{ padding: '1px 3px', borderRight: '1px solid #E5E7EB' }}>
                       <button
                         onMouseDown={() => handleSlotMouseDown(day, hour, minute)}
                         onMouseEnter={() => handleSlotMouseEnter(day, hour, minute)}
