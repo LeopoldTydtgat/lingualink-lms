@@ -12,7 +12,7 @@ export default async function MyClassesPage() {
 
   const { data: student } = await supabase
     .from('students')
-    .select('id, timezone')
+    .select('id, timezone, profile_completed')
     .eq('auth_user_id', user.id)
     .single()
 
@@ -77,6 +77,7 @@ export default async function MyClassesPage() {
       lessons={lessons}
       lastFeedback={lastFeedback}
       studentTimezone={student.timezone ?? 'Europe/London'}
+      profileCompleted={student.profile_completed ?? true}
     />
   )
 }
