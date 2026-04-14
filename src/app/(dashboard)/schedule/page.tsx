@@ -16,7 +16,9 @@ export default async function SchedulePage() {
     .eq('id', user.id)
     .single()
 
-  if (!profile) return null
+  if (!profile) return (
+    <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
+  )
 
   // Fetch existing availability for this teacher
   const { data: availability } = await supabase
