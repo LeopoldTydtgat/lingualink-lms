@@ -1,5 +1,32 @@
 # LinguaLink Online - Build Journal
 
+## Session 47 - 14 April 2026 - Schedule Fixes, Rate Limiting & Report Improvements
+
+### What was built
+- `src/lib/rateLimit.ts` - new DB-backed IP rate limiter using `login_attempts` Supabase table; replaces broken in-memory rate limiter
+- `src/app/(auth)/login/actions.ts` - wired new rate limiter (portal: 'teacher'), inlined IP extraction
+- `src/app/(student-auth)/student/login/actions.ts` - same, portal: 'student'
+- `src/lib/rate-limit.ts` - deleted (in-memory, stateless on Vercel serverless - was non-functional)
+- `src/app/(dashboard)/schedule/tabs/DayToDay.tsx` - 6 fixes: 24hr calendar (00:00-24:00), left/right nav arrows, hint text updated, inline delete modal replacing browser confirm, hover brightness effect on availability blocks, Export to Calendar button generating .ics file, past-date guards on handleDateSelect and handleEventClick
+- `src/app/(dashboard)/schedule/tabs/GeneralAvailability.tsx` - 24hr grid (00:00-23:30), auto-scroll to 06:00 on load, sticky day headers, column dividers, comment updated
+- `src/app/(dashboard)/schedule/tabs/Holidays.tsx` - updated description and warning text, inline delete modal replacing browser confirm
+- `src/app/(dashboard)/reports/[id]/ReportFormClient.tsx` - 150 character minimum on feedback field, 1000 character max, real-time character counter with remaining indicator
+- `src/app/(dashboard)/reports/[id]/page.tsx` - fetches assigned study sheet titles alongside IDs
+- `src/components/AssignStudySheetsModal.tsx` - onSaved callback updated to return full sheet objects instead of IDs only
+- `src/app/(dashboard)/students/[id]/StudentDetailClient.tsx` - Messages tab replaced with deep-link button to /messages?studentId=
+- `src/app/(dashboard)/messages/page.tsx` - student deep-link support via ?studentId= query param, auto-opens conversation on load
+
+### Break/Fix Log
+Issue 1: In-memory rate limiter non-functional on Vercel / Cause: Serverless functions are stateless - counter resets on every invocation / Fix: Replaced with DB-backed login_attempts table, admin client, 5 attempts per 10 minutes per IP per portal / Lesson: Never use in-memory state for anything that must persist across serverless invocations
+
+Issue 2: validRange prop on FullCalendar caused infinite re-render loop / Cause: new Date() inside JSX creates a new object on every render, causing FullCalendar to think the range changed, triggering datesSet, triggering setVisibleRange, infinite loop / Fix: Removed validRange entirely - past-date guards in handleDateSelect and handleEventClick are sufficient / Lesson: Never pass new Date() directly into a FullCalendar prop - compute once via useRef
+
+Issue 3: Newly assigned study sheets rendered as "Unknown sheet" / Cause: AssignStudySheetsModal.onSaved only returned IDs, not full sheet objects - newly assigned sheets were not in local state / Fix: Updated modal callback to return { id, title }[] objects; ReportFormClient updates both currentAssignedIds and currentAssignedSheets on save
+
+### Session result
+Significant hardening and UX improvements across the schedule, reports, and student profile sections. Rate limiting is now properly DB-backed and production-safe. The schedule calendar is fully 24-hour with improved navigation, inline modals, calendar export, and past-date protection. Class reports now enforce meaningful feedback with a 150-character minimum. Study sheet titles are visible on report forms. The student profile Messages tab now deep-links directly into a conversation with that student.
+
+---
 
 ## Session 46 - 14 April 2026 - Timezone Selector, Language Selector & Teacher Login Fix
 
