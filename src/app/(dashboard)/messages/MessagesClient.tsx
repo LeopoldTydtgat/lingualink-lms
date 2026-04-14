@@ -140,7 +140,10 @@ export default function MessagesClient({
   const [searchQuery, setSearchQuery] = useState('')
   const [newMsgSearch, setNewMsgSearch] = useState('')
   const [, forceUpdate] = useState(0)
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{ url: string; filename: string; size: number }>>([])
+  const [uploading, setUploading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -247,7 +250,8 @@ export default function MessagesClient({
     const result = await sendMessage(
       selectedContact.id,
       selectedContact.type as 'teacher' | 'admin' | 'student',
-      html
+      html,
+      pendingAttachments.length > 0 ? pendingAttachments : undefined
     )
 
     if (result?.error) {
@@ -263,7 +267,7 @@ export default function MessagesClient({
       receiver_id: selectedContact.id,
       receiver_type: selectedContact.type,
       content: html,
-      attachments: [],
+      attachments: pendingAttachments,
       read_at: null,
       created_at: new Date().toISOString(),
     }
@@ -273,6 +277,7 @@ export default function MessagesClient({
       prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
     )
     editor.commands.clearContent()
+    setPendingAttachments([])
     setSending(false)
   }
 
@@ -295,6 +300,33 @@ export default function MessagesClient({
     }
     setShowNewMessage(false)
     setNewMsgSearch('')
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File must be under 10MB.')
+      e.target.value = ''
+      return
+    }
+
+    setUploading(true)
+    const form = new FormData()
+    form.append('file', file)
+
+    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+    const json = await res.json()
+
+    if (!res.ok) {
+      alert(json.error ?? 'Upload failed.')
+    } else {
+      setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+    }
+
+    setUploading(false)
+    e.target.value = ''
   }
 
   const filteredContacts = contacts.filter(c =>
@@ -439,13 +471,28 @@ export default function MessagesClient({
                               Received: #1F2937 dark charcoal, white text
                               Two distinct colours = immediately obvious who said what */}
                           <div
-                            className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                            className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isFromMe
                               ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className="mt-1 flex flex-col gap-1">
+                              {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
+                                >
+                                  📎 {att.filename}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           {/* Timestamp + read ticks row */}
                           <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">
@@ -472,6 +519,12 @@ export default function MessagesClient({
                 .messages-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
                 .messages-composer .ProseMirror:focus { outline: none !important; border: none !important; }
                 .messages-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+                .messages-composer .ProseMirror ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .messages-composer .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .messages-composer .ProseMirror li { margin: 0.1rem 0; }
+                .message-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .message-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .message-bubble li { margin: 0.1rem 0; }
               `}</style>
               {/* Formatting toolbar */}
               <div className="flex items-center gap-1 px-4 pt-3 pb-1">
@@ -496,6 +549,13 @@ export default function MessagesClient({
                 >
                   U
                 </button>
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                  className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >
+                  •≡
+                </button>
               </div>
 
               {/* Tiptap editor — bordered container shows the typing area clearly.
@@ -508,9 +568,54 @@ export default function MessagesClient({
                 <EditorContent editor={editor} />
               </div>
 
+              {/* Pending attachments list */}
+              {pendingAttachments.length > 0 && (
+                <div className="mx-4 mb-2 flex flex-col gap-1">
+                  {pendingAttachments.map((att, i) => (
+                    <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600">
+                      <span className="truncate max-w-[200px]">📎 {att.filename}</span>
+                      <button
+                        onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                        className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                        aria-label="Remove attachment"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Send row */}
               <div className="flex items-center justify-between px-4 pb-3 pt-1">
-                <span className="text-xs text-gray-400">📎 File attachments — coming soon</span>
+                <div className="flex items-center gap-2">
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  {/* Paperclip button */}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                    title="Attach file"
+                    aria-label="Attach file"
+                  >
+                    {uploading ? (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="animate-spin">
+                        <circle cx="8" cy="8" r="6" stroke="#9ca3af" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M13.5 7.5L7.5 13.5C6.1 14.9 3.9 14.9 2.5 13.5C1.1 12.1 1.1 9.9 2.5 8.5L8.5 2.5C9.4 1.6 10.9 1.6 11.8 2.5C12.7 3.4 12.7 4.9 11.8 5.8L5.8 11.8C5.3 12.3 4.6 12.3 4.1 11.8C3.6 11.3 3.6 10.6 4.1 10.1L9.5 4.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
                 <button
                   onClick={handleSend}
                   disabled={sending}

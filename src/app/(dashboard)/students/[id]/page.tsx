@@ -33,7 +33,6 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       students (
         id,
         full_name,
-        email,
         photo_url,
         self_reported_level,
         timezone

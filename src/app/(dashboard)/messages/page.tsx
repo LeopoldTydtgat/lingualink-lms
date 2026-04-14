@@ -19,7 +19,9 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     .eq('id', user.id)
     .single()
 
-  if (!profile) return null
+  if (!profile) return (
+    <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
+  )
 
   // â”€â”€ Pre-open admin conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
