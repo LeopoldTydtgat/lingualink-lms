@@ -1,6 +1,74 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 45 - 14 April 2026 - Student Portal Fixes & Self-Registration Foundation
+
+### What was built
+- Fixed student My Account page - switched to `createAdminClient()` with explicit 
+  safe column list, resolving silent query failure caused by column-level REVOKEs
+- Created `src/app/api/student/profile/route.ts` - POST (photo upload) and PATCH 
+  (field updates) routes using admin client, replacing all direct browser-side 
+  Supabase calls on the student account page
+- Added `profile_completed` and `must_change_password` boolean columns to the 
+  students table via Supabase SQL Editor
+- Created `src/app/api/student/change-password/route.ts` - PATCH route that updates 
+  auth password and sets `must_change_password: false` via admin client
+- Created `src/app/(student-auth)/student/change-password/page.tsx` - standalone 
+  full-page password change screen outside the student layout (no sidebar, no 
+  redirect loop risk)
+- Updated `src/app/(student)/student/layout.tsx` - switched student fetch to 
+  `createAdminClient()`, added `must_change_password` redirect to change-password 
+  page
+- Added profile completion banner to student dashboard - dismissable per session, 
+  links to My Account, disappears permanently once profile is saved
+- Updated `src/lib/email/templates.ts` - added Lingualink logo above orange header 
+  in all outgoing emails
+- Updated `src/app/api/admin/students/route.ts` - replaced inline welcome email HTML 
+  with `buildEmailTemplate`, removed recovery link, added "Log In" button linking to 
+  student portal, added `profile_completed: false` and `must_change_password: true` 
+  to student upsert
+
+### Break/Fix Log
+
+Issue 1: Student My Account showed "Account not found" after UUID was corrected
+Symptom: Page showed fallback despite correct `auth_user_id` in students table
+Cause: `select('*')` column list in page.tsx contained columns from the profiles/
+teachers table that don't exist on students - Supabase returned null silently
+Fix: Replaced column list with only valid students table columns
+Lesson: Never assume column names - always verify against actual table schema before 
+writing queries
+
+Issue 2: Student login loop after adding must_change_password to layout
+Symptom: Entering login credentials refreshed back to login page, clearing fields
+Cause: `must_change_password` column was added to the layout select but lacked 
+SELECT privilege for the authenticated role - entire query returned null, hitting 
+`!student` redirect to `/student/login`
+Fix: Ran `GRANT SELECT (must_change_password, profile_completed, teacher_notes, 
+follow_up_date, follow_up_reason) ON students TO authenticated` in Supabase SQL 
+Editor; switched layout student query to `createAdminClient()`
+Lesson: Any new column added to a table with column-level REVOKEs must be explicitly 
+granted before it can be selected - even by the admin client if the layout previously 
+used the regular client
+
+Issue 3: middleware.ts creation attempted during build
+Symptom: Claude Code prompted to create middleware.ts during Step 5
+Cause: Instruction asked for route protection without specifying the proxy.ts pattern
+Fix: Pressed No, redirected Claude Code to add the check directly inside the student 
+layout server component instead
+Lesson: Always explicitly state "do not create middleware.ts" in any instruction 
+involving route protection
+
+### Session result
+Resolved the persistent student My Account loading failure and the student login 
+redirect loop. Established the must_change_password first-login flow, profile 
+completion banner, and admin-routed photo upload. Updated all platform emails to 
+include the Lingualink logo. Confirmed local and production share the same Supabase 
+project - SQL grants apply universally. All changes deployed to production and 
+verified on the live Vercel URL.
+
+---
+
+
 ## Session 44 - 13 April 2026 - Claude Code Setup & Account Page Fixes
 
 ### What was built
