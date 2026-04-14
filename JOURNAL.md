@@ -1,5 +1,47 @@
 # LinguaLink Online - Build Journal
 
+## Session 48 - 14 April 2026 - Hardening Pass Continued: Privacy, Messages, Billing & Bug Fixes
+
+### What was built
+- **Student email privacy** — removed `email` from all teacher-facing student select queries (`students/page.tsx`, `students/[id]/page.tsx`) and stripped it from both client-side TypeScript types and rendered UI. Teachers can no longer see student email addresses.
+- **Graceful profile fallback** — replaced three silent `if (!profile) return null` bail-outs in `billing/page.tsx`, `messages/page.tsx`, and `schedule/page.tsx` with a user-facing error message. Pages no longer render blank if the profile query returns empty.
+- **Messages bullet list** — added a bullet list toolbar button to the message composer (StarterKit already included support; button was missing). Fixed Tailwind's preflight reset stripping list styles in both the composer and sent message bubbles by scoping CSS rules to `.messages-composer .ProseMirror` and `.message-bubble`.
+- **Messages file attachments** — implemented end-to-end: created `messages` Supabase Storage bucket (private, 10MB limit, JPEG/PNG/WebP/PDF only) with three RLS policies; built `api/messages/upload/route.ts` POST handler; updated `sendMessage` action to accept and persist attachments; added paperclip button, hidden file input, pending attachment list with remove buttons, and attachment chip rendering in sent/received bubbles using signed URLs (7-day expiry).
+- **RightPanel billing calculation** — wired up real billing data replacing hardcoded `€ –`. Layout now fetches current month lessons and calculates `currentAmount` (completed + student no-show) and `projectedAmount` (+ scheduled), passed as `billingData` prop to `RightPanel`.
+- **Admin nav regression fix** — `hourly_rate` added to the profile select during billing work caused the entire profile query to fail silently (column-level RLS restriction). Fixed by removing `hourly_rate` from the regular profile select and fetching it separately via `createAdminClient()` which uses the service role. Admin Controls link restored to Shannon's nav.
+- **Student detail back button** — added a `← Back to Students` button at the top of the student detail page. Fixed a `router is not defined` runtime error by adding the missing `const router = useRouter()` call inside the component body.
+
+### Break/Fix Log
+
+**Issue 1: Silent profile query failure killing admin nav**
+Symptom: Admin Controls link disappeared from Shannon's nav after billing work.
+Cause: `hourly_rate` added to the regular Supabase profile select — this field has column-level privileges revoked for non-service-role clients, causing the entire query to return nothing silently. `profile` became null, role defaulted to `'teacher'`, admin link was filtered out.
+Fix: Removed `hourly_rate` from the regular profile select. Fetched it separately using `createAdminClient()` (service role) which bypasses column restrictions.
+Lesson: Never add restricted columns to regular client selects. Any column touched by `REVOKE` at the column level must always be fetched via the admin client.
+
+**Issue 2: Attachment URLs returning 404**
+Symptom: Clicking an attachment link returned `Bucket not found` in the browser.
+Cause: Upload route was calling `getPublicUrl()` — a synchronous method that constructs a public URL regardless of bucket permissions. The `messages` bucket is private, so the URL was invalid.
+Fix: Replaced with `createSignedUrl(path, 604800)` — generates a time-limited signed URL valid for 7 days that works with private buckets.
+Lesson: Private buckets always require signed URLs. `getPublicUrl()` only works on public buckets.
+
+**Issue 3: Bullet list invisible in sent bubbles**
+Symptom: Bullet list formatted correctly in composer but rendered as plain text in sent message bubbles.
+Cause: Tailwind's preflight reset applies `list-style: none` globally. The CSS scope fix applied to `.messages-composer .ProseMirror` did not cover the bubble render area.
+Fix: Added a `message-bubble` class to the bubble container div and added matching CSS rules scoped to `.message-bubble` in the same style block.
+Lesson: When fixing CSS for a rich text editor, check both the input area and the output render area — they are separate DOM contexts and both need the reset overridden.
+
+**Issue 4: `router is not defined` on back button**
+Symptom: Runtime ReferenceError when clicking the back button in student detail.
+Cause: `useRouter` was imported at the top of the file but `const router = useRouter()` was never called inside the component body.
+Fix: Added `const router = useRouter()` as the first line of the component function body.
+Lesson: Confirm hook instantiation exists in the component body, not just the import.
+
+### Session result
+A focused hardening session addressing four teacher portal issues raised by the client. Student email addresses are now fully removed from all teacher-facing views, protecting student privacy. The messages feature received two significant upgrades — bullet list formatting now renders correctly in both the composer and sent bubbles, and file attachments are fully functional end-to-end using a private Supabase Storage bucket with signed URLs. The RightPanel billing summary now shows real calculated values instead of hardcoded dashes. A silent profile query failure — introduced when `hourly_rate` was incorrectly added to a column-restricted select — caused the admin nav link to disappear for Shannon; this was diagnosed and resolved by moving the restricted field fetch to the admin client. A back navigation button was added to the student detail page.
+
+---
+
 ## Session 47 - 14 April 2026 - Schedule Fixes, Rate Limiting & Report Improvements
 
 ### What was built
