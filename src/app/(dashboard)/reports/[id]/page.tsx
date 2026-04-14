@@ -72,6 +72,15 @@ export default async function ReportPage({ params }: Props) {
 
   const assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
 
+  let assignedSheets: { id: string; title: string }[] = []
+  if (assignedSheetIds.length > 0) {
+    const { data: sheets } = await supabase
+      .from('study_sheets')
+      .select('id, title')
+      .in('id', assignedSheetIds)
+    assignedSheets = sheets ?? []
+  }
+
   // Build a clean report object with correct types
   const cleanReport = {
     ...report,
@@ -84,6 +93,7 @@ export default async function ReportPage({ params }: Props) {
       profile={profile ?? { id: '', full_name: '', role: '' }}
       isAdmin={isAdmin}
       assignedSheetIds={assignedSheetIds}
+      assignedSheets={assignedSheets}
     />
   )
 }

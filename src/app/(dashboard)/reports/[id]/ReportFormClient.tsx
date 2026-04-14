@@ -43,6 +43,7 @@ type Props = {
   profile: { id: string; full_name: string; role: string }
   isAdmin: boolean
   assignedSheetIds: string[]
+  assignedSheets: { id: string; title: string }[]
 }
 
 const CEFR_LEVELS = [
@@ -73,7 +74,7 @@ const CEFR_DESCRIPTIONS: Record<string, string> = {
   C2: 'Can understand virtually everything heard or read. Expresses themselves spontaneously, very fluently and precisely.',
 }
 
-export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets }: Props) {
   const router = useRouter()
   const supabase = createClient()
 
@@ -95,6 +96,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   const [error, setError] = useState<string | null>(null)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [currentAssignedIds, setCurrentAssignedIds] = useState<string[]>(assignedSheetIds)
+  const [currentAssignedSheets, setCurrentAssignedSheets] = useState<{ id: string; title: string }[]>(assignedSheets)
 
   const isEditable = report.status === 'pending' || report.status === 'reopened'
 
@@ -118,6 +120,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
     // If teacher unchecked the confirmation, require a note
     if (didClassHappen && !studentConfirmed && !impersonationNote.trim()) {
       setError('Please provide a note about who attended the class.')
+      return
+    }
+    if (didClassHappen && feedbackText.trim().length < 150) {
+      setError('Please provide at least 150 characters of feedback before submitting.')
       return
     }
 
@@ -297,7 +303,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               value={feedbackText}
               onChange={e => setFeedbackText(e.target.value)}
               rows={5}
-              maxLength={2000}
+              maxLength={1000}
               placeholder="Summarise what was covered, how the student performed, and what to focus on next time..."
               className={[
                 'w-full border border-gray-300 rounded-xl px-4 py-3 text-sm',
@@ -305,7 +311,12 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                 !isEditable ? 'bg-gray-50 text-gray-500' : '',
               ].join(' ')}
             />
-            <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 2000</p>
+            <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 1000</p>
+    {feedbackText.length < 150 && (
+      <p className="text-xs text-red-500 mt-1">
+        Minimum 150 characters required ({150 - feedbackText.length} remaining)
+      </p>
+    )}
           </section>
 
           {/* Study sheet assignment */}
@@ -315,12 +326,17 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               Assign vocabulary or grammar sheets for the student to review.
             </p>
             {currentAssignedIds.length > 0 && (
-              <p className="text-sm text-gray-600 mb-3">
-                <span className="font-semibold" style={{ color: '#FF8303' }}>
-                  {currentAssignedIds.length}
-                </span>
-                {' '}sheet{currentAssignedIds.length !== 1 ? 's' : ''} assigned
-              </p>
+              <ul className="mb-3 space-y-1">
+                {currentAssignedIds.map(id => {
+                  const sheet = currentAssignedSheets.find(s => s.id === id)
+                  return (
+                    <li key={id} className="text-sm text-gray-700 flex items-center gap-2">
+                      <span style={{ color: '#FF8303' }}>•</span>
+                      {sheet?.title ?? 'Unknown sheet'}
+                    </li>
+                  )
+                })}
+              </ul>
             )}
             {isEditable && (
               <button
@@ -477,7 +493,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           studentId={student.id}
           alreadyAssigned={currentAssignedIds}
           onClose={() => setShowAssignModal(false)}
-          onSaved={(ids) => setCurrentAssignedIds(ids)}
+          onSaved={(sheets) => {
+            setCurrentAssignedIds(sheets.map(s => s.id))
+            setCurrentAssignedSheets(sheets)
+          }}
         />
       )}
 

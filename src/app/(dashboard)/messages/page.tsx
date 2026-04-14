@@ -5,7 +5,7 @@ import MessagesClient from './MessagesClient'
 
 interface PageProps {
   // Next.js 15 â€” searchParams is a Promise, must be awaited
-  searchParams: Promise<{ openAdmin?: string; adminId?: string }>
+  searchParams: Promise<{ openAdmin?: string; adminId?: string; studentId?: string }>
 }
 
 export default async function MessagesPage({ searchParams }: PageProps) {
@@ -25,7 +25,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
   // with ?openAdmin=true&adminId={id}. We read those params and fetch the admin
   // profile so MessagesClient can auto-select the conversation immediately.
-  const { openAdmin, adminId } = await searchParams
+  const { openAdmin, adminId, studentId } = await searchParams
 
   let adminContact: {
     id: string
@@ -51,6 +51,36 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         name: adminProfile.full_name,
         email: '',
         photo_url: adminProfile.photo_url ?? null,
+        latestMessage: null,
+        unreadCount: 0,
+      }
+    }
+  }
+
+  // ── Student deep-link ──────────────────────────────────────────────────────
+  let studentContact: {
+    id: string
+    type: string
+    name: string
+    email: string
+    photo_url: string | null
+    latestMessage: null
+    unreadCount: number
+  } | null = null
+
+  if (studentId) {
+    const { data: studentData } = await supabase
+      .from('students')
+      .select('id, full_name, email, photo_url')
+      .eq('id', studentId)
+      .single()
+    if (studentData) {
+      studentContact = {
+        id: studentData.id,
+        type: 'student',
+        name: studentData.full_name,
+        email: studentData.email ?? '',
+        photo_url: studentData.photo_url ?? null,
         latestMessage: null,
         unreadCount: 0,
       }
@@ -153,7 +183,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
       allStudents={allStudents || []}
       // Pass the pre-resolved admin contact if the URL requested it.
       // MessagesClient will auto-select this conversation on mount.
-      initialContact={adminContact}
+      initialContact={adminContact ?? studentContact}
     />
   )
 }
