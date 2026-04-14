@@ -1,5 +1,6 @@
 // src/app/(dashboard)/layout.tsx
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import LeftNav from '@/components/layout/LeftNav'
 import TopHeader from '@/components/layout/TopHeader'
@@ -51,6 +52,38 @@ export default async function DashboardLayout({
       student_name: studentRow?.full_name ?? 'Student',
     }
   }
+
+  // ── Billing summary for the current calendar month ────────────────────────
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  const { data: monthLessons } = await supabase
+    .from('lessons')
+    .select('duration_minutes, status')
+    .eq('teacher_id', profile?.id)
+    .gte('scheduled_at', monthStart)
+    .in('status', ['completed', 'student_no_show', 'scheduled'])
+
+  const admin = createAdminClient()
+  const { data: rateRow } = await admin
+    .from('profiles')
+    .select('hourly_rate')
+    .eq('id', user.id)
+    .single()
+  const hourlyRate = rateRow?.hourly_rate ?? 0
+
+  let currentAmount = 0
+  let projectedAmount = 0
+
+  for (const lesson of monthLessons ?? []) {
+    const amount = (lesson.duration_minutes / 60) * hourlyRate
+    if (lesson.status === 'completed' || lesson.status === 'student_no_show') {
+      currentAmount += amount
+    }
+    projectedAmount += amount
+  }
+
+  const billingData = { currentAmount, projectedAmount }
 
   const { count: unreadCount } = await supabase
     .from('messages')
@@ -116,6 +149,7 @@ export default async function DashboardLayout({
             teacherId={profile?.id ?? null}
             announcements={announcements}
             nextLesson={nextLesson}
+            billingData={billingData}
           />
         </div>
       </div>

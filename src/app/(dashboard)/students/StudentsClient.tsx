@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation'
 type Student = {
   id: string
   full_name: string
-  email: string
   photo_url: string | null
   self_reported_level: string | null
 }

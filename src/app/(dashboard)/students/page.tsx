@@ -32,7 +32,6 @@ export default async function StudentsPage() {
       students (
         id,
         full_name,
-        email,
         photo_url,
         self_reported_level
       ),

@@ -27,6 +27,7 @@ type RightPanelProps = {
   teacherId: string | null
   announcements?: AnnouncementItem[]
   nextLesson?: NextLesson | null
+  billingData?: { currentAmount: number; projectedAmount: number }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,6 +68,7 @@ export default function RightPanel({
   teacherId,
   announcements = [],
   nextLesson = null,
+  billingData,
 }: RightPanelProps) {
   const router = useRouter()
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
@@ -163,11 +165,15 @@ export default function RightPanel({
           <div className="space-y-1">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Current month</span>
-              <span className="font-semibold text-gray-900">€ –</span>
+              <span className="font-semibold text-gray-900">
+                {billingData != null ? `€ ${billingData.currentAmount.toFixed(2)}` : '€ –'}
+              </span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Projected</span>
-              <span className="font-semibold text-gray-900">€ –</span>
+              <span className="font-semibold text-gray-900">
+                {billingData != null ? `€ ${billingData.projectedAmount.toFixed(2)}` : '€ –'}
+              </span>
             </div>
           </div>
           <Button

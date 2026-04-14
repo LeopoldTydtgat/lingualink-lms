@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 type Student = {
   id: string
   full_name: string
-  email: string
   photo_url: string | null
   self_reported_level: string | null
   timezone: string | null
@@ -65,6 +65,7 @@ export default function StudentDetailClient({
   reports,
   isAdmin,
 }: Props) {
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('General Info')
   const [notes, setNotes] = useState(training.notes ?? '')
   const [editingNotes, setEditingNotes] = useState(false)
@@ -157,10 +158,6 @@ export default function StudentDetailClient({
             <div>
               <p className="text-gray-500">Timezone</p>
               <p className="font-medium text-gray-900">{student?.timezone ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Email</p>
-              <p className="font-medium text-gray-900">{student?.email ?? '—'}</p>
             </div>
           </div>
         </div>
@@ -333,6 +330,16 @@ export default function StudentDetailClient({
   return (
     <div className="p-6 max-w-4xl">
 
+      <button
+        onClick={() => router.push('/students')}
+        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4 transition-colors"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Back to Students
+      </button>
+
       <div className="flex items-center gap-4 mb-6">
         {student?.photo_url ? (
           <img
@@ -350,7 +357,6 @@ export default function StudentDetailClient({
         )}
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{student?.full_name ?? 'Unknown Student'}</h1>
-          <p className="text-sm text-gray-500">{student?.email}</p>
         </div>
       </div>
 
