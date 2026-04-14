@@ -19,6 +19,7 @@ import {
   AlertCircle,
   Eye,
 } from 'lucide-react'
+import TimezoneSelect from '@/components/TimezoneSelect'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,37 +71,6 @@ interface Props {
   reviews: Review[]
   userId: string
 }
-
-// ─── Timezones list ───────────────────────────────────────────────────────────
-
-const TIMEZONES = [
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Europe/Amsterdam',
-  'Europe/Brussels',
-  'Europe/Madrid',
-  'Europe/Rome',
-  'Europe/Lisbon',
-  'Europe/Warsaw',
-  'Europe/Stockholm',
-  'Europe/Oslo',
-  'Europe/Copenhagen',
-  'Europe/Helsinki',
-  'Europe/Athens',
-  'Europe/Bucharest',
-  'Europe/Prague',
-  'Europe/Vienna',
-  'Europe/Zurich',
-  'Africa/Johannesburg',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'Asia/Dubai',
-  'Asia/Singapore',
-  'Australia/Sydney',
-]
 
 // ─── Tab definitions (Security removed — admin manages passwords) ─────────────
 
@@ -384,7 +354,7 @@ function PublicProfileModal({
               {(profile.teaching_languages?.length ?? 0) > 0 && (
                 <div>
                   <p style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
-                    Teaches
+                    I TEACH:
                   </p>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                     {profile.teaching_languages!.map((lang) => (
@@ -818,26 +788,9 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
             <Label htmlFor="timezone" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
               Timezone
             </Label>
-            <select
-              id="timezone"
-              value={timezone}
-              onChange={(e) => setTimezone(e.target.value)}
-              style={{
-                width: '400px',
-                height: '40px',
-                border: '1px solid #e0dfdc',
-                borderRadius: '8px',
-                padding: '0 12px',
-                fontSize: '14px',
-                backgroundColor: 'white',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="">Select timezone...</option>
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>{tz}</option>
-              ))}
-            </select>
+            <div style={{ maxWidth: '400px' }}>
+              <TimezoneSelect value={timezone} onChange={setTimezone} />
+            </div>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
               This controls how all class times are displayed for you.
             </p>
@@ -868,7 +821,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
         <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
 
           <TagInput
-            label="Teaching Languages"
+            label="I Teach:"
             values={teachingLanguages}
             onChange={setTeachingLanguages}
             placeholder="e.g. English"
