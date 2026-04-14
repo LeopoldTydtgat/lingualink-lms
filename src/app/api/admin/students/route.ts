@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { CreateStudentSchema } from '@/lib/validation/schemas'
+import { buildEmailTemplate } from '@/lib/email/templates'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -138,6 +139,8 @@ export async function POST(req: NextRequest) {
         status: data.status,
         is_active: true,
         is_private: data.is_private ?? true,
+        profile_completed: false,
+        must_change_password: true,
         company_id: data.company_id ?? null,
         academic_advisor_id: data.academic_advisor_id ?? null,
         customer_number: data.customer_number ?? null,
@@ -209,35 +212,30 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 7. Send welcome email ────────────────────────────────────────────────
-    const { data: resetData, error: resetError } =
-      await adminClient.auth.admin.generateLink({
-        type: 'recovery',
-        email: data.email,
-      })
+    const welcomeBody = `
+      <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+        Your Lingualink Online student account has been created.
+        Your login credentials have been sent to you separately by your admin.
+        Click the button below to log in to your portal.
+      </p>
+      <a
+        href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login"
+        style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+      >
+        Log In
+      </a>
+    `
 
-    if (!resetError && resetData?.properties?.action_link) {
-      await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
-        to: data.email,
-        subject: 'Welcome to Lingualink Online – Set Your Password',
-        html: `
-          <div style="font-family: Inter, sans-serif; max-width: 560px; margin: 0 auto;">
-            <div style="background-color: #FF8303; padding: 24px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 20px;">Welcome to Lingualink Online</h1>
-            </div>
-            <div style="padding: 24px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-              <p style="color: #374151;">Dear ${data.full_name},</p>
-              <p style="color: #374151;">Your student account has been created. Please click the button below to set your password and access the portal.</p>
-              <a href="${resetData.properties.action_link}"
-                style="display: inline-block; background-color: #FF8303; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
-                Set My Password
-              </a>
-              <p style="color: #6b7280; font-size: 13px;">This link expires in 24 hours. If you have any questions contact us at ${process.env.ADMIN_EMAIL ?? 'admin@lingualinkonline.com'}.</p>
-            </div>
-          </div>
-        `,
-      })
-    }
+    await resend.emails.send({
+      from: 'no-reply@lingualinkonline.com',
+      to: data.email,
+      subject: 'Welcome to Lingualink Online',
+      html: buildEmailTemplate({
+        recipientName: data.full_name,
+        subject: 'Welcome to Lingualink Online',
+        bodyHtml: welcomeBody,
+      }),
+    })
 
     return NextResponse.json({ success: true, id: studentId })
   } catch (err) {
