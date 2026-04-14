@@ -166,7 +166,7 @@ const sectionTitleStyle: React.CSSProperties = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AccountClient({ student, activeTraining, allTrainings }: Props) {
-  const supabase = createClient()
+  const supabase = createClient() // kept for password-change auth operations only
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Profile photo
@@ -218,29 +218,14 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     setPhotoUploading(true)
 
     try {
-      const ext = file.name.split('.').pop()
-      const path = `students/${student.id}/avatar.${ext}`
+      const formData = new FormData()
+      formData.append('photo', file)
 
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(path, file, { upsert: true })
+      const res = await fetch('/api/student/profile', { method: 'POST', body: formData })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Upload failed')
 
-      if (uploadError) throw uploadError
-
-      const { data: urlData } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(path)
-
-      const publicUrl = urlData.publicUrl
-
-      const { error: updateError } = await supabase
-        .from('students')
-        .update({ photo_url: publicUrl })
-        .eq('id', student.id)
-
-      if (updateError) throw updateError
-
-      setPhotoUrl(publicUrl)
+      setPhotoUrl(json.photo_url)
     } catch {
       setPhotoError('Failed to upload photo. Please try again.')
     } finally {
@@ -255,18 +240,21 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     setGeneralSaved(false)
     setGeneralError('')
 
-    const { error } = await supabase
-      .from('students')
-      .update({ timezone, language_preference: languagePref })
-      .eq('id', student.id)
-
-    if (error) {
-      setGeneralError('Failed to save. Please try again.')
-    } else {
+    try {
+      const res = await fetch('/api/student/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone, language_preference: languagePref }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
       setGeneralSaved(true)
       setTimeout(() => setGeneralSaved(false), 3000)
+    } catch {
+      setGeneralError('Failed to save. Please try again.')
+    } finally {
+      setGeneralSaving(false)
     }
-    setGeneralSaving(false)
   }
 
   // ── Save learning profile ───────────────────────────────────────────────────
@@ -276,22 +264,25 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     setLearningSaved(false)
     setLearningError('')
 
-    const { error } = await supabase
-      .from('students')
-      .update({
-        learning_goals: learningGoals,
-        interests,
-        self_assessed_level: selfLevel,
+    try {
+      const res = await fetch('/api/student/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          learning_goals: learningGoals,
+          interests,
+          self_assessed_level: selfLevel,
+        }),
       })
-      .eq('id', student.id)
-
-    if (error) {
-      setLearningError('Failed to save. Please try again.')
-    } else {
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? 'Failed to save')
       setLearningSaved(true)
       setTimeout(() => setLearningSaved(false), 3000)
+    } catch {
+      setLearningError('Failed to save. Please try again.')
+    } finally {
+      setLearningSaving(false)
     }
-    setLearningSaving(false)
   }
 
   // ── Change password ─────────────────────────────────────────────────────────

@@ -21,6 +21,13 @@ export function buildEmailTemplate({ recipientName, bodyHtml }: EmailTemplateOpt
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
 
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding:24px 40px 0;background-color:#FFFFFF;">
+              <img src="${process.env.NEXT_PUBLIC_SITE_URL}/lingualink-logo-clean.svg" alt="Lingualink Online" height="56" style="display:block;" />
+            </td>
+          </tr>
+
           <!-- Header -->
           <tr>
             <td style="background-color:#FF8303;padding:28px 40px;">
