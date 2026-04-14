@@ -22,6 +22,13 @@ interface ClassEvent {
   student_name: string
 }
 
+// Format an ISO datetime string as a UTC ICS timestamp e.g. "20260414T080000Z"
+function toIcsDate(isoStr: string): string {
+  const d = new Date(isoStr)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
+}
+
 // Build local date string YYYY-MM-DD without UTC conversion.
 // toISOString() shifts the date when Cape Town (UTC+2) is ahead of UTC,
 // so we build the string directly from local date parts instead.
@@ -94,6 +101,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [isSaving, setIsSaving] = useState(false)
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
   const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [exportMsg, setExportMsg] = useState('')
 
   async function fetchClassesForRange(startStr: string, endStr: string) {
     setIsLoading(true)
@@ -182,19 +191,60 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   async function handleEventClick(info: any) {
     const { type, recordId } = info.event.extendedProps
     if (type !== 'specific') return
+    const eventStart = info.event.startStr.slice(0, 10)
+    const today = toLocalDateStr(new Date())
+    if (eventStart < today) return
 
-    const confirmed = window.confirm('Remove this block?')
-    if (!confirmed) return
+    setPendingDelete(recordId)
+  }
 
-    const { error } = await supabase.from('availability').delete().eq('id', recordId)
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const { error } = await supabase.from('availability').delete().eq('id', pendingDelete)
     if (!error) {
-      onAvailabilityChange(availability.filter(a => a.id !== recordId))
+      onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
     }
+    setPendingDelete(null)
+  }
+
+  function exportToCalendar() {
+    if (classes.length === 0) {
+      setExportMsg('No classes this week to export')
+      setTimeout(() => setExportMsg(''), 3000)
+      return
+    }
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//LinguaLink Online//Teacher Portal//EN',
+    ]
+    classes.forEach(c => {
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:${c.id}`,
+        `DTSTART:${toIcsDate(c.starts_at)}`,
+        `DTEND:${toIcsDate(c.ends_at)}`,
+        `SUMMARY:${c.student_name}`,
+        `DESCRIPTION:Class with ${c.student_name}`,
+        'END:VEVENT',
+      )
+    })
+    lines.push('END:VCALENDAR')
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `lingualink-classes-${visibleRange ? toLocalDateStr(visibleRange.start) : 'week'}.ics`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   // Click or drag on calendar while a mode is active
   async function handleDateSelect(info: any) {
     if (!mode) return
+    const today = toLocalDateStr(new Date())
+    const selectedDate = info.startStr.slice(0, 10)
+    if (selectedDate < today) return
     setIsSaving(true)
 
     const { data, error } = await supabase
@@ -219,6 +269,13 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
   return (
     <div>
+      <style>{`
+        .fc-event:hover {
+          filter: brightness(0.85);
+          cursor: pointer;
+        }
+      `}</style>
+
       {/* Mode buttons */}
       <div className="flex items-center gap-3 mb-4">
         <button
@@ -262,9 +319,31 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             ? 'Click or drag on the calendar to mark yourself available'
             : mode === 'unavailable'
             ? 'Click or drag on the calendar to mark yourself unavailable'
-            : 'Select a mode above, then click or drag on the calendar'}
+            : 'Select a mode on the left, then click or drag on the calendar'}
         </span>
+
+        <button
+          onClick={exportToCalendar}
+          style={{
+            marginLeft: 'auto',
+            padding: '8px 16px',
+            backgroundColor: '#ffffff',
+            color: '#374151',
+            border: '1px solid #E5E7EB',
+            borderRadius: '6px',
+            fontSize: '13px',
+            fontWeight: '600',
+            cursor: 'pointer',
+          }}
+        >
+          Export to Calendar
+        </button>
       </div>
+      {exportMsg && (
+        <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px', textAlign: 'right' }}>
+          {exportMsg}
+        </p>
+      )}
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
@@ -302,6 +381,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             center: 'title',
             right: '',
           }}
+          buttonText={{ prev: '←', next: '→' }}
           timeZone="local"
           datesSet={info => {
             setVisibleRange({ start: info.start, end: info.end })
@@ -313,8 +393,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           select={handleDateSelect}
           eventClick={handleEventClick}
           allDaySlot={false}
-          slotMinTime="06:00:00"
-          slotMaxTime="23:00:00"
+          slotMinTime="00:00:00"
+          slotMaxTime="24:00:00"
           slotDuration="00:30:00"
           slotLabelInterval="01:00:00"
           nowIndicator={true}
@@ -328,6 +408,44 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
         Click any green or red block to remove it. Booked classes cannot be removed here.
       </p>
+
+      {pendingDelete && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff', borderRadius: '12px', padding: '28px 32px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', minWidth: '280px', textAlign: 'center',
+          }}>
+            <p style={{ fontSize: '15px', fontWeight: '600', color: '#111827', marginBottom: '20px' }}>
+              Remove this block?
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                onClick={() => setPendingDelete(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                  backgroundColor: '#F3F4F6', color: '#374151', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: 'none',
+                  backgroundColor: '#DC2626', color: '#ffffff', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

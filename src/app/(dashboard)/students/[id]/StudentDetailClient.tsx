@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 
 type Student = {
@@ -307,8 +308,23 @@ export default function StudentDetailClient({
   // ── TAB: Messages ─────────────────────────────────────────────
   function MessagesTab() {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6 text-center">
-        <p className="text-gray-500 text-sm">Messages will be available once the Messages feature is built in Step 10.</p>
+      <div className="bg-white border border-gray-200 rounded-lg p-6 flex flex-col items-center gap-4">
+        <p className="text-sm text-gray-500">Send a direct message to this student via the Messages page.</p>
+        <Link
+          href={`/messages?studentId=${student!.id}`}
+          prefetch={false}
+          style={{
+            padding: '10px 24px',
+            backgroundColor: '#FF8303',
+            color: '#ffffff',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: '600',
+            textDecoration: 'none',
+          }}
+        >
+          Message {student!.full_name}
+        </Link>
       </div>
     )
   }

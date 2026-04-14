@@ -3,15 +3,15 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { checkRateLimit, recordFailedAttempt, clearAttempts, getClientIp } from '@/lib/rate-limit'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 export async function studentLoginAction(formData: FormData) {
   // ── Rate limit check ────────────────────────────────────────────────────────
   const headersList = await headers()
-  const ip = getClientIp(headersList)
-  const rateLimitError = checkRateLimit(ip)
-  if (rateLimitError) {
-    return { error: rateLimitError }
+  const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const isBlocked = await checkRateLimit(ip, 'student')
+  if (isBlocked) {
+    return { error: 'Too many login attempts. Please wait 10 minutes before trying again.' }
   }
 
   const email = (formData.get('email') as string)?.trim().toLowerCase()
@@ -28,10 +28,6 @@ export async function studentLoginAction(formData: FormData) {
   })
 
   if (authError || !authData.user) {
-    // Only count actual credential failures — not network/server errors
-    if (!authError || authError.status === 400) {
-      recordFailedAttempt(ip)
-    }
     // Return a generic message — don't leak whether the email exists
     return { error: 'Incorrect email address or password.' }
   }
@@ -54,7 +50,5 @@ export async function studentLoginAction(formData: FormData) {
     return { error: 'Your account has been deactivated. Please contact admin.' }
   }
 
-  // Success — clear any accumulated attempt count for this IP
-  clearAttempts(ip)
   redirect('/student/my-classes')
 }

@@ -20,7 +20,7 @@ type Props = {
   studentId: string
   alreadyAssigned: string[]
   onClose: () => void
-  onSaved: (assignedIds: string[]) => void
+  onSaved: (sheets: { id: string; title: string }[]) => void
 }
 
 function ChilliPeppers({ count }: { count: number }) {
@@ -112,7 +112,7 @@ export default function AssignStudySheetsModal({
         )
     }
 
-    onSaved(Array.from(selected))
+    onSaved(sheets.filter(s => selected.has(s.id)))
     setSaving(false)
     onClose()
   }

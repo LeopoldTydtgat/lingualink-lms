@@ -35,6 +35,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
   const [toDate, setToDate] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   // Filter down to just holiday records for display
   const holidays = availability.filter(a => a.type === 'holiday')
@@ -83,18 +84,17 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
     setIsSaving(false)
   }
 
-  async function deleteHoliday(id: string) {
-    const confirmed = window.confirm('Remove this holiday period?')
-    if (!confirmed) return
+  function deleteHoliday(id: string) {
+    setPendingDelete(id)
+  }
 
-    const { error: dbError } = await supabase
-      .from('availability')
-      .delete()
-      .eq('id', id)
-
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const { error: dbError } = await supabase.from('availability').delete().eq('id', pendingDelete)
     if (!dbError) {
-      onAvailabilityChange(availability.filter(a => a.id !== id))
+      onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
     }
+    setPendingDelete(null)
   }
 
   return (
@@ -105,7 +105,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
       <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '24px' }}>
         Specify periods during which no new classes will be assigned to you.
         Already booked classes are not affected — if you have existing classes during
-        this period you must cancel them manually.
+        this period, you must contact your co-ordinator.
       </p>
 
       {/* Warning banner */}
@@ -122,7 +122,6 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
         <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
         <p style={{ fontSize: '13px', color: '#92400E', margin: 0 }}>
           Adding a holiday period does not automatically cancel existing bookings.
-          Please check your upcoming classes and cancel any that fall within this period manually.
         </p>
       </div>
 
@@ -269,6 +268,43 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
           </div>
         )}
       </div>
+      {pendingDelete && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff', borderRadius: '12px', padding: '28px 32px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.18)', minWidth: '280px', textAlign: 'center',
+          }}>
+            <p style={{ fontSize: '15px', fontWeight: '600', color: '#111827', marginBottom: '20px' }}>
+              Remove this holiday period?
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                onClick={() => setPendingDelete(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                  backgroundColor: '#F3F4F6', color: '#374151', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: 'none',
+                  backgroundColor: '#DC2626', color: '#ffffff', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
