@@ -3,6 +3,8 @@
 import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
+import TimezoneSelect from '@/components/TimezoneSelect'
+import LanguageSelect from '@/components/LanguageSelect'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,65 +38,6 @@ interface Props {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const TIMEZONES = [
-  'Europe/London',
-  'Europe/Dublin',
-  'Europe/Lisbon',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Europe/Amsterdam',
-  'Europe/Brussels',
-  'Europe/Madrid',
-  'Europe/Rome',
-  'Europe/Stockholm',
-  'Europe/Oslo',
-  'Europe/Copenhagen',
-  'Europe/Helsinki',
-  'Europe/Warsaw',
-  'Europe/Prague',
-  'Europe/Vienna',
-  'Europe/Budapest',
-  'Europe/Bucharest',
-  'Europe/Athens',
-  'Europe/Istanbul',
-  'Africa/Johannesburg',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'Asia/Dubai',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-]
-
-const LANGUAGES = [
-  'Afrikaans',
-  'Arabic',
-  'Chinese (Mandarin)',
-  'Czech',
-  'Danish',
-  'Dutch',
-  'Finnish',
-  'French',
-  'German',
-  'Greek',
-  'Hebrew',
-  'Hungarian',
-  'Italian',
-  'Japanese',
-  'Korean',
-  'Norwegian',
-  'Polish',
-  'Portuguese',
-  'Romanian',
-  'Russian',
-  'Spanish',
-  'Swedish',
-  'Turkish',
-  'Ukrainian',
-]
 
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
@@ -440,29 +383,11 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
           <div>
             <label style={labelStyle}>Timezone</label>
-            <select
-              style={inputStyle}
-              value={timezone}
-              onChange={e => setTimezone(e.target.value)}
-            >
-              <option value="">Select timezone…</option>
-              {TIMEZONES.map(tz => (
-                <option key={tz} value={tz}>{tz.replace('_', ' ')}</option>
-              ))}
-            </select>
+            <TimezoneSelect value={timezone} onChange={setTimezone} />
           </div>
           <div>
             <label style={labelStyle}>Language Preference</label>
-            <select
-              style={inputStyle}
-              value={languagePref}
-              onChange={e => setLanguagePref(e.target.value)}
-            >
-              <option value="">Select language…</option>
-              {LANGUAGES.map(lang => (
-                <option key={lang} value={lang}>{lang}</option>
-              ))}
-            </select>
+            <LanguageSelect value={languagePref} onChange={setLanguagePref} />
           </div>
         </div>
 

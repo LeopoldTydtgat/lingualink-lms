@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { signIn } from './actions'
@@ -10,22 +10,22 @@ import { Label } from '@/components/ui/label'
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
 
-  async function handleSubmit(formData: FormData) {
+  function handleSubmit(formData: FormData) {
     setError(null)
-    setLoading(true)
-    const result = await signIn(formData)
-    if (result?.error) {
-      setError(result.error)
-      setLoading(false)
-      return
-    }
-    if (result?.success) {
-      router.push('/upcoming-classes')
-    }
+    startTransition(async () => {
+      const result = await signIn(formData)
+      if (result?.error) {
+        setError(result.error)
+        return
+      }
+      if (result?.success) {
+        router.push('/upcoming-classes')
+      }
+    })
   }
 
   return (
@@ -113,21 +113,21 @@ export default function LoginPage() {
 
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={isPending}
                 style={{
                   height: '44px',
-                  backgroundColor: loading ? '#ffb366' : '#FF8303',
+                  backgroundColor: isPending ? '#ffb366' : '#FF8303',
                   color: '#ffffff',
                   fontWeight: 600,
                   fontSize: '15px',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: loading ? 'not-allowed' : 'pointer',
+                  cursor: isPending ? 'not-allowed' : 'pointer',
                   width: '100%',
                   marginTop: '4px',
                 }}
               >
-                {loading ? 'Signing in...' : 'Sign in'}
+                {isPending ? 'Signing in...' : 'Sign in'}
               </Button>
             </form>
 

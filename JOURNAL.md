@@ -1,6 +1,28 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 46 - 14 April 2026 - Timezone Selector, Language Selector & Teacher Login Fix
+
+### What was built
+- `src/components/TimezoneSelect.tsx` - shared searchable timezone dropdown with 63 IANA timezones grouped by region, UTC offsets computed client-side via Intl API to avoid hydration mismatches
+- `src/components/LanguageSelect.tsx` - shared language dropdown listing 44 major world languages, values stored as English names
+- Wired `TimezoneSelect` into teacher My Account page, replacing the previous inline select
+- Wired `TimezoneSelect` and `LanguageSelect` into student My Account page, replacing both inline selects
+- Fixed teacher login button not showing loading state - replaced useState/setLoading with useTransition/isPending to match React 19 transition behaviour
+- Updated "Teaching Languages" label to "I Teach:" on teacher Professional Info tab and public profile preview modal
+
+### Break/Fix Log
+Issue 1: Teacher login button never showed "Signing in..." state
+Symptom: Button stayed static during login - no visual feedback that sign-in was in progress
+Cause: In React 19, calling setLoading(true) inside a transition does not flush a re-render before the await, so the button never visually entered the loading state
+Fix: Replaced useState boolean with useTransition - isPending is updated reliably by React before async work begins
+Lesson: In React 19 with form actions, useTransition is the correct pattern for pending UI states - useState loading flags are unreliable inside transitions
+
+### Session result
+Built two shared components - TimezoneSelect and LanguageSelect - and wired them into both the teacher and student My Account pages, replacing hardcoded inline selects. Fixed the teacher portal login button which had no visual loading state due to a React 19 transition behaviour difference. Small label wording update on the teacher Professional Info tab. Both portals tested and working on live Vercel deployment.
+
+---
+
 ## Session 43 - 11 April 2026 - Live Portal Auth Loop Fix
 
 ### What was built
