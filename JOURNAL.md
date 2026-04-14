@@ -23,6 +23,100 @@ Built two shared components - TimezoneSelect and LanguageSelect - and wired them
 
 ---
 
+## Session 45 - 14 April 2026 - Student Portal Fixes & Self-Registration Foundation
+
+### What was built
+- Fixed student My Account page - switched to `createAdminClient()` with explicit 
+  safe column list, resolving silent query failure caused by column-level REVOKEs
+- Created `src/app/api/student/profile/route.ts` - POST (photo upload) and PATCH 
+  (field updates) routes using admin client, replacing all direct browser-side 
+  Supabase calls on the student account page
+- Added `profile_completed` and `must_change_password` boolean columns to the 
+  students table via Supabase SQL Editor
+- Created `src/app/api/student/change-password/route.ts` - PATCH route that updates 
+  auth password and sets `must_change_password: false` via admin client
+- Created `src/app/(student-auth)/student/change-password/page.tsx` - standalone 
+  full-page password change screen outside the student layout (no sidebar, no 
+  redirect loop risk)
+- Updated `src/app/(student)/student/layout.tsx` - switched student fetch to 
+  `createAdminClient()`, added `must_change_password` redirect to change-password 
+  page
+- Added profile completion banner to student dashboard - dismissable per session, 
+  links to My Account, disappears permanently once profile is saved
+- Updated `src/lib/email/templates.ts` - added Lingualink logo above orange header 
+  in all outgoing emails
+- Updated `src/app/api/admin/students/route.ts` - replaced inline welcome email HTML 
+  with `buildEmailTemplate`, removed recovery link, added "Log In" button linking to 
+  student portal, added `profile_completed: false` and `must_change_password: true` 
+  to student upsert
+
+### Break/Fix Log
+
+Issue 1: Student My Account showed "Account not found" after UUID was corrected
+Symptom: Page showed fallback despite correct `auth_user_id` in students table
+Cause: `select('*')` column list in page.tsx contained columns from the profiles/
+teachers table that don't exist on students - Supabase returned null silently
+Fix: Replaced column list with only valid students table columns
+Lesson: Never assume column names - always verify against actual table schema before 
+writing queries
+
+Issue 2: Student login loop after adding must_change_password to layout
+Symptom: Entering login credentials refreshed back to login page, clearing fields
+Cause: `must_change_password` column was added to the layout select but lacked 
+SELECT privilege for the authenticated role - entire query returned null, hitting 
+`!student` redirect to `/student/login`
+Fix: Ran `GRANT SELECT (must_change_password, profile_completed, teacher_notes, 
+follow_up_date, follow_up_reason) ON students TO authenticated` in Supabase SQL 
+Editor; switched layout student query to `createAdminClient()`
+Lesson: Any new column added to a table with column-level REVOKEs must be explicitly 
+granted before it can be selected - even by the admin client if the layout previously 
+used the regular client
+
+Issue 3: middleware.ts creation attempted during build
+Symptom: Claude Code prompted to create middleware.ts during Step 5
+Cause: Instruction asked for route protection without specifying the proxy.ts pattern
+Fix: Pressed No, redirected Claude Code to add the check directly inside the student 
+layout server component instead
+Lesson: Always explicitly state "do not create middleware.ts" in any instruction 
+involving route protection
+
+### Session result
+Resolved the persistent student My Account loading failure and the student login 
+redirect loop. Established the must_change_password first-login flow, profile 
+completion banner, and admin-routed photo upload. Updated all platform emails to 
+include the Lingualink logo. Confirmed local and production share the same Supabase 
+project - SQL grants apply universally. All changes deployed to production and 
+verified on the live Vercel URL.
+
+---
+
+
+## Session 44 - 13 April 2026 - Claude Code Setup & Account Page Fixes
+
+### What was built
+- Installed and configured Claude Code (CLI) as the primary development tool going forward
+- Created CLAUDE.md with full project rules, architecture notes, and critical never-break constraints
+- Added password visibility toggle (eye icon) to both teacher and student login pages
+- Fixed next/image hostname error by adding Supabase storage domain to next.config.ts
+- Fixed false `if (!profile) redirect('/login')` pattern in billing, messages, reports, and schedule pages
+- Fixed My Account page data not saving - root cause was missing RLS UPDATE policy silently blocking writes; resolved by routing saves through a new server-side API route `/api/profile` using the admin client
+- Fixed My Account page not loading saved data - root cause was column-level REVOKEs blocking `select('*')` reads; resolved by switching to `createAdminClient()` with an explicit column list
+- Moved success toast on My Account from bottom right to bottom center
+
+### Break/Fix Log
+Issue 1: Password field had no visibility toggle / Usability gap / Added Eye/EyeOff icons from lucide-react to both login pages / Always use type="button" on toggle to prevent accidental form submission
+
+Issue 2: next/image blocking page render / Supabase storage hostname not whitelisted in next.config.ts / Added remotePatterns entry for varrxikjrbycpobydlev.supabase.co / Always add image hostnames to next.config.ts when using Supabase Storage
+
+Issue 3: My Account saves silently failing / No RLS UPDATE policy on profiles table - PostgREST returns no error but writes 0 rows / Created /api/profile PATCH route using admin client with field whitelist / Never use browser Supabase client for writes on tables with restrictive RLS - route through admin API instead
+
+Issue 4: My Account fields empty on load / Column-level REVOKEs blocking select('*') and returning null profile / Switched page.tsx to createAdminClient() with explicit safe column list / Never use select('*') on tables with column-level privilege restrictions
+
+### Session result
+Claude Code is now the primary development tool for this project, replacing the Cursor Agent workflow. CLAUDE.md locks in all critical project rules so every session starts with full context. Four real bugs fixed and confirmed working on localhost. A new working principle was established: one fix must never cause another problem - no ripple effect of bugs.
+
+---
+
 ## Session 43 - 11 April 2026 - Live Portal Auth Loop Fix
 
 ### What was built
