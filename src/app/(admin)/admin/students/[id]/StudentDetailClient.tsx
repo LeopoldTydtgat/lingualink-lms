@@ -1,9 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ─── Shared message types (exported so page.tsx can import) ──────────────────
+
+export type AdminMessage = {
+  id: string
+  sender_id: string
+  sender_type: string
+  receiver_id: string
+  receiver_type: string
+  content: string
+  attachments: Array<{ url: string; filename: string; size: number }>
+  read_at: string | null
+  created_at: string
+}
+
+export type AdminConversation = {
+  contactId: string
+  contactName: string
+  contactPhotoUrl: string | null
+  messages: AdminMessage[]
+}
+
+// ── Domain types ─────────────────────────────────────────────────────────────
 
 type Teacher = { id: string; full_name: string }
 
@@ -66,6 +87,7 @@ type Props = {
   hoursLog: HoursLogEntry[]
   reports: Report[]
   reviews: Review[]
+  conversations: AdminConversation[]
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'messages' | 'reviews'
@@ -167,6 +189,139 @@ function StarRating({ rating }: { rating: number }) {
   )
 }
 
+// ─── Messages helpers ─────────────────────────────────────────────────────────
+
+function msgFormatTime(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) {
+    const h = date.getHours().toString().padStart(2, '0')
+    const m = date.getMinutes().toString().padStart(2, '0')
+    return `${h}:${m}`
+  }
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').slice(0, 60)
+}
+
+function MsgAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+  if (photoUrl) {
+    return <img src={photoUrl} alt={name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+  }
+  return (
+    <div
+      className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+      style={{ backgroundColor: '#FF8303' }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  )
+}
+
+// ─── Read-only message thread ─────────────────────────────────────────────────
+
+function MessageThread({
+  conversation,
+  studentId,
+}: {
+  conversation: AdminConversation
+  studentId: string
+}) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [conversation.contactId])
+
+  return (
+    <>
+      {/* Thread header */}
+      <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-shrink-0 bg-white">
+        <MsgAvatar name={conversation.contactName} photoUrl={conversation.contactPhotoUrl} />
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{conversation.contactName}</p>
+          <p className="text-xs text-gray-400">Teacher</p>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <style>{`
+          .admin-msg-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+          .admin-msg-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+          .admin-msg-bubble li { margin: 0.1rem 0; }
+        `}</style>
+        {conversation.messages.map((msg, index) => {
+          const isFromStudent = msg.sender_id === studentId
+          const showDate =
+            index === 0 ||
+            new Date(msg.created_at).toDateString() !==
+              new Date(conversation.messages[index - 1].created_at).toDateString()
+
+          return (
+            <div key={msg.id}>
+              {showDate && (
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-gray-100" />
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {new Date(msg.created_at).toLocaleDateString([], {
+                      weekday: 'long', day: 'numeric', month: 'long',
+                    })}
+                  </span>
+                  <div className="flex-1 h-px bg-gray-100" />
+                </div>
+              )}
+              <div className={`flex ${isFromStudent ? 'justify-end' : 'justify-start'}`}>
+                <div className="max-w-[72%]">
+                  <div
+                    className="admin-msg-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                    style={
+                      isFromStudent
+                        ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                        : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                    }
+                    dangerouslySetInnerHTML={{ __html: msg.content }}
+                  />
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mt-1 flex flex-col gap-1">
+                      {msg.attachments.map((att, i) => (
+                        <a
+                          key={i}
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
+                          style={{ color: isFromStudent ? '#fff' : '#d1d5db' }}
+                        >
+                          📎 {att.filename}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  <div className={`flex items-center mt-1 ${isFromStudent ? 'justify-end' : 'justify-start'}`}>
+                    <span className="text-xs text-gray-400">{msgFormatTime(msg.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Read-only footer */}
+      <div className="border-t border-gray-200 px-4 py-3 bg-gray-50 flex-shrink-0 text-center">
+        <span className="text-xs text-gray-400">Read-only — admin view cannot send messages</span>
+      </div>
+    </>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function StudentDetailClient({
@@ -179,6 +334,7 @@ export default function StudentDetailClient({
   hoursLog,
   reports,
   reviews,
+  conversations,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -190,6 +346,9 @@ export default function StudentDetailClient({
   const [hoursNotes, setHoursNotes] = useState('')
   const [hoursSaving, setHoursSaving] = useState(false)
   const [hoursError, setHoursError] = useState<string | null>(null)
+
+  // Messages state
+  const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
 
   const id = student.id as string
   const fullName = student.full_name as string
@@ -219,7 +378,6 @@ export default function StudentDetailClient({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to update hours.')
-      // Reset form and reload
       setHoursAction(null)
       setHoursAmount('')
       setInvoiceRef('')
@@ -237,7 +395,7 @@ export default function StudentDetailClient({
     { key: 'classes', label: `Classes (${lessons.length})` },
     { key: 'hours', label: `Hours Log (${hoursLog.length})` },
     { key: 'reports', label: `Reports (${reports.length})` },
-    { key: 'messages', label: 'Messages' },
+    { key: 'messages', label: `Messages (${conversations.length})` },
     { key: 'reviews', label: `Reviews (${reviews.length})` },
   ]
 
@@ -670,11 +828,70 @@ export default function StudentDetailClient({
 
       {/* ── Messages ── */}
       {activeTab === 'messages' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-          <p className="text-gray-500 text-sm">
-            Message thread view coming in a later step.
-          </p>
-        </div>
+        conversations.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+            <p className="text-gray-400 text-sm">No conversations yet.</p>
+          </div>
+        ) : (
+          <div
+            className="flex bg-white rounded-xl border border-gray-200 overflow-hidden"
+            style={{ height: '620px' }}
+          >
+            {/* Left: conversation list */}
+            <div className="w-64 border-r border-gray-200 flex flex-col flex-shrink-0">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-700">Teacher conversations</p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {conversations.map((conv) => {
+                  const lastMsg = conv.messages[conv.messages.length - 1]
+                  const isSelected = selectedConversation?.contactId === conv.contactId
+                  return (
+                    <button
+                      key={conv.contactId}
+                      onClick={() => setSelectedConversation(conv)}
+                      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
+                      style={isSelected ? { backgroundColor: '#FFF3E0' } : {}}
+                    >
+                      <MsgAvatar name={conv.contactName} photoUrl={conv.contactPhotoUrl} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-sm font-medium text-gray-700 truncate">
+                            {conv.contactName}
+                          </span>
+                          {lastMsg && (
+                            <span className="text-xs text-gray-400 flex-shrink-0">
+                              {msgFormatTime(lastMsg.created_at)}
+                            </span>
+                          )}
+                        </div>
+                        {lastMsg && (
+                          <p className="text-xs text-gray-400 truncate mt-0.5">
+                            {stripHtml(lastMsg.content)}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Right: thread */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {!selectedConversation ? (
+                <div className="flex-1 flex items-center justify-center text-gray-400">
+                  <p className="text-sm">Select a conversation to read the thread</p>
+                </div>
+              ) : (
+                <MessageThread
+                  conversation={selectedConversation}
+                  studentId={id}
+                />
+              )}
+            </div>
+          </div>
+        )
       )}
 
       {/* ── Reviews ── */}
@@ -698,7 +915,6 @@ export default function StudentDetailClient({
                   </div>
                   <StarRating rating={review.rating} />
                 </div>
-                {/* Show admin-edited text if present, otherwise original */}
                 <p className="text-sm text-gray-700 mt-2">
                   {review.admin_edited_text || review.review_text || 'No written review.'}
                 </p>

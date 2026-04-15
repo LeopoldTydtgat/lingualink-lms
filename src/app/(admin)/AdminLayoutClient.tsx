@@ -109,7 +109,7 @@ export default function AdminLayoutClient({
           flexShrink: 0,
         }}
       >
-        <Link href="/admin">
+        <Link href="/admin" prefetch={false}>
           <img
             src="/lingualink-logo-white.svg"
             alt="Lingualink Online"
