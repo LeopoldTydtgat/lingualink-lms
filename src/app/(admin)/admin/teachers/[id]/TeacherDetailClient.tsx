@@ -1,7 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+
+// ─── Shared message types (exported so page.tsx can import) ──────────────────
+
+export type AdminMessage = {
+  id: string
+  sender_id: string
+  sender_type: string
+  receiver_id: string
+  receiver_type: string
+  content: string
+  attachments: Array<{ url: string; filename: string; size: number }>
+  read_at: string | null
+  created_at: string
+}
+
+export type AdminConversation = {
+  contactId: string
+  contactName: string
+  contactPhotoUrl: string | null
+  messages: AdminMessage[]
+}
+
+// ─── Domain types ─────────────────────────────────────────────────────────────
 
 const ROLE_LABEL: Record<string, string> = {
   teacher: 'Teacher',
@@ -49,9 +72,12 @@ type Props = {
   lessons: Lesson[]
   invoices: Invoice[]
   history: HistoryEntry[]
+  conversations: AdminConversation[]
 }
 
-type Tab = 'overview' | 'classes' | 'invoices' | 'history'
+type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
+
+// ─── Small reusable components ────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string | null }) {
   const colour =
@@ -65,7 +91,7 @@ function StatusBadge({ status }: { status: string | null }) {
 
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={colour}>
-      {STATUS_LABEL[status ?? ''] ?? status ?? 'â€“'}
+      {STATUS_LABEL[status ?? ''] ?? status ?? '—'}
     </span>
   )
 }
@@ -107,15 +133,151 @@ function InfoRow({ label, value, adminOnly }: {
           </span>
         )}
       </span>
-      <span className="text-sm text-gray-800">{value || 'â€“'}</span>
+      <span className="text-sm text-gray-800">{value || '—'}</span>
     </div>
   )
 }
 
-export default function TeacherDetailClient({ teacher, lessons, invoices, history }: Props) {
+// ─── Messages helpers ─────────────────────────────────────────────────────────
+
+function msgFormatTime(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) {
+    const h = date.getHours().toString().padStart(2, '0')
+    const m = date.getMinutes().toString().padStart(2, '0')
+    return `${h}:${m}`
+  }
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
+  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').slice(0, 60)
+}
+
+function MsgAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+  if (photoUrl) {
+    return <img src={photoUrl} alt={name} className="w-9 h-9 rounded-full object-cover flex-shrink-0" />
+  }
+  return (
+    <div
+      className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+      style={{ backgroundColor: '#FF8303' }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  )
+}
+
+// ─── Read-only message thread ─────────────────────────────────────────────────
+
+function MessageThread({
+  conversation,
+  teacherId,
+}: {
+  conversation: AdminConversation
+  teacherId: string
+}) {
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [conversation.contactId])
+
+  return (
+    <>
+      {/* Thread header */}
+      <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-shrink-0 bg-white">
+        <MsgAvatar name={conversation.contactName} photoUrl={conversation.contactPhotoUrl} />
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{conversation.contactName}</p>
+          <p className="text-xs text-gray-400">Student</p>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <style>{`
+          .admin-msg-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+          .admin-msg-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+          .admin-msg-bubble li { margin: 0.1rem 0; }
+        `}</style>
+        {conversation.messages.map((msg, index) => {
+          const isFromTeacher = msg.sender_id === teacherId
+          const showDate =
+            index === 0 ||
+            new Date(msg.created_at).toDateString() !==
+              new Date(conversation.messages[index - 1].created_at).toDateString()
+
+          return (
+            <div key={msg.id}>
+              {showDate && (
+                <div className="flex items-center gap-3 my-4">
+                  <div className="flex-1 h-px bg-gray-100" />
+                  <span className="text-xs text-gray-400 flex-shrink-0">
+                    {new Date(msg.created_at).toLocaleDateString([], {
+                      weekday: 'long', day: 'numeric', month: 'long',
+                    })}
+                  </span>
+                  <div className="flex-1 h-px bg-gray-100" />
+                </div>
+              )}
+              <div className={`flex ${isFromTeacher ? 'justify-end' : 'justify-start'}`}>
+                <div className="max-w-[72%]">
+                  <div
+                    className="admin-msg-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                    style={
+                      isFromTeacher
+                        ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                        : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                    }
+                    dangerouslySetInnerHTML={{ __html: msg.content }}
+                  />
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="mt-1 flex flex-col gap-1">
+                      {msg.attachments.map((att, i) => (
+                        <a
+                          key={i}
+                          href={att.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
+                          style={{ color: isFromTeacher ? '#fff' : '#d1d5db' }}
+                        >
+                          📎 {att.filename}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  <div className={`flex items-center mt-1 ${isFromTeacher ? 'justify-end' : 'justify-start'}`}>
+                    <span className="text-xs text-gray-400">{msgFormatTime(msg.created_at)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Read-only footer */}
+      <div className="border-t border-gray-200 px-4 py-3 bg-gray-50 flex-shrink-0 text-center">
+        <span className="text-xs text-gray-400">Read-only — admin view cannot send messages</span>
+      </div>
+    </>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [deleting, setDeleting] = useState(false)
+  const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
 
   const id = teacher.id as string
   const fullName = teacher.full_name as string
@@ -147,6 +309,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
     { key: 'classes', label: `Classes (${lessons.length})` },
     { key: 'invoices', label: `Invoices (${invoices.length})` },
     { key: 'history', label: 'History' },
+    { key: 'messages', label: `Messages (${conversations.length})` },
   ]
 
   return (
@@ -156,7 +319,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
         onClick={() => router.push('/admin/teachers')}
         className="text-sm text-gray-500 hover:text-gray-700 mb-4 block"
       >
-        â† Teachers
+        ← Teachers
       </button>
 
       {/* Top card */}
@@ -257,8 +420,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <InfoRow label="Contract Start" value={teacher.contract_start as string} />
             <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
             <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
-            <InfoRow label="Hourly Rate (â‚¬)"
-              value={teacher.hourly_rate != null ? `â‚¬${teacher.hourly_rate}` : null}
+            <InfoRow label="Hourly Rate (€)"
+              value={teacher.hourly_rate != null ? `€${teacher.hourly_rate}` : null}
               adminOnly />
             <InfoRow label="VAT Required"
               value={teacher.vat_required ? 'Yes' : 'No'}
@@ -284,18 +447,18 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               value={teacher.follow_up_reason as string} adminOnly />
           </div>
 
-          {/* Admin notes â€” full width, amber background */}
+          {/* Admin notes — full width, amber background */}
           <div className="col-span-2 rounded-xl border p-5 space-y-2"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              ðŸ”’ Admin Notes â€” Not visible to teacher
+              🔒 Admin Notes — Not visible to teacher
             </h2>
             <p className="text-sm" style={{ color: '#78350f' }}>
               {(teacher.admin_notes as string) || 'No admin notes.'}
             </p>
           </div>
 
-          {/* Bio â€” cast to string and use !! to avoid unknown being treated as ReactNode */}
+          {/* Bio */}
           {!!(teacher.bio as string) && (
             <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5 space-y-2">
               <h2 className="font-semibold text-gray-800">Bio</h2>
@@ -371,11 +534,11 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                   <tr key={inv.id} className="border-b border-gray-50">
                     <td className="px-4 py-3 text-gray-800">{inv.month}</td>
                     <td className="px-4 py-3 text-gray-600">
-                      {inv.total_amount != null ? `â‚¬${inv.total_amount}` : 'â€“'}
+                      {inv.total_amount != null ? `€${inv.total_amount}` : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">
-                        {inv.status ?? 'â€“'}
+                        {inv.status ?? '—'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
@@ -417,8 +580,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                     <td className="px-4 py-3 font-medium text-gray-800">
                       {entry.field_name.replace(/_/g, ' ')}
                     </td>
-                    <td className="px-4 py-3 text-gray-500">{entry.old_value || 'â€“'}</td>
-                    <td className="px-4 py-3 text-gray-800">{entry.new_value || 'â€“'}</td>
+                    <td className="px-4 py-3 text-gray-500">{entry.old_value || '—'}</td>
+                    <td className="px-4 py-3 text-gray-800">{entry.new_value || '—'}</td>
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(entry.changed_at).toLocaleString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
@@ -432,6 +595,74 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Messages tab */}
+      {activeTab === 'messages' && (
+        conversations.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+            <p className="text-gray-400 text-sm">No conversations yet.</p>
+          </div>
+        ) : (
+          <div
+            className="flex bg-white rounded-xl border border-gray-200 overflow-hidden"
+            style={{ height: '620px' }}
+          >
+            {/* Left: conversation list */}
+            <div className="w-64 border-r border-gray-200 flex flex-col flex-shrink-0">
+              <div className="px-4 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-700">Student conversations</p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {conversations.map((conv) => {
+                  const lastMsg = conv.messages[conv.messages.length - 1]
+                  const isSelected = selectedConversation?.contactId === conv.contactId
+                  return (
+                    <button
+                      key={conv.contactId}
+                      onClick={() => setSelectedConversation(conv)}
+                      className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
+                      style={isSelected ? { backgroundColor: '#FFF3E0' } : {}}
+                    >
+                      <MsgAvatar name={conv.contactName} photoUrl={conv.contactPhotoUrl} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-sm font-medium text-gray-700 truncate">
+                            {conv.contactName}
+                          </span>
+                          {lastMsg && (
+                            <span className="text-xs text-gray-400 flex-shrink-0">
+                              {msgFormatTime(lastMsg.created_at)}
+                            </span>
+                          )}
+                        </div>
+                        {lastMsg && (
+                          <p className="text-xs text-gray-400 truncate mt-0.5">
+                            {stripHtml(lastMsg.content)}
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Right: thread */}
+            <div className="flex-1 flex flex-col min-w-0">
+              {!selectedConversation ? (
+                <div className="flex-1 flex items-center justify-center text-gray-400">
+                  <p className="text-sm">Select a conversation to read the thread</p>
+                </div>
+              ) : (
+                <MessageThread
+                  conversation={selectedConversation}
+                  teacherId={id}
+                />
+              )}
+            </div>
+          </div>
+        )
       )}
     </div>
   )

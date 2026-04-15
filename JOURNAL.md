@@ -1,5 +1,59 @@
 # LinguaLink Online - Build Journal
 
+## Session 50 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
+
+### What was built
+- Updated contact email addresses across entire codebase - all teacher-facing 
+  emails now reference teachers@lingualinkonline.com and all student-facing 
+  emails reference support@lingualinkonline.com. Updated files: login page, 
+  billing client, teacher invite API, student account client, email templates, 
+  and all cron/booking/message action files
+- Refactored buildEmailTemplate in src/lib/email/templates.ts to accept 
+  contactEmail as a dynamic parameter - every call site updated with the 
+  correct address based on recipient type
+- Added clickable logo to all three portals - teacher portal logo links to 
+  /dashboard, student portal logo links to correct student home route, admin 
+  portal logo links to /admin. Files updated: LeftNav.tsx, StudentLeftNav.tsx, 
+  AdminLayoutClient.tsx
+- Built read-only admin message access - the client can now read all 
+  teacher-student conversations from both the Teacher Detail page and Student 
+  Detail page in the admin portal. Implemented in TeacherDetailClient.tsx, 
+  StudentDetailClient.tsx, and both corresponding page.tsx server components. 
+  Uses createAdminClient() throughout with explicit column selects
+
+### Break/Fix Log
+Issue 1: Email logo not rendering in Gmail
+Symptom: Logo image does not appear in sent emails despite URL being publicly 
+accessible on Vercel
+Cause: Gmail blocks externally hosted images by default. Switched to base64 
+inline embedding but logo still did not render - root cause not fully resolved
+Fix: Pinned for dedicated investigation in a future session. Base64 embed 
+remains in place.
+Lesson: Email client image rendering is inconsistent - Gmail in particular 
+requires images to be explicitly loaded by the recipient or embedded in a 
+way that bypasses content policies. SVG inline rendering may be the correct 
+long-term solution.
+
+Issue 2: Student portal clickable logo returning 404
+Symptom: Logo link on student portal navigated to /student/dashboard which 
+does not exist
+Cause: Incorrect assumption about student portal home route
+Fix: Checked actual route structure and updated StudentLeftNav.tsx to use 
+the correct path
+Lesson: Always verify actual route structure before hardcoding paths - never 
+assume portal route naming mirrors teacher portal conventions.
+
+### Session result
+Contact email addresses are now correctly routed across the entire platform - 
+teachers receive support contact details for teachers@lingualinkonline.com and 
+students for support@lingualinkonline.com. All three portal logos are now 
+clickable and navigate to the correct home page. The admin portal now has 
+read-only visibility into all teacher-student message threads, giving the 
+client full oversight of platform communications without requiring account 
+impersonation. The email logo remains unresolved and is deferred.
+
+---
+
 ## Session 48 - 14 April 2026 - Hardening Pass Continued: Privacy, Messages, Billing & Bug Fixes
 
 ### What was built

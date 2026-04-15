@@ -71,7 +71,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavPro
         className="flex items-center justify-center px-4 shrink-0"
         style={{ height: '72px', background: 'linear-gradient(to right, #ffffff, #fff3e8)' }}
       >
-        <Link href="/upcoming-classes" prefetch={false}>
+        <Link href="/dashboard" prefetch={false}>
           <img src="/lingualink-logo-clean.svg" alt="Lingualink Online" style={{ height: '56px', width: 'auto' }} />
         </Link>
       </div>
