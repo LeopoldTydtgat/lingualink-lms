@@ -312,6 +312,7 @@ export async function POST(req: NextRequest) {
           recipientName: studentRow.full_name,
           subject: studentSubject,
           bodyHtml: studentBodyHtml,
+          contactEmail: 'support@lingualinkonline.com',
         }),
       }),
       resend.emails.send({
@@ -322,6 +323,7 @@ export async function POST(req: NextRequest) {
           recipientName: teacher.full_name,
           subject: teacherSubject,
           bodyHtml: teacherBodyHtml,
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
       }),
     ])

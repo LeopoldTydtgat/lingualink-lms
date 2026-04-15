@@ -77,6 +77,7 @@ export async function GET(request: Request) {
             student.timezone ?? 'Europe/London',
             24
           ),
+          contactEmail: 'support@lingualinkonline.com',
         }),
       })
 
@@ -96,6 +97,7 @@ export async function GET(request: Request) {
             teacher.timezone ?? 'Africa/Johannesburg',
             24
           ),
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
 
@@ -161,6 +163,7 @@ export async function GET(request: Request) {
             student.timezone ?? 'Europe/London',
             1
           ),
+          contactEmail: 'support@lingualinkonline.com',
         }),
       })
 
@@ -180,6 +183,7 @@ export async function GET(request: Request) {
             teacher.timezone ?? 'Africa/Johannesburg',
             1
           ),
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
 

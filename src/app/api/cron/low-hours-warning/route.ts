@@ -70,6 +70,7 @@ export async function GET(request: Request) {
           recipientName: student.full_name,
           subject: 'You have less than 2 hours remaining',
           bodyHtml: studentLowHoursEmailContent(hoursRemaining),
+          contactEmail: 'support@lingualinkonline.com',
         }),
       })
 
