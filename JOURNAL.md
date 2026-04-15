@@ -1,5 +1,26 @@
 # LinguaLink Online - Build Journal
 
+## Session 51 - 15 April 2026 - Archive, Purge and Styled Confirmation Modals
+
+### What was built
+- Archive functionality added to Teacher Detail and Student Detail pages in admin portal
+- Purge (hard delete) functionality added to Teacher Detail and Student Detail pages in admin portal
+- Cascade delete order implemented: messages, exercise_completions, assignments, reports, invoices, classes, training records, hours_log, reviews, then auth user
+- Purge blocked if any linked teachers or students are not yet archived - shows named list of blockers
+- Purge confirmation modal requires Shannon to type the full name before confirming
+- Native browser confirm() and alert() dialogs replaced with styled modal dialogs on both Archive and Purge actions
+- Modals match portal design system throughout
+
+### Break/Fix Log
+Issue 1: Student Detail page missing Purge button / Cause: Button correctly hidden until status is 'former' - not a bug / Fix: Archive first, then Purge appears / Lesson: Archive is a prerequisite for Purge by design
+
+Issue 2: Archive action using native browser confirm() dialog / Cause: Initial implementation used window.confirm() / Fix: Replaced with styled modal matching existing Purge dialog pattern in both TeacherDetailClient.tsx and StudentDetailClient.tsx / Lesson: Never use native browser dialogs in a portal - always use styled modals
+
+### Session result
+Archive and Purge functionality is fully working on both Teacher and Student detail pages in the admin portal. Archive is reversible and sets status to 'former'. Purge is permanent and cascades through all related data before removing the auth user. Both actions now use styled confirmation modals consistent with the portal design. Next step is filtering archived records out of the Teachers and Students list pages by default with a toggle to show them when needed.
+
+---
+
 ## Session 49 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
 
 ### What was built

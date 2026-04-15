@@ -88,6 +88,7 @@ type Props = {
   reports: Report[]
   reviews: Review[]
   conversations: AdminConversation[]
+  purgeBlockedBy: string[]
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'messages' | 'reviews'
@@ -335,6 +336,7 @@ export default function StudentDetailClient({
   reports,
   reviews,
   conversations,
+  purgeBlockedBy,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -347,6 +349,17 @@ export default function StudentDetailClient({
   const [hoursSaving, setHoursSaving] = useState(false)
   const [hoursError, setHoursError] = useState<string | null>(null)
 
+  // Archive state
+  const [archiving, setArchiving] = useState(false)
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  // Purge state
+  const [showPurgeDialog, setShowPurgeDialog] = useState(false)
+  const [purgeConfirmName, setPurgeConfirmName] = useState('')
+  const [purging, setPurging] = useState(false)
+  const [purgeError, setPurgeError] = useState<string | null>(null)
+
   // Messages state
   const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
 
@@ -354,6 +367,53 @@ export default function StudentDetailClient({
   const fullName = student.full_name as string
   const photoUrl = student.photo_url as string | null
   const status = student.status as string | null
+
+  const isFormer = status === 'former'
+  const purgeReady = isFormer && purgeBlockedBy.length === 0
+
+  function handleArchive() {
+    if (isFormer) return
+    setArchiveError(null)
+    setShowArchiveDialog(true)
+  }
+
+  async function handleArchiveConfirm() {
+    setArchiving(true)
+    setArchiveError(null)
+    try {
+      const res = await fetch(`/api/admin/students/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'former' }),
+      })
+      if (!res.ok) throw new Error('Failed to archive student.')
+      setShowArchiveDialog(false)
+      router.push('/admin/students')
+      router.refresh()
+    } catch {
+      setArchiveError('Something went wrong. Please try again.')
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  async function handlePurge() {
+    if (purgeConfirmName !== fullName) return
+    setPurgeError(null)
+    setPurging(true)
+    try {
+      const res = await fetch(`/api/admin/students/${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to purge student.')
+      setShowPurgeDialog(false)
+      router.push('/admin/students')
+      router.refresh()
+    } catch (err: unknown) {
+      setPurgeError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setPurging(false)
+    }
+  }
 
   async function handleHoursSubmit() {
     setHoursError(null)
@@ -413,7 +473,7 @@ export default function StudentDetailClient({
 
       {/* Top card */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             {photoUrl ? (
               <img src={photoUrl} alt={fullName}
@@ -457,14 +517,48 @@ export default function StudentDetailClient({
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => router.push(`/admin/students/${id}/edit`)}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              Edit
-            </button>
+          {/* Action buttons + purge block notice */}
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button
+                onClick={() => router.push(`/admin/students/${id}/edit`)}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Edit
+              </button>
+              <button
+                onClick={handleArchive}
+                disabled={archiving || isFormer}
+                className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-50"
+                style={isFormer
+                  ? { borderColor: '#d1d5db', color: '#9ca3af', cursor: 'default' }
+                  : { borderColor: '#fed7aa', color: '#c2410c' }}
+              >
+                {archiving ? 'Archiving...' : isFormer ? 'Archived' : 'Archive'}
+              </button>
+              {isFormer && (
+                <button
+                  onClick={() => { setPurgeError(null); setPurgeConfirmName(''); setShowPurgeDialog(true) }}
+                  disabled={!purgeReady}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ borderColor: '#fca5a5', color: '#dc2626' }}
+                  title={!purgeReady ? `Purge blocked: archive linked teachers first` : undefined}
+                >
+                  Purge
+                </button>
+              )}
+            </div>
+
+            {/* Purge blocked notice */}
+            {isFormer && purgeBlockedBy.length > 0 && (
+              <div
+                className="text-xs rounded-lg px-3 py-2 max-w-xs text-right"
+                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+              >
+                <p className="font-medium">Purge blocked — archive these teachers first:</p>
+                <p className="mt-0.5">{purgeBlockedBy.join(', ')}</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -926,6 +1020,108 @@ export default function StudentDetailClient({
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* ─── Archive confirmation dialog ──────────────────────────────────────────── */}
+      {showArchiveDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              Archive {fullName}?
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              This will set their status to <strong className="text-gray-700">Former</strong> and
+              deactivate their account. You can still purge them later if needed.
+            </p>
+
+            {archiveError && (
+              <div
+                className="text-sm rounded-lg px-4 py-3 mb-4"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}
+              >
+                {archiveError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowArchiveDialog(false); setArchiveError(null) }}
+                disabled={archiving}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArchiveConfirm}
+                disabled={archiving}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: '#c2410c' }}
+              >
+                {archiving ? 'Archiving...' : 'Archive Student'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Purge confirmation dialog ─────────────────────────────────────────── */}
+      {showPurgeDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              Permanently purge {fullName}?
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              This will permanently delete all classes, hours, messages, reports, reviews, and the account itself.
+              <strong className="text-gray-700"> This cannot be undone.</strong>
+            </p>
+
+            {purgeError && (
+              <div
+                className="text-sm rounded-lg px-4 py-3 mb-4"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}
+              >
+                {purgeError}
+              </div>
+            )}
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Type <span className="font-semibold">{fullName}</span> to confirm:
+            </label>
+            <input
+              type="text"
+              value={purgeConfirmName}
+              onChange={(e) => setPurgeConfirmName(e.target.value)}
+              placeholder={fullName}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:border-red-400"
+              autoFocus
+            />
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowPurgeDialog(false); setPurgeConfirmName(''); setPurgeError(null) }}
+                disabled={purging}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePurge}
+                disabled={purgeConfirmName !== fullName || purging}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#dc2626' }}
+              >
+                {purging ? 'Purging...' : 'Permanently Purge'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
