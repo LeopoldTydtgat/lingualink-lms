@@ -25,9 +25,7 @@ export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: Em
           <!-- Header -->
           <tr>
             <td style="background-color:#FF8303;padding:28px 40px 24px;text-align:center;">
-              <div style="background:#1a1a1a;display:inline-block;padding:12px 20px;border-radius:6px;margin-bottom:18px;">
-                <img src="https://lingualink-lms.vercel.app/lingualink-email-logo.png" alt="Lingualink Online" width="160" style="display:block;" />
-              </div>
+              <img src="https://lingualink-lms.vercel.app/lingualink-email-logo.png" alt="Lingualink Online" width="160" style="display:block;margin:0 auto 18px;" />
               <p style="margin:0;font-size:20px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;">
                 Lingualink Online
               </p>
