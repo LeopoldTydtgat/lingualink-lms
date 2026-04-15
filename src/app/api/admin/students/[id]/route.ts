@@ -1,7 +1,40 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+// ─── Auth helper ──────────────────────────────────────────────────────────────
+
+async function verifyAdmin() {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll() {},
+      },
+    }
+  )
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return null
+
+  const { data: adminProfile } = await supabase
+    .from('profiles')
+    .select('account_types, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    adminProfile?.role === 'admin' ||
+    (adminProfile?.account_types ?? []).includes('school_admin')
+
+  return isAdmin ? user : null
+}
+
+// ─── PATCH — update student ───────────────────────────────────────────────────
 
 export async function PATCH(
   req: NextRequest,
@@ -11,7 +44,6 @@ export async function PATCH(
     const { id } = await params
     const body = await req.json()
 
-    // --- 1. Verify the requesting user is an admin ---
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,13 +75,8 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Use service role for all writes
-    const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const adminClient = createAdminClient()
 
-    // --- 2. Verify the student exists ---
     const { data: current, error: fetchError } = await adminClient
       .from('students')
       .select('id')
@@ -60,18 +87,15 @@ export async function PATCH(
       return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
     }
 
-    // --- 3. Extract fields destined for each table ---
     const {
       assigned_teacher_ids,
       training_id,
       package_name,
       total_hours,
       end_date,
-      // Everything else goes to the students table
       ...studentFields
     } = body
 
-    // --- 4. Update the students table ---
     const { error: studentError } = await adminClient
       .from('students')
       .update({ ...studentFields, updated_at: new Date().toISOString() })
@@ -82,7 +106,6 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to update student.' }, { status: 500 })
     }
 
-    // --- 5. Update the active training if training fields were provided ---
     if (training_id && (package_name !== undefined || total_hours !== undefined || end_date !== undefined)) {
       const trainingUpdate: Record<string, unknown> = {}
       if (package_name !== undefined) trainingUpdate.package_name = package_name
@@ -100,8 +123,6 @@ export async function PATCH(
       }
     }
 
-    // --- 6. Update assigned teachers if provided ---
-    // Delete all existing training_teachers rows for this training, then re-insert
     if (training_id && Array.isArray(assigned_teacher_ids)) {
       const { error: deleteError } = await adminClient
         .from('training_teachers')
@@ -133,6 +154,136 @@ export async function PATCH(
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('PATCH student error:', err)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
+}
+
+// ─── DELETE — permanently purge student and all associated data ───────────────
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+
+    const user = await verifyAdmin()
+    if (!user) return NextResponse.json({ error: 'Unauthorised or Forbidden' }, { status: 401 })
+
+    const adminClient = createAdminClient()
+
+    // 1. Verify student exists and is 'former'
+    const { data: student, error: fetchError } = await adminClient
+      .from('students')
+      .select('id, full_name, status, auth_user_id')
+      .eq('id', id)
+      .single()
+
+    if (fetchError || !student) {
+      return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
+    }
+
+    if (student.status !== 'former') {
+      return NextResponse.json(
+        { error: 'Student must be archived (status: former) before purging.' },
+        { status: 409 }
+      )
+    }
+
+    // 2. Check all linked teachers are 'former'
+    const { data: linkedLessons } = await adminClient
+      .from('lessons')
+      .select('teacher_id')
+      .eq('student_id', id)
+      .not('teacher_id', 'is', null)
+
+    const linkedTeacherIds = [
+      ...new Set((linkedLessons || []).map((l: { teacher_id: string }) => l.teacher_id)),
+    ]
+
+    if (linkedTeacherIds.length > 0) {
+      const { data: nonFormerTeachers } = await adminClient
+        .from('profiles')
+        .select('full_name')
+        .in('id', linkedTeacherIds)
+        .neq('status', 'former')
+
+      if (nonFormerTeachers && nonFormerTeachers.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Cannot purge: the following teachers must be archived first.`,
+            blockedBy: nonFormerTeachers.map((t: { full_name: string }) => t.full_name),
+          },
+          { status: 409 }
+        )
+      }
+    }
+
+    // 3. Cascade delete in dependency order
+
+    // 3a. messages
+    await adminClient
+      .from('messages')
+      .delete()
+      .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
+
+    // 3b. exercise_completions (keyed by student_id)
+    await adminClient.from('exercise_completions').delete().eq('student_id', id)
+
+    // 3c. assignments (keyed by student_id)
+    await adminClient.from('assignments').delete().eq('student_id', id)
+
+    // 3d. Get lesson IDs for this student
+    const { data: lessonRows } = await adminClient
+      .from('lessons')
+      .select('id')
+      .eq('student_id', id)
+    const lessonIds = (lessonRows || []).map((l: { id: string }) => l.id)
+
+    // 3e. Delete reports for these lessons
+    if (lessonIds.length > 0) {
+      await adminClient.from('reports').delete().in('class_id', lessonIds)
+    }
+
+    // 3f. Delete lessons
+    await adminClient.from('lessons').delete().eq('student_id', id)
+
+    // 3g. Get training IDs for this student
+    const { data: trainingRows } = await adminClient
+      .from('trainings')
+      .select('id')
+      .eq('student_id', id)
+    const trainingIds = (trainingRows || []).map((t: { id: string }) => t.id)
+
+    // 3h. Delete training_teachers
+    if (trainingIds.length > 0) {
+      await adminClient.from('training_teachers').delete().in('training_id', trainingIds)
+    }
+
+    // 3i. Delete trainings
+    await adminClient.from('trainings').delete().eq('student_id', id)
+
+    // 3j. Delete hours_log
+    await adminClient.from('hours_log').delete().eq('student_id', id)
+
+    // 3k. Delete student_reviews
+    await adminClient.from('student_reviews').delete().eq('student_id', id)
+
+    // 3l. Delete the student record
+    await adminClient.from('students').delete().eq('id', id)
+
+    // 3m. Delete Supabase auth user
+    const authUserId = student.auth_user_id as string | null
+    if (authUserId) {
+      const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(authUserId)
+      if (authDeleteError) {
+        console.error('Auth user delete error (non-fatal):', authDeleteError)
+      }
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    console.error('DELETE student error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }
