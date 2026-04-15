@@ -52,6 +52,7 @@ export async function sendMessage(
         recipientName: recipientProfile.full_name,
         subject,
         bodyHtml: newMessageEmailContent(student.full_name),
+        contactEmail: 'teachers@lingualinkonline.com',
       }),
     })
   }
@@ -82,4 +83,3 @@ export async function markMessagesAsRead(contactId: string) {
     .eq('sender_id', contactId)
     .is('read_at', null)
 }
-

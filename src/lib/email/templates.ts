@@ -5,9 +5,10 @@ interface EmailTemplateOptions {
   recipientName: string
   subject: string
   bodyHtml: string
+  contactEmail: string
 }
 
-export function buildEmailTemplate({ recipientName, bodyHtml }: EmailTemplateOptions): string {
+export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: EmailTemplateOptions): string {
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -21,16 +22,12 @@ export function buildEmailTemplate({ recipientName, bodyHtml }: EmailTemplateOpt
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
 
-          <!-- Logo -->
-          <tr>
-            <td align="center" style="padding:24px 40px 0;background-color:#FFFFFF;">
-              <img src="${process.env.NEXT_PUBLIC_SITE_URL}/lingualink-logo-clean.svg" alt="Lingualink Online" height="56" style="display:block;" />
-            </td>
-          </tr>
-
           <!-- Header -->
           <tr>
-            <td style="background-color:#FF8303;padding:28px 40px;">
+            <td style="background-color:#FF8303;padding:28px 40px 24px;text-align:center;">
+              <div style="background:#1a1a1a;display:inline-block;padding:12px 20px;border-radius:6px;margin-bottom:18px;">
+                <img src="https://lingualink-lms.vercel.app/lingualink-email-logo.png" alt="Lingualink Online" width="160" style="display:block;" />
+              </div>
               <p style="margin:0;font-size:20px;font-weight:700;color:#FFFFFF;letter-spacing:-0.3px;">
                 Lingualink Online
               </p>
@@ -52,8 +49,8 @@ export function buildEmailTemplate({ recipientName, bodyHtml }: EmailTemplateOpt
             <td style="padding:24px 40px;border-top:1px solid #E5E7EB;">
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
-                <a href="mailto:info@lingualinkonline.com" style="color:#FF8303;text-decoration:none;">
-                  info@lingualinkonline.com
+                <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
+                  ${contactEmail}
                 </a>
               </p>
               <p style="margin:8px 0 0;font-size:13px;color:#9CA3AF;">
@@ -366,7 +363,7 @@ export function studentLowHoursEmailContent(
       To continue booking classes without interruption, please contact us to purchase more hours.
     </p>
     <a
-      href="mailto:info@lingualinkonline.com"
+      href="mailto:support@lingualinkonline.com"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Contact Us
