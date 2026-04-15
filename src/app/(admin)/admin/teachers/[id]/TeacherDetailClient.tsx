@@ -73,6 +73,7 @@ type Props = {
   invoices: Invoice[]
   history: HistoryEntry[]
   conversations: AdminConversation[]
+  purgeBlockedBy: string[]
 }
 
 type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
@@ -273,11 +274,21 @@ function MessageThread({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations }: Props) {
+export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
-  const [deleting, setDeleting] = useState(false)
   const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
+
+  // Archive state
+  const [archiving, setArchiving] = useState(false)
+  const [showArchiveDialog, setShowArchiveDialog] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  // Purge dialog state
+  const [showPurgeDialog, setShowPurgeDialog] = useState(false)
+  const [purgeConfirmName, setPurgeConfirmName] = useState('')
+  const [purging, setPurging] = useState(false)
+  const [purgeError, setPurgeError] = useState<string | null>(null)
 
   const id = teacher.id as string
   const fullName = teacher.full_name as string
@@ -285,22 +296,50 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
   const status = teacher.status as string | null
   const accountTypes = (teacher.account_types as string[]) ?? []
 
-  async function handleSoftDelete() {
-    if (!confirm(`Are you sure you want to deactivate ${fullName}? This will set their status to 'Former'.`)) return
-    setDeleting(true)
+  const isFormer = status === 'former'
+  const purgeReady = isFormer && purgeBlockedBy.length === 0
+
+  function handleArchive() {
+    if (isFormer) return
+    setArchiveError(null)
+    setShowArchiveDialog(true)
+  }
+
+  async function handleArchiveConfirm() {
+    setArchiving(true)
+    setArchiveError(null)
     try {
       const res = await fetch(`/api/admin/teachers/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'former', is_active: false }),
       })
-      if (!res.ok) throw new Error('Failed to deactivate teacher.')
+      if (!res.ok) throw new Error('Failed to archive teacher.')
+      setShowArchiveDialog(false)
       router.push('/admin/teachers')
       router.refresh()
     } catch {
-      alert('Something went wrong. Please try again.')
+      setArchiveError('Something went wrong. Please try again.')
     } finally {
-      setDeleting(false)
+      setArchiving(false)
+    }
+  }
+
+  async function handlePurge() {
+    if (purgeConfirmName !== fullName) return
+    setPurgeError(null)
+    setPurging(true)
+    try {
+      const res = await fetch(`/api/admin/teachers/${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to purge teacher.')
+      setShowPurgeDialog(false)
+      router.push('/admin/teachers')
+      router.refresh()
+    } catch (err: unknown) {
+      setPurgeError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setPurging(false)
     }
   }
 
@@ -324,7 +363,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Top card */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           {/* Left: photo + name */}
           <div className="flex items-center gap-4">
             {photoUrl ? (
@@ -351,27 +390,54 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             </div>
           </div>
 
-          {/* Right: action buttons */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => router.push(`/admin/teachers/${id}/edit`)}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => router.push(`/admin/teachers/${id}/edit?section=public`)}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              Edit Public Profile
-            </button>
-            <button
-              onClick={handleSoftDelete}
-              disabled={deleting}
-              className="px-4 py-2 rounded-lg text-sm font-medium border text-red-600 border-red-200 hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? 'Deactivating...' : 'Deactivate'}
-            </button>
+          {/* Right: action buttons + purge block notice */}
+          <div className="flex flex-col items-end gap-2 flex-shrink-0">
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button
+                onClick={() => router.push(`/admin/teachers/${id}/edit`)}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => router.push(`/admin/teachers/${id}/edit?section=public`)}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Edit Public Profile
+              </button>
+              <button
+                onClick={handleArchive}
+                disabled={archiving || isFormer}
+                className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-50"
+                style={isFormer
+                  ? { borderColor: '#d1d5db', color: '#9ca3af', cursor: 'default' }
+                  : { borderColor: '#fed7aa', color: '#c2410c' }}
+              >
+                {archiving ? 'Archiving...' : isFormer ? 'Archived' : 'Archive'}
+              </button>
+              {isFormer && (
+                <button
+                  onClick={() => { setPurgeError(null); setPurgeConfirmName(''); setShowPurgeDialog(true) }}
+                  disabled={!purgeReady}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed"
+                  style={{ borderColor: '#fca5a5', color: '#dc2626' }}
+                  title={!purgeReady ? `Purge blocked: archive linked students first` : undefined}
+                >
+                  Purge
+                </button>
+              )}
+            </div>
+
+            {/* Purge blocked notice */}
+            {isFormer && purgeBlockedBy.length > 0 && (
+              <div
+                className="text-xs rounded-lg px-3 py-2 max-w-xs text-right"
+                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+              >
+                <p className="font-medium">Purge blocked — archive these students first:</p>
+                <p className="mt-0.5">{purgeBlockedBy.join(', ')}</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -663,6 +729,108 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             </div>
           </div>
         )
+      )}
+
+      {/* ─── Archive confirmation dialog ──────────────────────────────────────────── */}
+      {showArchiveDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              Archive {fullName}?
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              This will set their status to <strong className="text-gray-700">Former</strong> and
+              deactivate their account. You can still purge them later if needed.
+            </p>
+
+            {archiveError && (
+              <div
+                className="text-sm rounded-lg px-4 py-3 mb-4"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}
+              >
+                {archiveError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowArchiveDialog(false); setArchiveError(null) }}
+                disabled={archiving}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArchiveConfirm}
+                disabled={archiving}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: '#c2410c' }}
+              >
+                {archiving ? 'Archiving...' : 'Archive Teacher'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Purge confirmation dialog ─────────────────────────────────────────── */}
+      {showPurgeDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center z-50"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              Permanently purge {fullName}?
+            </h3>
+            <p className="text-sm text-gray-500 mb-4">
+              This will permanently delete all classes, invoices, messages, reviews, and the account itself.
+              <strong className="text-gray-700"> This cannot be undone.</strong>
+            </p>
+
+            {purgeError && (
+              <div
+                className="text-sm rounded-lg px-4 py-3 mb-4"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}
+              >
+                {purgeError}
+              </div>
+            )}
+
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Type <span className="font-semibold">{fullName}</span> to confirm:
+            </label>
+            <input
+              type="text"
+              value={purgeConfirmName}
+              onChange={(e) => setPurgeConfirmName(e.target.value)}
+              placeholder={fullName}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:border-red-400"
+              autoFocus
+            />
+
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowPurgeDialog(false); setPurgeConfirmName(''); setPurgeError(null) }}
+                disabled={purging}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePurge}
+                disabled={purgeConfirmName !== fullName || purging}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#dc2626' }}
+              >
+                {purging ? 'Purging...' : 'Permanently Purge'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
