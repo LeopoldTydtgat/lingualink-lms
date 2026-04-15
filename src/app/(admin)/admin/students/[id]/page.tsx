@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import StudentDetailClient from './StudentDetailClient'
+import type { AdminConversation } from './StudentDetailClient'
 
 export default async function StudentDetailPage({
   params,
@@ -180,6 +181,66 @@ export default async function StudentDetailPage({
       : (r.profiles as { full_name: string } | null)?.full_name ?? '—',
   }))
 
+  // ── Messages: fetch all student conversations ──────────────────────────────
+  // Only select explicit columns — never select('*') on messages
+  const { data: rawMessages } = await supabase
+    .from('messages')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
+    .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
+    .order('created_at', { ascending: true })
+    .limit(500)
+
+  const msgs = rawMessages ?? []
+
+  // The other party in each message is always a teacher/admin (a profile)
+  const profileIds = [
+    ...new Set(
+      msgs.map((m) => (m.sender_id === id ? m.receiver_id : m.sender_id))
+    ),
+  ]
+
+  const { data: profiles } = profileIds.length > 0
+    ? await supabase
+      .from('profiles')
+      .select('id, full_name, photo_url')
+      .in('id', profileIds)
+    : { data: [] as { id: string; full_name: string; photo_url: string | null }[] }
+
+  const profileMap = Object.fromEntries(
+    (profiles ?? []).map((p) => [p.id, p])
+  )
+
+  // Group messages by teacher/profile into conversations
+  const convMap = new Map<string, typeof msgs>()
+  for (const msg of msgs) {
+    const pid = msg.sender_id === id ? msg.receiver_id : msg.sender_id
+    if (!convMap.has(pid)) convMap.set(pid, [])
+    convMap.get(pid)!.push(msg)
+  }
+
+  const conversations: AdminConversation[] = Array.from(convMap.entries())
+    .map(([pid, messages]) => ({
+      contactId: pid,
+      contactName: profileMap[pid]?.full_name ?? 'Unknown',
+      contactPhotoUrl: profileMap[pid]?.photo_url ?? null,
+      messages: messages.map((m) => ({
+        id: m.id,
+        sender_id: m.sender_id,
+        sender_type: m.sender_type,
+        receiver_id: m.receiver_id,
+        receiver_type: m.receiver_type,
+        content: m.content,
+        attachments: (m.attachments as Array<{ url: string; filename: string; size: number }>) ?? [],
+        read_at: m.read_at,
+        created_at: m.created_at,
+      })),
+    }))
+    .sort((a, b) => {
+      const lastA = a.messages[a.messages.length - 1]?.created_at ?? ''
+      const lastB = b.messages[b.messages.length - 1]?.created_at ?? ''
+      return lastB.localeCompare(lastA)
+    })
+
   const hoursRemaining = activeTrain
     ? Number(activeTrain.total_hours) - Number(activeTrain.hours_consumed)
     : null
@@ -195,6 +256,7 @@ export default async function StudentDetailPage({
       hoursLog={hoursLog || []}
       reports={reports}
       reviews={flatReviews}
+      conversations={conversations}
     />
   )
 }
