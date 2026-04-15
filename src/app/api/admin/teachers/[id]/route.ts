@@ -1,7 +1,40 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+// ─── Auth helper ──────────────────────────────────────────────────────────────
+
+async function verifyAdmin() {
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll() {},
+      },
+    }
+  )
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return null
+
+  const { data: adminProfile } = await supabase
+    .from('profiles')
+    .select('account_types, role')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    adminProfile?.role === 'admin' ||
+    (adminProfile?.account_types ?? []).includes('school_admin')
+
+  return isAdmin ? user : null
+}
+
+// ─── PATCH — update teacher profile ──────────────────────────────────────────
 
 export async function PATCH(
   req: NextRequest,
@@ -11,7 +44,6 @@ export async function PATCH(
     const { id } = await params
     const body = await req.json()
 
-    // --- 1. Verify the requesting user is an admin ---
     const cookieStore = await cookies()
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,11 +75,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // --- 2. Fetch the current profile to build history log ---
-    const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const adminClient = createAdminClient()
 
     const { data: current, error: fetchError } = await adminClient
       .from('profiles')
@@ -59,14 +87,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
-    // --- 3. Build history log entries for changed fields ---
-    // Strip admin_notes from history — too sensitive to log in plain text
     const SKIP_FIELDS = ['admin_notes', 'updated_at', 'created_at']
     const historyEntries = Object.entries(body)
       .filter(([key]) => !SKIP_FIELDS.includes(key))
       .filter(([key, newVal]) => {
         const oldVal = current[key]
-        // Compare as strings to catch array and numeric differences
         return JSON.stringify(oldVal) !== JSON.stringify(newVal)
       })
       .map(([key, newVal]) => ({
@@ -78,7 +103,6 @@ export async function PATCH(
         changed_at: new Date().toISOString(),
       }))
 
-    // --- 4. Update the profile ---
     const { error: updateError } = await adminClient
       .from('profiles')
       .update({ ...body, updated_at: new Date().toISOString() })
@@ -89,14 +113,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to update teacher.' }, { status: 500 })
     }
 
-    // --- 5. Insert history log entries ---
     if (historyEntries.length > 0) {
       const { error: historyError } = await adminClient
         .from('teacher_history_log')
         .insert(historyEntries)
 
       if (historyError) {
-        // Non-fatal — log but don't fail the request
         console.error('History log error:', historyError)
       }
     }
@@ -104,6 +126,137 @@ export async function PATCH(
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('PATCH teacher error:', err)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
+}
+
+// ─── DELETE — permanently purge teacher and all associated data ───────────────
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params
+
+    const user = await verifyAdmin()
+    if (!user) return NextResponse.json({ error: 'Unauthorised or Forbidden' }, { status: 401 })
+
+    const adminClient = createAdminClient()
+
+    // 1. Verify teacher exists and is 'former'
+    const { data: teacher, error: fetchError } = await adminClient
+      .from('profiles')
+      .select('id, full_name, status')
+      .eq('id', id)
+      .single()
+
+    if (fetchError || !teacher) {
+      return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
+    }
+
+    if (teacher.status !== 'former') {
+      return NextResponse.json(
+        { error: 'Teacher must be archived (status: former) before purging.' },
+        { status: 409 }
+      )
+    }
+
+    // 2. Check all linked students are 'former'
+    const { data: linkedLessons } = await adminClient
+      .from('lessons')
+      .select('student_id')
+      .eq('teacher_id', id)
+      .not('student_id', 'is', null)
+
+    const linkedStudentIds = [
+      ...new Set((linkedLessons || []).map((l: { student_id: string }) => l.student_id)),
+    ]
+
+    if (linkedStudentIds.length > 0) {
+      const { data: nonFormerStudents } = await adminClient
+        .from('students')
+        .select('full_name')
+        .in('id', linkedStudentIds)
+        .neq('status', 'former')
+
+      if (nonFormerStudents && nonFormerStudents.length > 0) {
+        return NextResponse.json(
+          {
+            error: `Cannot purge: the following students must be archived first.`,
+            blockedBy: nonFormerStudents.map((s: { full_name: string }) => s.full_name),
+          },
+          { status: 409 }
+        )
+      }
+    }
+
+    // 3. Cascade delete in dependency order
+
+    // 3a. messages
+    await adminClient
+      .from('messages')
+      .delete()
+      .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
+
+    // 3b. Get lesson IDs
+    const { data: lessonRows } = await adminClient
+      .from('lessons')
+      .select('id')
+      .eq('teacher_id', id)
+    const lessonIds = (lessonRows || []).map((l: { id: string }) => l.id)
+
+    if (lessonIds.length > 0) {
+      // 3c. Get assignment IDs linked to these lessons
+      const { data: assignmentRows } = await adminClient
+        .from('assignments')
+        .select('id')
+        .in('lesson_id', lessonIds)
+      const assignmentIds = (assignmentRows || []).map((a: { id: string }) => a.id)
+
+      // 3d. Delete exercise_completions tied to those assignments
+      if (assignmentIds.length > 0) {
+        await adminClient
+          .from('exercise_completions')
+          .delete()
+          .in('assignment_id', assignmentIds)
+      }
+
+      // 3e. Delete assignments
+      await adminClient.from('assignments').delete().in('lesson_id', lessonIds)
+
+      // 3f. Delete reports
+      await adminClient.from('reports').delete().in('class_id', lessonIds)
+    }
+
+    // 3g. Delete invoices
+    await adminClient.from('invoices').delete().eq('teacher_id', id)
+
+    // 3h. Delete lessons
+    await adminClient.from('lessons').delete().eq('teacher_id', id)
+
+    // 3i. Delete training_teachers
+    await adminClient.from('training_teachers').delete().eq('teacher_id', id)
+
+    // 3j. Delete student_reviews
+    await adminClient.from('student_reviews').delete().eq('teacher_id', id)
+
+    // 3k. Delete teacher_history_log
+    await adminClient.from('teacher_history_log').delete().eq('teacher_id', id)
+
+    // 3l. Delete profile row
+    await adminClient.from('profiles').delete().eq('id', id)
+
+    // 3m. Delete Supabase auth user (teacher id === auth user id for profiles)
+    const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(id)
+    if (authDeleteError) {
+      // Non-fatal — profile is already deleted; log and continue
+      console.error('Auth user delete error (non-fatal):', authDeleteError)
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    console.error('DELETE teacher error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }

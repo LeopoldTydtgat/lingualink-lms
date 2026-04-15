@@ -181,6 +181,29 @@ export default async function StudentDetailPage({
       : (r.profiles as { full_name: string } | null)?.full_name ?? '—',
   }))
 
+  // ── Purge eligibility: check all linked teachers are 'former' ───────────────
+  const { data: linkedLessonRows } = await supabase
+    .from('lessons')
+    .select('teacher_id')
+    .eq('student_id', id)
+    .not('teacher_id', 'is', null)
+
+  const linkedTeacherIds = [
+    ...new Set(
+      (linkedLessonRows || []).map((l: { teacher_id: string }) => l.teacher_id)
+    ),
+  ]
+
+  let purgeBlockedBy: string[] = []
+  if (linkedTeacherIds.length > 0) {
+    const { data: nonFormerTeachers } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .in('id', linkedTeacherIds)
+      .neq('status', 'former')
+    purgeBlockedBy = (nonFormerTeachers || []).map((t: { full_name: string }) => t.full_name)
+  }
+
   // ── Messages: fetch all student conversations ──────────────────────────────
   // Only select explicit columns — never select('*') on messages
   const { data: rawMessages } = await supabase
@@ -257,6 +280,7 @@ export default async function StudentDetailPage({
       reports={reports}
       reviews={flatReviews}
       conversations={conversations}
+      purgeBlockedBy={purgeBlockedBy}
     />
   )
 }
