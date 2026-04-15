@@ -541,7 +541,7 @@ export default function BillingClient({
         <div className="bg-white border border-gray-200 rounded-lg p-6 max-w-lg">
           <div className="mb-5 p-3 bg-amber-50 border border-amber-200 rounded-lg">
             <p className="text-sm text-amber-800">
-              To update this information please contact us at <strong>admin@lingualinkonline.com</strong>
+              To update this information please contact us at <strong>teachers@lingualinkonline.com</strong>
             </p>
           </div>
           {!billingInfo || (!billingInfo.iban && !billingInfo.paypal_email && !billingInfo.tax_number) ? (

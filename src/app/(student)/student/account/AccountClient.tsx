@@ -591,7 +591,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           )}
 
           <a
-            href="mailto:info@lingualinkonline.com"
+            href="mailto:support@lingualinkonline.com"
             style={{
               display: 'inline-block',
               padding: '9px 20px',
