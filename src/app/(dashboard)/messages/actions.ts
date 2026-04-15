@@ -80,6 +80,7 @@ export async function sendMessage(
         recipientName,
         subject,
         bodyHtml: newMessageEmailContent(profile.full_name),
+        contactEmail: receiverType === 'student' ? 'support@lingualinkonline.com' : 'teachers@lingualinkonline.com',
       }),
     })
   }

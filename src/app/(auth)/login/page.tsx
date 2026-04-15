@@ -133,7 +133,7 @@ export default function LoginPage() {
 
             <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
               Forgot your password? Contact{' '}
-              <span style={{ color: '#FF8303', fontWeight: 500 }}>admin@lingualinkonline.com</span>
+              <span style={{ color: '#FF8303', fontWeight: 500 }}>teachers@lingualinkonline.com</span>
             </p>
           </div>
         </div>

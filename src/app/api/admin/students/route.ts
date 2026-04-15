@@ -234,6 +234,7 @@ export async function POST(req: NextRequest) {
         recipientName: data.full_name,
         subject: 'Welcome to Lingualink Online',
         bodyHtml: welcomeBody,
+        contactEmail: 'support@lingualinkonline.com',
       }),
     })
 
