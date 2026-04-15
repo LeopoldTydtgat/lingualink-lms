@@ -1,6 +1,6 @@
 # LinguaLink Online - Build Journal
 
-## Session 50 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
+## Session 49 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
 
 ### What was built
 - Updated contact email addresses across entire codebase - all teacher-facing 
