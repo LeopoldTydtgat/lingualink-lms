@@ -60,6 +60,7 @@ export default function TeachersListClient({ teachers }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
+  const [showArchived, setShowArchived] = useState(false)
 
   const filtered = teachers.filter((t) => {
     const matchesSearch =
@@ -67,7 +68,8 @@ export default function TeachersListClient({ teachers }: Props) {
       t.email.toLowerCase().includes(search.toLowerCase())
     const matchesStatus =
       statusFilter === 'All' || t.status === statusFilter
-    return matchesSearch && matchesStatus
+    const matchesArchived = showArchived || t.status !== 'former'
+    return matchesSearch && matchesStatus && matchesArchived
   })
 
   return (
@@ -109,6 +111,17 @@ export default function TeachersListClient({ teachers }: Props) {
             </option>
           ))}
         </select>
+        <button
+          onClick={() => setShowArchived(!showArchived)}
+          className="px-3 py-2 rounded-lg text-sm font-medium border"
+          style={
+            showArchived
+              ? { backgroundColor: '#FF8303', color: '#ffffff', borderColor: '#FF8303' }
+              : { backgroundColor: '#ffffff', color: '#6b7280', borderColor: '#e5e7eb' }
+          }
+        >
+          Show Archived
+        </button>
       </div>
 
       {/* Table */}
@@ -156,6 +169,7 @@ export default function TeachersListClient({ teachers }: Props) {
                       )}
                       <Link
                         href={`/admin/teachers/${teacher.id}`}
+                        prefetch={false}
                         className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
                       >
                         {teacher.full_name}
