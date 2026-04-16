@@ -24,16 +24,11 @@ type Props = {
 const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const CATEGORIES = ['All', 'vocabulary', 'grammar']
 
-function ChilliPeppers({ count }: { count: number }) {
+function DifficultyDots({ count }: { count: number }) {
   return (
-    <span className="flex gap-0.5">
-      {[1, 2, 3].map((i) => (
-        <span
-          key={i}
-          style={{ opacity: i <= count ? 1 : 0.2 }}
-        >
-          🌶️
-        </span>
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} style={{ color: n <= count ? '#FF8303' : '#e5e7eb', fontSize: '15px', lineHeight: 1 }}>●</span>
       ))}
     </span>
   )
@@ -154,7 +149,7 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
                   {sheet.level}
                 </span>
               </span>
-              <ChilliPeppers count={sheet.difficulty} />
+              <DifficultyDots count={sheet.difficulty} />
               <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
             </div>
           ))

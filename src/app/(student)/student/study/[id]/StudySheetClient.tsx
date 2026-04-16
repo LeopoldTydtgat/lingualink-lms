@@ -41,13 +41,11 @@ interface Props {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function DifficultyIcons({ level }: { level: number }) {
+function DifficultyDots({ level }: { level: number }) {
   return (
-    <span>
-      {Array.from({ length: 3 }).map((_, i) => (
-        <span key={i} style={{ color: i < level ? '#FF8303' : '#d1d5db' }}>
-          🌶️
-        </span>
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} style={{ color: n <= level ? '#FF8303' : '#e5e7eb', fontSize: '14px', lineHeight: 1 }}>●</span>
       ))}
     </span>
   )
@@ -169,7 +167,7 @@ export default function StudySheetClient({
             {sheet.category}
           </span>
           <span className="text-sm text-gray-500">{sheet.level}</span>
-          <DifficultyIcons level={sheet.difficulty ?? 1} />
+          <DifficultyDots level={sheet.difficulty ?? 1} />
         </div>
         <h1 className="text-2xl font-bold text-gray-900">{sheet.title}</h1>
       </div>
@@ -244,7 +242,6 @@ export default function StudySheetClient({
                       <td className="px-4 py-3 text-gray-700">{w.definition}</td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{w.example}</td>
                       <td className="px-4 py-3">
-                        {/* Audio button — placeholder; wire up TTS if added later */}
                         <button
                           onClick={() => {
                             if ('speechSynthesis' in window) {

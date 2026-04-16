@@ -36,11 +36,11 @@ type Props = {
   isAdmin: boolean
 }
 
-function ChilliPeppers({ count }: { count: number }) {
+function DifficultyDots({ count }: { count: number }) {
   return (
-    <span className="flex gap-0.5">
-      {[1, 2, 3].map((i) => (
-        <span key={i} style={{ opacity: i <= count ? 1 : 0.2 }}>🌶️</span>
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} style={{ color: n <= count ? '#FF8303' : '#e5e7eb', fontSize: '15px', lineHeight: 1 }}>●</span>
       ))}
     </span>
   )
@@ -153,7 +153,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
               >
                 {sheet.level}
               </span>
-              <ChilliPeppers count={sheet.difficulty} />
+              <DifficultyDots count={sheet.difficulty} />
             </div>
           </div>
           {isAdmin && (
@@ -189,7 +189,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
                   <td className="px-6 py-4 font-medium text-gray-900 text-sm">{word.word}</td>
                   <td className="px-6 py-4 text-sm text-gray-500 italic">{word.part_of_speech}</td>
                   <td className="px-6 py-4 text-sm text-gray-700">{word.definition}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">"{word.example}"</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">&ldquo;{word.example}&rdquo;</td>
                 </tr>
               ))}
             </tbody>

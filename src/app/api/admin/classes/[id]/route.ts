@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 
 // GET /api/admin/classes/[id]
@@ -201,6 +202,59 @@ export async function PATCH(
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ success: true })
+}
+
+// DELETE /api/admin/classes/[id]
+// Hard-deletes a lesson record. Only allowed when status is cancelled.
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const supabase = await createClient()
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_types')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    profile?.account_types?.includes('school_admin') ||
+    profile?.account_types?.includes('staff')
+
+  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const adminClient = createAdminClient()
+
+  const { data: lesson, error: fetchError } = await adminClient
+    .from('lessons')
+    .select('id, status')
+    .eq('id', id)
+    .single()
+
+  if (fetchError || !lesson) {
+    return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
+  }
+
+  const cancelledStatuses = ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher']
+  if (!cancelledStatuses.includes(lesson.status)) {
+    return NextResponse.json({ error: 'Only cancelled classes can be deleted. Please cancel the class first.' }, { status: 422 })
+  }
+
+  const { error: deleteError } = await adminClient
+    .from('lessons')
+    .delete()
+    .eq('id', id)
+
+  if (deleteError) {
+    return NextResponse.json({ error: deleteError.message }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })
