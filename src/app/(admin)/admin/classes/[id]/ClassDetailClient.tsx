@@ -53,6 +53,7 @@ export default function ClassDetailClient({ lesson }: Props) {
   const router = useRouter()
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
+  const [cancelReasonError, setCancelReasonError] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
 
@@ -91,16 +92,30 @@ export default function ClassDetailClient({ lesson }: Props) {
       setCancelling(false)
       return
     }
-    // Navigate away and back to force a full server re-render with updated status
     window.location.href = '/admin/classes'
-    
+  }
+
+  function openCancelModal() {
+    setCancelReason('')
+    setCancelReasonError('')
+    setCancelError('')
+    setShowCancelModal(true)
+  }
+
+  function attemptCancel() {
+    if (cancelReason.trim().length < 10) {
+      setCancelReasonError('Please provide a reason (minimum 10 characters)')
+      return
+    }
+    setCancelReasonError('')
+    handleCancel()
   }
 
   return (
     <div style={{ padding: '32px', maxWidth: '720px' }}>
 
       {/* Back */}
-      <Link href="/admin/classes" style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
+      <Link href="/admin/classes" prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
         ← Back to Classes
       </Link>
 
@@ -119,7 +134,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           }}>
             {statusMeta.label}
           </span>
-          <Link href={`/admin/classes/${lesson.id}/edit`}>
+          <Link href={`/admin/classes/${lesson.id}/edit`} prefetch={false}>
             <button style={{
               padding: '8px 16px', borderRadius: '7px', border: '1px solid #D1D5DB',
               backgroundColor: 'white', fontSize: '13px', fontWeight: 600,
@@ -130,7 +145,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           </Link>
           {isCancellable && (
             <button
-              onClick={() => setShowCancelModal(true)}
+              onClick={openCancelModal}
               style={{
                 padding: '8px 16px', borderRadius: '7px', border: 'none',
                 backgroundColor: '#FEF2F2', fontSize: '13px', fontWeight: 600,
@@ -179,7 +194,7 @@ export default function ClassDetailClient({ lesson }: Props) {
 
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
           {/* Teacher */}
-          <Link href={`/admin/teachers/${lesson.teacher_id}`} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
+          <Link href={`/admin/teachers/${lesson.teacher_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '12px',
               padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
@@ -207,7 +222,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           </Link>
 
           {/* Student */}
-          <Link href={`/admin/students/${lesson.student_id}`} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
+          <Link href={`/admin/students/${lesson.student_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '12px',
               padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
@@ -248,7 +263,7 @@ export default function ClassDetailClient({ lesson }: Props) {
                 Status: <strong style={{ textTransform: 'capitalize' }}>{lesson.report.status}</strong>
               </p>
             </div>
-            <Link href={`/admin/reports?lesson_id=${lesson.id}`}>
+            <Link href={`/admin/reports?lesson_id=${lesson.id}`} prefetch={false}>
               <button style={{
                 padding: '8px 16px', borderRadius: '7px', border: 'none',
                 backgroundColor: '#FF8303', color: 'white', fontSize: '13px',
@@ -350,19 +365,24 @@ export default function ClassDetailClient({ lesson }: Props) {
               The student&apos;s hours will be refunded. This action cannot be undone.
             </p>
             <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
-              Reason (optional)
+              Reason
             </label>
             <textarea
               value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-              placeholder="e.g. Teacher unavailable"
+              onChange={(e) => { setCancelReason(e.target.value); setCancelReasonError('') }}
+              placeholder="e.g. Teacher unavailable due to illness"
               rows={3}
               style={{
-                width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
+                width: '100%', border: `1px solid ${cancelReasonError ? '#FCA5A5' : '#D1D5DB'}`, borderRadius: '6px',
                 padding: '8px 10px', fontSize: '14px', outline: 'none',
-                resize: 'none', boxSizing: 'border-box', marginBottom: '12px',
+                resize: 'none', boxSizing: 'border-box', marginBottom: '6px',
               }}
             />
+            {cancelReasonError && (
+              <p style={{ fontSize: '12px', color: '#B91C1C', marginBottom: '10px', marginTop: 0 }}>
+                {cancelReasonError}
+              </p>
+            )}
             {cancelError && (
               <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{cancelError}</p>
             )}
@@ -377,7 +397,7 @@ export default function ClassDetailClient({ lesson }: Props) {
                 Go Back
               </button>
               <button
-                onClick={handleCancel}
+                onClick={attemptCancel}
                 disabled={cancelling}
                 style={{
                   padding: '9px 18px', borderRadius: '7px', border: 'none',

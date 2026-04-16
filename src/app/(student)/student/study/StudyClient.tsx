@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, CheckCircle, Clock, Search, Filter } from 'lucide-react'
+import { BookOpen, CheckCircle, Clock, Search } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,14 +48,12 @@ function isPracticed(sheetId: string, completions: Completion[]) {
   return completions.some((c) => c.sheet_id === sheetId && c.assignment_id === null)
 }
 
-/** Renders chilli pepper difficulty icons */
-function DifficultyIcons({ level }: { level: number }) {
+/** Renders difficulty dot icons */
+function DifficultyDots({ level }: { level: number }) {
   return (
-    <span className="text-sm">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <span key={i} style={{ color: i < level ? '#FF8303' : '#d1d5db' }}>
-          🌶️
-        </span>
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} style={{ color: n <= level ? '#FF8303' : '#e5e7eb', fontSize: '14px', lineHeight: 1 }}>●</span>
       ))}
     </span>
   )
@@ -287,7 +285,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
                         </td>
                         <td className="px-4 py-3 text-gray-700">{sheet.level}</td>
                         <td className="px-4 py-3">
-                          <DifficultyIcons level={sheet.difficulty ?? 1} />
+                          <DifficultyDots level={sheet.difficulty ?? 1} />
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -360,7 +358,7 @@ function AssignmentCard({
               {sheet.category}
             </span>
             <span className="text-xs text-gray-500">{sheet.level}</span>
-            <DifficultyIcons level={sheet.difficulty ?? 1} />
+            <DifficultyDots level={sheet.difficulty ?? 1} />
           </div>
           <p className="text-xs text-gray-400 mt-1">
             Assigned {formatDate(assignment.assigned_at)}

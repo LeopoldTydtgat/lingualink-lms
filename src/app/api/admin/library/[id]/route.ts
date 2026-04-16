@@ -28,7 +28,7 @@ export async function PATCH(
   const body = await request.json()
 
   // Only allow fields that are safe to update — strip anything unexpected
-  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active']
+  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments']
   const update: Record<string, unknown> = {}
   for (const key of allowed) {
     if (key in body) update[key] = body[key]

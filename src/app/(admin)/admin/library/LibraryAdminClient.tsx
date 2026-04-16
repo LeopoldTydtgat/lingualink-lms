@@ -29,6 +29,12 @@ export type SheetContent = {
   exercises?: ExerciseRow[]
 }
 
+export type Attachment = {
+  name: string
+  url: string
+  type: string
+}
+
 export type StudySheet = {
   id: string
   title: string
@@ -39,6 +45,7 @@ export type StudySheet = {
   is_active: boolean
   allowed_roles: string[] // ['teacher','teacher_exam'] | ['teacher_exam'] | ['admin']
   intro_text: string | null
+  attachments: Attachment[] | null
   created_at: string
   updated_at: string
 }
@@ -67,11 +74,17 @@ function rolesColor(roles: string[]): string {
   return '#16a34a'
 }
 
-function ChilliIcons({ count }: { count: number }) {
+function DifficultyBars({ count }: { count: number }) {
   return (
-    <span className="flex gap-0.5">
+    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
       {[1, 2, 3].map(n => (
-        <span key={n} style={{ opacity: n <= count ? 1 : 0.2 }}>🌶️</span>
+        <span key={n} style={{
+          display: 'inline-block',
+          width: '5px',
+          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
+          borderRadius: '2px',
+          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
+        }} />
       ))}
     </span>
   )
@@ -269,9 +282,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Difficulties</option>
-          <option value="1">🌶️</option>
-          <option value="2">🌶️🌶️</option>
-          <option value="3">🌶️🌶️🌶️</option>
+          <option value="1">▁ Easy</option>
+          <option value="2">▁▂ Medium</option>
+          <option value="3">▁▂▃ Hard</option>
         </select>
         <select
           value={filterRoles}
@@ -425,7 +438,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   <span className="font-mono text-gray-700">{sheet.level}</span>
 
                   {/* Difficulty */}
-                  <ChilliIcons count={sheet.difficulty} />
+                  <DifficultyBars count={sheet.difficulty} />
 
                   {/* Access */}
                   <span

@@ -51,24 +51,33 @@ export async function POST(request: Request) {
 
   const body = await request.json()
 
-  const { title, category, level, difficulty, intro_text, content, allowed_roles, is_active } = body
+  const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments } = body
 
   if (!title || !category || !level || !difficulty) {
     return NextResponse.json({ error: 'title, category, level, and difficulty are required' }, { status: 400 })
   }
 
+  const insert: Record<string, unknown> = {
+    title,
+    category,
+    level,
+    difficulty,
+    intro_text: intro_text ?? null,
+    content: content ?? { words: [], exercises: [] },
+    allowed_roles: allowed_roles ?? ['teacher', 'teacher_exam'],
+    is_active: is_active ?? true,
+    attachments: Array.isArray(attachments) ? attachments : [],
+  }
+
+  // Allow the client to supply a pre-generated UUID (used when files were
+  // uploaded before the sheet was created, so storage paths align)
+  if (id && typeof id === 'string' && id.length > 0) {
+    insert.id = id
+  }
+
   const { data, error } = await supabase
     .from('study_sheets')
-    .insert({
-      title,
-      category,
-      level,
-      difficulty,
-      intro_text: intro_text ?? null,
-      content: content ?? { words: [], exercises: [] },
-      allowed_roles: allowed_roles ?? ['teacher', 'teacher_exam'],
-      is_active: is_active ?? true,
-    })
+    .insert(insert)
     .select()
     .single()
 
