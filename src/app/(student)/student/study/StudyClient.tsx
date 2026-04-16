@@ -48,12 +48,18 @@ function isPracticed(sheetId: string, completions: Completion[]) {
   return completions.some((c) => c.sheet_id === sheetId && c.assignment_id === null)
 }
 
-/** Renders difficulty dot icons */
-function DifficultyDots({ level }: { level: number }) {
+/** Renders difficulty bar icons */
+function DifficultyBars({ count }: { count: number }) {
   return (
-    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
       {[1, 2, 3].map(n => (
-        <span key={n} style={{ color: n <= level ? '#FF8303' : '#e5e7eb', fontSize: '14px', lineHeight: 1 }}>●</span>
+        <span key={n} style={{
+          display: 'inline-block',
+          width: '5px',
+          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
+          borderRadius: '2px',
+          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
+        }} />
       ))}
     </span>
   )
@@ -285,7 +291,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
                         </td>
                         <td className="px-4 py-3 text-gray-700">{sheet.level}</td>
                         <td className="px-4 py-3">
-                          <DifficultyDots level={sheet.difficulty ?? 1} />
+                          <DifficultyBars count={sheet.difficulty ?? 1} />
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -358,7 +364,7 @@ function AssignmentCard({
               {sheet.category}
             </span>
             <span className="text-xs text-gray-500">{sheet.level}</span>
-            <DifficultyDots level={sheet.difficulty ?? 1} />
+            <DifficultyBars count={sheet.difficulty ?? 1} />
           </div>
           <p className="text-xs text-gray-400 mt-1">
             Assigned {formatDate(assignment.assigned_at)}
