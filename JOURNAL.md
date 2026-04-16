@@ -1,6 +1,57 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 52 - 16 April 2026 - Signal Bars, Admin Header & Library Polish
+
+### What was built
+- Signal bar difficulty icons rolled out across all 3 portals - replaced 
+  `DifficultyDots` (●●●) with `DifficultyBars` in 5 files:
+  `StudySheetsClient.tsx`, `StudySheetDetailClient.tsx`, 
+  `AssignStudySheetsModal.tsx`, `StudySheetClient.tsx`, `StudyClient.tsx`
+- `StudySheetFormClient.tsx` (teacher portal new sheet form) — difficulty 
+  selector updated to signal bar button style matching admin modal
+- Admin library table column alignment fixed using percentage-based 
+  `gridTemplateColumns` instead of rem values
+- Removed broken Edit Sheet button from teacher portal study sheet detail 
+  page - editing is admin-only via `/admin/library`
+- Admin portal header restructured to full-width spanning the entire top - 
+  sidebar now sits below header, eliminating the hard cut between black 
+  sidebar and orange header
+- Admin header gradient matches teacher portal: fades from `#fff3e8` at the 
+  logo on the left to solid `#FF8303` on the right
+- Admin portal now uses `lingualink-logo-clean.svg` matching teacher and 
+  student portals - removed white logo variant from admin layout
+
+### Break/Fix Log
+Issue 1: Admin library columns misaligned - Category data appearing under 
+Level header
+Cause: rem-based column widths calculated differently across header and data 
+rows due to checkbox intrinsic size difference
+Fix: Switched to percentage-based gridTemplateColumns on both header and data 
+rows
+Lesson: Use percentage columns for shared grid layouts - rem values can drift 
+between rows with different content types
+
+Issue 2: Edit Sheet button in teacher portal giving 404
+Cause: Button pointed to `/study-sheets/${id}/edit` which does not exist - 
+editing is done via admin portal modal only
+Fix: Removed the button entirely from StudySheetDetailClient.tsx
+
+Issue 3: Admin header had hard cut between black sidebar and orange header
+Cause: Sidebar ran full height and header only covered the right portion
+Fix: Restructured layout so header spans full width at top, sidebar sits 
+below it - matches the structural approach of the teacher portal
+
+### Session result
+Difficulty icons are now consistent across all three portals using the signal 
+bar style. The admin portal header now matches the teacher portal aesthetic 
+with a smooth gradient fade from the logo area into solid orange. All library 
+table columns align correctly.
+
+
+---
+
+
 ## Session 51 - 16 April 2026 - Signal Bars + Library Polish
 
 ### What was built

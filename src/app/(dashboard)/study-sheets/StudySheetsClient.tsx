@@ -24,11 +24,17 @@ type Props = {
 const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const CATEGORIES = ['All', 'vocabulary', 'grammar']
 
-function DifficultyDots({ count }: { count: number }) {
+function DifficultyBars({ count }: { count: number }) {
   return (
-    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
       {[1, 2, 3].map(n => (
-        <span key={n} style={{ color: n <= count ? '#FF8303' : '#e5e7eb', fontSize: '15px', lineHeight: 1 }}>●</span>
+        <span key={n} style={{
+          display: 'inline-block',
+          width: '5px',
+          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
+          borderRadius: '2px',
+          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
+        }} />
       ))}
     </span>
   )
@@ -149,7 +155,7 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
                   {sheet.level}
                 </span>
               </span>
-              <DifficultyDots count={sheet.difficulty} />
+              <DifficultyBars count={sheet.difficulty} />
               <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
             </div>
           ))
