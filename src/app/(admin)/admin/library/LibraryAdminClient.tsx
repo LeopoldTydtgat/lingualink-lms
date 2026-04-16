@@ -387,7 +387,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
           {/* Column headers */}
           <div className="grid gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100 bg-gray-50"
-            style={{ gridTemplateColumns: '2rem 2fr 6rem 5rem 7rem 7rem 5rem auto' }}>
+            style={{ gridTemplateColumns: '3% 25% 11% 7% 9% 15% 8% 22%' }}>
             <input
               type="checkbox"
               checked={filtered.length > 0 && selectedIds.size === filtered.length}
@@ -411,7 +411,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   key={sheet.id}
                   className="grid gap-3 px-5 py-3.5 items-center text-sm"
                   style={{
-                    gridTemplateColumns: '2rem 2fr 6rem 5rem 7rem 7rem 5rem auto',
+                    gridTemplateColumns: '3% 25% 11% 7% 9% 15% 8% 22%',
                     backgroundColor: selectedIds.has(sheet.id) ? '#fff9f5' : undefined,
                   }}
                 >

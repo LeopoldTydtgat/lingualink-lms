@@ -97,29 +97,26 @@ export default function AdminLayoutClient({
 
   const Sidebar = () => (
     <div className="flex flex-col h-full">
-      {/* Logo area — white block, same height as orange header */}
       <div
         style={{
           height: '72px',
-          backgroundColor: '#111827',
-          borderBottom: '1px solid #374151',
+          background: 'linear-gradient(to right, #ffffff, #fff3e8)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
+          borderBottom: '1px solid rgba(255,131,3,0.15)',
         }}
       >
         <Link href="/admin" prefetch={false}>
           <img
-            src="/lingualink-logo-white.svg"
+            src="/lingualink-logo-clean.svg"
             alt="Lingualink Online"
-            style={{ height: '36px', width: 'auto' }}
+            style={{ height: '56px', width: 'auto' }}
           />
         </Link>
       </div>
-
-      {/* Black nav area */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 pt-6 space-y-1 overflow-y-auto">
         {navItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
@@ -155,92 +152,149 @@ export default function AdminLayoutClient({
   ]
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
-      {/* Desktop sidebar — full height, white logo block on top, black nav below */}
-      <aside className="hidden lg:flex flex-col w-56 flex-shrink-0 bg-gray-900">
-        <Sidebar />
-      </aside>
+    <div className="flex flex-col h-screen overflow-hidden">
 
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div className="lg:hidden fixed inset-0 z-40 flex">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="relative flex flex-col w-56 bg-gray-900 z-50">
-            <Sidebar />
-          </aside>
-        </div>
-      )}
-
-      {/* Right side: orange header + content */}
-      <div className="flex flex-col flex-1 min-w-0">
-        {/* Orange header — greeting and avatar only, aligns with 72px logo block */}
-        <header
-          className="flex items-center justify-end px-6 flex-shrink-0"
-          style={{ backgroundColor: '#FF8303', height: '72px' }}
-        >
-          <div className="flex items-center gap-3">
-            <button className="lg:hidden text-white mr-2" onClick={() => setSidebarOpen(true)}>
-              <Menu size={22} />
-            </button>
-            <span className="text-white text-sm font-medium hidden sm:block">
-              Hello {profile.full_name?.split(' ')[0]}!
-            </span>
-            <Link href="/admin/settings">
-              {profile.photo_url ? (
-                <img
-                  src={profile.photo_url}
-                  alt={profile.full_name}
-                  className="w-8 h-8 rounded-full object-cover border-2 border-white/50"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white text-sm font-bold">
-                  {profile.full_name?.charAt(0).toUpperCase()}
-                </div>
-              )}
-            </Link>
-          </div>
-        </header>
-
-        {/* Page content + right panel */}
-        <div className="flex flex-1 min-h-0">
-          <main className="flex-1 overflow-y-auto">
-            <div className="max-w-6xl mx-auto">
-              {children}
-            </div>
-          </main>
-
-          <aside className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
-              At a Glance
-            </h3>
-            <div className="space-y-3">
-              {panelWidgets.map((w) => (
-                <Link key={w.label} href={w.href}>
-                  <div className="rounded-lg p-3 bg-gray-50 border border-gray-200 hover:border-orange-200 transition-colors">
-                    <p className="text-xs text-gray-500">{w.label}</p>
-                    <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827' }}>
-                      {w.value}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-
-            {rightPanelStats.activeAnnouncementText && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  Announcement
-                </p>
-                <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">
-                  {rightPanelStats.activeAnnouncementText}
-                </p>
-                <Link href="/admin/announcements" className="text-xs mt-1 inline-block hover:underline" style={{ color: '#FF8303' }}>
-                  Manage
-                </Link>
+      {/* Full-width header across the top */}
+      <header
+        className="flex items-center justify-between px-6 flex-shrink-0 w-full"
+        style={{
+          background: 'linear-gradient(to right, #ffffff 0%, #fff3e8 18%, #FF8303 32%)',
+          height: '72px',
+          zIndex: 10,
+        }}
+      >
+        <Link href="/admin" prefetch={false}>
+          <img
+            src="/lingualink-logo-clean.svg"
+            alt="Lingualink Online"
+            style={{ height: '56px', width: 'auto' }}
+          />
+        </Link>
+        <div className="flex items-center gap-3">
+          <button className="lg:hidden text-white mr-2" onClick={() => setSidebarOpen(true)}>
+            <Menu size={22} />
+          </button>
+          <span className="text-white text-sm font-medium hidden sm:block">
+            Hello {profile.full_name?.split(' ')[0]}!
+          </span>
+          <Link href="/admin/settings" prefetch={false}>
+            {profile.photo_url ? (
+              <img
+                src={profile.photo_url}
+                alt={profile.full_name}
+                className="w-8 h-8 rounded-full object-cover border-2 border-white/50"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white text-sm font-bold">
+                {profile.full_name?.charAt(0).toUpperCase()}
               </div>
             )}
-          </aside>
+          </Link>
         </div>
+      </header>
+
+      {/* Below header: sidebar + content */}
+      <div className="flex flex-1 min-h-0">
+
+        {/* Desktop sidebar */}
+        <aside className="hidden lg:flex flex-col w-56 flex-shrink-0 bg-gray-900">
+          <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto">
+            {navItems.map((item) => (
+              <NavLink key={item.href} item={item} />
+            ))}
+          </nav>
+          <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              style={{ color: '#9ca3af' }}
+            >
+              <ArrowLeft size={18} style={{ color: '#9ca3af' }} />
+              Back to Teacher Portal
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              style={{ color: '#9ca3af' }}
+            >
+              <LogOut size={18} style={{ color: '#9ca3af' }} />
+              Log Out
+            </button>
+          </div>
+        </aside>
+
+        {/* Mobile sidebar overlay */}
+        {sidebarOpen && (
+          <div className="lg:hidden fixed inset-0 z-40 flex">
+            <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+            <aside className="relative flex flex-col w-56 bg-gray-900 z-50">
+              <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto">
+                {navItems.map((item) => (
+                  <NavLink key={item.href} item={item} />
+                ))}
+              </nav>
+              <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+                <Link
+                  href="/dashboard"
+                  prefetch={false}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
+                  style={{ color: '#9ca3af' }}
+                >
+                  <ArrowLeft size={18} style={{ color: '#9ca3af' }} />
+                  Back to Teacher Portal
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
+                  style={{ color: '#9ca3af' }}
+                >
+                  <LogOut size={18} style={{ color: '#9ca3af' }} />
+                  Log Out
+                </button>
+              </div>
+            </aside>
+          </div>
+        )}
+
+        {/* Main content */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-6xl mx-auto">
+            {children}
+          </div>
+        </main>
+
+        {/* Right panel */}
+        <aside className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
+            At a Glance
+          </h3>
+          <div className="space-y-3">
+            {panelWidgets.map((w) => (
+              <Link key={w.label} href={w.href} prefetch={false}>
+                <div className="rounded-lg p-3 bg-gray-50 border border-gray-200 hover:border-orange-200 transition-colors">
+                  <p className="text-xs text-gray-500">{w.label}</p>
+                  <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827' }}>
+                    {w.value}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+          {rightPanelStats.activeAnnouncementText && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Announcement
+              </p>
+              <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">
+                {rightPanelStats.activeAnnouncementText}
+              </p>
+              <Link href="/admin/announcements" prefetch={false} className="text-xs mt-1 inline-block hover:underline" style={{ color: '#FF8303' }}>
+                Manage
+              </Link>
+            </div>
+          )}
+        </aside>
       </div>
     </div>
   )
