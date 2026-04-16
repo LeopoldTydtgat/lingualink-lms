@@ -239,14 +239,17 @@ export default function StudySheetFormClient({ mode }: Props) {
                   <button
                     key={d}
                     onClick={() => setDifficulty(d)}
-                    className="px-4 py-2 rounded-lg border text-sm"
-                    style={
-                      difficulty === d
-                        ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
-                        : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
-                    }
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '3px',
+                      padding: '6px 14px', borderRadius: '8px',
+                      border: `1px solid ${difficulty === d ? '#FF8303' : '#e5e7eb'}`,
+                      backgroundColor: difficulty === d ? '#FF8303' : 'white',
+                      cursor: 'pointer',
+                    }}
                   >
-                    {'🌶️'.repeat(d)}
+                    {[1, 2, 3].map(n => (
+                      <span key={n} style={{ color: difficulty === d ? 'white' : (n <= d ? '#FF8303' : '#e5e7eb'), fontSize: '15px', lineHeight: 1 }}>●</span>
+                    ))}
                   </button>
                 ))}
               </div>
