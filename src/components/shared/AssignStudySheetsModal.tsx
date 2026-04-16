@@ -23,11 +23,11 @@ type Props = {
   onSaved: (sheets: { id: string; title: string }[]) => void
 }
 
-function ChilliPeppers({ count }: { count: number }) {
+function DifficultyDots({ count }: { count: number }) {
   return (
-    <span className="flex gap-0.5">
-      {[1, 2, 3].map((i) => (
-        <span key={i} style={{ opacity: i <= count ? 1 : 0.2 }}>🌶️</span>
+    <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
+      {[1, 2, 3].map(n => (
+        <span key={n} style={{ color: n <= count ? '#FF8303' : '#e5e7eb', fontSize: '14px', lineHeight: 1 }}>●</span>
       ))}
     </span>
   )
@@ -231,7 +231,7 @@ export default function AssignStudySheetsModal({
                         >
                           {sheet.level}
                         </span>
-                        <ChilliPeppers count={sheet.difficulty} />
+                        <DifficultyDots count={sheet.difficulty} />
                       </div>
                     </div>
 

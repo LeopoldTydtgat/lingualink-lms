@@ -1,6 +1,31 @@
 # LinguaLink Online - Build Journal
 
-## Session 51 - 15 April 2026 - Archive, Purge and Styled Confirmation Modals
+
+## Session 51 - 16 April 2026 - Signal Bars + Library Polish
+
+### What was built
+- Replaced dot difficulty indicators (●●●) with graduated signal bar icons across 
+  the admin study library - both the list table and the Edit Study Sheet modal
+- `LibraryAdminClient.tsx` - new `DifficultyBars` component renders three bars 
+  of increasing height (6px / 10px / 14px), orange for filled, light grey for empty
+- `SheetFormModal.tsx` - new `DifficultyButton` component replaces `DotButton` with 
+  the same bar style; selected state renders bars in white on orange background, 
+  unselected shows orange bars on white with orange border
+- Difficulty filter dropdown updated to use block characters (▁ ▁▂ ▁▂▃) to match
+
+### Break/Fix Log
+No issues this session.
+
+### Session result
+Quick polish session. Difficulty indicators are now visually consistent across the 
+library list and the create/edit modal. Both components use the same bar proportions 
+and colour logic.
+
+
+---
+
+
+## Session 50 - 15 April 2026 - Archive, Purge and Styled Confirmation Modals
 
 ### What was built
 - Archive functionality added to Teacher Detail and Student Detail pages in admin portal
@@ -21,7 +46,7 @@ Archive and Purge functionality is fully working on both Teacher and Student det
 
 ---
 
-## Session 50 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
+## Session 49 - 15 April 2026 - Contact Emails, Logo Attempts, Clickable Nav, Admin Messages
 
 ### What was built
 - Updated contact email addresses across entire codebase - all teacher-facing 

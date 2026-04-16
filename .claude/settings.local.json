@@ -6,7 +6,8 @@
       "Bash(npx eslint:*)",
       "Bash(node:*)",
       "Bash(node -e \"const fs=require\\('fs'\\);process.stdout.write\\(fs.readFileSync\\('public/lingualink-email-logo.png'\\).toString\\('base64'\\)\\);\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(grep -v \"^--$\")"
     ]
   }
 }

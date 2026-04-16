@@ -29,6 +29,12 @@ export type SheetContent = {
   exercises?: ExerciseRow[]
 }
 
+export type Attachment = {
+  name: string
+  url: string
+  type: string
+}
+
 export type StudySheet = {
   id: string
   title: string
@@ -39,6 +45,7 @@ export type StudySheet = {
   is_active: boolean
   allowed_roles: string[] // ['teacher','teacher_exam'] | ['teacher_exam'] | ['admin']
   intro_text: string | null
+  attachments: Attachment[] | null
   created_at: string
   updated_at: string
 }
@@ -67,11 +74,17 @@ function rolesColor(roles: string[]): string {
   return '#16a34a'
 }
 
-function ChilliIcons({ count }: { count: number }) {
+function DifficultyBars({ count }: { count: number }) {
   return (
-    <span className="flex gap-0.5">
+    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
       {[1, 2, 3].map(n => (
-        <span key={n} style={{ opacity: n <= count ? 1 : 0.2 }}>🌶️</span>
+        <span key={n} style={{
+          display: 'inline-block',
+          width: '5px',
+          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
+          borderRadius: '2px',
+          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
+        }} />
       ))}
     </span>
   )
@@ -269,9 +282,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Difficulties</option>
-          <option value="1">🌶️</option>
-          <option value="2">🌶️🌶️</option>
-          <option value="3">🌶️🌶️🌶️</option>
+          <option value="1">▁ Easy</option>
+          <option value="2">▁▂ Medium</option>
+          <option value="3">▁▂▃ Hard</option>
         </select>
         <select
           value={filterRoles}
@@ -393,9 +406,6 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {/* Rows */}
           <div className="divide-y divide-gray-50">
             {filtered.map(sheet => {
-              const isDeleting = deletingId === sheet.id
-              const isConfirming = confirmDeleteId === sheet.id
-
               return (
                 <div
                   key={sheet.id}
@@ -428,7 +438,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   <span className="font-mono text-gray-700">{sheet.level}</span>
 
                   {/* Difficulty */}
-                  <ChilliIcons count={sheet.difficulty} />
+                  <DifficultyBars count={sheet.difficulty} />
 
                   {/* Access */}
                   <span
@@ -456,33 +466,62 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     >
                       Edit
                     </button>
-                    {!isConfirming ? (
-                      <button
-                        onClick={() => setConfirmDeleteId(sheet.id)}
-                        className="text-xs underline text-red-400 hover:text-red-600"
-                      >
-                        Delete
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-red-500 font-medium whitespace-nowrap">Sure?</span>
-                        <button
-                          onClick={() => handleDelete(sheet.id)}
-                          disabled={isDeleting}
-                          className="text-xs text-white px-2 py-0.5 rounded disabled:opacity-40"
-                          style={{ backgroundColor: '#FD5602' }}
-                        >
-                          {isDeleting ? '…' : 'Yes'}
-                        </button>
-                        <button onClick={() => setConfirmDeleteId(null)} className="text-xs text-gray-400 underline">
-                          No
-                        </button>
-                      </div>
-                    )}
+                    <button
+                      onClick={() => setConfirmDeleteId(sheet.id)}
+                      className="text-xs underline text-red-400 hover:text-red-600"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Single delete confirmation modal */}
+      {confirmDeleteId && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+        }}>
+          <div style={{
+            backgroundColor: 'white', borderRadius: '12px', padding: '28px',
+            width: '440px', maxWidth: '90vw',
+          }}>
+            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', marginTop: 0 }}>
+              Delete Study Sheet?
+            </h3>
+            <p style={{ fontSize: '14px', color: '#6B7280' }}>
+              Are you sure you want to delete this study sheet? This cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                disabled={deletingId === confirmDeleteId}
+                style={{
+                  padding: '9px 18px', borderRadius: '7px', border: '1px solid #D1D5DB',
+                  backgroundColor: 'white', fontSize: '13px',
+                  cursor: deletingId === confirmDeleteId ? 'not-allowed' : 'pointer', color: '#374151',
+                }}
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDeleteId)}
+                disabled={deletingId === confirmDeleteId}
+                style={{
+                  padding: '9px 18px', borderRadius: '7px', border: 'none',
+                  backgroundColor: deletingId === confirmDeleteId ? '#E5E7EB' : '#DC2626',
+                  color: deletingId === confirmDeleteId ? '#9CA3AF' : 'white',
+                  fontSize: '13px', fontWeight: 600,
+                  cursor: deletingId === confirmDeleteId ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {deletingId === confirmDeleteId ? 'Deleting...' : 'Yes, Delete Sheet'}
+              </button>
+            </div>
           </div>
         </div>
       )}

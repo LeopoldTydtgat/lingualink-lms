@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 // PATCH /api/admin/library/[id] — update a study sheet
 export async function PATCH(
@@ -27,7 +28,7 @@ export async function PATCH(
   const body = await request.json()
 
   // Only allow fields that are safe to update — strip anything unexpected
-  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active']
+  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments']
   const update: Record<string, unknown> = {}
   for (const key of allowed) {
     if (key in body) update[key] = body[key]
@@ -46,7 +47,7 @@ export async function PATCH(
   return NextResponse.json(data)
 }
 
-// DELETE /api/admin/library/[id] — delete a study sheet
+// DELETE /api/admin/library/[id] — delete a study sheet and its assignments
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -70,7 +71,15 @@ export async function DELETE(
 
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { error } = await supabase
+  const adminClient = createAdminClient()
+
+  // Delete associated assignments first to avoid FK constraint violations
+  await adminClient
+    .from('assignments')
+    .delete()
+    .eq('study_sheet_id', id)
+
+  const { error } = await adminClient
     .from('study_sheets')
     .delete()
     .eq('id', id)
