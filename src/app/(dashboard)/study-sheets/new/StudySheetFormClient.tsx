@@ -234,22 +234,34 @@ export default function StudySheetFormClient({ mode }: Props) {
             {/* Difficulty */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty</label>
-              <div className="flex gap-2">
-                {[1, 2, 3].map(d => (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[1, 2, 3].map(val => (
                   <button
-                    key={d}
-                    onClick={() => setDifficulty(d)}
+                    key={val}
+                    type="button"
+                    onClick={() => setDifficulty(val)}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: '3px',
-                      padding: '6px 14px', borderRadius: '8px',
-                      border: `1px solid ${difficulty === d ? '#FF8303' : '#e5e7eb'}`,
-                      backgroundColor: difficulty === d ? '#FF8303' : 'white',
-                      cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',
+                      border: difficulty === val ? '2px solid #FF8303' : '2px solid #e5e7eb',
+                      backgroundColor: difficulty === val ? '#FF8303' : 'white',
                     }}
                   >
-                    {[1, 2, 3].map(n => (
-                      <span key={n} style={{ color: difficulty === d ? 'white' : (n <= d ? '#FF8303' : '#e5e7eb'), fontSize: '15px', lineHeight: 1 }}>●</span>
-                    ))}
+                    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '14px' }}>
+                      {[1, 2, 3].map(n => (
+                        <span key={n} style={{
+                          display: 'inline-block', width: '5px',
+                          height: n === 1 ? '5px' : n === 2 ? '9px' : '13px',
+                          borderRadius: '2px',
+                          backgroundColor: n <= val
+                            ? (difficulty === val ? 'white' : '#FF8303')
+                            : (difficulty === val ? 'rgba(255,255,255,0.35)' : '#e5e7eb'),
+                        }} />
+                      ))}
+                    </span>
+                    <span style={{ fontSize: '13px', fontWeight: 500, color: difficulty === val ? 'white' : '#6b7280' }}>
+                      {val === 1 ? 'Easy' : val === 2 ? 'Medium' : 'Hard'}
+                    </span>
                   </button>
                 ))}
               </div>
