@@ -56,8 +56,26 @@ export default function ClassDetailClient({ lesson }: Props) {
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
 
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+
   const statusMeta = getStatusMeta(lesson.status)
   const isCancellable = ['scheduled'].includes(lesson.status)
+  const isCancelled = ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher'].includes(lesson.status)
+
+  async function handleDelete() {
+    setDeleting(true)
+    setDeleteError('')
+    const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!res.ok) {
+      setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+      setDeleting(false)
+      return
+    }
+    window.location.href = '/admin/classes'
+  }
 
   async function handleCancel() {
     setCancelling(true)
@@ -122,6 +140,16 @@ export default function ClassDetailClient({ lesson }: Props) {
               Cancel Class
             </button>
           )}
+          <button
+            onClick={() => { setDeleteError(''); setShowDeleteModal(true) }}
+            style={{
+              padding: '8px 16px', borderRadius: '7px', border: 'none',
+              backgroundColor: '#FEF2F2', fontSize: '13px', fontWeight: 600,
+              cursor: 'pointer', color: '#991B1B',
+            }}
+          >
+            Delete
+          </button>
         </div>
       </div>
 
@@ -236,6 +264,74 @@ export default function ClassDetailClient({ lesson }: Props) {
           </p>
         )}
       </div>
+
+      {/* Delete modal */}
+      {showDeleteModal && (
+        <div style={{
+          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50,
+        }}>
+          <div style={{
+            backgroundColor: 'white', borderRadius: '12px', padding: '28px',
+            width: '440px', maxWidth: '90vw',
+          }}>
+            <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', marginTop: 0 }}>
+              Delete This Class?
+            </h3>
+            {!isCancelled ? (
+              <>
+                <p style={{ fontSize: '14px', color: '#B91C1C', marginBottom: '20px' }}>
+                  Only cancelled classes can be deleted. Please cancel the class first.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setShowDeleteModal(false)}
+                    style={{
+                      padding: '9px 18px', borderRadius: '7px', border: '1px solid #D1D5DB',
+                      backgroundColor: 'white', fontSize: '13px', cursor: 'pointer', color: '#374151',
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: '14px', color: '#6B7280' }}>
+                  Are you sure you want to delete this class? This cannot be undone.
+                </p>
+                {deleteError && (
+                  <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{deleteError}</p>
+                )}
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setShowDeleteModal(false)}
+                    disabled={deleting}
+                    style={{
+                      padding: '9px 18px', borderRadius: '7px', border: '1px solid #D1D5DB',
+                      backgroundColor: 'white', fontSize: '13px', cursor: deleting ? 'not-allowed' : 'pointer', color: '#374151',
+                    }}
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    style={{
+                      padding: '9px 18px', borderRadius: '7px', border: 'none',
+                      backgroundColor: deleting ? '#E5E7EB' : '#DC2626',
+                      color: deleting ? '#9CA3AF' : 'white',
+                      fontSize: '13px', fontWeight: 600, cursor: deleting ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {deleting ? 'Deleting...' : 'Yes, Delete Class'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Cancel modal */}
       {showCancelModal && (
