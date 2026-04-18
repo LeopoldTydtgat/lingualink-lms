@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -103,14 +104,55 @@ export async function PATCH(
         changed_at: new Date().toISOString(),
       }))
 
+    // Build an explicit payload so unknown keys from the request body never
+    // reach PostgREST — a single unrecognised column aborts the entire update.
+    const updatePayload = {
+      full_name:             body.full_name,
+      timezone:              body.timezone,
+      account_types:         body.account_types,
+      status:                body.status,
+      role:                  body.role,
+      teacher_type:          body.teacher_type,
+      contract_start:        body.contract_start        ?? null,
+      orientation_date:      body.orientation_date      ?? null,
+      observed_lesson_date:  body.observed_lesson_date  ?? null,
+      title:                 body.title                 ?? null,
+      date_of_birth:         body.date_of_birth         ?? null,
+      gender:                body.gender                ?? null,
+      nationality:           body.nationality           ?? null,
+      phone:                 body.phone                 ?? null,
+      street_address:        body.street_address        ?? null,
+      area_code:             body.area_code             ?? null,
+      city:                  body.city                  ?? null,
+      paypal_email:          body.paypal_email          ?? null,
+      iban:                  body.iban                  ?? null,
+      bic:                   body.bic                   ?? null,
+      vat_required:          body.vat_required          ?? false,
+      tax_number:            body.tax_number            ?? null,
+      hourly_rate:           body.hourly_rate           ?? null,
+      currency:              body.currency              ?? 'EUR',
+      native_languages:      body.native_languages      ?? [],
+      teaching_languages:    body.teaching_languages    ?? [],
+      specialties:           body.specialties           ?? null,
+      bio:                   body.bio                   ?? null,
+      quote:                 body.quote                 ?? null,
+      admin_notes:           body.admin_notes           ?? null,
+      follow_up_date:        body.follow_up_date        ?? null,
+      follow_up_reason:      body.follow_up_reason      ?? null,
+      updated_at:            new Date().toISOString(),
+    }
+
     const { error: updateError } = await adminClient
       .from('profiles')
-      .update({ ...body, updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', id)
 
     if (updateError) {
-      console.error('Profile update error:', updateError)
-      return NextResponse.json({ error: 'Failed to update teacher.' }, { status: 500 })
+      console.error('Profile update error:', JSON.stringify(updateError, null, 2))
+      return NextResponse.json(
+        { error: updateError.message || 'Failed to update teacher.' },
+        { status: 500 }
+      )
     }
 
     if (historyEntries.length > 0) {
@@ -122,6 +164,10 @@ export async function PATCH(
         console.error('History log error:', historyError)
       }
     }
+
+    revalidatePath('/account')
+    revalidatePath('/upcoming-classes')
+    revalidatePath('/dashboard')
 
     return NextResponse.json({ success: true })
   } catch (err) {

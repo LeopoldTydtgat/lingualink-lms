@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
         area_code: data.area_code ?? null,
         city: data.city ?? null,
         hourly_rate: data.hourly_rate ?? null,
+        currency: data.currency ?? 'EUR',
         contract_start: data.contract_start ?? null,
         orientation_date: data.orientation_date ?? null,
         observed_lesson_date: data.observed_lesson_date ?? null,
@@ -167,6 +168,8 @@ export async function POST(req: NextRequest) {
         specialties: data.specialties ?? null,
         quote: data.quote ?? null,
         video_url: data.video_url ?? null,
+        must_change_password: true,
+        profile_completed: false,
       })
 
     if (profileError) {

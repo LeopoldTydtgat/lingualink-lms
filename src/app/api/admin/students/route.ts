@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
         package_type: data.package_name,
         total_hours: data.total_hours,
         hours_consumed: 0,
-        end_date: data.end_date,
+        end_date: data.end_date ?? null,
         status: 'active',
         low_hours_warning_sent: false,
       })

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
@@ -16,7 +18,7 @@ export default async function AccountPage() {
 
   const { data: profileRow } = await admin
     .from('profiles')
-    .select('id, full_name, role, photo_url, timezone, bio, teaching_languages, speaking_languages, preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate')
+    .select('id, full_name, role, photo_url, timezone, bio, teaching_languages, speaking_languages, preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate, currency')
     .eq('id', user.id)
     .single()
 
@@ -73,6 +75,7 @@ export default async function AccountPage() {
     area_code: profileRow?.area_code ?? null,
     city: profileRow?.city ?? null,
     hourly_rate: profileRow?.hourly_rate ?? null,
+    currency: profileRow?.currency ?? null,
   }
 
   return (
