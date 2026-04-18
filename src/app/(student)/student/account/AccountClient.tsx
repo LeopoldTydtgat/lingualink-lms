@@ -117,6 +117,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   const [photoUrl, setPhotoUrl] = useState<string | null>(student.photo_url)
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoError, setPhotoError] = useState('')
+  const [photoSuccess, setPhotoSuccess] = useState(false)
 
   // General info
   const [timezone, setTimezone] = useState(student.timezone ?? '')
@@ -162,6 +163,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     }
 
     setPhotoError('')
+    setPhotoSuccess(false)
     setPhotoUploading(true)
 
     try {
@@ -173,6 +175,8 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       if (!res.ok) throw new Error(json.error ?? 'Upload failed')
 
       setPhotoUrl(json.photo_url)
+      setPhotoSuccess(true)
+      setTimeout(() => setPhotoSuccess(false), 3000)
     } catch {
       setPhotoError('Failed to upload photo. Please try again.')
     } finally {
@@ -356,6 +360,9 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
               JPG, PNG or WebP — max 2MB
             </p>
+            {photoSuccess && (
+              <p style={{ fontSize: '13px', color: '#16a34a', fontWeight: '500', marginTop: '4px' }}>✓ Photo updated</p>
+            )}
             {photoError && (
               <p style={{ fontSize: '13px', color: '#dc2626', marginTop: '4px' }}>{photoError}</p>
             )}

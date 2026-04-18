@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { CheckCircle } from 'lucide-react'
 
 const TYPE_OPTIONS = [
   { value: 'b2b', label: 'B2B' },
@@ -62,6 +63,7 @@ export default function CreateCompanyClient() {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
   function set(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -87,8 +89,8 @@ export default function CreateCompanyClient() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to create company.')
 
-      router.push(`/admin/companies/${data.id}`)
-      router.refresh()
+      setSuccess(true)
+      setTimeout(() => { router.push(`/admin/companies/${data.id}`); router.refresh() }, 1500)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -107,6 +109,18 @@ export default function CreateCompanyClient() {
         <span className="text-gray-300">/</span>
         <h1 className="text-2xl font-bold text-gray-900">Add Company</h1>
       </div>
+
+      {success && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          Company created!
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg text-sm"
