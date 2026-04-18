@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import AdminLayoutClient from './AdminLayoutClient'
 
 // ── date helpers ──────────────────────────────────────────────────────────────
@@ -62,6 +63,8 @@ export default async function AdminLayout({
   // ── right panel stats ─────────────────────────────────────────────────────
   const { start: todayStart, end: todayEnd } = getTodayUTCRange()
 
+  const adminDb = createAdminClient()
+
   const [
     todayRes,
     pendingRes,
@@ -69,6 +72,7 @@ export default async function AdminLayout({
     trainingsRes,
     invoicesRes,
     announcementRes,
+    unreadMessagesRes,
   ] = await Promise.all([
     // Classes today (excluding cancelled)
     supabase
@@ -108,6 +112,12 @@ export default async function AdminLayout({
       .eq('is_active', true)
       .limit(1)
       .maybeSingle(),
+
+    // Platform-wide unread message count for the nav badge
+    adminDb
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .is('read_at', null),
   ])
 
   const classesTodayCount = (todayRes.data ?? []).filter(
@@ -127,8 +137,14 @@ export default async function AdminLayout({
     activeAnnouncementText: announcementRes.data?.message ?? null,
   }
 
+  const unreadMessagesCount = unreadMessagesRes.count ?? 0
+
   return (
-    <AdminLayoutClient profile={profile} rightPanelStats={rightPanelStats}>
+    <AdminLayoutClient
+      profile={profile}
+      rightPanelStats={rightPanelStats}
+      unreadMessagesCount={unreadMessagesCount}
+    >
       {children}
     </AdminLayoutClient>
   )

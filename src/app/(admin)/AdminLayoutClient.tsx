@@ -11,6 +11,7 @@ import {
   Building2,
   CalendarDays,
   FileText,
+  MessageSquare,
   CreditCard,
   BookOpen,
   Megaphone,
@@ -33,6 +34,7 @@ interface Profile {
 interface AdminLayoutClientProps {
   profile: Profile
   rightPanelStats: RightPanelStats
+  unreadMessagesCount: number
   children: React.ReactNode
 }
 
@@ -43,6 +45,7 @@ const navItems = [
   { href: '/admin/companies', label: 'Companies', icon: Building2 },
   { href: '/admin/classes', label: 'Classes', icon: CalendarDays },
   { href: '/admin/reports', label: 'Reports', icon: FileText },
+  { href: '/admin/messages', label: 'Messages', icon: MessageSquare },
   { href: '/admin/billing', label: 'Billing', icon: CreditCard },
   { href: '/admin/library', label: 'Library', icon: BookOpen },
   { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
@@ -54,6 +57,7 @@ const navItems = [
 export default function AdminLayoutClient({
   profile,
   rightPanelStats,
+  unreadMessagesCount,
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
@@ -78,6 +82,7 @@ export default function AdminLayoutClient({
   const NavLink = ({ item }: { item: (typeof navItems)[0] }) => {
     const active = isActive(item.href, item.exact)
     const Icon = item.icon
+    const showBadge = item.href === '/admin/messages' && unreadMessagesCount > 0
     return (
       <Link
         href={item.href}
@@ -90,7 +95,28 @@ export default function AdminLayoutClient({
         }
       >
         <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
-        {item.label}
+        <span className="flex-1">{item.label}</span>
+        {showBadge && (
+          <span
+            style={{
+              backgroundColor: active ? '#ffffff' : '#FF8303',
+              color: active ? '#FF8303' : '#ffffff',
+              fontSize: '11px',
+              minWidth: '18px',
+              height: '18px',
+              borderRadius: '9999px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              paddingLeft: '4px',
+              paddingRight: '4px',
+              fontWeight: 600,
+              lineHeight: 1,
+            }}
+          >
+            {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+          </span>
+        )}
       </Link>
     )
   }

@@ -61,12 +61,9 @@ export default function LoginPage() {
               />
             </div>
 
-            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
             </h1>
-            <p style={{ fontSize: '14px', color: '#6b7280', margin: '0 0 32px' }}>
-              Teacher Portal — enter your credentials
-            </p>
 
             <form action={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

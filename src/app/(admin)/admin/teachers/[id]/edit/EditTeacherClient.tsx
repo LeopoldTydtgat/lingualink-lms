@@ -94,6 +94,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
     street_address: (teacher.street_address as string) ?? '',
     area_code: (teacher.area_code as string) ?? '',
     city: (teacher.city as string) ?? '',
+    preferred_payment_type: (teacher.preferred_payment_type as string) ?? '',
     paypal_email: (teacher.paypal_email as string) ?? '',
     iban: (teacher.iban as string) ?? '',
     bic: (teacher.bic as string) ?? '',
@@ -158,6 +159,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           street_address: form.street_address || null,
           area_code: form.area_code || null,
           city: form.city || null,
+          preferred_payment_type: form.preferred_payment_type || null,
           paypal_email: form.paypal_email || null,
           iban: form.iban || null,
           bic: form.bic || null,
@@ -393,6 +395,14 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           <div className="border-t border-gray-100 pt-4">
             <p className="text-sm font-semibold text-gray-700 mb-3">Payment Details</p>
             <div className="space-y-4">
+              <Field label="Preferred Payment Type">
+                <select className={selectClass} value={form.preferred_payment_type}
+                  onChange={(e) => set('preferred_payment_type', e.target.value)}>
+                  <option value="">— Select —</option>
+                  <option value="bank">Bank Transfer</option>
+                  <option value="paypal">PayPal</option>
+                </select>
+              </Field>
               <Field label="PayPal Email">
                 <input type="email" className={inputClass} value={form.paypal_email}
                   onChange={(e) => set('paypal_email', e.target.value)} />
@@ -402,7 +412,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
                   <input className={inputClass} value={form.iban}
                     onChange={(e) => set('iban', e.target.value)} />
                 </Field>
-                <Field label="BIC">
+                <Field label="SWIFT / BIC">
                   <input className={inputClass} value={form.bic}
                     onChange={(e) => set('bic', e.target.value)} />
                 </Field>
