@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/low-hours-warning",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/keep-alive",
+      "schedule": "0 0 * * *"
     }
   ]
 }

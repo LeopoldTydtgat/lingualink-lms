@@ -29,6 +29,7 @@ type Profile = {
 type Props = {
   classes: Class[]
   profile: Profile
+  profileCompleted: boolean
 }
 
 function groupByDay(classes: Class[]): Record<string, Class[]> {
@@ -225,12 +226,44 @@ function DayGroup({ dateStr, classes }: { dateStr: string; classes: Class[] }) {
   )
 }
 
-export default function UpcomingClassesClient({ classes, profile }: Props) {
+export default function UpcomingClassesClient({ classes, profile, profileCompleted }: Props) {
+  const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted)
   const grouped = groupByDay(classes)
   const days = Object.keys(grouped).sort()
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
+
+      {showProfileBanner && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#FFF7ED',
+          borderLeft: '4px solid #FF8303',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          gap: '12px',
+        }}>
+          <p style={{ margin: 0, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>
+            Complete your profile to get the most out of your portal.{' '}
+            <a
+              href="/account"
+              style={{ color: '#FF8303', fontWeight: 600, textDecoration: 'none' }}
+            >
+              Complete now →
+            </a>
+          </p>
+          <button
+            onClick={() => setShowProfileBanner(false)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>

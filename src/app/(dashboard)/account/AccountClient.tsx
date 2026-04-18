@@ -42,6 +42,7 @@ interface Profile {
   area_code: string | null
   city: string | null
   hourly_rate: number | null
+  currency: string | null
 }
 
 interface Resource {

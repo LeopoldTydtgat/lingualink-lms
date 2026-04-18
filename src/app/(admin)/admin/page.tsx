@@ -73,6 +73,8 @@ export interface AlertLesson {
   student_name: string
 }
 
+export const dynamic = 'force-dynamic'
+
 // ── page ──────────────────────────────────────────────────────────────────────
 export default async function AdminDashboardPage() {
   const cookieStore = await cookies()

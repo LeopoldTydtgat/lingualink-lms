@@ -19,11 +19,14 @@ export default async function DashboardLayout({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const admin = createAdminClient()
+  const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role')
+    .select('id, full_name, email, photo_url, role, must_change_password')
     .eq('id', user.id)
     .single()
+
+  if (profile?.must_change_password) redirect('/change-password')
 
   const { data: lessonRow } = await supabase
     .from('lessons')
@@ -64,13 +67,13 @@ export default async function DashboardLayout({
     .gte('scheduled_at', monthStart)
     .in('status', ['completed', 'student_no_show', 'scheduled'])
 
-  const admin = createAdminClient()
   const { data: rateRow } = await admin
     .from('profiles')
-    .select('hourly_rate')
+    .select('hourly_rate, currency')
     .eq('id', user.id)
     .single()
   const hourlyRate = rateRow?.hourly_rate ?? 0
+  const currency = rateRow?.currency ?? null
 
   let currentAmount = 0
   let projectedAmount = 0
@@ -150,6 +153,7 @@ export default async function DashboardLayout({
             announcements={announcements}
             nextLesson={nextLesson}
             billingData={billingData}
+            currency={currency}
           />
         </div>
       </div>

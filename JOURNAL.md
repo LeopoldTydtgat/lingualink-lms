@@ -1,6 +1,54 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 53 - 18 April 2026 - Admin Portal Fixes, Currency, First Login Flow & Profile Sync
+
+### What was built
+- `src/app/api/keep-alive/route.ts` - new GET route that pings Supabase daily to prevent free tier pausing
+- `vercel.json` — added midnight UTC daily cron entry for `/api/keep-alive`
+- `src/app/(admin)/admin/teachers/[id]/edit/page.tsx` - removed redirect after save, replaced with inline "Changes saved!" toast
+- `src/app/(admin)/admin/students/[id]/edit/page.tsx` - same save confirmation fix
+- `src/app/api/admin/teachers/[id]/route.ts` - fixed save not persisting, added revalidatePath calls, surfaced real Supabase errors to client
+- `src/app/api/admin/students/[id]/route.ts` - added revalidatePath calls after successful save
+- `src/app/(teacher)/dashboard/account/page.tsx` - added `export const dynamic = 'force-dynamic'`
+- `src/app/(student)/student/account/page.tsx` - added `export const dynamic = 'force-dynamic'`
+- `src/app/(admin)/admin/teachers/page.tsx` - dynamic currency symbol (€/$/ £) in Rate column, floating point display fixed globally
+- `src/app/(admin)/admin/_components/DatePartInput.tsx` - new three-part DD/MM/YYYY input component with auto-advance focus
+- `src/app/(admin)/admin/teachers/new/CreateTeacherClient.tsx` - YouTube URL field removed, all date fields replaced with DatePartInput, date validation fixed
+- `src/app/(admin)/admin/teachers/[id]/edit/EditTeacherClient.tsx` - same date and validation fixes
+- `src/app/(admin)/admin/students/new/CreateStudentClient.tsx` — date fields replaced with DatePartInput, end_date made optional
+- `src/app/(admin)/admin/students/[id]/edit/EditStudentClient.tsx` - end_date made optional, validation removed
+- `src/app/(admin)/admin/teachers/schemas.ts` — date validation updated to accept YYYY-MM-DD or null
+- `src/app/(teacher)/dashboard/account/AccountClient.tsx` - currency symbol now dynamic, hourly rate section removed from teacher view
+- `src/app/(teacher)/dashboard/_components/RightPanel.tsx` - billing section currency symbol now dynamic
+- `src/app/api/admin/teachers/route.ts` - new teachers created with `must_change_password: true` and `profile_completed: false`
+- `src/app/(auth)/change-password/page.tsx` - new forced password change page for teachers on first login
+- `src/app/api/teacher/change-password/route.ts` - updates auth password and clears `must_change_password` flag
+- `src/app/(teacher)/dashboard/layout.tsx` - redirects to `/change-password` if `must_change_password` is true
+- `src/app/(teacher)/dashboard/upcoming-classes/UpcomingClassesClient.tsx` - orange profile completion banner added
+- `profiles` table - `must_change_password` and `profile_completed` columns added via Supabase SQL editor
+- `profiles` table - `currency` column added via Supabase SQL editor
+- Admin password override added to teacher and student detail/edit pages in admin portal
+- Password eye icon toggle added to all password fields across all three portals
+
+### Break/Fix Log
+Issue 1: Teacher save not persisting / Cause: PATCH route was spreading entire request body into PostgREST - unrecognised columns caused silent abort / Fix: Explicit column whitelist in updatePayload, real Supabase error now surfaced to client / Lesson: Never spread request body directly into a Supabase update - always whitelist columns explicitly
+
+Issue 2: Currency column missing from profiles / Cause: Column did not exist in database / Fix: Added via Supabase SQL editor, PATCH route already handled it correctly / Lesson: Always confirm column exists in schema before writing API code against it
+
+Issue 3: Admin changes not reflecting in teacher/student portals / Cause: Server Components were serving stale cached data / Fix: Added revalidatePath after every successful PATCH, added force-dynamic to account pages / Lesson: Any admin write that should be visible elsewhere needs revalidatePath on all affected routes
+
+Issue 4: Floating point display (e.g. 49.99 instead of 50) / Cause: toFixed(2) applied during save path, not just display / Fix: Raw string from input parsed once with parseFloat, formatting only applied at display / Lesson: Never apply toFixed during save - only during display
+
+Issue 5: Date input not auto-advancing on Windows Chrome / Cause: Native type="date" inputs do not auto-advance between segments on Windows / Fix: Replaced with custom DatePartInput component - three separate inputs (DD/MM/YYYY) with focus auto-advance / Lesson: Never rely on native date input behaviour across browsers on Windows
+
+Issue 6: Date validation rejecting valid dates / Cause: Schema regex running before empty string was coerced to null / Fix: Empty strings coerced to null before regex runs / Lesson: Always handle empty string → null coercion before running format validation
+
+### Session result
+A large batch of admin portal fixes were completed this session. Teacher profile saves now persist correctly with real error messages surfaced to the client. Admin changes to teacher and student profiles now reflect immediately in their respective portals via cache revalidation. Currency is fully dynamic across all three portals. The teacher first-login flow is implemented - new teachers are forced to change their password and shown a profile completion banner. Admin can override any teacher or student password at any time. Date inputs have been rebuilt with a reliable three-part component. The hourly rate is now hidden from teachers entirely. Several quality-of-life improvements were made including eye icon toggles on all password fields and optional date fields throughout the admin forms.
+
+---
+
 ## Session 52 - 16 April 2026 - Signal Bars, Admin Header & Library Polish
 
 ### What was built

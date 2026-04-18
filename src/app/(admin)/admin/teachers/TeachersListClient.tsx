@@ -12,6 +12,7 @@ type Teacher = {
   status: string | null
   account_types: string[] | null
   hourly_rate: number | null
+  currency: string | null
   role: string
   lesson_count: number
 }
@@ -133,7 +134,7 @@ export default function TeachersListClient({ teachers }: Props) {
               <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Roles</th>
-              <th className="text-left px-4 py-3 font-medium text-gray-600">Rate (€/hr)</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Rate/hr</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Classes</th>
             </tr>
           </thead>
@@ -197,7 +198,9 @@ export default function TeachersListClient({ teachers }: Props) {
                   </td>
 
                   <td className="px-4 py-3 text-gray-600">
-                    {teacher.hourly_rate != null ? `€${teacher.hourly_rate}` : '—'}
+                    {teacher.hourly_rate != null
+                      ? `${({ EUR: '€', USD: '$', GBP: '£' } as Record<string, string>)[teacher.currency ?? 'EUR'] ?? '€'}${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}`
+                      : '—'}
                   </td>
 
                   <td className="px-4 py-3 text-gray-600">{teacher.lesson_count}</td>

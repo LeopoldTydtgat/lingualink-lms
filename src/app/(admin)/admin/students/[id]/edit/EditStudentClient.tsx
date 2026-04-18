@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { CheckCircle } from 'lucide-react'
+import { DatePartInput } from '../../../_components/DatePartInput'
 
 type Company = { id: string; name: string }
 type Teacher = { id: string; full_name: string }
@@ -127,6 +129,7 @@ export default function EditStudentClient({
   const [activeSection, setActiveSection] = useState<Section>('A')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
   function set(field: string, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -151,7 +154,6 @@ export default function EditStudentClient({
     if (form.assigned_teacher_ids.length === 0) return setError('At least one teacher must be assigned.')
     if (!form.package_name.trim()) return setError('Training package name is required.')
     if (!form.total_hours) return setError('Total hours is required.')
-    if (!form.end_date) return setError('Training end date is required.')
 
     setSaving(true)
     try {
@@ -178,7 +180,7 @@ export default function EditStudentClient({
           interests: form.interests || null,
           package_name: form.package_name,
           total_hours: parseFloat(form.total_hours),
-          end_date: form.end_date,
+          end_date: form.end_date || null,
           cancellation_policy: form.cancellation_policy,
           admin_notes: form.admin_notes || null,
           teacher_notes: form.teacher_notes || null,
@@ -189,8 +191,8 @@ export default function EditStudentClient({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
-      router.push(`/admin/students/${id}`)
-      router.refresh()
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -229,6 +231,19 @@ export default function EditStudentClient({
           </button>
         ))}
       </div>
+
+      {/* Success toast */}
+      {success && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          Changes saved!
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -271,8 +286,7 @@ export default function EditStudentClient({
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="Date of Birth" adminOnly>
-              <input type="date" className={inputClass} value={form.date_of_birth}
-                onChange={(e) => set('date_of_birth', e.target.value)} />
+              <DatePartInput value={form.date_of_birth} onChange={(v) => set('date_of_birth', v)} />
             </Field>
             <Field label="Phone / Mobile">
               <input className={inputClass} value={form.phone}
@@ -489,8 +503,7 @@ export default function EditStudentClient({
                 onChange={(e) => set('total_hours', e.target.value)} />
             </Field>
             <Field label="Training End Date">
-              <input type="date" className={inputClass} value={form.end_date}
-                onChange={(e) => set('end_date', e.target.value)} />
+              <DatePartInput value={form.end_date} onChange={(v) => set('end_date', v)} />
             </Field>
           </div>
 
@@ -571,7 +584,7 @@ export default function EditStudentClient({
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || success}
                 className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
                 style={{ backgroundColor: '#FF8303' }}
               >
