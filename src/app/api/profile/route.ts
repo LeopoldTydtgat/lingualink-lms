@@ -41,7 +41,7 @@ export async function PATCH(req: NextRequest) {
     const admin = createAdminClient()
     const { error: updateError } = await admin
       .from('profiles')
-      .update(patch)
+      .update({ ...patch, profile_completed: true })
       .eq('id', user.id)
 
     if (updateError) {

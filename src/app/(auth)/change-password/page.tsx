@@ -25,7 +25,7 @@ export default function ChangePasswordPage() {
     }
 
     startTransition(async () => {
-      const res = await fetch('/api/student/change-password', {
+      const res = await fetch('/api/teacher/change-password', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -34,7 +34,7 @@ export default function ChangePasswordPage() {
       if (data.error) {
         setError(data.error)
       } else {
-        router.push('/student/my-classes')
+        router.push('/upcoming-classes')
       }
     })
   }

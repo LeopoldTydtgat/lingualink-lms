@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
+import { DatePartInput } from '../../_components/DatePartInput'
 
 type Company = { id: string; name: string }
 type Teacher = { id: string; full_name: string }
@@ -138,6 +140,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeSection, setActiveSection] = useState<Section>('A')
+  const [showTempPassword, setShowTempPassword] = useState(false)
 
   function set(field: keyof FormData, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -167,7 +170,6 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
     if (form.assigned_teacher_ids.length === 0) return setError('At least one teacher must be assigned.')
     if (!form.package_name.trim()) return setError('Training package name is required.')
     if (!form.total_hours) return setError('Total hours is required.')
-    if (!form.end_date) return setError('Training end date is required.')
 
     setSaving(true)
     try {
@@ -260,8 +262,18 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           </Field>
 
           <Field label="Temporary Password">
-            <input type="password" className={inputClass} value={form.temp_password}
-              onChange={(e) => set('temp_password', e.target.value)} />
+            <div style={{ position: 'relative' }}>
+              <input type={showTempPassword ? 'text' : 'password'} className={inputClass + ' pr-10'} value={form.temp_password}
+                onChange={(e) => set('temp_password', e.target.value)} />
+              <button
+                type="button"
+                onClick={() => setShowTempPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                aria-label={showTempPassword ? 'Hide password' : 'Show password'}
+              >
+                {showTempPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <p className="text-xs text-gray-400 mt-1">
               Student will be prompted to set their own password on first login.
             </p>
@@ -269,8 +281,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="Date of Birth" adminOnly>
-              <input type="date" className={inputClass} value={form.date_of_birth}
-                onChange={(e) => set('date_of_birth', e.target.value)} />
+              <DatePartInput value={form.date_of_birth} onChange={(v) => set('date_of_birth', v)} />
             </Field>
             <Field label="Phone / Mobile">
               <input className={inputClass} value={form.phone}
@@ -491,8 +502,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
                 onChange={(e) => set('total_hours', e.target.value)} />
             </Field>
             <Field label="Training End Date">
-              <input type="date" className={inputClass} value={form.end_date}
-                onChange={(e) => set('end_date', e.target.value)} />
+              <DatePartInput value={form.end_date} onChange={(v) => set('end_date', v)} />
             </Field>
           </div>
 

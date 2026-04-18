@@ -2,12 +2,20 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { CheckCircle } from 'lucide-react'
+import { DatePartInput } from '../../../_components/DatePartInput'
 
 const TIMEZONES = [
   'Africa/Johannesburg', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
   'Europe/Amsterdam', 'Europe/Madrid', 'Europe/Rome', 'Europe/Warsaw',
   'Europe/Prague', 'Europe/Budapest', 'America/New_York', 'America/Chicago',
   'America/Los_Angeles', 'Asia/Dubai', 'Asia/Singapore', 'Australia/Sydney',
+]
+
+const CURRENCY_OPTIONS = [
+  { value: 'EUR', symbol: '€' },
+  { value: 'GBP', symbol: '£' },
+  { value: 'USD', symbol: '$' },
 ]
 
 const ACCOUNT_TYPE_OPTIONS = [
@@ -92,13 +100,13 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
     vat_required: (teacher.vat_required as boolean) ?? false,
     tax_number: (teacher.tax_number as string) ?? '',
     hourly_rate: teacher.hourly_rate != null ? String(teacher.hourly_rate) : '',
+    currency: (teacher.currency as string) ?? 'EUR',
     native_languages: (teacher.native_languages as string[]) ?? [],
     teaching_languages: (teacher.teaching_languages as string[]) ?? [],
     qualifications: (teacher.qualifications as string) ?? '',
     specialties: (teacher.specialties as string) ?? '',
     bio: (teacher.bio as string) ?? '',
     quote: (teacher.quote as string) ?? '',
-    video_url: (teacher.video_url as string) ?? '',
     admin_notes: (teacher.admin_notes as string) ?? '',
     follow_up_date: (teacher.follow_up_date as string) ?? '',
     follow_up_reason: (teacher.follow_up_reason as string) ?? '',
@@ -107,6 +115,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
   const [activeSection, setActiveSection] = useState<'A' | 'B'>(initialSection)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
   function set(field: string, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -124,6 +133,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
 
   async function handleSave() {
     setError(null)
+    setSuccess(false)
     if (!form.first_name.trim()) return setError('First name is required.')
     if (!form.last_name.trim()) return setError('Last name is required.')
 
@@ -141,6 +151,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           orientation_date: form.orientation_date || null,
           observed_lesson_date: form.observed_lesson_date || null,
           title: form.title || null,
+          date_of_birth: form.date_of_birth || null,
           gender: form.gender || null,
           nationality: form.nationality || null,
           phone: form.phone || null,
@@ -153,12 +164,12 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           vat_required: form.vat_required,
           tax_number: form.tax_number || null,
           hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+          currency: form.currency,
           native_languages: form.native_languages,
           teaching_languages: form.teaching_languages,
           specialties: form.specialties || null,
           bio: form.bio || null,
           quote: form.quote || null,
-          video_url: form.video_url || null,
           admin_notes: form.admin_notes || null,
           follow_up_date: form.follow_up_date || null,
           follow_up_reason: form.follow_up_reason || null,
@@ -170,8 +181,8 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
-      router.push(`/admin/teachers/${id}`)
-      router.refresh()
+      setSuccess(true)
+      setTimeout(() => setSuccess(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -208,6 +219,19 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           </button>
         ))}
       </div>
+
+      {/* Success toast */}
+      {success && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          Changes saved!
+        </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -278,20 +302,31 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
 
           <div className="grid grid-cols-3 gap-4">
             <Field label="Contract Start Date">
-              <input type="date" className={inputClass} value={form.contract_start}
-                onChange={(e) => set('contract_start', e.target.value)} />
+              <DatePartInput value={form.contract_start} onChange={(v) => set('contract_start', v)} />
             </Field>
             <Field label="Orientation Date">
-              <input type="date" className={inputClass} value={form.orientation_date}
-                onChange={(e) => set('orientation_date', e.target.value)} />
+              <DatePartInput value={form.orientation_date} onChange={(v) => set('orientation_date', v)} />
             </Field>
             <Field label="Observed Lesson Date">
-              <input type="date" className={inputClass} value={form.observed_lesson_date}
-                onChange={(e) => set('observed_lesson_date', e.target.value)} />
+              <DatePartInput value={form.observed_lesson_date} onChange={(v) => set('observed_lesson_date', v)} />
             </Field>
           </div>
 
-          <div className="flex justify-end pt-2">
+          <div className="flex items-center justify-between pt-2">
+            <div className="flex gap-3">
+              <button
+                onClick={() => router.push(`/admin/teachers/${id}`)}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || success}
+                className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: '#FF8303' }}>
+                {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
             <button onClick={() => setActiveSection('B')}
               className="px-5 py-2 rounded-lg text-sm font-medium text-white"
               style={{ backgroundColor: '#FF8303' }}>
@@ -328,8 +363,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           </div>
 
           <Field label="Date of Birth" adminOnly>
-            <input type="date" className={inputClass} value={form.date_of_birth}
-              onChange={(e) => set('date_of_birth', e.target.value)} />
+            <DatePartInput value={form.date_of_birth} onChange={(v) => set('date_of_birth', v)} />
           </Field>
 
           <Field label="Phone / Mobile">
@@ -385,10 +419,31 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
                   <span className="text-sm text-gray-600">This teacher is required to charge VAT</span>
                 </label>
               </Field>
-              <Field label="Hourly Rate (€)" adminOnly>
-                <input type="number" min="0" step="0.01" className={inputClass}
-                  value={form.hourly_rate}
-                  onChange={(e) => set('hourly_rate', e.target.value)} />
+              <Field label="Hourly Rate" adminOnly>
+                <div className="flex">
+                  <select
+                    className="border border-gray-200 rounded-l-lg px-2 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white border-r-0"
+                    value={form.currency}
+                    onChange={(e) => set('currency', e.target.value)}
+                  >
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.symbol} {c.value}</option>
+                    ))}
+                  </select>
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">
+                      {CURRENCY_OPTIONS.find(c => c.value === form.currency)?.symbol ?? '€'}
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="w-full border border-gray-200 rounded-r-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                      value={form.hourly_rate}
+                      onChange={(e) => set('hourly_rate', e.target.value)}
+                    />
+                  </div>
+                </div>
               </Field>
             </div>
           </div>
@@ -448,11 +503,6 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
                 <input className={inputClass} value={form.quote}
                   onChange={(e) => set('quote', e.target.value)} />
               </Field>
-              <Field label="YouTube Video URL">
-                <input type="url" className={inputClass} value={form.video_url}
-                  onChange={(e) => set('video_url', e.target.value)}
-                  placeholder="https://youtube.com/..." />
-              </Field>
             </div>
           </div>
 
@@ -470,8 +520,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
               </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Follow-up Date" adminOnly>
-                  <input type="date" className={inputClass} value={form.follow_up_date}
-                    onChange={(e) => set('follow_up_date', e.target.value)} />
+                  <DatePartInput value={form.follow_up_date} onChange={(v) => set('follow_up_date', v)} />
                 </Field>
                 <Field label="Follow-up Reason" adminOnly>
                   <input className={inputClass} value={form.follow_up_reason}
@@ -496,7 +545,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || success}
                 className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
                 style={{ backgroundColor: '#FF8303' }}>
                 {saving ? 'Saving...' : 'Save Changes'}

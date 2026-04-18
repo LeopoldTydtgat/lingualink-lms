@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -150,6 +151,10 @@ export async function PATCH(
         }
       }
     }
+
+    revalidatePath('/student/account')
+    revalidatePath('/student/dashboard')
+    revalidatePath('/upcoming-classes')
 
     return NextResponse.json({ success: true })
   } catch (err) {
