@@ -62,6 +62,10 @@ export async function createTeamsMeeting({
       // This is what tells Graph to create a Teams meeting link
       isOnlineMeeting: true,
       onlineMeetingProvider: 'teamsForBusiness',
+      lobbyBypassSettings: {
+        scope: 'everyone',
+        isDialInBypassEnabled: true,
+      },
     })
 
   const joinUrl = event?.onlineMeeting?.joinUrl
