@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { createTeamsMeeting } from '@/lib/microsoft/graph'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -158,6 +159,23 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Create Teams meeting before inserting the lesson so the URL is available immediately
+  let teamsJoinUrl: string | null = null
+  let teamsMeetingId: string | null = null
+  try {
+    console.log('[Teams] Creating meeting — AZURE_TENANT_ID set:', !!process.env.AZURE_TENANT_ID, '| AZURE_CLIENT_ID set:', !!process.env.AZURE_CLIENT_ID, '| AZURE_CLIENT_SECRET set:', !!process.env.AZURE_CLIENT_SECRET)
+    const meeting = await createTeamsMeeting({
+      subject: `LinguaLink lesson — ${scheduled_at}`,
+      startTime: scheduled_at,
+      durationMinutes: duration_minutes,
+    })
+    teamsJoinUrl = meeting.joinUrl
+    teamsMeetingId = meeting.meetingId
+    console.log('[Teams] Meeting created successfully:', teamsMeetingId)
+  } catch (teamsErr) {
+    console.error('[Teams] createTeamsMeeting failed — lesson will be created without a join URL:', teamsErr)
+  }
+
   // Create the lesson record
   const { data: lesson, error: lessonError } = await supabase
     .from('lessons')
@@ -168,9 +186,8 @@ export async function POST(request: NextRequest) {
       scheduled_at,
       duration_minutes,
       status: 'scheduled',
-      // Teams meeting link will be added once MS Graph API is wired up
-      teams_join_url: null,
-      teams_meeting_id: null,
+      teams_join_url: teamsJoinUrl,
+      teams_meeting_id: teamsMeetingId,
     })
     .select('id')
     .single()
