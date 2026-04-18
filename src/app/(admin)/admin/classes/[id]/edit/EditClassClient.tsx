@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { CheckCircle } from 'lucide-react'
 
 interface Teacher {
   id: string
@@ -68,6 +69,7 @@ export default function EditClassClient({ lesson, teachers }: Props) {
   const [duration, setDuration] = useState(lesson.duration_minutes)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
   const timeSlots = generateTimeSlots()
   const today = new Date()
@@ -102,7 +104,8 @@ export default function EditClassClient({ lesson, teachers }: Props) {
       return
     }
 
-    router.push(`/admin/classes/${lesson.id}`)
+    setSuccess(true)
+    setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 1500)
   }
 
   return (
@@ -216,6 +219,18 @@ export default function EditClassClient({ lesson, teachers }: Props) {
 
       {error && (
         <p style={{ fontSize: '13px', color: '#B91C1C', marginTop: '12px' }}>{error}</p>
+      )}
+
+      {success && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          Changes saved!
+        </div>
       )}
 
       <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
