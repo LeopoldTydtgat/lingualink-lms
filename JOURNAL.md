@@ -1,6 +1,33 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 54 - 18 April 2026 - Admin Messages, Login Cleanup, Email Logo Fix
+
+### What was built
+- src/app/(admin)/admin/messages/page.tsx - new server component, fetches all platform messages grouped by teacher/student conversation pair
+- src/app/(admin)/admin/messages/AdminMessagesClient.tsx - two-panel chat UI, the client can read and send into any thread, real-time via Supabase channel
+- src/app/(admin)/admin/messages/actions.ts - sendAdminMessage, markAdminThreadRead, getAdminThreadMessages server actions
+- src/app/(admin)/admin/layout.tsx - unread messages badge added to Messages nav item, Messages nav item added
+- src/app/(admin)/admin/messages/page.tsx - TS fix: attachments added to RawMessage type and Supabase select
+- src/app/(admin)/admin/teachers/create/CreateTeacherClient.tsx - preferred_payment_type field added to create form
+- src/app/login/page.tsx - subtitle removed, forgot password updated to teachers@lingualinkonline.com
+- src/app/(student)/student/login/page.tsx - subtitle removed, Teacher sign in here link removed, forgot password updated to support@lingualinkonline.com
+- src/lib/email/templates.ts - base64 logo replaced with hosted PNG URL
+- public/lingualink-logo-email.png - logo extracted from base64 and committed as static file
+
+### Break/Fix Log
+Issue 1: Admin messages hydration error — timestamp format differed between server and client / Cause: locale-dependent date formatting / Fix: replaced with hardcoded DAYS/MONTHS arrays and midnight-normalised calendar day diff / Lesson: never use toLocaleDateString() or toLocaleTimeString() in components that render on both server and client
+
+Issue 2: Build failed on PR — TS2322 type error in admin messages page / Cause: RawMessage type missing attachments field / Fix: added attachments to RawMessage interface and Supabase select column list / Lesson: always run npx tsc --noEmit before pushing
+
+Issue 3: Email logo not rendering in Gmail / Cause: base64 data URIs stripped by Gmail security / Fix: extracted PNG to public/ and referenced via hosted URL / Lesson: Gmail blocks base64 image URIs — always use hosted URLs. Final fix deferred to custom domain setup
+
+### Session result
+Admin messages section built and deployed - the client can now monitor and participate in all teacher/student conversations from the admin portal. Login pages cleaned up. Email logo partially fixed - will complete when custom domain is live.
+
+---
+
+
 ## Session 53 - 18 April 2026 - Admin Portal Fixes, Currency, First Login Flow & Profile Sync
 
 ### What was built
