@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, CheckCircle } from 'lucide-react'
 import { DatePartInput } from '../../_components/DatePartInput'
 
 type Company = { id: string; name: string }
@@ -139,6 +139,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
   const [activeSection, setActiveSection] = useState<Section>('A')
   const [showTempPassword, setShowTempPassword] = useState(false)
 
@@ -189,8 +190,8 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to create student.')
 
-      router.push('/admin/students')
-      router.refresh()
+      setSuccess(true)
+      setTimeout(() => { router.push('/admin/students'); router.refresh() }, 1500)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -229,6 +230,19 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           </button>
         ))}
       </div>
+
+      {/* Success toast */}
+      {success && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          Student created!
+        </div>
+      )}
 
       {/* Error */}
       {error && (

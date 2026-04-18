@@ -527,10 +527,10 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           {/* Payment info */}
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Payment Details</h2>
-            <InfoRow label="Preferred Payment" value={teacher.preferred_payment_type as string} />
+            <InfoRow label="Preferred Payment" value={teacher.preferred_payment_type === "bank" ? "Bank Transfer" : teacher.preferred_payment_type === "paypal" ? "PayPal" : teacher.preferred_payment_type as string} />
             <InfoRow label="PayPal Email" value={teacher.paypal_email as string} />
             <InfoRow label="IBAN" value={teacher.iban as string} />
-            <InfoRow label="BIC" value={teacher.bic as string} />
+            <InfoRow label="SWIFT / BIC" value={teacher.bic as string} />
             <InfoRow label="Tax Number" value={teacher.tax_number as string} />
           </div>
 

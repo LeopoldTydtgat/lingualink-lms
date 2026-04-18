@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { CheckCircle } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const supabase = createClient()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
+  const [toast, setToast] = useState<string | null>(null)
 
   // ── Shared reference data ──────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<TeacherProfile[]>([])
@@ -334,6 +336,8 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setSavingPaid(false)
     setMarkingPaidId(null)
     await loadBaseData()
+    setToast('Invoice marked as paid!')
+    setTimeout(() => setToast(null), 3000)
   }
 
   // ── View invoice PDF (signed URL) ──────────────────────────────────────────
@@ -359,6 +363,8 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       })
       const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
       setTemplateUrl(urlData.publicUrl)
+      setToast('Template uploaded!')
+      setTimeout(() => setToast(null), 3000)
     }
     setUploadingTemplate(false)
   }
@@ -464,6 +470,18 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   return (
     <div className="p-6 max-w-6xl">
       <input ref={templateInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleTemplateUpload} />
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
+          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
+          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        }}>
+          <CheckCircle size={16} color="#16a34a" />
+          {toast}
+        </div>
+      )}
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">

@@ -46,12 +46,9 @@ export default function StudentLoginPage() {
               />
             </div>
 
-            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>
+            <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
             </h1>
-            <p style={{ fontSize: '14px', color: '#6b7280', margin: '0 0 32px' }}>
-              Student Portal — enter your credentials
-            </p>
 
             {error && (
               <div style={{ backgroundColor: '#fff4f4', border: '1px solid #FD5602', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '14px', color: '#FD5602' }}>
@@ -100,11 +97,6 @@ export default function StudentLoginPage() {
                 </div>
               </div>
 
-              <div style={{ textAlign: 'right', marginTop: '-6px' }}>
-                <a href="/student/forgot-password" style={{ fontSize: '13px', color: '#FF8303', textDecoration: 'none', fontWeight: 500 }}>
-                  Forgot your password?
-                </a>
-              </div>
 
               <button
                 type="submit"
@@ -115,11 +107,9 @@ export default function StudentLoginPage() {
               </button>
             </form>
 
-            <p style={{ textAlign: 'center', fontSize: '13px', color: '#9ca3af', marginTop: '28px' }}>
-              Teacher?{' '}
-              <a href="/login" style={{ color: '#FF8303', textDecoration: 'none', fontWeight: 500 }}>
-                Sign in here
-              </a>
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
+              Forgot your password? Contact{' '}
+              <span style={{ color: '#FF8303', fontWeight: 500 }}>support@lingualinkonline.com</span>
             </p>
           </div>
         </div>

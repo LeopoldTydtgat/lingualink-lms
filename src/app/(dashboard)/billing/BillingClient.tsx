@@ -568,7 +568,7 @@ export default function BillingClient({
               )}
               {billingInfo.bic && (
                 <div className="flex gap-2">
-                  <span className="text-gray-500 w-44 flex-shrink-0">BIC:</span>
+                  <span className="text-gray-500 w-44 flex-shrink-0">SWIFT / BIC:</span>
                   <span className="text-gray-900 font-mono">{billingInfo.bic}</span>
                 </div>
               )}
