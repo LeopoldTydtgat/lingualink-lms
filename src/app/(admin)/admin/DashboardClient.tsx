@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -111,6 +111,7 @@ export default function DashboardClient({
   todayLabel,
 }: Props) {
   const router = useRouter()
+  const [isPending, startTransition] = useTransition()
 
   // Auto-refresh server data every 30 seconds by re-running server components
   useEffect(() => {
@@ -168,7 +169,7 @@ export default function DashboardClient({
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="p-6 space-y-6">
 
       {/* ── page header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
@@ -179,11 +180,12 @@ export default function DashboardClient({
           </p>
         </div>
         <button
-          onClick={() => router.refresh()}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          onClick={() => startTransition(() => router.refresh())}
+          disabled={isPending}
+          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
         >
-          <RefreshCw size={14} />
-          Refresh now
+          <RefreshCw size={14} className={isPending ? 'animate-spin' : ''} />
+          {isPending ? 'Refreshing...' : 'Refresh now'}
         </button>
       </div>
 

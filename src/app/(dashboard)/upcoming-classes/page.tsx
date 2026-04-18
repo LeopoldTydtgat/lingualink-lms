@@ -9,7 +9,7 @@ export default async function UpcomingClassesPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('*')
+    .select('*, profile_completed')
     .eq('id', user.id)
     .single()
 
@@ -49,6 +49,7 @@ export default async function UpcomingClassesPage() {
     <UpcomingClassesClient
       classes={classes}
       profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
+      profileCompleted={profile?.profile_completed ?? true}
     />
   )
 }

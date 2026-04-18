@@ -28,6 +28,7 @@ type RightPanelProps = {
   announcements?: AnnouncementItem[]
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
+  currency?: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -64,12 +65,16 @@ function formatClassTime(isoString: string, durationMinutes: number): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
+
 export default function RightPanel({
   teacherId,
   announcements = [],
   nextLesson = null,
   billingData,
+  currency,
 }: RightPanelProps) {
+  const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
@@ -166,13 +171,13 @@ export default function RightPanel({
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Current month</span>
               <span className="font-semibold text-gray-900">
-                {billingData != null ? `€ ${billingData.currentAmount.toFixed(2)}` : '€ –'}
+                {billingData != null ? `${currencySymbol} ${billingData.currentAmount.toFixed(2)}` : `${currencySymbol} –`}
               </span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Projected</span>
               <span className="font-semibold text-gray-900">
-                {billingData != null ? `€ ${billingData.projectedAmount.toFixed(2)}` : '€ –'}
+                {billingData != null ? `${currencySymbol} ${billingData.projectedAmount.toFixed(2)}` : `${currencySymbol} –`}
               </span>
             </div>
           </div>

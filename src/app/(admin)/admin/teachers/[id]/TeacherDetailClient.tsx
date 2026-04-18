@@ -290,6 +290,12 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
   const [purging, setPurging] = useState(false)
   const [purgeError, setPurgeError] = useState<string | null>(null)
 
+  // Password override state
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordSuccess, setPasswordSuccess] = useState(false)
+
   const id = teacher.id as string
   const fullName = teacher.full_name as string
   const photoUrl = teacher.photo_url as string | null
@@ -340,6 +346,30 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       setPurgeError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setPurging(false)
+    }
+  }
+
+  async function handleSetPassword() {
+    setPasswordError(null)
+    setPasswordSuccess(false)
+    if (newPassword.length < 8) {
+      return setPasswordError('Password must be at least 8 characters.')
+    }
+    setPasswordSaving(true)
+    try {
+      const res = await fetch(`/api/admin/teachers/${id}/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: newPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to set password.')
+      setNewPassword('')
+      setPasswordSuccess(true)
+    } catch (err: unknown) {
+      setPasswordError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setPasswordSaving(false)
     }
   }
 
@@ -487,7 +517,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
             <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
             <InfoRow label="Hourly Rate (€)"
-              value={teacher.hourly_rate != null ? `€${teacher.hourly_rate}` : null}
+              value={teacher.hourly_rate != null ? `€${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}` : null}
               adminOnly />
             <InfoRow label="VAT Required"
               value={teacher.vat_required ? 'Yes' : 'No'}
@@ -522,6 +552,54 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <p className="text-sm" style={{ color: '#78350f' }}>
               {(teacher.admin_notes as string) || 'No admin notes.'}
             </p>
+          </div>
+
+          {/* Password override — admin only */}
+          <div className="col-span-2 rounded-xl border p-5 space-y-3"
+            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+            <h2 className="font-semibold" style={{ color: '#92400e' }}>
+              🔑 Set New Password — Admin only
+            </h2>
+            <p className="text-xs" style={{ color: '#78350f' }}>
+              Overrides the teacher&apos;s current password immediately. The teacher is not notified.
+            </p>
+
+            {passwordError && (
+              <div className="text-sm rounded-lg px-4 py-2"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                {passwordError}
+              </div>
+            )}
+            {passwordSuccess && (
+              <div className="text-sm rounded-lg px-4 py-2"
+                style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
+                Password updated successfully.
+              </div>
+            )}
+
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
+                  placeholder="Min. 8 characters"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                />
+              </div>
+              <button
+                onClick={handleSetPassword}
+                disabled={passwordSaving || !newPassword}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
+                style={{ backgroundColor: '#92400e' }}
+              >
+                {passwordSaving ? 'Saving...' : 'Set Password'}
+              </button>
+            </div>
           </div>
 
           {/* Bio */}

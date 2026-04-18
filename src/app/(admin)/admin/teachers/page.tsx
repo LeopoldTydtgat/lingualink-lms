@@ -15,6 +15,7 @@ export default async function TeachersPage() {
       status,
       account_types,
       hourly_rate,
+      currency,
       role,
       lessons (count)
     `)

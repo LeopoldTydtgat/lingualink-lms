@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
+import { DatePartInput } from '../../_components/DatePartInput'
 
 const TIMEZONES = [
   'Africa/Johannesburg',
@@ -20,6 +22,12 @@ const TIMEZONES = [
   'Asia/Dubai',
   'Asia/Singapore',
   'Australia/Sydney',
+]
+
+const CURRENCY_OPTIONS = [
+  { value: 'EUR', symbol: '€' },
+  { value: 'GBP', symbol: '£' },
+  { value: 'USD', symbol: '$' },
 ]
 
 const ACCOUNT_TYPE_OPTIONS = [
@@ -72,13 +80,13 @@ type FormData = {
   vat_required: boolean
   tax_number: string
   hourly_rate: string
+  currency: string
   native_languages: string[]
   teaching_languages: string[]
   qualifications: string
   specialties: string
   bio: string
   quote: string
-  video_url: string
   admin_notes: string
   follow_up_date: string
   follow_up_reason: string
@@ -91,8 +99,8 @@ const EMPTY_FORM: FormData = {
   observed_lesson_date: '', title: '', date_of_birth: '', gender: '',
   nationality: '', phone: '', street_address: '', area_code: '', city: '',
   paypal_email: '', iban: '', bic: '', vat_required: false, tax_number: '',
-  hourly_rate: '', native_languages: [], teaching_languages: [],
-  qualifications: '', specialties: '', bio: '', quote: '', video_url: '',
+  hourly_rate: '', currency: 'EUR', native_languages: [], teaching_languages: [],
+  qualifications: '', specialties: '', bio: '', quote: '',
   admin_notes: '', follow_up_date: '', follow_up_reason: '',
 }
 
@@ -127,6 +135,7 @@ export default function CreateTeacherClient() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeSection, setActiveSection] = useState<'A' | 'B'>('A')
+  const [showTempPassword, setShowTempPassword] = useState(false)
 
   function set(field: keyof FormData, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -160,7 +169,8 @@ export default function CreateTeacherClient() {
         body: JSON.stringify({
           ...form,
           full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
-          hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
+          hourly_rate: form.hourly_rate ? parseFloat(parseFloat(form.hourly_rate).toFixed(2)) : null,
+          currency: form.currency,
         }),
       })
 
@@ -236,8 +246,18 @@ export default function CreateTeacherClient() {
           </Field>
 
           <Field label="Temporary Password">
-            <input type="password" className={inputClass} value={form.temp_password}
-              onChange={(e) => set('temp_password', e.target.value)} />
+            <div style={{ position: 'relative' }}>
+              <input type={showTempPassword ? 'text' : 'password'} className={inputClass + ' pr-10'} value={form.temp_password}
+                onChange={(e) => set('temp_password', e.target.value)} />
+              <button
+                type="button"
+                onClick={() => setShowTempPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                aria-label={showTempPassword ? 'Hide password' : 'Show password'}
+              >
+                {showTempPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
             <p className="text-xs text-gray-400 mt-1">
               Teacher will be prompted to set their own password on first login.
             </p>
@@ -281,16 +301,13 @@ export default function CreateTeacherClient() {
 
           <div className="grid grid-cols-3 gap-4">
             <Field label="Contract Start Date">
-              <input type="date" className={inputClass} value={form.contract_start}
-                onChange={(e) => set('contract_start', e.target.value)} />
+              <DatePartInput value={form.contract_start} onChange={(v) => set('contract_start', v)} />
             </Field>
             <Field label="Orientation Date">
-              <input type="date" className={inputClass} value={form.orientation_date}
-                onChange={(e) => set('orientation_date', e.target.value)} />
+              <DatePartInput value={form.orientation_date} onChange={(v) => set('orientation_date', v)} />
             </Field>
             <Field label="Observed Lesson Date">
-              <input type="date" className={inputClass} value={form.observed_lesson_date}
-                onChange={(e) => set('observed_lesson_date', e.target.value)} />
+              <DatePartInput value={form.observed_lesson_date} onChange={(v) => set('observed_lesson_date', v)} />
             </Field>
           </div>
 
@@ -333,8 +350,7 @@ export default function CreateTeacherClient() {
           </div>
 
           <Field label="Date of Birth" adminOnly>
-            <input type="date" className={inputClass} value={form.date_of_birth}
-              onChange={(e) => set('date_of_birth', e.target.value)} />
+            <DatePartInput value={form.date_of_birth} onChange={(v) => set('date_of_birth', v)} />
           </Field>
 
           <Field label="Phone / Mobile">
@@ -390,10 +406,31 @@ export default function CreateTeacherClient() {
                   <span className="text-sm text-gray-600">This teacher is required to charge VAT</span>
                 </label>
               </Field>
-              <Field label="Hourly Rate (€)" adminOnly>
-                <input type="number" min="0" step="0.01" className={inputClass}
-                  value={form.hourly_rate}
-                  onChange={(e) => set('hourly_rate', e.target.value)} />
+              <Field label="Hourly Rate" adminOnly>
+                <div className="flex">
+                  <select
+                    className="border border-gray-200 rounded-l-lg px-2 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white border-r-0"
+                    value={form.currency}
+                    onChange={(e) => set('currency', e.target.value)}
+                  >
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>{c.symbol} {c.value}</option>
+                    ))}
+                  </select>
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">
+                      {CURRENCY_OPTIONS.find(c => c.value === form.currency)?.symbol ?? '€'}
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="w-full border border-gray-200 rounded-r-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                      value={form.hourly_rate}
+                      onChange={(e) => set('hourly_rate', e.target.value)}
+                    />
+                  </div>
+                </div>
               </Field>
             </div>
           </div>
@@ -453,11 +490,6 @@ export default function CreateTeacherClient() {
                 <input className={inputClass} value={form.quote}
                   onChange={(e) => set('quote', e.target.value)} />
               </Field>
-              <Field label="YouTube Video URL">
-                <input type="url" className={inputClass} value={form.video_url}
-                  onChange={(e) => set('video_url', e.target.value)}
-                  placeholder="https://youtube.com/..." />
-              </Field>
             </div>
           </div>
 
@@ -475,8 +507,7 @@ export default function CreateTeacherClient() {
               </Field>
               <div className="grid grid-cols-2 gap-4">
                 <Field label="Follow-up Date" adminOnly>
-                  <input type="date" className={inputClass} value={form.follow_up_date}
-                    onChange={(e) => set('follow_up_date', e.target.value)} />
+                  <DatePartInput value={form.follow_up_date} onChange={(v) => set('follow_up_date', v)} />
                 </Field>
                 <Field label="Follow-up Reason" adminOnly>
                   <input className={inputClass} value={form.follow_up_reason}

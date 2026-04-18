@@ -5,12 +5,15 @@ import { z } from 'zod'
 const uuid = z.string().uuid('Must be a valid ID')
 const optionalUuid = z.string().uuid('Must be a valid ID').optional().nullable()
 
-// Accepts YYYY-MM-DD only
-const dateString = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a valid date in YYYY-MM-DD format')
-  .optional()
-  .nullable()
+// Accepts YYYY-MM-DD or empty string/null (empty string is coerced to null)
+const dateString = z.preprocess(
+  (val) => (val === '' ? null : val),
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a valid date in YYYY-MM-DD format')
+    .optional()
+    .nullable()
+)
 
 // Accepts a valid http/https URL or empty string/null
 const optionalUrl = z
@@ -65,6 +68,7 @@ export const CreateTeacherSchema = z.object({
 
   // Admin-only financial fields
   hourly_rate: z.number().positive('Hourly rate must be a positive number').max(10_000).optional().nullable(),
+  currency: z.enum(['EUR', 'GBP', 'USD']).default('EUR').optional(),
   vat_required: z.boolean().optional().default(false),
   tax_number: z.string().max(100).optional().nullable(),
   iban: z.string().max(50).optional().nullable(),
@@ -114,9 +118,7 @@ export const CreateStudentSchema = z.object({
     .positive('Total hours must be a positive number')
     .max(500, 'Total hours cannot exceed 500')
     .multipleOf(0.5, 'Hours must be in 0.5-hour increments'),
-  end_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Training end date must be in YYYY-MM-DD format'),
+  end_date: dateString,
   package_name: z.string().min(1, 'Package name is required').max(100),
 
   // Optional account fields
