@@ -346,7 +346,7 @@ export default function BillingClient({
       />
 
       {/* Header + view switcher */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 className="text-2xl font-bold text-gray-900">Billing &amp; Invoices</h1>
         <div className="flex gap-2">
           {(['billing', 'billingInfo'] as const).map(view => (

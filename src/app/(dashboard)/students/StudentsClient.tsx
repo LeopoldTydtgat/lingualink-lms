@@ -126,7 +126,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
   return (
     <div className="p-6">
       {/* Page header */}
-      <div className="mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Students & Trainings</h1>
         <p className="text-sm text-gray-500 mt-1">{totalCount} total training{totalCount !== 1 ? 's' : ''}</p>
       </div>
@@ -136,11 +136,9 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
 
         {/* LEFT — Current Trainings */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-gray-900">
-              Current Trainings
-              <span className="ml-2 text-sm font-normal text-gray-500">({currentTrainings.length})</span>
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Current Trainings ({currentTrainings.length})</h2>
           </div>
           <input
             type="text"
@@ -161,11 +159,9 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
 
         {/* RIGHT — Past Trainings */}
         <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-gray-900">
-              Past Trainings
-              <span className="ml-2 text-sm font-normal text-gray-500">({pastTrainings.length})</span>
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Past Trainings ({pastTrainings.length})</h2>
           </div>
           <input
             type="text"
