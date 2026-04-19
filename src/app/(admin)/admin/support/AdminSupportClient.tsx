@@ -155,7 +155,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     setSending(true)
 
     const tempId = crypto.randomUUID()
-    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: text, created_at: new Date().toISOString() }])
+    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: text, created_at: new Date().toISOString(), read_at: null }])
 
     const res = await fetch('/api/support/send', {
       method: 'POST',
