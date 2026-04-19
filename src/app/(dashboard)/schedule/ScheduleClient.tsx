@@ -47,12 +47,14 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">
-        Schedule &amp; Availability
-      </h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Manage your weekly availability, specific day adjustments, and holiday periods.
-      </p>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">
+          Schedule &amp; Availability
+        </h1>
+        <p className="text-sm text-gray-500">
+          Manage your weekly availability, specific day adjustments, and holiday periods.
+        </p>
+      </div>
 
       {/* Tab buttons */}
       <div className="flex gap-1 border-b border-gray-200 mb-6">

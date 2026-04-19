@@ -350,23 +350,25 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">Reports</h1>
-        <p className="text-sm text-gray-500 mt-1">Class reports submitted by teachers. Flagged reports require your attention.</p>
-        {(pendingCount > 0 || flaggedCount > 0) && (
-          <div className="flex gap-3 mt-3">
-            {pendingCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFFBEB', color: '#92400E' }}>
-                <span className="font-semibold">{pendingCount}</span> pending
-              </span>
-            )}
-            {flaggedCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FEF2F2', color: '#991B1B' }}>
-                <span className="font-semibold">{flaggedCount}</span> flagged — action required
-              </span>
-            )}
-          </div>
-        )}
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Reports</h1>
+          <p className="text-sm text-gray-500 mt-1">Class reports submitted by teachers. Flagged reports require your attention.</p>
+          {(pendingCount > 0 || flaggedCount > 0) && (
+            <div className="flex gap-3 mt-3">
+              {pendingCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFFBEB', color: '#92400E' }}>
+                  <span className="font-semibold">{pendingCount}</span> pending
+                </span>
+              )}
+              {flaggedCount > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FEF2F2', color: '#991B1B' }}>
+                  <span className="font-semibold">{flaggedCount}</span> flagged — action required
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="border-b border-gray-200 mb-6">

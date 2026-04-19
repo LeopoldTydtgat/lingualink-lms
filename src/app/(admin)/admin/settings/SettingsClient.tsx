@@ -77,6 +77,13 @@ export default function SettingsClient({ initialSettings }: Props) {
   }
 
   return (
+    <>
+    <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Platform Settings</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Configure platform-wide settings and defaults.</p>
+      </div>
+    </div>
     <div className="space-y-8">
 
       {/* ── Section: Contact ─────────────────────────────────────────── */}
@@ -267,6 +274,7 @@ export default function SettingsClient({ initialSettings }: Props) {
       </div>
 
     </div>
+    </>
   )
 }
 

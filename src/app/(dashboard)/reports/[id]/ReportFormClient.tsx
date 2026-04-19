@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -215,7 +215,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
       {/* Did the class take place? */}
       <section className="mb-8">
-        <h2 className="text-base font-semibold text-gray-800 mb-3">Did the class take place?</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Did the class take place?</h2>
+        </div>
         <div className="flex gap-3">
           <button
             disabled={!isEditable}
@@ -249,7 +252,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
         <>
           {/* Student identity confirmation */}
           <section className="mb-8">
-            <h2 className="text-base font-semibold text-gray-800 mb-3">Student Confirmation</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Student Confirmation</h2>
+            </div>
             <label className="flex items-start gap-3 cursor-pointer">
               <input
                 type="checkbox"
@@ -292,9 +298,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
           {/* Feedback box */}
           <section className="mb-8">
-            <h2 className="text-base font-semibold text-gray-800 mb-1">
-              Class Recap, Feedback &amp; Next Steps
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Class Recap, Feedback &amp; Next Steps</h2>
+            </div>
             <p className="text-xs text-gray-500 mb-3">
               This will appear as the recap on the next class card.
             </p>
@@ -321,7 +328,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
           {/* Study sheet assignment */}
           <section className="mb-8">
-            <h2 className="text-base font-semibold text-gray-800 mb-1">Study Sheets for Next Time</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Study Sheets for Next Time</h2>
+            </div>
             <p className="text-xs text-gray-500 mb-3">
               Assign vocabulary or grammar sheets for the student to review.
             </p>
@@ -351,11 +361,14 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
           {/* Student level assessment */}
           <section className="mb-8">
-            <h2 className="text-base font-semibold text-gray-800 mb-1">Student Level Assessment</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Student Level Assessment</h2>
+            </div>
             <p className="text-xs text-gray-500 mb-4">Select a CEFR level for each skill.</p>
             <div className="flex flex-col gap-4">
-              {SKILLS.map(skill => (
-                <div key={skill.key}>
+              {SKILLS.map((skill, index) => (
+                <div key={skill.key} style={{ paddingBottom: '8px', marginBottom: '8px', borderBottom: '1px solid #F3F4F6' }}>
                   <p className="text-sm font-medium text-gray-700 mb-2">{skill.label}</p>
                   <div className="flex flex-wrap gap-2">
                     {CEFR_LEVELS.map(level => (
@@ -365,8 +378,8 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                         onClick={() => setSkillLevel(skill.key, level)}
                         style={
                           levelData[skill.key] === level
-                            ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
-                            : { backgroundColor: 'white', color: '#4B5563' }
+                            ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white', minWidth: '44px', textAlign: 'center' }
+                            : { backgroundColor: 'white', color: '#4B5563', minWidth: '44px', textAlign: 'center' }
                         }
                         className="px-3 py-1 rounded-md text-xs font-semibold border border-gray-300 transition-colors"
                       >
@@ -381,12 +394,12 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             {/* CEFR guidance */}
             <div className="mt-6 bg-gray-50 border border-gray-200 rounded-xl p-4">
               <p className="text-xs font-semibold text-gray-600 mb-3 uppercase tracking-wide">CEFR Level Guide</p>
-              <div className="flex flex-col gap-2">
+              <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '4px 8px', alignItems: 'start' }}>
                 {Object.entries(CEFR_DESCRIPTIONS).map(([level, desc]) => (
-                  <div key={level} className="flex gap-3 text-xs text-gray-600">
-                    <span className="font-bold text-gray-800 w-6 shrink-0">{level}</span>
-                    <span>{desc}</span>
-                  </div>
+                  <React.Fragment key={level}>
+                    <span className="text-xs font-bold text-gray-800">{level}</span>
+                    <span className="text-xs text-gray-600">{desc}</span>
+                  </React.Fragment>
                 ))}
               </div>
             </div>
@@ -444,10 +457,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       {/* Additional details */}
       {didClassHappen !== null && (
         <section className="mb-8">
-          <h2 className="text-base font-semibold text-gray-800 mb-1">
-            Additional Details
-            {didClassHappen === false && <span className="text-red-500 ml-1">*</span>}
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Additional Details{didClassHappen === false && <span className="text-red-500 ml-1">*</span>}</h2>
+          </div>
           {didClassHappen === false && (
             <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}

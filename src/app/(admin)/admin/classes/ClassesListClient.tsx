@@ -119,7 +119,7 @@ export default function ClassesListClient({ teachers }: Props) {
     <div style={{ padding: '32px' }}>
 
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: 0 }}>Classes</h1>
           <p style={{ fontSize: '14px', color: '#6B7280', marginTop: '4px' }}>

@@ -167,14 +167,17 @@ export default function ProgressClient({
     <div className="p-6 max-w-5xl mx-auto space-y-8">
 
       {/* Page title */}
-      <div>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">My Progress</h1>
         <p className="text-sm text-gray-500 mt-1">Track your learning journey and skill development</p>
       </div>
 
       {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Training Overview ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       <section>
-        <h2 className="text-base font-semibold text-gray-700 mb-4">Training Overview</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Training Overview</h2>
+        </div>
 
         {training ? (
           <div className="space-y-4">
@@ -212,7 +215,10 @@ export default function ProgressClient({
 
       {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Level Tracker ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       <section>
-        <h2 className="text-base font-semibold text-gray-700 mb-1">Level Tracker</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Level Tracker</h2>
+        </div>
         {latestLevelDate && (
           <p className="text-xs text-gray-400 mb-4">
             Based on your teacher&apos;s assessment from {formatDate(latestLevelDate, timezone)}
@@ -280,7 +286,10 @@ export default function ProgressClient({
 
       {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Class History Summary ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       <section>
-        <h2 className="text-base font-semibold text-gray-700 mb-4">Class History</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Class History</h2>
+        </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard
             label="Classes Completed"
@@ -302,7 +311,10 @@ export default function ProgressClient({
 
       {/* ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Exercises Progress ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ */}
       <section>
-        <h2 className="text-base font-semibold text-gray-700 mb-4">Exercises Progress</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Exercises Progress</h2>
+        </div>
         <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm space-y-4">
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
