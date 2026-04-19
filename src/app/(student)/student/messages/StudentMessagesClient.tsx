@@ -56,6 +56,9 @@ interface Props {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr)
   const now = new Date()
@@ -66,8 +69,8 @@ function formatTime(dateStr: string): string {
     return `${h}:${m}`
   }
   if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
-  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  if (diffDays < 7) return DAYS_SHORT[date.getDay()]
+  return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}`
 }
 
 function stripHtml(html: string): string {
@@ -409,9 +412,12 @@ export default function StudentMessagesClient({
                         <div className="flex items-center gap-3 my-4">
                           <div className="flex-1 h-px bg-gray-100" />
                           <span className="text-xs text-gray-400 flex-shrink-0">
-                            {new Date(msg.created_at).toLocaleDateString([], {
-                              weekday: 'long', day: 'numeric', month: 'long',
-                            })}
+                            {(() => {
+                              const d = new Date(msg.created_at)
+                              const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+                              const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
+                              return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`
+                            })()}
                           </span>
                           <div className="flex-1 h-px bg-gray-100" />
                         </div>

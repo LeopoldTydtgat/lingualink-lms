@@ -7,9 +7,7 @@ import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
-import ChatWidget, { STUDENT_FAQS } from '@/components/ChatWidget'
 import ClassReminderModal from '@/components/student/ClassReminderModal'
-import { sendMessage, markMessagesAsRead } from '@/app/(student)/student/messages/actions'
 
 export default async function StudentDashboardLayout({
   children,
@@ -61,15 +59,15 @@ export default async function StudentDashboardLayout({
     .select('*', { count: 'exact', head: true })
     .eq('student_id', student.id)
 
+  const { count: unreadMessageCount } = await supabase
+    .from('messages')
+    .select('*', { count: 'exact', head: true })
+    .eq('receiver_id', student.id)
+    .is('read_at', null)
+
   const hoursRemaining = training
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
-
-  const { data: adminProfile } = await supabase
-    .from('profiles')
-    .select('id, full_name, photo_url')
-    .eq('role', 'admin')
-    .single()
 
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
@@ -97,7 +95,7 @@ export default async function StudentDashboardLayout({
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {/* Sidebar runs full height - logo lives here */}
-      <StudentLeftNav />
+      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={user.id} />
 
       {/* Right side: header on top, then content row below */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -126,17 +124,6 @@ export default async function StudentDashboardLayout({
           />
         </div>
       </div>
-
-      <ChatWidget
-        currentUserId={student.id}
-        currentUserName={student.full_name}
-        adminProfileId={adminProfile?.id ?? null}
-        adminName={adminProfile?.full_name ?? 'Admin'}
-        adminPhotoUrl={adminProfile?.photo_url ?? null}
-        faqs={STUDENT_FAQS}
-        sendMessageAction={sendMessage}
-        markAsReadAction={markMessagesAsRead}
-      />
 
       {/* Class reminder modal — renders on all student pages */}
       <ClassReminderModal studentId={student.id} />

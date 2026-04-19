@@ -1,7 +1,7 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -23,10 +23,48 @@ const navItems = [
   { label: 'My Account',   href: '/student/account',      icon: User },
 ]
 
-export default function StudentLeftNav() {
+interface StudentLeftNavProps {
+  unreadMessageCount?: number
+  userId?: string
+}
+
+export default function StudentLeftNav({ unreadMessageCount = 0, userId }: StudentLeftNavProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const [liveUnreadCount, setLiveUnreadCount] = useState(unreadMessageCount)
+
+  useEffect(() => {
+    setLiveUnreadCount(unreadMessageCount)
+  }, [unreadMessageCount])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const channel = supabase
+      .channel(`student-nav-unread-${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${userId}`,
+      }, () => {
+        setLiveUnreadCount(prev => prev + 1)
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${userId}`,
+      }, (payload) => {
+        if (payload.new.read_at && !payload.old.read_at) {
+          setLiveUnreadCount(prev => Math.max(0, prev - 1))
+        }
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [userId, supabase])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -92,6 +130,26 @@ export default function StudentLeftNav() {
                 style={{ color: isActive ? '#ffffff' : '#9ca3af' }}
               />
               {item.label}
+              {item.label === 'Messages' && liveUnreadCount > 0 && (
+                <span
+                  style={{
+                    marginLeft: 'auto',
+                    backgroundColor: isActive ? 'rgba(255,255,255,0.35)' : '#FF8303',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    minWidth: '18px',
+                    height: '18px',
+                    borderRadius: '9999px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 4px',
+                  }}
+                >
+                  {liveUnreadCount > 9 ? '9+' : liveUnreadCount}
+                </span>
+              )}
             </Link>
           )
         })}
