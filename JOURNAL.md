@@ -1,5 +1,57 @@
 # LinguaLink Online - Build Journal
 
+## Session 56 - 19 April 2026 - Visual Polish Pass Across All Portals
+
+### What was built
+- src/components/layout/RightPanel.tsx - section labels replaced with orange bar accent pattern; card backgrounds changed to bg-white; aside background changed to #f9fafb
+- src/components/student/layout/StudentRightPanel.tsx - all four sections wrapped in white cards; aside background changed to #f9fafb; gap and padding tightened
+- src/app/(dashboard)/upcoming-classes/UpcomingClassesClient.tsx - page title bottom border separator added
+- src/app/(dashboard)/reports/ReportsClient.tsx - page title border added; Pending Reports and Completed Reports sub-headings replaced with orange bar pattern; divider added between sections
+- src/app/(dashboard)/reports/[id]/ReportClient.tsx - all report form section headings replaced with orange bar pattern; skill row dividers added; CEFR guide grid layout applied; level button fixed widths added
+- src/app/(dashboard)/schedule/ScheduleClient.tsx - page title border added; Holidays, Add unavailability period, Planned Unavailability headings replaced with orange bar pattern
+- src/app/(dashboard)/students/StudentsClient.tsx - page title border added; Current Trainings and Past Trainings headings replaced with orange bar pattern
+- src/app/(dashboard)/study-sheets/StudySheetsClient.tsx - page title border added
+- src/app/(dashboard)/billing/BillingClient.tsx - page title border added
+- src/app/(dashboard)/account/AccountClient.tsx - page title border added
+- src/app/(student)/student/my-classes/MyClassesClient.tsx - page title border added; Book a Class button moved into header flex row
+- src/app/(student)/student/past-classes/PastClassesClient.tsx - page title border added
+- src/app/(student)/student/progress/ProgressClient.tsx - page title border added; Training Overview, Level Tracker, Class History, Exercises Progress headings replaced with orange bar pattern
+- src/app/(student)/student/study/StudyClient.tsx - page title border added
+- src/app/(student)/student/account/AccountClient.tsx - page title border added; Profile Photo, General Information, Learning Profile, Hours and Training, Training History, Change Password headings replaced with orange bar pattern
+- src/app/(admin)/AdminLayoutClient.tsx - live unread count state and Supabase realtime subscription added for messages and support badges; liveUnreadMessages and liveUnreadSupport replace static props in NavLink badge logic
+- src/app/(admin)/admin/messages/AdminMessagesClient.tsx - optimistic message replaced with real inserted message from server action; duplicate-id guard added
+- src/app/(admin)/admin/messages/actions.ts - sendAdminMessage now chains .select().single() and returns inserted message
+- src/app/(admin)/admin/support/AdminSupportClient.tsx - read_at: null added to optimistic message to fix TypeScript build error
+- src/app/(admin)/admin/AdminDashboardClient.tsx - page title border added; Today's Classes and Pending Reports headings replaced with orange bar pattern; AT A GLANCE label replaced with orange bar pattern
+- src/app/(admin)/admin/teachers/TeachersListClient.tsx - page title border added
+- src/app/(admin)/admin/students/StudentsClient.tsx - page title border added
+- src/app/(admin)/admin/companies/CompaniesListClient.tsx - page title border added
+- src/app/(admin)/admin/classes/ClassesListClient.tsx - page title border added
+- src/app/(admin)/admin/reports/ReportsAdminClient.tsx - page title border added
+- src/app/(admin)/admin/billing/BillingAdminClient.tsx - page title border added
+- src/app/(admin)/admin/library/LibraryAdminClient.tsx - page title border added
+- src/app/(admin)/admin/announcements/AnnouncementsClient.tsx - page title border added; ACTIVE and INACTIVE section headings replaced with orange bar pattern
+- src/app/(admin)/admin/tasks/TasksClient.tsx - page title border added
+- src/app/(admin)/admin/exports/ExportsClient.tsx - page title border added
+- src/app/(admin)/admin/settings/SettingsClient.tsx - page title border added
+
+### Break/Fix Log
+Issue 1: Vercel build failed on dev branch / TypeScript error - read_at missing from optimistic message object in AdminSupportClient.tsx / Added read_at: null to the optimistic message / Always include all required fields from the interface when building optimistic UI objects
+
+Issue 2: Student right panel cards not visible / Card backgrounds were white on a white aside background - no contrast / Changed aside background to #f9fafb so white cards sit visibly on top
+
+Issue 3: Teacher right panel cards not visible / Same root cause - bg-gray-50 cards on a bg-gray-50 aside / Changed card sections to bg-white
+
+Issue 4: Page title border not spanning full width / Border wrapper div was narrower than the content area / Added width: 100% to all border wrapper divs; restructured headers with flex space-between to include action buttons inside the bordered row
+
+Issue 5: Admin Messages badge not clearing / AdminLayoutClient used static unreadMessagesCount prop with no realtime subscription / Added useState and useEffect with Supabase realtime channel listening for INSERT and UPDATE events on messages and support_messages tables
+
+Issue 6: Admin Messages ticks not updating / Optimistic message used crypto.randomUUID() as ID - real INSERT arrived via realtime with different ID causing duplicate; UPDATE matched real ID but not fake one / Removed optimistic message pattern; sendAdminMessage now returns inserted record; client appends real message directly with duplicate-id guard
+
+### Session result
+A full visual polish pass was completed across all three portals - teacher, student, and admin. Every page received a consistent bottom-border page title separator and orange bar accent treatment on sub-section headings. The right panel widgets on both teacher and student portals were given proper card styling with white backgrounds on a light grey aside. Two functional bugs were also fixed - the admin messages nav badge now updates in real time without a page refresh, and message read ticks now correctly flip from single grey to double orange when the recipient reads the message. The Vercel build error from the previous session was resolved. All changes were CSS and layout only except for the two messaging fixes, and no existing functionality was broken.
+
+---
 
 ## Session 55 - 19 April 2026 - Support Chat, Messaging Fixes and Live Nav Badges
 
