@@ -206,32 +206,19 @@ export default function AdminMessagesClient({
       return
     }
 
-    // Optimistic message — content will be overwritten by realtime with proper HTML
-    const htmlContent = composerText
-      .trim()
-      .split('\n')
-      .map(line => `<p>${line || '<br>'}</p>`)
-      .join('')
-
-    const optimistic: AdminMessage = {
-      id: crypto.randomUUID(),
-      sender_id: currentAdmin.id,
-      sender_type: 'admin',
-      receiver_id: selectedConv.studentId,
-      receiver_type: 'student',
-      content: htmlContent,
-      attachments: [],
-      read_at: null,
-      created_at: new Date().toISOString(),
+    if (result?.message) {
+      setMessages(prev => {
+        if (prev.some(m => m.id === result.message.id)) return prev
+        return [...prev, result.message as AdminMessage]
+      })
+      setConversations(prev =>
+        prev.map(c => c.key === selectedConv.key
+          ? { ...c, latestMessage: result.message as AdminMessage }
+          : c
+        )
+      )
     }
 
-    setMessages(prev => [...prev, optimistic])
-    setConversations(prev =>
-      prev.map(c => c.key === selectedConv.key
-        ? { ...c, latestMessage: optimistic }
-        : c
-      )
-    )
     setComposerText('')
     setSending(false)
     textareaRef.current?.focus()

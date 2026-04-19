@@ -65,14 +65,14 @@ export async function sendAdminMessage(
     .map(line => `<p>${line || '<br>'}</p>`)
     .join('')
 
-  const { error } = await adminDb.from('messages').insert({
+  const { data: inserted, error } = await adminDb.from('messages').insert({
     sender_id:     adminProfile.id,
     sender_type:   'admin',
     receiver_id:   receiverId,
     receiver_type: receiverType,
     content:       htmlContent,
     attachments:   [],
-  })
+  }).select().single()
 
   if (error) return { error: error.message }
 
@@ -122,7 +122,7 @@ export async function sendAdminMessage(
   }
 
   revalidatePath('/admin/messages')
-  return { success: true }
+  return { success: true, message: inserted }
 }
 
 export async function markAdminThreadRead(teacherSideId: string, studentId: string) {
