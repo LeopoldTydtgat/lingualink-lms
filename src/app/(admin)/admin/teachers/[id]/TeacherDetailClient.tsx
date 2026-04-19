@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Eye, EyeOff } from 'lucide-react'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -292,6 +293,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
   // Password override state
   const [newPassword, setNewPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
@@ -582,14 +584,23 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                 <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
                   New Password
                 </label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
-                  placeholder="Min. 8 characters"
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none"
-                  style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
+                    placeholder="Min. 8 characters"
+                    className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
+                    style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
               <button
                 onClick={handleSetPassword}

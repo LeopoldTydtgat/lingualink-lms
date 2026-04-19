@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string }
@@ -20,7 +19,6 @@ const DAY_OF_WEEK_MAP: Record<string, number> = {
 }
 
 // Generate slots in 30-minute increments from 00:00 to 23:30
-// Each entry is { hour: 6, minute: 0 }, { hour: 6, minute: 30 }, etc.
 const SLOTS = Array.from({ length: 48 }, (_, i) => ({
   hour: Math.floor(i / 2),
   minute: (i % 2) * 30,
@@ -53,7 +51,6 @@ function isSlotActive(availability: AvailabilityRecord[], dayName: string, hour:
 }
 
 export default function GeneralAvailability({ profile, availability, onAvailabilityChange }: Props) {
-  const supabase = createClient()
   const generalSlots = availability.filter(a => a.type === 'general')
 
   const isDragging = useRef(false)
@@ -61,6 +58,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   const draggedSlots = useRef<Set<string>>(new Set())
   const scrollRef = useRef<HTMLDivElement>(null)
   const [localGeneral, setLocalGeneral] = useState<AvailabilityRecord[]>(generalSlots)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -112,17 +110,33 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
 
         if (inserts.length === 0) return
 
-        const { data, error } = await supabase
-          .from('availability')
-          .insert(inserts)
-          .select()
-
-        if (!error && data) {
+        const results = await Promise.all(
+          inserts.map(record =>
+            fetch('/api/teacher/availability', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(record),
+            }).then(async r => {
+              if (r.ok) return { ok: true, data: await r.json().catch(() => null) }
+              const body = await r.json().catch(() => ({}))
+              console.error('[GeneralAvailability] save failed:', body)
+              return { ok: false, data: null }
+            })
+          )
+        )
+        const anyFailed = results.some(r => !r.ok)
+        if (!anyFailed) {
+          setSaveError('')
+          const newRecords = results.map(r => r.data).filter(Boolean) as AvailabilityRecord[]
           const updatedGeneral = [
             ...generalSlots.filter(a => !a.id.startsWith('temp-')),
-            ...(data as AvailabilityRecord[]),
+            ...newRecords,
           ]
           onAvailabilityChange([...otherRecords, ...updatedGeneral])
+        } else {
+          // One or more saves failed — revert optimistic UI back to last persisted state
+          setSaveError('Failed to save. Please try again.')
+          setLocalGeneral(generalSlots)
         }
       } else {
         const idsToDelete = slots
@@ -141,14 +155,24 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
 
         if (idsToDelete.length === 0) return
 
-        const { error } = await supabase
-          .from('availability')
-          .delete()
-          .in('id', idsToDelete)
-
-        if (!error) {
+        const results = await Promise.all(
+          idsToDelete.map(id =>
+            fetch(`/api/teacher/availability/${id}`, { method: 'DELETE' }).then(async r => {
+              if (r.ok || r.status === 404) return true
+              const body = await r.json().catch(() => ({}))
+              console.error('[GeneralAvailability] delete failed:', body)
+              return false
+            })
+          )
+        )
+        if (results.every(Boolean)) {
+          setSaveError('')
           const updatedGeneral = generalSlots.filter(a => !idsToDelete.includes(a.id))
           onAvailabilityChange([...otherRecords, ...updatedGeneral])
+        } else {
+          // One or more deletes failed — revert optimistic UI
+          setSaveError('Failed to remove slot(s). Please try again.')
+          setLocalGeneral(generalSlots)
         }
       }
     }
@@ -162,6 +186,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
     isDragging.current = true
     dragMode.current = active ? 'off' : 'on'
     draggedSlots.current = new Set()
+    setSaveError('')
     applySlotLocally(dayName, hour, minute)
   }
 
@@ -193,7 +218,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           end_time: endTime,
           is_available: true,
           start_at: null,
-  end_at: null,
+          end_at: null,
         }
         setLocalGeneral(prev => [...prev, tempRecord])
       }
@@ -215,6 +240,12 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           Click or click and drag to select multiple slots. Orange = available.
         </p>
       </div>
+
+      {saveError && (
+        <p style={{ fontSize: '13px', color: '#DC2626', marginBottom: '12px', padding: '8px 12px', backgroundColor: '#FEF2F2', borderRadius: '6px', border: '1px solid #FECACA' }}>
+          {saveError}
+        </p>
+      )}
 
       <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'auto' }}>
@@ -248,7 +279,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                         onDragStart={e => e.preventDefault()}
                         style={{
                           width: '90px',
-                          height: '20px', // shorter rows for 30-min increments
+                          height: '20px',
                           borderRadius: '4px',
                           border: active ? '1px solid #FF8303' : '1px solid #E5E7EB',
                           backgroundColor: active ? '#FF8303' : '#F3F4F6',

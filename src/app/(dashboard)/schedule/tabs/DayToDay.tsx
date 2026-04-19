@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
@@ -100,9 +100,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
-  const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null)
+  // Store as strings so useMemo gets stable primitive deps — Date objects are never ===
+  const [visibleRange, setVisibleRange] = useState<{ start: string; end: string } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [exportMsg, setExportMsg] = useState('')
+  const [actionError, setActionError] = useState('')
 
   async function fetchClassesForRange(startStr: string, endStr: string) {
     setIsLoading(true)
@@ -127,16 +129,24 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     setIsLoading(false)
   }
 
-  function buildEvents() {
+  // Memoised so FullCalendar only receives a new events array when the underlying
+  // data actually changes — not on every state update (mode, isSaving, actionError, etc.).
+  // Without this, every button click causes FullCalendar to re-render its grid,
+  // cancelling in-flight selections and resetting the scroll position (Issue 5).
+  const calendarEvents = useMemo(() => {
     const events: object[] = []
 
-    // 1. Weekly recurring slots — soft orange background tint, no text, never stacks
+    // 1. Weekly recurring slots — soft orange background tint
     if (visibleRange) {
       const generalSlots = availability.filter(a => a.type === 'general')
-      events.push(...expandGeneralSlots(generalSlots, visibleRange.start, visibleRange.end))
+      events.push(...expandGeneralSlots(
+        generalSlots,
+        new Date(visibleRange.start),
+        new Date(visibleRange.end),
+      ))
     }
 
-    // 2. Specific availability — solid green block, no label needed
+    // 2. Specific availability — solid green block
     availability
       .filter(a => a.type === 'specific' && a.is_available)
       .forEach(a => {
@@ -153,7 +163,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         })
       })
 
-    // 3. Unavailability — solid red block, no label needed
+    // 3. Unavailability — solid red block
     availability
       .filter(a => (a.type === 'specific' || a.type === 'holiday') && !a.is_available)
       .forEach(a => {
@@ -185,7 +195,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     })
 
     return events
-  }
+  }, [availability, classes, visibleRange?.start, visibleRange?.end])
 
   // Click a green or red block to delete it
   async function handleEventClick(info: any) {
@@ -195,14 +205,18 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const today = toLocalDateStr(new Date())
     if (eventStart < today) return
 
+    setActionError('')
     setPendingDelete(recordId)
   }
 
   async function confirmDelete() {
     if (!pendingDelete) return
-    const { error } = await supabase.from('availability').delete().eq('id', pendingDelete)
-    if (!error) {
+    const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
+    if (res.ok) {
       onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
+    } else {
+      const body = await res.json().catch(() => ({}))
+      setActionError(body.error ?? 'Failed to remove block. Please try again.')
     }
     setPendingDelete(null)
   }
@@ -234,7 +248,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `lingualink-classes-${visibleRange ? toLocalDateStr(visibleRange.start) : 'week'}.ics`
+    a.download = `lingualink-classes-${visibleRange ? visibleRange.start.slice(0, 10) : 'week'}.ics`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -246,21 +260,25 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const selectedDate = info.startStr.slice(0, 10)
     if (selectedDate < today) return
     setIsSaving(true)
+    setActionError('')
 
-    const { data, error } = await supabase
-      .from('availability')
-      .insert({
+    const res = await fetch('/api/teacher/availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         teacher_id: profile.id,
         type: 'specific',
         start_at: info.startStr,
         end_at: info.endStr,
         is_available: mode === 'available',
-      })
-      .select()
-      .single()
-
-    if (!error && data) {
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
       onAvailabilityChange([...availability, data as AvailabilityRecord])
+    } else {
+      const body = await res.json().catch(() => ({}))
+      setActionError(body.error ?? 'Failed to save. Please try again.')
     }
 
     setIsSaving(false)
@@ -339,9 +357,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           Export to Calendar
         </button>
       </div>
+
       {exportMsg && (
         <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px', textAlign: 'right' }}>
           {exportMsg}
+        </p>
+      )}
+
+      {actionError && (
+        <p style={{ fontSize: '13px', color: '#DC2626', marginBottom: '8px', padding: '8px 12px', backgroundColor: '#FEF2F2', borderRadius: '6px', border: '1px solid #FECACA' }}>
+          {actionError}
         </p>
       )}
 
@@ -384,10 +409,15 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           buttonText={{ prev: '←', next: '→' }}
           timeZone="local"
           datesSet={info => {
-            setVisibleRange({ start: info.start, end: info.end })
+            // Only update state when the range actually changes — prevents unnecessary
+            // re-renders that would pass a new events array to FullCalendar mid-interaction.
+            setVisibleRange(prev => {
+              if (prev?.start === info.startStr && prev?.end === info.endStr) return prev
+              return { start: info.startStr, end: info.endStr }
+            })
             fetchClassesForRange(info.startStr, info.endStr)
           }}
-          events={buildEvents()}
+          events={calendarEvents}
           selectable={!!mode}
           selectMirror={true}
           select={handleDateSelect}

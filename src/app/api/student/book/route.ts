@@ -192,6 +192,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── 3b. Enforce 24-hour booking rule ─────────────────────────────────────────
+    const hoursUntilClass = (new Date(scheduledAt).getTime() - Date.now()) / (1000 * 60 * 60)
+    if (hoursUntilClass < 24) {
+      return NextResponse.json(
+        { error: 'Classes cannot be booked within 24 hours of the start time.' },
+        { status: 400 }
+      )
+    }
+
     // ── 4. Load the teacher's profile for emails ──────────────────────────────
     const { data: teacher, error: teacherError } = await supabase
       .from('profiles')

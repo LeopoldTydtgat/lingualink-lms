@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,9 +48,12 @@ function localTimeToUtcMs(dateStr: string, timeStr: string, timezone: string): n
     new Intl.DateTimeFormat('en-GB', { minute: '2-digit', timeZone: timezone }).format(guessUtc)
   )
 
-  // Step 3: Calculate the offset difference and adjust
+  // Step 3: Calculate the offset difference and adjust.
+  // diffMinutes is negative for timezones ahead of UTC (e.g. UTC+4: local is 4h ahead,
+  // so the UTC equivalent is earlier). Adding diffMinutes shifts the guess in the right
+  // direction: guess + diffMinutes moves backwards for positive offsets, forwards for negative.
   const diffMinutes = (h - localHour) * 60 + (m - localMinute)
-  return guessUtc.getTime() - diffMinutes * 60 * 1000
+  return guessUtc.getTime() + diffMinutes * 60 * 1000
 }
 
 // Check whether two time ranges overlap
@@ -87,8 +91,11 @@ export async function GET(req: NextRequest) {
   const weekEndDate = weekDates[6]
 
   // ── Fetch teacher's timezone ────────────────────────────────────────────────
+  // Use the admin client so RLS on profiles/availability does not block the student's session.
 
-  const { data: teacherProfile } = await supabase
+  const admin = createAdminClient()
+
+  const { data: teacherProfile } = await admin
     .from('profiles')
     .select('timezone')
     .eq('id', teacherId)
@@ -99,7 +106,7 @@ export async function GET(req: NextRequest) {
 
   // ── Fetch availability records ──────────────────────────────────────────────
 
-  const { data: availabilityData } = await supabase
+  const { data: availabilityData } = await admin
     .from('availability')
     .select('type, day_of_week, start_time, end_time, start_at, end_at, is_available')
     .eq('teacher_id', teacherId)
@@ -189,10 +196,11 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Block slots in the past
+    // Block slots within 24 hours (24-hour booking rule) or in the past
     const now = Date.now()
+    const cutoff = now + 24 * 60 * 60 * 1000
     for (const slot of slots) {
-      if (new Date(slot.startIso).getTime() < now) {
+      if (new Date(slot.startIso).getTime() < cutoff) {
         slot.available = false
       }
     }
