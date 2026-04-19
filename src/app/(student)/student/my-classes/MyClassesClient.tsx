@@ -227,7 +227,7 @@ export default function MyClassesClient({
         alignItems: 'center',
         marginBottom: '24px',
       }}>
-        <div>
+        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px' }}>
           <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
             My Classes
           </h1>
