@@ -241,6 +241,7 @@ export default function ChatWidget({
       sender_role: 'user',
       content: text,
       created_at: new Date().toISOString(),
+      read_at: null,
     }])
 
     const res = await fetch('/api/support/send', {
