@@ -167,7 +167,7 @@ export default function ProgressClient({
     <div className="p-6 max-w-5xl mx-auto space-y-8">
 
       {/* Page title */}
-      <div>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">My Progress</h1>
         <p className="text-sm text-gray-500 mt-1">Track your learning journey and skill development</p>
       </div>

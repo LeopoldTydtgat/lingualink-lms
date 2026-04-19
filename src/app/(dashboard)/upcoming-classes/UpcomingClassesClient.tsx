@@ -265,7 +265,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       )}
 
       <div className="flex items-center justify-between">
-        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px' }}>
+        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
           <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
           <p className="text-sm text-gray-500 mt-1">
             {classes.length} {classes.length === 1 ? 'class' : 'classes'} scheduled
