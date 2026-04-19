@@ -2,8 +2,6 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 
 export async function sendMessage(
   receiverId: string,
@@ -34,28 +32,6 @@ export async function sendMessage(
   })
 
   if (error) return { error: error.message }
-
-  // ── Email notification to the teacher/admin ──
-  const { data: recipientProfile } = await supabase
-    .from('profiles')
-    .select('full_name, email')
-    .eq('id', receiverId)
-    .single()
-
-  if (recipientProfile?.email) {
-    const subject = `Lingualink Online — New message from ${student.full_name}`
-    await resend.emails.send({
-      from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-      to: recipientProfile.email,
-      subject,
-      html: buildEmailTemplate({
-        recipientName: recipientProfile.full_name,
-        subject,
-        bodyHtml: newMessageEmailContent(student.full_name),
-        contactEmail: 'teachers@lingualinkonline.com',
-      }),
-    })
-  }
 
   revalidatePath('/student/messages')
   return { success: true }

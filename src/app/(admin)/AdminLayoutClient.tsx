@@ -12,6 +12,7 @@ import {
   CalendarDays,
   FileText,
   MessageSquare,
+  Headphones,
   CreditCard,
   BookOpen,
   Megaphone,
@@ -35,6 +36,7 @@ interface AdminLayoutClientProps {
   profile: Profile
   rightPanelStats: RightPanelStats
   unreadMessagesCount: number
+  unreadSupportCount: number
   children: React.ReactNode
 }
 
@@ -46,6 +48,7 @@ const navItems = [
   { href: '/admin/classes', label: 'Classes', icon: CalendarDays },
   { href: '/admin/reports', label: 'Reports', icon: FileText },
   { href: '/admin/messages', label: 'Messages', icon: MessageSquare },
+  { href: '/admin/support', label: 'Support', icon: Headphones },
   { href: '/admin/billing', label: 'Billing', icon: CreditCard },
   { href: '/admin/library', label: 'Library', icon: BookOpen },
   { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
@@ -58,6 +61,7 @@ export default function AdminLayoutClient({
   profile,
   rightPanelStats,
   unreadMessagesCount,
+  unreadSupportCount,
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
@@ -82,7 +86,12 @@ export default function AdminLayoutClient({
   const NavLink = ({ item }: { item: (typeof navItems)[0] }) => {
     const active = isActive(item.href, item.exact)
     const Icon = item.icon
-    const showBadge = item.href === '/admin/messages' && unreadMessagesCount > 0
+    const showBadge =
+          (item.href === '/admin/messages' && unreadMessagesCount > 0) ||
+          (item.href === '/admin/support' && unreadSupportCount > 0)
+
+        const badgeCount =
+          item.href === '/admin/messages' ? unreadMessagesCount : unreadSupportCount
     return (
       <Link
         href={item.href}
@@ -114,7 +123,7 @@ export default function AdminLayoutClient({
               lineHeight: 1,
             }}
           >
-            {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+            {badgeCount > 99 ? '99+' : badgeCount}
           </span>
         )}
       </Link>

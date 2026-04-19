@@ -73,6 +73,7 @@ export default async function AdminLayout({
     invoicesRes,
     announcementRes,
     unreadMessagesRes,
+    unreadSupportRes,
   ] = await Promise.all([
     // Classes today (excluding cancelled)
     supabase
@@ -118,6 +119,13 @@ export default async function AdminLayout({
       .from('messages')
       .select('id', { count: 'exact', head: true })
       .is('read_at', null),
+
+    // Unread support messages count for the Support nav badge
+    adminDb
+      .from('support_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('sender_role', 'user')
+      .is('read_at', null),
   ])
 
   const classesTodayCount = (todayRes.data ?? []).filter(
@@ -138,12 +146,14 @@ export default async function AdminLayout({
   }
 
   const unreadMessagesCount = unreadMessagesRes.count ?? 0
+  const unreadSupportCount = unreadSupportRes.count ?? 0
 
   return (
     <AdminLayoutClient
       profile={profile}
       rightPanelStats={rightPanelStats}
       unreadMessagesCount={unreadMessagesCount}
+      unreadSupportCount={unreadSupportCount}
     >
       {children}
     </AdminLayoutClient>
