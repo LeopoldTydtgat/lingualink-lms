@@ -93,7 +93,7 @@ export default function AnnouncementsClient({
   return (
     <div className="p-6 max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-xl font-bold text-gray-900">Announcements</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -120,9 +120,10 @@ export default function AnnouncementsClient({
       {/* Active announcements */}
       {active.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Active ({active.length})
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '13px', fontWeight: '600', color: '#6b7280', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>ACTIVE ({active.length})</h2>
+          </div>
           <div className="space-y-3">
             {active.map((a) => (
               <AnnouncementRow
@@ -141,9 +142,10 @@ export default function AnnouncementsClient({
       {/* Inactive announcements */}
       {inactive.length > 0 && (
         <section>
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-            Inactive ({inactive.length})
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '13px', fontWeight: '600', color: '#6b7280', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>INACTIVE ({inactive.length})</h2>
+          </div>
           <div className="space-y-3">
             {inactive.map((a) => (
               <AnnouncementRow

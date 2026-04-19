@@ -59,7 +59,7 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   return (
     <div className="p-6 max-w-5xl mx-auto">
 
-      <div className="mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Class Reports</h1>
         <p className="text-sm text-gray-500 mt-1">
           Complete a report within 12 hours of each class ending.
@@ -67,9 +67,12 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
       </div>
 
       {/* Pending reports */}
-      <section className="mb-10">
+      <section>
         <div className="flex items-center gap-3 mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">Pending Reports</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Pending Reports</h2>
+          </div>
           {pendingReports.length > 0 && (
             <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">
               {pendingReports.length}
@@ -88,10 +91,15 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
         )}
       </section>
 
+      <div style={{ borderTop: '1px solid #E0DFDC', marginTop: '24px', marginBottom: '24px' }} />
+
       {/* Completed reports */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">Completed Reports</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Completed Reports</h2>
+          </div>
           <input
             type="text"
             placeholder="Search by student name..."

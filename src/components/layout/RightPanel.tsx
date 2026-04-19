@@ -102,14 +102,15 @@ export default function RightPanel({
   const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 15 * 60
 
   return (
-    <aside className="w-72 bg-white border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto">
+    <aside className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}
-        <section className="bg-gray-50 rounded-xl p-4 border border-brand-grey">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            Next Class
-          </p>
+        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+          <div className="flex items-center gap-2 mb-2">
+            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Next Class</p>
+          </div>
 
           {!nextLesson ? (
             <p className="text-sm text-gray-500">No upcoming classes</p>
@@ -163,10 +164,11 @@ export default function RightPanel({
         </section>
 
         {/* ── BILLING SUMMARY ── */}
-        <section className="bg-gray-50 rounded-xl p-4 border border-brand-grey">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-            Billing
-          </p>
+        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+          <div className="flex items-center gap-2 mb-2">
+            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Billing</p>
+          </div>
           <div className="space-y-1">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Current month</span>
@@ -193,8 +195,9 @@ export default function RightPanel({
         </section>
 
         {/* ── WHAT'S NEW ── */}
-        <section className="bg-gray-50 rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 border border-brand-grey">
           <div className="flex items-center gap-2 mb-2">
+            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
             <Bell size={14} className="text-gray-400" />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
               What&apos;s New

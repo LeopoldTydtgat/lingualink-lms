@@ -172,7 +172,7 @@ export default function DashboardClient({
     <div className="p-6 space-y-6">
 
       {/* ── page header ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -232,7 +232,10 @@ export default function DashboardClient({
         {/* Left: live classes feed */}
         <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-800 text-sm">Today&apos;s Classes</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Today&apos;s Classes</h2>
+            </div>
             <span className="text-xs text-gray-400">{todayLabel} · SAST</span>
           </div>
 
@@ -279,9 +282,10 @@ export default function DashboardClient({
         {/* Right: pending + flagged reports */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 flex flex-col">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-800 text-sm">
-              Pending Reports
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Pending Reports</h2>
+            </div>
             <Link
               href="/admin/reports?filter=pending"
               className="text-xs hover:underline"

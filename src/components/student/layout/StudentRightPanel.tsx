@@ -53,14 +53,6 @@ function isJoinable(isoString: string, now: number): boolean {
   return secondsUntil <= 600 // 10 minutes
 }
 
-const SECTION_LABEL: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: '600',
-  color: '#9ca3af',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  marginBottom: '8px',
-}
 
 export default function StudentRightPanel({
   studentId: _studentId,
@@ -95,20 +87,23 @@ export default function StudentRightPanel({
       style={{
         width: '240px',
         minWidth: '240px',
-        backgroundColor: '#ffffff',
+        backgroundColor: '#f9fafb',
         borderLeft: '1px solid #E0DFDC',
-        padding: '20px 16px',
+        padding: '16px 12px',
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
+        gap: '12px',
         flexShrink: 0,
       }}
     >
 
       {/* â”€â”€ Next Class â”€â”€ */}
-      <div>
-        <p style={SECTION_LABEL}>Next Class</p>
+      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Next Class</p>
+        </div>
 
         {nextLesson ? (
           <>
@@ -178,8 +173,11 @@ export default function StudentRightPanel({
       </div>
 
       {/* â”€â”€ Hours Remaining â”€â”€ */}
-      <div>
-        <p style={SECTION_LABEL}>Hours Remaining</p>
+      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Hours Remaining</p>
+        </div>
 
         <p style={{
           fontSize: '18px',
@@ -203,16 +201,22 @@ export default function StudentRightPanel({
       </div>
 
       {/* â”€â”€ Training End Date â”€â”€ */}
-      <div>
-        <p style={SECTION_LABEL}>Training Ends</p>
+      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Training Ends</p>
+        </div>
         <p style={{ fontSize: '13px', color: '#6b7280' }}>
           {trainingEndDate ? formatEndDate(trainingEndDate) : '--'}
         </p>
       </div>
 
       {/* â”€â”€ Exercises Progress â”€â”€ */}
-      <div>
-        <p style={SECTION_LABEL}>My Exercises</p>
+      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>My Exercises</p>
+        </div>
 
         <div style={{
           height: '6px',

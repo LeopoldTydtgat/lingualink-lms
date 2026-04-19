@@ -641,7 +641,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
     <div style={{ padding: '32px', maxWidth: '800px' }}>
 
       {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111' }}>
           My Account
         </h1>

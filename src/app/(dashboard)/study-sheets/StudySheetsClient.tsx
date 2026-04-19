@@ -58,7 +58,7 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
+        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
           <h1 className="text-2xl font-semibold text-gray-900">Study Sheets & Exercises</h1>
           <p className="text-sm text-gray-500 mt-1">{studySheets.length} sheets in library</p>
         </div>
