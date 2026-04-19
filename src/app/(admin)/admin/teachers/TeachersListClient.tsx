@@ -76,7 +76,7 @@ export default function TeachersListClient({ teachers }: Props) {
   return (
     <div className="p-6">
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Teachers</h1>
           <p className="text-sm text-gray-500 mt-0.5">

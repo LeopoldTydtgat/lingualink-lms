@@ -236,8 +236,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     <div className="p-6 max-w-6xl">
 
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Study Library</h1>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Study Library</h1>
+        </div>
         <button
           onClick={() => { setEditingSheet(null); setShowForm(true) }}
           className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg text-white font-medium"
