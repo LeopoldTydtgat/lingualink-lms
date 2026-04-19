@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string }
@@ -29,8 +28,6 @@ function todayStr(): string {
 }
 
 export default function Holidays({ profile, availability, onAvailabilityChange }: Props) {
-  const supabase = createClient()
-
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -61,21 +58,22 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const { data, error: dbError } = await supabase
-      .from('availability')
-      .insert({
+    const res = await fetch('/api/teacher/availability', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         teacher_id: profile.id,
         type: 'holiday',
         start_at: start,
         end_at: end,
         is_available: false,
-      })
-      .select()
-      .single()
+      }),
+    })
 
-    if (dbError) {
+    if (!res.ok) {
       setError('Failed to save. Please try again.')
-    } else if (data) {
+    } else {
+      const data = await res.json()
       onAvailabilityChange([...availability, data as AvailabilityRecord])
       setFromDate('')
       setToDate('')
@@ -90,8 +88,8 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
 
   async function confirmDelete() {
     if (!pendingDelete) return
-    const { error: dbError } = await supabase.from('availability').delete().eq('id', pendingDelete)
-    if (!dbError) {
+    const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
+    if (res.ok) {
       onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
     }
     setPendingDelete(null)

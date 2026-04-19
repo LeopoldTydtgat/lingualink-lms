@@ -74,6 +74,7 @@ type FormData = {
   street_address: string
   area_code: string
   city: string
+  preferred_payment_type: string
   paypal_email: string
   iban: string
   bic: string
@@ -98,7 +99,7 @@ const EMPTY_FORM: FormData = {
   status: 'current', contract_start: '', orientation_date: '',
   observed_lesson_date: '', title: '', date_of_birth: '', gender: '',
   nationality: '', phone: '', street_address: '', area_code: '', city: '',
-  paypal_email: '', iban: '', bic: '', vat_required: false, tax_number: '',
+  preferred_payment_type: 'bank', paypal_email: '', iban: '', bic: '', vat_required: false, tax_number: '',
   hourly_rate: '', currency: 'EUR', native_languages: [], teaching_languages: [],
   qualifications: '', specialties: '', bio: '', quote: '',
   admin_notes: '', follow_up_date: '', follow_up_reason: '',
@@ -394,6 +395,13 @@ export default function CreateTeacherClient() {
           <div className="border-t border-gray-100 pt-4">
             <p className="text-sm font-semibold text-gray-700 mb-3">Payment Details</p>
             <div className="space-y-4">
+              <Field label="Preferred Payment Type">
+                <select className={selectClass} value={form.preferred_payment_type}
+                  onChange={(e) => set('preferred_payment_type', e.target.value)}>
+                  <option value="bank">Bank Transfer</option>
+                  <option value="paypal">PayPal</option>
+                </select>
+              </Field>
               <Field label="PayPal Email">
                 <input type="email" className={inputClass} value={form.paypal_email}
                   onChange={(e) => set('paypal_email', e.target.value)} />
