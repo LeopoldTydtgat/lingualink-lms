@@ -302,11 +302,13 @@ export default function AdminExportsPage() {
 
   return (
     <div style={{ padding: '32px', maxWidth: '1000px' }}>
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: 0 }}>Data Exports</h1>
-        <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
-          Download CSV reports for analysis in Excel or Google Sheets. Use the filters to narrow by date, teacher, or student.
-        </p>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: 0 }}>Data Exports</h1>
+          <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+            Download CSV reports for analysis in Excel or Google Sheets. Use the filters to narrow by date, teacher, or student.
+          </p>
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

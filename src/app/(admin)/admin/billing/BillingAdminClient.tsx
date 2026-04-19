@@ -484,8 +484,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       )}
 
       {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Billing &amp; Invoices</h1>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Billing &amp; Invoices</h1>
+        </div>
       </div>
 
       {/* Tab switcher */}

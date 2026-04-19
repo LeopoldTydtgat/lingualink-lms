@@ -343,9 +343,10 @@ export default function AdminLayoutClient({
 
         {/* Right panel */}
         <aside className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto">
-          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">
-            At a Glance
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>At a Glance</p>
+          </div>
           <div className="space-y-3">
             {panelWidgets.map((w) => (
               <Link key={w.label} href={w.href} prefetch={false}>

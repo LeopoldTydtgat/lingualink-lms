@@ -159,7 +159,7 @@ export default function AdminTasksPage() {
     <div style={{ padding: '32px', maxWidth: '1200px' }}>
 
       {/* ── Page header ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: 0 }}>Tasks</h1>
           <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
