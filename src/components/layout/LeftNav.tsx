@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard,
@@ -41,12 +42,46 @@ const navItems: NavItem[] = [
 type LeftNavProps = {
   userRole: string
   unreadMessageCount?: number
+  userId?: string
 }
 
-export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavProps) {
+export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: LeftNavProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const [liveUnreadCount, setLiveUnreadCount] = useState(unreadMessageCount)
+
+  useEffect(() => {
+    setLiveUnreadCount(unreadMessageCount)
+  }, [unreadMessageCount])
+
+  useEffect(() => {
+    if (!userId) return
+
+    const channel = supabase
+      .channel(`nav-unread-${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${userId}`,
+      }, () => {
+        setLiveUnreadCount(prev => prev + 1)
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${userId}`,
+      }, (payload) => {
+        if (payload.new.read_at && !payload.old.read_at) {
+          setLiveUnreadCount(prev => Math.max(0, prev - 1))
+        }
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [userId, supabase])
 
   const isAdmin = userRole === 'admin'
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin)
@@ -99,12 +134,12 @@ export default function LeftNav({ userRole, unreadMessageCount = 0 }: LeftNavPro
                 />
                 {item.label}
 
-                {item.label === 'Messages' && unreadMessageCount > 0 && (
+                {item.label === 'Messages' && liveUnreadCount > 0 && (
                   <span
                     className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
                     style={{ backgroundColor: active ? 'rgba(255,255,255,0.35)' : '#FF8303', fontSize: '10px' }}
                   >
-                    {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
+                    {liveUnreadCount > 9 ? '9+' : liveUnreadCount}
                   </span>
                 )}
               </Link>

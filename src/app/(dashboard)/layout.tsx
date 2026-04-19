@@ -7,8 +7,7 @@ import TopHeader from '@/components/layout/TopHeader'
 import RightPanel from '@/components/layout/RightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
-import ChatWidget, { TEACHER_FAQS } from '@/components/ChatWidget'
-import { sendMessage, markMessagesAsRead } from '@/app/(dashboard)/messages/actions'
+import ChatWidget from '@/components/ChatWidget'
 
 export default async function DashboardLayout({
   children,
@@ -129,6 +128,7 @@ export default async function DashboardLayout({
       <LeftNav
         userRole={profile?.role ?? 'teacher'}
         unreadMessageCount={unreadCount ?? 0}
+        userId={user.id}
       />
 
       {/* Right side: header on top, then content row below */}
@@ -158,16 +158,15 @@ export default async function DashboardLayout({
         </div>
       </div>
 
-      <ChatWidget
-        currentUserId={profile?.id ?? ''}
-        currentUserName={profile?.full_name ?? 'Teacher'}
-        adminProfileId={adminProfile?.id ?? null}
-        adminName={adminProfile?.full_name ?? 'Admin'}
-        adminPhotoUrl={adminProfile?.photo_url ?? null}
-        faqs={TEACHER_FAQS}
-        sendMessageAction={sendMessage}
-        markAsReadAction={markMessagesAsRead}
-      />
+      {profile?.role !== 'admin' && (
+        <ChatWidget
+          participantId={profile?.id ?? ''}
+          participantType="teacher"
+          participantAuthId={user.id}
+          adminName={adminProfile?.full_name ?? 'Shannon'}
+          adminPhotoUrl={adminProfile?.photo_url ?? null}
+        />
+      )}
     </div>
   )
 }

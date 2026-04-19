@@ -1,5 +1,6 @@
 // src/app/(dashboard)/messages/page.tsx
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
 
@@ -10,6 +11,7 @@ interface PageProps {
 
 export default async function MessagesPage({ searchParams }: PageProps) {
   const supabase = await createClient()
+  const admin = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
@@ -134,9 +136,9 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     else profileContactIds.push(id)
   }
 
-  // Fetch student details for student contacts
+  // Use admin client — RLS blocks teacher role from reading students table directly
   const { data: studentDetails } = studentContactIds.length > 0
-    ? await supabase
+    ? await admin
         .from('students')
         .select('id, full_name, email, photo_url')
         .in('id', studentContactIds)
@@ -171,12 +173,36 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     new Date(a.latestMessage.created_at).getTime()
   )
 
-  // All active students â€” used for the "New Message" picker
-  const { data: allStudents } = await supabase
-    .from('students')
-    .select('id, full_name, email, photo_url')
-    .eq('is_active', true)
-    .order('full_name')
+  // Only students assigned to this teacher via active trainings
+  // Admin sees all students; teachers only see their own
+  let allStudents: { id: string; full_name: string; email: string; photo_url: string | null }[] = []
+
+  if (profile.role === 'admin') {
+    const { data } = await supabase
+      .from('students')
+      .select('id, full_name, email, photo_url')
+      .eq('is_active', true)
+      .order('full_name')
+    allStudents = data || []
+  } else {
+    // Use admin client — RLS blocks teacher role from reading these tables directly
+    const { data: assignedTrainings } = await admin
+      .from('trainings')
+      .select('student_id')
+      .eq('teacher_id', profile.id)
+
+    const assignedIds = (assignedTrainings ?? []).map((t: { student_id: string }) => t.student_id)
+
+    if (assignedIds.length > 0) {
+      const { data } = await admin
+        .from('students')
+        .select('id, full_name, email, photo_url')
+        .in('id', assignedIds)
+        .eq('is_active', true)
+        .order('full_name')
+      allStudents = data || []
+    }
+  }
 
   return (
     <MessagesClient

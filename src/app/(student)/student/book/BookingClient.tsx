@@ -443,13 +443,20 @@ function StepDateTime({
     weekDays.push(d)
   }
 
-  // Check if a slot at index `slotIndex` within a day can be the start of a booking
-  // For 60 min: this slot AND the next must both be available
-  // For 90 min: this slot AND the next two must all be available
+  // Pre-compute the selected booking window so slot rendering can highlight the full range
+  const selectedStartMs = selectedStartIso ? new Date(selectedStartIso).getTime() : null
+
+  // Check if a slot at index `slotIndex` within a day can be the start of a booking.
+  // Requires slotsNeeded consecutive 30-minute slots that are all available AND
+  // actually adjacent in time (no gaps — teacher might have non-contiguous availability).
   function isBookableStart(daySlots: Slot[], slotIndex: number): boolean {
     for (let i = 0; i < slotsNeeded; i++) {
       const s = daySlots[slotIndex + i]
       if (!s || !s.available) return false
+      if (i > 0) {
+        const expectedMs = new Date(daySlots[slotIndex + i - 1].startIso).getTime() + 30 * 60 * 1000
+        if (new Date(s.startIso).getTime() !== expectedMs) return false
+      }
     }
     return true
   }
@@ -597,7 +604,10 @@ function StepDateTime({
                   )}
                   {daySlots.map((slot, i) => {
                     const canBook = !isPast && isBookableStart(daySlots, i)
-                    const isSelected = selectedStartIso === slot.startIso
+                    const slotStartMs = new Date(slot.startIso).getTime()
+                    const isSelected = selectedStartMs !== null &&
+                      slotStartMs >= selectedStartMs &&
+                      slotStartMs < selectedStartMs + durationMinutes * 60 * 1000
 
                     // Don't render unavailable slots that also can't be booked
                     if (!slot.available && !canBook) return null

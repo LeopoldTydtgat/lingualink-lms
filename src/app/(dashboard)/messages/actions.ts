@@ -2,8 +2,6 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { revalidatePath } from 'next/cache'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 
 export async function sendMessage(
   receiverId: string,
@@ -37,53 +35,6 @@ export async function sendMessage(
   })
 
   if (error) return { error: error.message }
-
-  // ── Send email notification to the recipient ────────────────────────────────
-  // Look up the recipient's name and email from the correct table
-  let recipientName = ''
-  let recipientEmail = ''
-
-  if (receiverType === 'student') {
-    const { data: student } = await supabase
-      .from('students')
-      .select('full_name, email')
-      .eq('id', receiverId)
-      .single()
-
-    if (student) {
-      recipientName = student.full_name
-      recipientEmail = student.email
-    }
-  } else {
-    // teacher or admin — both live in profiles
-    const { data: recipientProfile } = await supabase
-      .from('profiles')
-      .select('full_name, email')
-      .eq('id', receiverId)
-      .single()
-
-    if (recipientProfile) {
-      recipientName = recipientProfile.full_name
-      recipientEmail = recipientProfile.email
-    }
-  }
-
-  // Only send if we found a valid email address
-  if (recipientEmail) {
-    const subject = `Lingualink Online — New message from ${profile.full_name}`
-
-    await resend.emails.send({
-      from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-      to: recipientEmail,
-      subject,
-      html: buildEmailTemplate({
-        recipientName,
-        subject,
-        bodyHtml: newMessageEmailContent(profile.full_name),
-        contactEmail: receiverType === 'student' ? 'support@lingualinkonline.com' : 'teachers@lingualinkonline.com',
-      }),
-    })
-  }
 
   revalidatePath('/messages')
   return { success: true }

@@ -1,6 +1,73 @@
 # LinguaLink Online - Build Journal
 
 
+## Session 55 - 19 April 2026 - Support Chat, Messaging Fixes and Live Nav Badges
+
+### What was built
+- src/components/ChatWidget.tsx - fully decoupled from left nav Messages tab; writes to support_messages table only; fetches FAQs from DB filtered by participant_type; unread badge on bubble; marks admin messages as read on open; temp message replaced with real DB message so ticks flip correctly
+- src/app/api/support/send/route.ts - new API route writing to support_messages; all message notification emails removed
+- src/app/(admin)/admin/support/page.tsx - new admin support inbox; conversations grouped by participant; the client can read and reply to teacher support messages
+- src/app/(admin)/admin/support/AdminSupportClient.tsx - two-panel support UI with FAQs tab; the client can add/edit/delete/toggle FAQs; read ticks on sent messages; conversation unread badge clears on open; realtime UPDATE listener for tick flips; student FAQ audience options removed
+- src/app/(admin)/AdminLayoutClient.tsx - Support nav item added with unread badge
+- src/app/(admin)/layout.tsx - unread support messages count added and passed to AdminLayoutClient
+- src/app/(student)/student/layout.tsx - ChatWidget removed from student portal entirely
+- src/app/(dashboard)/layout.tsx - ChatWidget hidden for admin role; userId passed to LeftNav
+- src/app/(dashboard)/messages/actions.ts - message notification emails removed; booking and cancellation emails untouched
+- src/app/(student)/student/messages/actions.ts - message notification emails removed
+- src/app/(dashboard)/messages/page.tsx - createAdminClient added; student name lookups and assigned student queries switched to admin client fixing Unknown contact bug and teacher student search; allStudents filtered to assigned students only via trainings table
+- src/components/layout/LeftNav.tsx - userId prop added; realtime Supabase subscription updates unread badge live without page refresh
+- src/components/student/layout/StudentLeftNav.tsx - unreadMessageCount prop and badge added; userId prop added; realtime subscription updates badge live
+- src/app/(student)/student/layout.tsx - unread message count query added; userId and unreadMessageCount passed to StudentLeftNav
+- src/app/(admin)/admin/messages/AdminMessagesClient.tsx - ReadTicks component added; realtime UPDATE listener added; ticks show on sent messages
+- src/app/(student)/student/messages/StudentMessagesClient.tsx - formatTime and date separator fixed to use manual string construction
+- Supabase SQL editor - support_user_mark_read RLS policy added on support_messages table allowing participants to mark their own messages as read
+
+### Break/Fix Log
+Issue 1: Support chat bubble badge persisting after reading on refresh / Cause: RLS policy missing - teacher update to mark admin messages as read was silently blocked / Fix: added support_user_mark_read policy on support_messages / Lesson: Supabase silently blocks writes with no error when RLS is missing - always verify before assuming a write failed
+
+Issue 2: Student contact showing as Unknown in teacher Messages / Cause: regular Supabase client blocked by RLS from reading students table / Fix: switched all student lookups in messages/page.tsx to createAdminClient() / Lesson: never use the regular client for reads on restricted tables
+
+Issue 3: Teacher could not find assigned students in New Message picker / Cause: same RLS block on trainings and students queries / Fix: switched both to createAdminClient() / Lesson: same as above
+
+Issue 4: Tick never flipping from grey to orange on support chat / Cause: optimistic update used a temp UUID that realtime UPDATE could not match to the real DB record / Fix: replaced temp message with real DB message returned from API response / Lesson: optimistic messages must be replaced with real DB records before relying on realtime UPDATE matching
+
+Issue 5: Nav badges requiring page refresh to clear / Cause: unread counts were static server-side props / Fix: added Supabase realtime subscriptions in LeftNav and StudentLeftNav listening for INSERT and UPDATE on messages table / Lesson: static server props need realtime subscriptions on the client side for live badge updates
+
+Issue 6: Runtime error on messages page after edits / Cause: stale Turbopack cache / Fix: deleted .next directory and restarted dev server / Lesson: clear .next when Turbopack throws reference errors that do not match actual code
+
+### Session result
+Support chat fully decoupled from regular messaging. Teachers contact the client via the bubble and messages land in a dedicated admin Support inbox separate from teacher/student Messages. FAQs managed by the client from the admin portal, teachers only. Message notification emails removed platform-wide to stay within Resend limits. Unknown student bug fixed, teacher student search fixed, live nav badges working without page refresh across all portals. Read ticks working on support chat, admin messages, and teacher and student portal messages.
+
+---
+
+
+## Session 54 - 18 April 2026 - Admin Messages, Login Cleanup, Email Logo Fix
+
+### What was built
+- src/app/(admin)/admin/messages/page.tsx - new server component, fetches all platform messages grouped by teacher/student conversation pair
+- src/app/(admin)/admin/messages/AdminMessagesClient.tsx - two-panel chat UI, the client can read and send into any thread, real-time via Supabase channel
+- src/app/(admin)/admin/messages/actions.ts - sendAdminMessage, markAdminThreadRead, getAdminThreadMessages server actions
+- src/app/(admin)/admin/layout.tsx - unread messages badge added to Messages nav item, Messages nav item added
+- src/app/(admin)/admin/messages/page.tsx - TS fix: attachments added to RawMessage type and Supabase select
+- src/app/(admin)/admin/teachers/create/CreateTeacherClient.tsx - preferred_payment_type field added to create form
+- src/app/login/page.tsx - subtitle removed, forgot password updated to teachers@lingualinkonline.com
+- src/app/(student)/student/login/page.tsx - subtitle removed, Teacher sign in here link removed, forgot password updated to support@lingualinkonline.com
+- src/lib/email/templates.ts - base64 logo replaced with hosted PNG URL
+- public/lingualink-logo-email.png - logo extracted from base64 and committed as static file
+
+### Break/Fix Log
+Issue 1: Admin messages hydration error — timestamp format differed between server and client / Cause: locale-dependent date formatting / Fix: replaced with hardcoded DAYS/MONTHS arrays and midnight-normalised calendar day diff / Lesson: never use toLocaleDateString() or toLocaleTimeString() in components that render on both server and client
+
+Issue 2: Build failed on PR — TS2322 type error in admin messages page / Cause: RawMessage type missing attachments field / Fix: added attachments to RawMessage interface and Supabase select column list / Lesson: always run npx tsc --noEmit before pushing
+
+Issue 3: Email logo not rendering in Gmail / Cause: base64 data URIs stripped by Gmail security / Fix: extracted PNG to public/ and referenced via hosted URL / Lesson: Gmail blocks base64 image URIs — always use hosted URLs. Final fix deferred to custom domain setup
+
+### Session result
+Admin messages section built and deployed - the client can now monitor and participate in all teacher/student conversations from the admin portal. Login pages cleaned up. Email logo partially fixed - will complete when custom domain is live.
+
+---
+
+
 ## Session 53 - 18 April 2026 - Admin Portal Fixes, Currency, First Login Flow & Profile Sync
 
 ### What was built
