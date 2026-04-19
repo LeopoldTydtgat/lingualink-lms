@@ -112,7 +112,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Page title */}
-      <div className="mb-6">
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Study</h1>
         <p className="text-sm text-gray-500 mt-1">
           Complete your assigned homework or practice independently.

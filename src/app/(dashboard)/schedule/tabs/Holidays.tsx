@@ -97,9 +97,10 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
 
   return (
     <div style={{ maxWidth: '600px' }}>
-      <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-        Holidays
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+        <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+        <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Holidays</h2>
+      </div>
       <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '24px' }}>
         Specify periods during which no new classes will be assigned to you.
         Already booked classes are not affected — if you have existing classes during
@@ -131,9 +132,10 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
         padding: '20px',
         marginBottom: '24px',
       }}>
-        <p style={{ fontSize: '13px', fontWeight: '600', color: '#374151', marginBottom: '12px' }}>
-          Add unavailability period
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Add unavailability period</h2>
+        </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div>
@@ -206,9 +208,10 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
 
       {/* Planned unavailability list */}
       <div>
-        <p style={{ fontSize: '13px', fontWeight: '600', color: '#374151', marginBottom: '12px' }}>
-          Planned Unavailability
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Planned Unavailability</h2>
+        </div>
 
         {holidays.length === 0 ? (
           <p style={{ fontSize: '13px', color: '#9CA3AF' }}>

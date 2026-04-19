@@ -291,16 +291,21 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     <div style={{ maxWidth: '720px', margin: '0 auto' }}>
 
       {/* Page title */}
-      <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
-        My Account
-      </h1>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '28px' }}>
-        Manage your profile, preferences, and account settings.
-      </p>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
+        <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
+          My Account
+        </h1>
+        <p style={{ fontSize: '14px', color: '#6b7280', margin: 0 }}>
+          Manage your profile, preferences, and account settings.
+        </p>
+      </div>
 
       {/* ── Profile Photo ── */}
       <div style={sectionCardStyle}>
-        <p style={sectionTitleStyle}>Profile Photo</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Profile Photo</h2>
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           {/* Avatar */}
@@ -372,7 +377,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
 
       {/* ── General Information ── */}
       <div style={sectionCardStyle}>
-        <p style={sectionTitleStyle}>General Information</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>General Information</h2>
+        </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
           <div>
@@ -431,7 +439,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
 
       {/* ── Learning Profile ── */}
       <div style={sectionCardStyle}>
-        <p style={sectionTitleStyle}>Learning Profile</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Learning Profile</h2>
+        </div>
 
         <div style={{ marginBottom: '16px' }}>
           <label style={labelStyle}>Learning Goals</label>
@@ -500,7 +511,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       {/* ── Hours & Training ── */}
       {activeTraining && (
         <div style={sectionCardStyle}>
-          <p style={sectionTitleStyle}>Hours &amp; Training</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Hours &amp; Training</h2>
+          </div>
 
           {/* Hours summary */}
           <div style={{
@@ -623,7 +637,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       {/* ── Training History ── */}
       {allTrainings.length > 0 && (
         <div style={sectionCardStyle}>
-          <p style={sectionTitleStyle}>Training History</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Training History</h2>
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {allTrainings.map(t => {
@@ -673,7 +690,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
 
       {/* ── Change Password ── */}
       <div style={sectionCardStyle}>
-        <p style={sectionTitleStyle}>Change Password</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Change Password</h2>
+        </div>
 
         <div style={{ maxWidth: '400px' }}>
           <div style={{ marginBottom: '14px' }}>
