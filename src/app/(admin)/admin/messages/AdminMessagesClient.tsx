@@ -85,6 +85,29 @@ function Avatar({ name, photoUrl, size = 10 }: {
   )
 }
 
+function ReadTicks({ readAt }: { readAt: string | null }) {
+  if (readAt) {
+    return (
+      <span className="inline-flex items-center gap-0.5 ml-1" aria-label="Read">
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
+          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center ml-1" aria-label="Sent">
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </span>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AdminMessagesClient({
@@ -150,6 +173,16 @@ export default function AdminMessagesClient({
               return [...prev, newMsg]
             })
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages' },
+        (payload) => {
+          const updated = payload.new as AdminMessage
+          setMessages(prev =>
+            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+          )
         }
       )
       .subscribe()
@@ -369,7 +402,10 @@ export default function AdminMessagesClient({
                               {formatTime(msg.created_at)}
                             </span>
                             {isAdmin && (
-                              <span className="text-xs text-gray-400">· Admin</span>
+                              <>
+                                <span className="text-xs text-gray-400">· Admin</span>
+                                <ReadTicks readAt={msg.read_at} />
+                              </>
                             )}
                           </div>
                         </div>
