@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
@@ -67,11 +67,53 @@ export default function AdminLayoutClient({
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [liveUnreadMessages, setLiveUnreadMessages] = useState(unreadMessagesCount)
+  const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-nav-unread')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+      }, (payload) => {
+        if (payload.new.read_at && !payload.old.read_at) {
+          setLiveUnreadMessages(prev => Math.max(0, prev - 1))
+        }
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+      }, () => {
+        setLiveUnreadMessages(prev => prev + 1)
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'support_messages',
+      }, (payload) => {
+        if (payload.new.read_at && !payload.old.read_at) {
+          setLiveUnreadSupport(prev => Math.max(0, prev - 1))
+        }
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_messages',
+      }, () => {
+        setLiveUnreadSupport(prev => prev + 1)
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -87,11 +129,11 @@ export default function AdminLayoutClient({
     const active = isActive(item.href, item.exact)
     const Icon = item.icon
     const showBadge =
-          (item.href === '/admin/messages' && unreadMessagesCount > 0) ||
-          (item.href === '/admin/support' && unreadSupportCount > 0)
+          (item.href === '/admin/messages' && liveUnreadMessages > 0) ||
+          (item.href === '/admin/support' && liveUnreadSupport > 0)
 
         const badgeCount =
-          item.href === '/admin/messages' ? unreadMessagesCount : unreadSupportCount
+          item.href === '/admin/messages' ? liveUnreadMessages : liveUnreadSupport
     return (
       <Link
         href={item.href}
