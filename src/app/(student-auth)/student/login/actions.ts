@@ -51,5 +51,5 @@ export async function studentLoginAction(formData: FormData) {
   }
 
   const returnUrl = (formData.get('returnUrl') as string) ?? ''
-  redirect(returnUrl.startsWith('/') ? returnUrl : '/student/dashboard')
+  redirect(returnUrl.startsWith('/') ? returnUrl : '/student/my-classes')
 }

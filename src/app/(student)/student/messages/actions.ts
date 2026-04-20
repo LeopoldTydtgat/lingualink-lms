@@ -6,7 +6,8 @@ import { revalidatePath } from 'next/cache'
 export async function sendMessage(
   receiverId: string,
   receiverType: 'teacher' | 'admin' | 'student',
-  content: string
+  content: string,
+  attachments?: Array<{ url: string; filename: string; size: number }>
 ) {
   const supabase = await createClient()
 
@@ -28,7 +29,7 @@ export async function sendMessage(
     receiver_id: receiverId,
     receiver_type: receiverType,
     content,
-    attachments: [],
+    attachments: attachments ?? [],
   })
 
   if (error) return { error: error.message }
