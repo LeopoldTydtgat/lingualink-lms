@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       teacherIds.length > 0
         ? adminClient
             .from('profiles')
-            .select('id, full_name, hourly_rate')
+            .select('id, full_name, hourly_rate, currency')
             .in('id', teacherIds)
         : Promise.resolve({ data: [], error: null }),
 

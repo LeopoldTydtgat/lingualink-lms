@@ -20,7 +20,7 @@ export default async function BillingPage() {
   // Fetch billing info server-side to avoid client 403
   const { data: billingInfo } = await supabase
     .from('profiles')
-    .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate')
+    .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate, currency')
     .eq('id', user.id)
     .single()
 

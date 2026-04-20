@@ -51,6 +51,7 @@ interface LessonRow {
   teacherName: string
   studentName: string
   hourlyRate: number
+  teacherCurrency: string
   cancellationPolicy: string | null
   companyId: string | null
   companyName: string | null
@@ -148,7 +149,7 @@ async function fetchBillingEntities(
   teacherIds: string[],
   studentIds: string[]
 ): Promise<{
-  teachers: { id: string; full_name: string; hourly_rate: number | null }[]
+  teachers: { id: string; full_name: string; hourly_rate: number | null; currency: string | null }[]
   students: { id: string; full_name: string; company_id: string | null; cancellation_policy: string | null }[]
 }> {
   const res = await fetch('/api/admin/billing/entities', {
@@ -273,14 +274,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       for (const c of cData || []) companyMap[c.id] = c.name
     }
 
-    const teacherMap: Record<string, { full_name: string; hourly_rate: number }> = {}
-    for (const t of tProfiles) teacherMap[t.id] = { full_name: t.full_name, hourly_rate: t.hourly_rate || 0 }
+    const teacherMap: Record<string, { full_name: string; hourly_rate: number; currency: string }> = {}
+    for (const t of tProfiles) teacherMap[t.id] = { full_name: t.full_name, hourly_rate: t.hourly_rate || 0, currency: t.currency ?? 'EUR' }
 
     const studentMap: Record<string, { full_name: string; company_id: string | null; cancellation_policy: string | null }> = {}
     for (const s of sRows) studentMap[s.id] = { full_name: s.full_name, company_id: s.company_id, cancellation_policy: s.cancellation_policy }
 
     return rawLessons.map(l => {
-      const t = teacherMap[l.teacher_id] || { full_name: 'Unknown', hourly_rate: 0 }
+      const t = teacherMap[l.teacher_id] || { full_name: 'Unknown', hourly_rate: 0, currency: 'EUR' }
       const s = studentMap[l.student_id] || { full_name: 'Unknown', company_id: null, cancellation_policy: null }
       const companyId = s.company_id
       const companyName = companyId ? (companyMap[companyId] || null) : null
@@ -289,6 +290,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
         teacherName: t.full_name,
         studentName: s.full_name,
         hourlyRate: t.hourly_rate,
+        teacherCurrency: t.currency,
         cancellationPolicy: s.cancellation_policy,
         companyId,
         companyName,
@@ -595,6 +597,8 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                   const lessonKey = `${inv.teacher_id}_${inv.billing_month}`
                   const lessonData = invoiceLessons[lessonKey] || []
                   const isLoadingThis = loadingLessons === lessonKey
+                  const teacherCur = lessonData[0]?.teacherCurrency
+                  const currSym = teacherCur === 'USD' ? '$' : teacherCur === 'GBP' ? '£' : '€'
 
                   return (
                     <div key={inv.id}>
@@ -613,7 +617,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                           {/* Right: amount, status, actions */}
                           <div className="flex items-center gap-4 flex-shrink-0">
                             <span className="text-sm font-medium text-gray-800">
-                              €{inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00'}
+                              {currSym}{inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00'}
                             </span>
 
                             <span
@@ -665,7 +669,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                         {markingPaidId === inv.id && (
                           <div className="mt-3 flex items-center gap-3 pl-0">
                             <p className="text-sm text-gray-600">
-                              Mark <strong>€{inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(inv.billing_month)}?
+                              Mark <strong>{currSym}{inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(inv.billing_month)}?
                             </p>
                             <button
                               onClick={() => handleMarkPaid(inv.id)}
@@ -710,14 +714,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                                     <span className="text-gray-500">{l.duration_minutes} min</span>
                                     <span className="text-xs font-medium" style={{ color: labelColor }}>{label}</span>
                                     <span className="text-right text-gray-700">
-                                      {billableToTeacher ? `€${amount.toFixed(2)}` : '—'}
+                                      {billableToTeacher ? `${l.teacherCurrency === 'USD' ? '$' : l.teacherCurrency === 'GBP' ? '£' : '€'}${amount.toFixed(2)}` : '—'}
                                     </span>
                                   </div>
                                 )
                               })}
                               <div className="flex justify-end mt-3 pt-2 border-t border-gray-200">
                                 <span className="text-sm font-semibold text-gray-900">
-                                  Total: €{lessonData.reduce((sum, l) => {
+                                  Total: {currSym}{lessonData.reduce((sum, l) => {
                                     const { billableToTeacher } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
                                     return billableToTeacher ? sum + lessonAmount(l.duration_minutes, l.hourlyRate) : sum
                                   }, 0).toFixed(2)}
