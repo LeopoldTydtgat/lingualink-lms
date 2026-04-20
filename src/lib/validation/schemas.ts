@@ -71,8 +71,7 @@ export const CreateTeacherSchema = z.object({
   currency: z.enum(['EUR', 'GBP', 'USD']).default('EUR').optional(),
   vat_required: z.boolean().optional().default(false),
   tax_number: z.string().max(100).optional().nullable(),
-  iban: z.string().max(50).optional().nullable(),
-  bic: z.string().max(20).optional().nullable(),
+  banking_details: z.string().max(2000).optional().nullable(),
   paypal_email: optionalEmail,
 
   // Admin-only HR fields
