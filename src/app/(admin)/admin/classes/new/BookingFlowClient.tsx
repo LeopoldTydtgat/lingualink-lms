@@ -364,7 +364,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
             </div>
           </div>
           <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
-            Time is stored as entered. Ensure you are entering the class time in the teacher&apos;s timezone ({selectedTeacher?.timezone ?? '—'}).
+            Time will be automatically converted from the teacher&apos;s timezone ({selectedTeacher?.timezone ?? '—'}) to UTC.
           </p>
           <button
             onClick={() => { if (selectedDate && selectedTime) setStep(5) }}
