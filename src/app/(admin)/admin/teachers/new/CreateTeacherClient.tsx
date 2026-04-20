@@ -256,13 +256,13 @@ export default function CreateTeacherClient() {
           </div>
 
           <Field label="Email Address">
-            <input type="email" className={inputClass} value={form.email}
+            <input type="email" autoComplete="off" className={inputClass} value={form.email}
               onChange={(e) => set('email', e.target.value)} />
           </Field>
 
           <Field label="Temporary Password">
             <div style={{ position: 'relative' }}>
-              <input type={showTempPassword ? 'text' : 'password'} className={inputClass + ' pr-10'} value={form.temp_password}
+              <input type={showTempPassword ? 'text' : 'password'} autoComplete="new-password" className={inputClass + ' pr-10'} value={form.temp_password}
                 onChange={(e) => set('temp_password', e.target.value)} />
               <button
                 type="button"

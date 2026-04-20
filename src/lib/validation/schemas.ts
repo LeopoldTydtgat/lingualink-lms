@@ -135,7 +135,6 @@ export const CreateStudentSchema = z.object({
   native_language: z.string().max(100).optional().nullable(),
   learning_language: z.string().max(100).optional().nullable(),
   current_fluency_level: z.enum(CEFR_LEVELS).optional().nullable(),
-  self_assessed_level: z.enum(CEFR_LEVELS).optional().nullable(),
   learning_goals: z.string().max(2000).optional().nullable(),
   interests: z.string().max(1000).optional().nullable(),
 
