@@ -1,5 +1,48 @@
 # LinguaLink Online - Build Journal
 
+## Session 57 - 20 April 2026 - Custom Domain, Auth Fixes & Form Improvements
+
+### What was built
+
+- Custom domain app.lingualinkonline.com configured in Vercel and DNS CNAME record added by domain manager - domain live and green with valid SSL certificate
+- NEXT_PUBLIC_SITE_URL updated in Vercel environment variables from http://localhost:3000 to https://app.lingualinkonline.com
+- Supabase URL Configuration updated - Site URL changed to https://app.lingualinkonline.com, wildcard redirect URL https://app.lingualinkonline.com/** added to whitelist
+- Client login email updated from shannon@lingualinkonline.com to info@lingualinkonline.com in both auth.users and profiles table via SQL
+- returnUrl pattern implemented in proxy.ts and both login components - navigating to a protected route while logged out now preserves the intended destination and redirects there after login
+- Contact emails corrected on login pages - teacher login shows teachers@lingualinkonline.com, student login shows support@lingualinkonline.com
+- Self-assessed level field removed from Add Student form and Zod validation schema - the client assesses all students herself
+- Hardcoded default email removed from Add Student and Add Teacher forms - both email fields now start empty
+- autoComplete="off" added to email fields and autoComplete="new-password" added to password fields on Add Student and Add Teacher forms to prevent browser credential autofill
+- Unauthorised error on student creation resolved - root cause was inline Supabase client with empty setAll() causing token refresh failures
+- IBAN and SWIFT/BIC fields replaced with a single free-text banking_details textarea on Add Teacher form - more flexible for teachers across different banking systems
+- Database column added: banking_details text on profiles table
+
+### Break/Fix Log
+
+**Issue 1 - Student creation returning Unauthorised**
+- Symptom: The client received an Unauthorised error when attempting to create a new student account from the admin portal
+- Cause: The student creation API route was using an inline Supabase client with an empty setAll(){} implementation. When the session token expired and Supabase attempted to refresh it, the new token could not be persisted. Supabase then found no valid session and returned null from getUser(), treating the request as unauthenticated
+- Fix: Replaced the inline client with createServerSupabaseClient() from src/lib/supabase/server.ts which correctly implements setAll and handles token refresh properly
+- Lesson: Never create inline Supabase server clients in API routes. Always use the shared createServerSupabaseClient() helper. A missing or empty setAll() fails silently on active sessions but breaks on any token refresh
+
+**Issue 2 - Admin portal not redirecting correctly after login**
+- Symptom: Navigating to /admin while logged out redirected to /login but after login the user landed on /dashboard instead of /admin
+- Cause: proxy.ts was redirecting unauthenticated users to /login without preserving the intended destination. The login components always redirected to the default dashboard after successful login regardless of where the user was trying to go
+- Fix: Updated proxy.ts to append the intended path as a returnUrl query parameter on redirect. Updated both teacher and student login components to read returnUrl after successful login and redirect there if it starts with /. Added validation to ensure returnUrl must start with / to prevent open redirect attacks
+- Lesson: Always preserve intended destination on auth redirects. Validate returnUrl server-side - only accept values starting with /
+
+**Issue 3 - Browser autofilling credentials into Add Student and Add Teacher forms**
+- Symptom: When opening the Add Student or Add Teacher form, the email field was pre-populated with the client's saved login email and the password field was pre-populated with her saved password
+- Cause: Two separate issues - the email field had info@lingualinkonline.com hardcoded as a default value from a previous session, and the browser was autofilling credentials into fields labelled email and password
+- Fix: Removed the hardcoded default email value from both forms. Added autoComplete="off" to email fields and autoComplete="new-password" to password fields to prevent browser autofill
+- Lesson: Never hardcode admin credentials as default values in forms. Always add appropriate autoComplete attributes to forms that are not login forms
+
+### Session result
+
+Session 57 focused on taking the platform from the Vercel preview URL to a fully configured production domain. The custom domain app.lingualinkonline.com is now live with valid SSL, all Supabase auth redirects are correctly configured, and the client's login credentials have been updated to her preferred email address. Three meaningful bugs were resolved - the Unauthorised error blocking student creation, the broken returnUrl redirect pattern, and browser credential autofill on admin forms. The banking details field on the Add Teacher form was simplified from rigid IBAN and SWIFT/BIC fields to a flexible free-text textarea to accommodate teachers across different banking systems. The platform is in a strong state ahead of the MS Teams integration test planned for the next session.
+
+---
+
 ## Session 56 - 19 April 2026 - Visual Polish Pass Across All Portals
 
 ### What was built
