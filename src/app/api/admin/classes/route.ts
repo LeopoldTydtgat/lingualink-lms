@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
 
@@ -138,6 +139,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
+  // Fetch teacher timezone
+  const adminClient = createAdminClient()
+  const { data: teacherProfile } = await adminClient
+    .from('profiles')
+    .select('timezone')
+    .eq('id', teacher_id)
+    .single()
+  const teacherTimezone = teacherProfile?.timezone || 'UTC'
+
+  // Convert naive local datetime to UTC using teacher's timezone
+  // "2026-04-22T09:30:00" in teacherTimezone → UTC ISO string
+  function localToUtc(localIso: string, tz: string): string {
+    const [datePart, timePart] = localIso.split('T')
+    const [year, month, day] = datePart.split('-').map(Number)
+    const [hour, minute] = timePart.split(':').map(Number)
+    // Two-pass offset correction (same pattern as availability route)
+    const guessUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    })
+    const parts = formatter.formatToParts(guessUtc)
+    const localHour = parseInt(parts.find(p => p.type === 'hour')!.value)
+    const localMinute = parseInt(parts.find(p => p.type === 'minute')!.value)
+    const diffMs = ((hour - localHour) * 60 + (minute - localMinute)) * 60000
+    return new Date(guessUtc.getTime() + diffMs).toISOString()
+  }
+
+  const scheduledAtUtc = localToUtc(scheduled_at, teacherTimezone)
+
   // Verify the training exists and has enough hours remaining
   const { data: training, error: trainingError } = await supabase
     .from('trainings')
@@ -165,8 +197,8 @@ export async function POST(request: NextRequest) {
   try {
     console.log('[Teams] Creating meeting — AZURE_TENANT_ID set:', !!process.env.AZURE_TENANT_ID, '| AZURE_CLIENT_ID set:', !!process.env.AZURE_CLIENT_ID, '| AZURE_CLIENT_SECRET set:', !!process.env.AZURE_CLIENT_SECRET)
     const meeting = await createTeamsMeeting({
-      subject: `LinguaLink lesson — ${scheduled_at}`,
-      startTime: scheduled_at,
+      subject: `LinguaLink lesson — ${scheduledAtUtc}`,
+      startTime: scheduledAtUtc,
       durationMinutes: duration_minutes,
     })
     teamsJoinUrl = meeting.joinUrl
@@ -183,7 +215,7 @@ export async function POST(request: NextRequest) {
       teacher_id,
       student_id,
       training_id,
-      scheduled_at,
+      scheduled_at: scheduledAtUtc,
       duration_minutes,
       status: 'scheduled',
       teams_join_url: teamsJoinUrl,
