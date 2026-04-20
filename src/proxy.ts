@@ -26,7 +26,22 @@ export async function proxy(request: NextRequest) {
   )
 
   // Refresh the session — writes updated auth cookies onto the response
-  await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  const { pathname } = request.nextUrl
+
+  const isPublicPath =
+    pathname === '/login' ||
+    pathname === '/student/login' ||
+    pathname.startsWith('/api/')
+
+  if (!isPublicPath && !user) {
+    const url = request.nextUrl.clone()
+    url.pathname = pathname.startsWith('/student/') ? '/student/login' : '/login'
+    url.search = ''
+    url.searchParams.set('returnUrl', pathname)
+    return NextResponse.redirect(url)
+  }
 
   return response
 }
