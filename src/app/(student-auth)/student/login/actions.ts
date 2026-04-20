@@ -50,5 +50,6 @@ export async function studentLoginAction(formData: FormData) {
     return { error: 'Your account has been deactivated. Please contact admin.' }
   }
 
-  redirect('/student/my-classes')
+  const returnUrl = (formData.get('returnUrl') as string) ?? ''
+  redirect(returnUrl.startsWith('/') ? returnUrl : '/student/dashboard')
 }
