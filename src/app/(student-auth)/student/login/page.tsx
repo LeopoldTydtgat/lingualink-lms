@@ -1,13 +1,16 @@
-﻿'use client'
+'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { studentLoginAction } from './actions'
 
-export default function StudentLoginPage() {
+function StudentLoginPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
+  const searchParams = useSearchParams()
+  const returnUrl = searchParams.get('returnUrl') ?? ''
 
   function handleSubmit(formData: FormData) {
     setError(null)
@@ -57,6 +60,8 @@ export default function StudentLoginPage() {
             )}
 
             <form action={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <input type="hidden" name="returnUrl" value={returnUrl} />
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label htmlFor="email" style={{ fontSize: '14px', fontWeight: 500, color: '#374151' }}>
                   Email address
@@ -109,7 +114,7 @@ export default function StudentLoginPage() {
 
             <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
               Forgot your password? Contact{' '}
-              <span style={{ color: '#FF8303', fontWeight: 500 }}>support@lingualinkonline.com</span>
+              <span style={{ color: '#FF8303', fontWeight: 500 }}>info@lingualinkonline.com</span>
             </p>
           </div>
         </div>
@@ -155,5 +160,13 @@ export default function StudentLoginPage() {
 
       </div>
     </>
+  )
+}
+
+export default function StudentLoginPage() {
+  return (
+    <Suspense>
+      <StudentLoginPageContent />
+    </Suspense>
   )
 }

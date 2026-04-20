@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useTransition, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
@@ -12,11 +12,12 @@ import { Label } from '@/components/ui/label'
 // Login page
 // ---------------------------------------------------------------------------
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   function handleSubmit(formData: FormData) {
     setError(null)
@@ -27,7 +28,8 @@ export default function LoginPage() {
         return
       }
       if (result?.success) {
-        router.push('/upcoming-classes')
+        const returnUrl = searchParams.get('returnUrl')
+        router.push(returnUrl?.startsWith('/') ? returnUrl : '/dashboard')
       }
     })
   }
@@ -134,7 +136,7 @@ export default function LoginPage() {
 
             <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
               Forgot your password? Contact{' '}
-              <span style={{ color: '#FF8303', fontWeight: 500 }}>teachers@lingualinkonline.com</span>
+              <span style={{ color: '#FF8303', fontWeight: 500 }}>info@lingualinkonline.com</span>
             </p>
           </div>
         </div>
@@ -180,5 +182,13 @@ export default function LoginPage() {
 
       </div>
     </>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginPageContent />
+    </Suspense>
   )
 }
