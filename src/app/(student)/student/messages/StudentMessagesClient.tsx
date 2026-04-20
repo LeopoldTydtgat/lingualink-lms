@@ -231,7 +231,7 @@ export default function StudentMessagesClient({
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
     const html = editor.getHTML()
-    if (!html || html === '<p></p>') return
+    if ((!html || html === '<p></p>') && pendingAttachments.length === 0) return
 
     setSending(true)
 
