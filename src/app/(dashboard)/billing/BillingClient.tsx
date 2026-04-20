@@ -39,6 +39,7 @@ interface BillingInfoDisplay {
   area_code: string | null
   city: string | null
   hourly_rate: number | null
+  currency: string | null
 }
 
 // "2026-04-01" → "April 2026"
@@ -110,6 +111,7 @@ export default function BillingClient({
 }) {
   const supabase = createClient()
   const isAdmin = profile.role === 'admin'
+  const currencySymbol = billingInfo?.currency === 'USD' ? '$' : billingInfo?.currency === 'GBP' ? '£' : '€'
 
   const now = new Date()
   const currentMonthDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
@@ -426,8 +428,8 @@ export default function BillingClient({
                     <div className="flex items-center gap-3">
                       <span className="text-base font-medium text-gray-700">
                         {invoice.amount_eur != null
-                          ? `€${Number(invoice.amount_eur).toFixed(2)}`
-                          : '€0.00'}
+                          ? `${currencySymbol}${Number(invoice.amount_eur).toFixed(2)}`
+                          : `${currencySymbol}0.00`}
                       </span>
                       <span
                         className="text-xs font-medium px-2.5 py-1 rounded-full text-white"
@@ -646,7 +648,7 @@ export default function BillingClient({
                             </span>
                             <span className="font-medium text-gray-900">{formatMonth(invoice.billing_month)}</span>
                             <span className="text-gray-700">
-                              {invoice.amount_eur != null ? `€${Number(invoice.amount_eur).toFixed(2)}` : '€0.00'}
+                              {invoice.amount_eur != null ? `${currencySymbol}${Number(invoice.amount_eur).toFixed(2)}` : `${currencySymbol}0.00`}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">
@@ -685,7 +687,7 @@ export default function BillingClient({
                         {markingPaidId === invoice.id && (
                           <div className="mt-3 flex items-center gap-3">
                             <p className="text-sm text-gray-600">
-                              Mark <strong>€{invoice.amount_eur != null ? Number(invoice.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(invoice.billing_month)}?
+                              Mark <strong>{currencySymbol}{invoice.amount_eur != null ? Number(invoice.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(invoice.billing_month)}?
                             </p>
                             <button
                               onClick={() => handleMarkPaid(invoice.id)}
