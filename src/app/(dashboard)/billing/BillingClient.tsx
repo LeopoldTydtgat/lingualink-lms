@@ -111,7 +111,6 @@ export default function BillingClient({
 }) {
   const supabase = createClient()
   const isAdmin = profile.role === 'admin'
-  const currencySymbol = billingInfo?.currency === 'USD' ? '$' : billingInfo?.currency === 'GBP' ? '£' : '€'
 
   const now = new Date()
   const currentMonthDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
@@ -130,6 +129,7 @@ export default function BillingClient({
 
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
+  const currencySymbol = billingInfo?.currency === 'USD' ? '$' : billingInfo?.currency === 'GBP' ? '£' : '€'
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
