@@ -304,6 +304,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
   const status = teacher.status as string | null
   const accountTypes = (teacher.account_types as string[]) ?? []
 
+  const currencySymbol = teacher.currency === 'USD' ? '$' : teacher.currency === 'GBP' ? '£' : '€'
+
   const isFormer = status === 'former'
   const purgeReady = isFormer && purgeBlockedBy.length === 0
 
@@ -518,8 +520,8 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <InfoRow label="Contract Start" value={teacher.contract_start as string} />
             <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
             <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
-            <InfoRow label="Hourly Rate (€)"
-              value={teacher.hourly_rate != null ? `€${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}` : null}
+            <InfoRow label="Hourly Rate"
+              value={teacher.hourly_rate != null ? `${currencySymbol}${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}` : null}
               adminOnly />
             <InfoRow label="VAT Required"
               value={teacher.vat_required ? 'Yes' : 'No'}
