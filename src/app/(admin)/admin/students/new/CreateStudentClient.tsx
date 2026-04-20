@@ -71,7 +71,6 @@ type FormData = {
   native_language: string
   learning_language: string
   current_fluency_level: string
-  self_assessed_level: string
   learning_goals: string
   interests: string
   // Section C — Training Setup
@@ -92,7 +91,7 @@ const EMPTY_FORM: FormData = {
   is_private: true, company_id: '', academic_advisor_id: '',
   assigned_teacher_ids: [],
   native_language: '', learning_language: 'English',
-  current_fluency_level: '', self_assessed_level: '',
+  current_fluency_level: '',
   learning_goals: '', interests: '',
   package_name: '', total_hours: '', end_date: '',
   cancellation_policy: '24hr',
@@ -271,13 +270,13 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           </div>
 
           <Field label="Email Address">
-            <input type="email" className={inputClass} value={form.email}
+            <input type="email" autoComplete="off" className={inputClass} value={form.email}
               onChange={(e) => set('email', e.target.value)} />
           </Field>
 
           <Field label="Temporary Password">
             <div style={{ position: 'relative' }}>
-              <input type={showTempPassword ? 'text' : 'password'} className={inputClass + ' pr-10'} value={form.temp_password}
+              <input type={showTempPassword ? 'text' : 'password'} autoComplete="new-password" className={inputClass + ' pr-10'} value={form.temp_password}
                 onChange={(e) => set('temp_password', e.target.value)} />
               <button
                 type="button"
@@ -447,26 +446,15 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Current Fluency Level (Admin Assessed)">
-              <select className={selectClass} value={form.current_fluency_level}
-                onChange={(e) => set('current_fluency_level', e.target.value)}>
-                <option value="">— Select —</option>
-                {FLUENCY_LEVELS.map((l) => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Self-Assessed Level">
-              <select className={selectClass} value={form.self_assessed_level}
-                onChange={(e) => set('self_assessed_level', e.target.value)}>
-                <option value="">— Select —</option>
-                {FLUENCY_LEVELS.map((l) => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
+          <Field label="Current Fluency Level (Admin Assessed)">
+            <select className={selectClass} value={form.current_fluency_level}
+              onChange={(e) => set('current_fluency_level', e.target.value)}>
+              <option value="">— Select —</option>
+              {FLUENCY_LEVELS.map((l) => (
+                <option key={l} value={l}>{l}</option>
+              ))}
+            </select>
+          </Field>
 
           <Field label="Learning Goals">
             <textarea rows={3} className={inputClass} value={form.learning_goals}
