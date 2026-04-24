@@ -52,13 +52,14 @@ function Button({
     asChild?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  const isOrangePrimary = (props.style as React.CSSProperties)?.backgroundColor === '#FF8303'
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={cn(buttonVariants({ variant, size, className }), isOrangePrimary && 'btn-primary-hover')}
       {...props}
     />
   )

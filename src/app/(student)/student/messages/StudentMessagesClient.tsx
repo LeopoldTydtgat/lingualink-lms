@@ -487,8 +487,8 @@ export default function StudentMessagesClient({
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
-                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                                ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                                : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />

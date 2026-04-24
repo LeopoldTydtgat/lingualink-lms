@@ -185,6 +185,9 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
           <button
             onClick={addHoliday}
             disabled={isSaving}
+            className="btn-primary-hover"
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
             style={{
               padding: '8px 20px',
               backgroundColor: '#FF8303',

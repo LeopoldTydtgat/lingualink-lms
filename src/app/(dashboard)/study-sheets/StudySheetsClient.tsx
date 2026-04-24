@@ -65,6 +65,8 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
         {isAdmin && (
           <Button
             onClick={() => router.push('/study-sheets/new')}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
             style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -91,7 +93,9 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
             <button
               key={level}
               onClick={() => setSelectedLevel(level)}
-              className="px-3 py-1.5 rounded-md text-sm border transition-colors"
+              className={`px-3 py-1.5 rounded-md text-sm border transition-colors${selectedLevel === level ? ' btn-primary-hover' : ''}`}
+              onMouseEnter={selectedLevel === level ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+              onMouseLeave={selectedLevel === level ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
               style={
                 selectedLevel === level
                   ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
@@ -109,7 +113,9 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className="px-3 py-1.5 rounded-md text-sm border transition-colors capitalize"
+              className={`px-3 py-1.5 rounded-md text-sm border transition-colors capitalize${selectedCategory === cat ? ' btn-primary-hover' : ''}`}
+              onMouseEnter={selectedCategory === cat ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+              onMouseLeave={selectedCategory === cat ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
               style={
                 selectedCategory === cat
                   ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
@@ -143,19 +149,20 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
             <div
               key={sheet.id}
               onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-              className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors last:border-0"
+              className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors last:border-0"
+              style={{ cursor: 'pointer' }}
             >
-              <span className="font-medium text-gray-900 text-sm">{sheet.title}</span>
-              <span className="text-sm text-gray-500 capitalize">{sheet.category}</span>
-              <span className="text-sm">
+              <span className="font-medium text-gray-900 text-sm" style={{ cursor: 'pointer' }}>{sheet.title}</span>
+              <span className="text-sm text-gray-500 capitalize" style={{ cursor: 'pointer' }}>{sheet.category}</span>
+              <span className="text-sm" style={{ cursor: 'pointer' }}>
                 <span
                   className="px-2 py-0.5 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303', cursor: 'pointer' }}
                 >
                   {sheet.level}
                 </span>
               </span>
-              <DifficultyBars count={sheet.difficulty} />
+              <span style={{ cursor: 'pointer' }}><DifficultyBars count={sheet.difficulty} /></span>
               <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
             </div>
           ))

@@ -374,7 +374,9 @@ export default function MessagesClient({
             <h1 className="text-base font-semibold text-gray-900">Messages</h1>
             <button
               onClick={() => setShowNewMessage(true)}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-lg leading-none"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-lg leading-none btn-primary-hover"
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
               style={{ backgroundColor: '#FF8303' }}
               title="New message"
             >
@@ -498,8 +500,8 @@ export default function MessagesClient({
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
-                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                                ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                                : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
@@ -652,7 +654,9 @@ export default function MessagesClient({
                 <button
                   onClick={handleSend}
                   disabled={sending}
-                  className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-opacity"
+                  className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-opacity btn-primary-hover"
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
                   style={{ backgroundColor: '#FF8303' }}
                 >
                   {sending ? 'Sending...' : 'Send'}

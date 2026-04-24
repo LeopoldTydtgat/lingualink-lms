@@ -731,6 +731,8 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploadingPhoto}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px' }}
                 >
                   <Camera size={15} />
@@ -801,6 +803,8 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
             <Button
               onClick={saveGeneralInfo}
               disabled={saving}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
               style={{
                 backgroundColor: '#FF8303',
                 color: 'white',
@@ -859,6 +863,8 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
             <Button
               onClick={saveProfessionalInfo}
               disabled={saving}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
               style={{
                 backgroundColor: '#FF8303',
                 color: 'white',

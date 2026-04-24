@@ -137,3 +137,9 @@
     @apply font-sans;
   }
 }
+
+/* Primary orange button hover — applies to any element with this class */
+.btn-primary-hover:not([disabled]):hover {
+  background-color: #e67300 !important;
+  transition: background-color 0.18s ease;
+}

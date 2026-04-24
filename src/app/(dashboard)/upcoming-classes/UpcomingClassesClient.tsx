@@ -274,7 +274,9 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
 
         {profile.role === 'admin' && (
           <button
-            className="px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors btn-primary-hover"
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
             style={{ backgroundColor: '#FF8303' }}
           >
             + Add Class
