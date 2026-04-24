@@ -77,14 +77,14 @@ export default async function AdminMessagesPage() {
       ? adminDb.from('profiles').select('id, full_name, photo_url, role').in('id', teacherSideIds)
       : { data: [] as any[] },
     studentIds.length > 0
-      ? adminDb.from('students').select('id, full_name, photo_url').in('id', studentIds)
+      ? adminDb.from('students').select('id, auth_user_id, full_name, photo_url').in('auth_user_id', studentIds)
       : { data: [] as any[] },
   ])
 
   const conversations = Array.from(convMap.values())
     .map(conv => {
       const teacher = (teacherProfiles ?? []).find((p: any) => p.id === conv.teacherSideId)
-      const student = (studentRecords  ?? []).find((s: any) => s.id === conv.studentId)
+      const student = (studentRecords  ?? []).find((s: any) => s.auth_user_id === conv.studentId)
       return {
         key:                conv.teacherSideId + ':' + conv.studentId,
         teacherSideId:      conv.teacherSideId,
