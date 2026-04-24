@@ -197,7 +197,9 @@ export default function StudySheetFormClient({ mode }: Props) {
                   <button
                     key={cat}
                     onClick={() => setCategory(cat)}
-                    className="px-4 py-2 rounded-lg border text-sm capitalize"
+                    className={`px-4 py-2 rounded-lg border text-sm capitalize${category === cat ? ' btn-primary-hover' : ''}`}
+                    onMouseEnter={category === cat ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+                    onMouseLeave={category === cat ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
                     style={
                       category === cat
                         ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
@@ -218,7 +220,9 @@ export default function StudySheetFormClient({ mode }: Props) {
                   <button
                     key={l}
                     onClick={() => setLevel(l)}
-                    className="px-3 py-1.5 rounded-md border text-sm"
+                    className={`px-3 py-1.5 rounded-md border text-sm${level === l ? ' btn-primary-hover' : ''}`}
+                    onMouseEnter={level === l ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+                    onMouseLeave={level === l ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
                     style={
                       level === l
                         ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
@@ -240,6 +244,9 @@ export default function StudySheetFormClient({ mode }: Props) {
                     key={val}
                     type="button"
                     onClick={() => setDifficulty(val)}
+                    className={difficulty === val ? 'btn-primary-hover' : ''}
+                    onMouseEnter={difficulty === val ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+                    onMouseLeave={difficulty === val ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: '6px',
                       padding: '6px 14px', borderRadius: '8px', cursor: 'pointer',

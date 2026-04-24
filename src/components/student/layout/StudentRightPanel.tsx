@@ -64,6 +64,8 @@ export default function StudentRightPanel({
 }: StudentRightPanelProps) {
   const [now, setNow] = useState(0)
   const [mounted, setMounted] = useState(false)
+  const [joinHovered, setJoinHovered] = useState(false)
+  const [exercisesHovered, setExercisesHovered] = useState(false)
 
   useEffect(() => {
     setNow(Date.now())
@@ -110,7 +112,7 @@ export default function StudentRightPanel({
             <p style={{
               fontSize: '22px',
               fontWeight: '700',
-              color: '#FF8303',
+              color: '#111827',
               fontVariantNumeric: 'tabular-nums',
               lineHeight: '1.2',
               marginBottom: '4px',
@@ -131,18 +133,23 @@ export default function StudentRightPanel({
                     : undefined}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onMouseEnter={() => setJoinHovered(true)}
+                  onMouseLeave={() => setJoinHovered(false)}
                   style={{
                     display: 'block',
                     padding: '7px 12px',
                     backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, now)
-                      ? '#FF8303'
+                      ? (joinHovered ? '#FF8303' : '#ffffff')
                       : '#E0DFDC',
                     color: mounted && isJoinable(nextLesson.scheduled_at, now)
-                      ? '#ffffff'
+                      ? (joinHovered ? '#ffffff' : '#FF8303')
                       : '#9ca3af',
+                    border: mounted && isJoinable(nextLesson.scheduled_at, now)
+                      ? '1.5px solid #FF8303'
+                      : 'none',
                     borderRadius: '6px',
                     fontSize: '13px',
-                    fontWeight: '500',
+                    fontWeight: '600',
                     textAlign: 'center',
                     textDecoration: 'none',
                     cursor: mounted && isJoinable(nextLesson.scheduled_at, now)
@@ -151,6 +158,7 @@ export default function StudentRightPanel({
                     pointerEvents: mounted && isJoinable(nextLesson.scheduled_at, now)
                       ? 'auto'
                       : 'none',
+                    transition: 'background-color 0.18s ease, color 0.18s ease',
                   }}
                 >
                   Join Class
@@ -164,7 +172,7 @@ export default function StudentRightPanel({
           </>
         ) : (
           <>
-            <p style={{ fontSize: '22px', fontWeight: '700', color: '#FF8303' }}>--</p>
+            <p style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>--</p>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
               No upcoming classes
             </p>
@@ -182,7 +190,7 @@ export default function StudentRightPanel({
         <p style={{
           fontSize: '18px',
           fontWeight: '700',
-          color: lowHours ? '#FD5602' : '#FF8303',
+          color: lowHours ? '#FD5602' : '#111827',
           marginBottom: '2px',
         }}>
           {formatHours(hoursRemaining)}
@@ -239,17 +247,21 @@ export default function StudentRightPanel({
 
         <Link
           href="/student/study"
+          onMouseEnter={() => setExercisesHovered(true)}
+          onMouseLeave={() => setExercisesHovered(false)}
           style={{
             display: 'block',
             marginTop: '10px',
             padding: '7px 12px',
-            backgroundColor: '#FF8303',
-            color: '#ffffff',
+            backgroundColor: exercisesHovered ? '#FF8303' : '#ffffff',
+            color: exercisesHovered ? '#ffffff' : '#FF8303',
+            border: '1.5px solid #FF8303',
             borderRadius: '6px',
             fontSize: '13px',
-            fontWeight: '500',
+            fontWeight: '600',
             textAlign: 'center',
             textDecoration: 'none',
+            transition: 'background-color 0.18s ease, color 0.18s ease',
           }}
         >
           Do My Exercises

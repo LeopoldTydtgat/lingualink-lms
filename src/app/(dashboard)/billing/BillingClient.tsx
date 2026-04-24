@@ -355,7 +355,9 @@ export default function BillingClient({
             <button
               key={view}
               onClick={() => setActiveView(view)}
-              className="px-4 py-2 text-sm rounded-lg border transition-colors"
+              className={`px-4 py-2 text-sm rounded-lg border transition-colors${activeView === view ? ' btn-primary-hover' : ''}`}
+              onMouseEnter={activeView === view ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+              onMouseLeave={activeView === view ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
               style={activeView === view
                 ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
                 : {}}
@@ -366,7 +368,9 @@ export default function BillingClient({
           {isAdmin && (
             <button
               onClick={() => setActiveView('admin')}
-              className="px-4 py-2 text-sm rounded-lg border transition-colors"
+              className={`px-4 py-2 text-sm rounded-lg border transition-colors${activeView === 'admin' ? ' btn-primary-hover' : ''}`}
+              onMouseEnter={activeView === 'admin' ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+              onMouseLeave={activeView === 'admin' ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
               style={activeView === 'admin'
                 ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
                 : {}}
@@ -390,7 +394,7 @@ export default function BillingClient({
               <p className="text-sm text-gray-500">Download the Lingualink branded template to complete your invoice</p>
             </div>
             {templateUrl ? (
-              <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 text-sm rounded-lg text-white" style={{ backgroundColor: '#FF8303' }}>
+              <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 text-sm rounded-lg text-white btn-primary-hover" onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')} style={{ backgroundColor: '#FF8303' }}>
                 Download Template
               </a>
             ) : (
@@ -618,7 +622,9 @@ export default function BillingClient({
               <button
                 onClick={() => templateInputRef.current?.click()}
                 disabled={uploadingTemplate}
-                className="px-4 py-2 text-sm rounded-lg text-white disabled:opacity-50"
+                className="px-4 py-2 text-sm rounded-lg text-white disabled:opacity-50 btn-primary-hover"
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
                 style={{ backgroundColor: '#FF8303' }}
               >
                 {uploadingTemplate ? 'Uploading…' : templateUrl ? 'Replace Template' : 'Upload Template'}
