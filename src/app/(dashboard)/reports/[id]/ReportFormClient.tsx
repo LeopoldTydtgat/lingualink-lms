@@ -228,7 +228,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                 ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
                 : { backgroundColor: 'white', color: '#374151' }
             }
-            className="px-6 py-2 rounded-lg text-sm font-semibold border border-gray-300 transition-colors"
+            onMouseEnter={didClassHappen === true ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+            onMouseLeave={didClassHappen === true ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
+            className={`px-6 py-2 rounded-lg text-sm font-semibold border border-gray-300 transition-colors${didClassHappen === true ? ' btn-primary-hover' : ''}`}
           >
             Yes
           </button>
@@ -381,7 +383,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                             ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white', minWidth: '44px', textAlign: 'center' }
                             : { backgroundColor: 'white', color: '#4B5563', minWidth: '44px', textAlign: 'center' }
                         }
-                        className="px-3 py-1 rounded-md text-xs font-semibold border border-gray-300 transition-colors"
+                        onMouseEnter={levelData[skill.key] === level ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+                        onMouseLeave={levelData[skill.key] === level ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
+                        className={`px-3 py-1 rounded-md text-xs font-semibold border border-gray-300 transition-colors${levelData[skill.key] === level ? ' btn-primary-hover' : ''}`}
                       >
                         {level}
                       </button>
@@ -492,7 +496,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           onClick={handleSave}
           disabled={saving}
           style={{ backgroundColor: saving ? '#fdba74' : '#FF8303' }}
-          className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-colors cursor-pointer"
+          onMouseEnter={!saving ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+          onMouseLeave={!saving ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
+          className={`w-full py-3 rounded-xl text-white font-semibold text-sm transition-colors cursor-pointer${!saving ? ' btn-primary-hover' : ''}`}
         >
           {saving ? 'Saving...' : 'Submit Report'}
         </button>

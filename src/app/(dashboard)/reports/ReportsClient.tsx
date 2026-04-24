@@ -176,7 +176,9 @@ function PendingReportCard({
         <a
           href={`/reports/${report.id}`}
           style={{ backgroundColor: '#FF8303' }}
-          className="text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          className="text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors btn-primary-hover"
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
         >
           Complete Report
         </a>
