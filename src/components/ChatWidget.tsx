@@ -1,8 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Underline from '@tiptap/extension-underline'
+import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
 import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import data from '@emoji-mart/data'
+
+const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -38,6 +46,12 @@ function formatTime(dateStr: string): string {
   const h = date.getHours().toString().padStart(2, '0')
   const m = date.getMinutes().toString().padStart(2, '0')
   return `${h}:${m}`
+}
+
+function isEmojiOnly(html: string): boolean {
+  const stripped = html.replace(/<[^>]*>/g, '').trim()
+  const emojiRegex = /^[\p{Emoji}\s]+$/u
+  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -114,13 +128,25 @@ export default function ChatWidget({
   const [activeTab, setActiveTab] = useState<'messages' | 'faq'>('messages')
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [faqs, setFaqs] = useState<FaqItem[]>([])
-  const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [messagesLoaded, setMessagesLoaded] = useState(false)
   const [faqsLoaded, setFaqsLoaded] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ underline: false }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Type a message...' }),
+    ],
+    content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
+  })
 
   // On mount: check for unread admin messages to show badge on bubble
   useEffect(() => {
@@ -176,16 +202,27 @@ export default function ChatWidget({
     if (!isOpen) return
     if (activeTab === 'messages') {
       loadMessages()
-      setTimeout(() => inputRef.current?.focus(), 100)
+      setTimeout(() => editor?.commands.focus(), 100)
     }
     if (activeTab === 'faq') {
       loadFaqs()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, activeTab, loadMessages, loadFaqs])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Real-time: new messages on this participant's thread
   useEffect(() => {
@@ -229,9 +266,10 @@ export default function ChatWidget({
   }, [isOpen, participantAuthId, supabase])
 
   const handleSend = async () => {
-    if (!input.trim() || sending) return
-    const text = input.trim()
-    setInput('')
+    if (!editor || sending) return
+    const html = editor.getHTML()
+    if (!html || html === '<p></p>') return
+    editor.commands.clearContent()
     setSending(true)
 
     // Optimistic update
@@ -239,7 +277,7 @@ export default function ChatWidget({
     setMessages(prev => [...prev, {
       id: tempId,
       sender_role: 'user',
-      content: text,
+      content: html,
       created_at: new Date().toISOString(),
       read_at: null,
     }])
@@ -251,7 +289,7 @@ export default function ChatWidget({
         participantId,
         participantType,
         participantAuthId,
-        content: text,
+        content: html,
       }),
     })
 
@@ -269,13 +307,6 @@ export default function ChatWidget({
     }
 
     setSending(false)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
   }
 
   const tabStyle = (tab: 'messages' | 'faq') =>
@@ -354,15 +385,15 @@ export default function ChatWidget({
                         )}
                         <div className="max-w-[75%]">
                           <div
-                            className="px-3 py-2 rounded-2xl text-sm leading-relaxed"
-                            style={
-                              isFromMe
-                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                            className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
+                            style={isEmojiOnly(msg.content)
+                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                              : isFromMe
+                              ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                              : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                             }
-                          >
-                            {msg.content}
-                          </div>
+                            dangerouslySetInnerHTML={{ __html: msg.content }}
+                          />
                           <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isFromMe && (
@@ -382,21 +413,58 @@ export default function ChatWidget({
                 )}
                 <div ref={messagesEndRef} />
               </div>
-              <div className="border-t border-gray-200 px-4 py-3 bg-white flex-shrink-0">
-                <div className="flex items-center gap-2">
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Type a message..."
-                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:border-orange-400 bg-gray-50"
-                    disabled={sending}
-                  />
+              <div className="border-t border-gray-200 flex-shrink-0 bg-white">
+                <style>{`
+                  .widget-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
+                  .widget-composer .ProseMirror:focus { outline: none !important; border: none !important; }
+                  .widget-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+                  .widget-composer .ProseMirror ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                  .widget-composer .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                  .widget-composer .ProseMirror li { margin: 0.1rem 0; }
+                  .widget-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                  .widget-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                  .widget-bubble li { margin: 0.1rem 0; }
+                `}</style>
+                <div className="flex items-center gap-1 px-3 pt-2 pb-1">
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
+                    className="px-2 py-0.5 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >B</button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
+                    className="px-2 py-0.5 text-xs rounded italic text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >I</button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
+                    className="px-2 py-0.5 text-xs rounded underline text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >U</button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                    className="px-2 py-0.5 text-xs rounded text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >•≡</button>
+                  <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                    <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>😊</button>
+                    {showEmojiPicker && (
+                      <div style={{ position: 'absolute', bottom: '32px', right: 0, zIndex: 50 }}>
+                        <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 px-3 pb-3">
+                  <div
+                    className="widget-composer flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus-within:border-orange-400 bg-gray-50 min-h-[36px] max-h-[80px] overflow-y-auto cursor-text transition-colors"
+                    onClick={() => editor?.commands.focus()}
+                  >
+                    <EditorContent editor={editor} />
+                  </div>
                   <button
                     onClick={handleSend}
-                    disabled={!input.trim() || sending}
+                    disabled={sending}
                     className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity disabled:opacity-40"
                     style={{ backgroundColor: '#FF8303' }}
                     aria-label="Send message"
