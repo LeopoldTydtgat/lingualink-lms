@@ -6,8 +6,12 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
+import dynamic from 'next/dynamic'
+import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage, markMessagesAsRead } from './actions'
+
+const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +76,12 @@ function formatTime(dateStr: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
+}
+
+function isEmojiOnly(html: string): boolean {
+  const stripped = html.replace(/<[^>]*>/g, '').trim()
+  const emojiRegex = /^[\p{Emoji}\s]+$/u
+  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -144,6 +154,8 @@ export default function MessagesClient({
   const [uploading, setUploading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -160,6 +172,16 @@ export default function MessagesClient({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   const fetchMessages = useCallback(async (contact: Contact) => {
     setLoadingMessages(true)
     const { data } = await supabase
@@ -167,7 +189,8 @@ export default function MessagesClient({
       .select('*')
       .or(
         `and(sender_id.eq.${currentUser.id},receiver_id.eq.${contact.id}),` +
-        `and(sender_id.eq.${contact.id},receiver_id.eq.${currentUser.id})`
+        `and(sender_id.eq.${contact.id},receiver_id.eq.${currentUser.id}),` +
+        `and(sender_type.eq.admin,receiver_id.eq.${currentUser.id})`
       )
       .order('created_at', { ascending: true })
 
@@ -472,9 +495,11 @@ export default function MessagesClient({
                               Two distinct colours = immediately obvious who said what */}
                           <div
                             className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={isFromMe
-                              ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                            style={isEmojiOnly(msg.content)
+                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                              : isFromMe
+                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
@@ -556,6 +581,14 @@ export default function MessagesClient({
                 >
                   •≡
                 </button>
+                <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                  <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '4px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>😊</button>
+                  {showEmojiPicker && (
+                    <div style={{ position: 'absolute', bottom: '40px', left: 0, zIndex: 50 }}>
+                      <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Tiptap editor — bordered container shows the typing area clearly.

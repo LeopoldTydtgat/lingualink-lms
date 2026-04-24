@@ -6,8 +6,12 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
+import dynamic from 'next/dynamic'
+import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sendMessage, markMessagesAsRead } from './actions'
+
+const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +81,12 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
+function isEmojiOnly(html: string): boolean {
+  const stripped = html.replace(/<[^>]*>/g, '').trim()
+  const emojiRegex = /^[\p{Emoji}\s]+$/u
+  return emojiRegex.test(stripped) && stripped.length <= 8
+}
+
 function Avatar({ name, photoUrl, size = 10 }: {
   name: string
   photoUrl: string | null
@@ -144,6 +154,8 @@ export default function StudentMessagesClient({
   const [uploading, setUploading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -159,6 +171,16 @@ export default function StudentMessagesClient({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const fetchMessages = useCallback(async (contact: Contact) => {
     setLoadingMessages(true)
@@ -460,13 +482,13 @@ export default function StudentMessagesClient({
                       )}
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
-                          {/* Sent: #FF8303 orange. Received: #1F2937 dark charcoal.
-                              Both white text — immediately clear who said what. */}
                           <div
-                            className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={isFromMe
-                              ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                            className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                            style={isEmojiOnly(msg.content)
+                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                              : isFromMe
+                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
@@ -503,12 +525,16 @@ export default function StudentMessagesClient({
 
             {/* ── Composer ── */}
             <div className="border-t border-gray-200 flex-shrink-0 bg-white">
-              {/* The style tag kills ProseMirror's own inner border so there is
-                  one clean box, not a box-within-a-box */}
               <style>{`
                 .student-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
                 .student-composer .ProseMirror:focus { outline: none !important; border: none !important; }
                 .student-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+                .student-composer .ProseMirror ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .student-composer .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .student-composer .ProseMirror li { margin: 0.1rem 0; }
+                .student-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .student-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .student-bubble li { margin: 0.1rem 0; }
               `}</style>
 
               {/* Formatting toolbar */}
@@ -528,6 +554,19 @@ export default function StudentMessagesClient({
                   className="px-2 py-1 text-xs rounded underline text-gray-500 hover:bg-gray-100"
                   style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                 >U</button>
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                  className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >•≡</button>
+                <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                  <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '4px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>😊</button>
+                  {showEmojiPicker && (
+                    <div style={{ position: 'absolute', bottom: '40px', left: 0, zIndex: 50 }}>
+                      <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Editor — one clean bordered box, ProseMirror inner border suppressed */}
