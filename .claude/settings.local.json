@@ -8,7 +8,8 @@
       "Bash(node -e \"const fs=require\\('fs'\\);process.stdout.write\\(fs.readFileSync\\('public/lingualink-email-logo.png'\\).toString\\('base64'\\)\\);\")",
       "Read(//tmp/**)",
       "Bash(grep -v \"^--$\")",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(npm install *)"
     ]
   }
 }
