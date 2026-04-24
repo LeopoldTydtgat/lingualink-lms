@@ -110,6 +110,8 @@ export default function MyClassesClient({
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
+  const [bookHovered, setBookHovered] = useState(false)
+  const [noClassBookHovered, setNoClassBookHovered] = useState(false)
 
   useEffect(() => {
     const currentNow = Date.now()
@@ -232,18 +234,21 @@ export default function MyClassesClient({
         </div>
         <button
           onClick={() => router.push('/student/book')}
+          onMouseEnter={() => setBookHovered(true)}
+          onMouseLeave={() => setBookHovered(false)}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
             padding: '10px 18px',
-            backgroundColor: '#FF8303',
-            color: '#ffffff',
-            border: 'none',
+            backgroundColor: bookHovered ? '#FF8303' : '#ffffff',
+            color: bookHovered ? '#ffffff' : '#FF8303',
+            border: '1.5px solid #FF8303',
             borderRadius: '8px',
             fontSize: '14px',
             fontWeight: '600',
             cursor: 'pointer',
+            transition: 'background-color 0.18s ease, color 0.18s ease',
           }}
         >
           <Plus size={16} />
@@ -513,15 +518,18 @@ export default function MyClassesClient({
           </p>
           <button
             onClick={() => router.push('/student/book')}
+            onMouseEnter={() => setNoClassBookHovered(true)}
+            onMouseLeave={() => setNoClassBookHovered(false)}
             style={{
               padding: '10px 20px',
-              backgroundColor: '#FF8303',
-              color: '#ffffff',
-              border: 'none',
+              backgroundColor: noClassBookHovered ? '#FF8303' : '#ffffff',
+              color: noClassBookHovered ? '#ffffff' : '#FF8303',
+              border: '1.5px solid #FF8303',
               borderRadius: '8px',
               fontSize: '14px',
               fontWeight: '600',
               cursor: 'pointer',
+              transition: 'background-color 0.18s ease, color 0.18s ease',
             }}
           >
             Book Your Next Class

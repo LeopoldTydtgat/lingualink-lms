@@ -145,6 +145,12 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
+  // Button hover states
+  const [uploadHovered, setUploadHovered] = useState(false)
+  const [generalSaveHovered, setGeneralSaveHovered] = useState(false)
+  const [learningSaveHovered, setLearningSaveHovered] = useState(false)
+  const [passwordHovered, setPasswordHovered] = useState(false)
+
   // ── Photo upload ────────────────────────────────────────────────────────────
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -348,16 +354,19 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={photoUploading}
+              onMouseEnter={() => setUploadHovered(true)}
+              onMouseLeave={() => setUploadHovered(false)}
               style={{
                 padding: '8px 16px',
-                backgroundColor: '#FF8303',
-                color: '#ffffff',
-                border: 'none',
+                backgroundColor: (uploadHovered && !photoUploading) ? '#FF8303' : '#ffffff',
+                color: (uploadHovered && !photoUploading) ? '#ffffff' : '#FF8303',
+                border: '1.5px solid #FF8303',
                 borderRadius: '8px',
                 fontSize: '14px',
                 fontWeight: '600',
                 cursor: photoUploading ? 'not-allowed' : 'pointer',
                 opacity: photoUploading ? 0.7 : 1,
+                transition: 'background-color 0.18s ease, color 0.18s ease',
               }}
             >
               {photoUploading ? 'Uploading…' : 'Upload Photo'}
@@ -414,16 +423,19 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           <button
             onClick={handleSaveGeneral}
             disabled={generalSaving}
+            onMouseEnter={() => setGeneralSaveHovered(true)}
+            onMouseLeave={() => setGeneralSaveHovered(false)}
             style={{
               padding: '9px 20px',
-              backgroundColor: '#FF8303',
-              color: '#ffffff',
-              border: 'none',
+              backgroundColor: (generalSaveHovered && !generalSaving) ? '#FF8303' : '#ffffff',
+              color: (generalSaveHovered && !generalSaving) ? '#ffffff' : '#FF8303',
+              border: '1.5px solid #FF8303',
               borderRadius: '8px',
               fontSize: '14px',
               fontWeight: '600',
               cursor: generalSaving ? 'not-allowed' : 'pointer',
               opacity: generalSaving ? 0.7 : 1,
+              transition: 'background-color 0.18s ease, color 0.18s ease',
             }}
           >
             {generalSaving ? 'Saving…' : 'Save Changes'}
@@ -485,16 +497,19 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           <button
             onClick={handleSaveLearning}
             disabled={learningSaving}
+            onMouseEnter={() => setLearningSaveHovered(true)}
+            onMouseLeave={() => setLearningSaveHovered(false)}
             style={{
               padding: '9px 20px',
-              backgroundColor: '#FF8303',
-              color: '#ffffff',
-              border: 'none',
+              backgroundColor: (learningSaveHovered && !learningSaving) ? '#FF8303' : '#ffffff',
+              color: (learningSaveHovered && !learningSaving) ? '#ffffff' : '#FF8303',
+              border: '1.5px solid #FF8303',
               borderRadius: '8px',
               fontSize: '14px',
               fontWeight: '600',
               cursor: learningSaving ? 'not-allowed' : 'pointer',
               opacity: learningSaving ? 0.7 : 1,
+              transition: 'background-color 0.18s ease, color 0.18s ease',
             }}
           >
             {learningSaving ? 'Saving…' : 'Save Changes'}
@@ -530,7 +545,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
               padding: '16px',
               textAlign: 'center',
             }}>
-              <p style={{ fontSize: '24px', fontWeight: '700', color: '#FF8303', margin: '0 0 4px' }}>
+              <p style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
                 {hoursRemaining(activeTraining)}h
               </p>
               <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>Hours remaining</p>
@@ -761,16 +776,19 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             <button
               onClick={handleChangePassword}
               disabled={passwordSaving}
+              onMouseEnter={() => setPasswordHovered(true)}
+              onMouseLeave={() => setPasswordHovered(false)}
               style={{
                 padding: '9px 20px',
-                backgroundColor: '#FF8303',
-                color: '#ffffff',
-                border: 'none',
+                backgroundColor: (passwordHovered && !passwordSaving) ? '#FF8303' : '#ffffff',
+                color: (passwordHovered && !passwordSaving) ? '#ffffff' : '#FF8303',
+                border: '1.5px solid #FF8303',
                 borderRadius: '8px',
                 fontSize: '14px',
                 fontWeight: '600',
                 cursor: passwordSaving ? 'not-allowed' : 'pointer',
                 opacity: passwordSaving ? 0.7 : 1,
+                transition: 'background-color 0.18s ease, color 0.18s ease',
               }}
             >
               {passwordSaving ? 'Saving…' : 'Update Password'}
