@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { format, isToday, isTomorrow } from 'date-fns'
+import { teacherRescheduleLesson } from './actions'
 
 type Student = {
   id: string
@@ -116,12 +117,15 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
   )
 }
 
-function ClassCard({ cls }: { cls: Class }) {
+function ClassCard({ cls, onReschedule }: { cls: Class; onReschedule: (cls: Class) => void }) {
   const [expanded, setExpanded] = useState(false)
   const startTime = format(new Date(cls.starts_at), 'HH:mm')
   const endTime = format(new Date(cls.ends_at), 'HH:mm')
-  const minutesUntilClass = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
-  const showJoinButton = minutesUntilClass <= 15 && minutesUntilClass > -60
+  const now = Date.now()
+  const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
+  const classEnded = now > new Date(cls.ends_at).getTime()
+  const showJoinButton = minutesUntilStart <= 10 && !classEnded
+  const showReschedule = minutesUntilStart > 24 * 60
 
   function handleJoinClass() {
     if (cls.teams_link) {
@@ -156,7 +160,15 @@ function ClassCard({ cls }: { cls: Class }) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900">{cls.student.full_name}</p>
+          <a
+            href={`/students/${cls.student.id}`}
+            onClick={e => e.stopPropagation()}
+            style={{ color: 'inherit', textDecoration: 'none' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#FF8303')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
+          >
+            <p className="font-semibold">{cls.student.full_name}</p>
+          </a>
           <p className="text-sm text-gray-500">{startTime} - {endTime}</p>
         </div>
 
@@ -187,8 +199,13 @@ function ClassCard({ cls }: { cls: Class }) {
                 Join Class
               </button>
             )}
-            <ActionButton label="Reschedule" />
-            <ActionButton label={'Chat with ' + cls.student.full_name.split(' ')[0]} />
+            {showReschedule && (
+              <ActionButton label="Reschedule" onClick={() => onReschedule(cls)} />
+            )}
+            <ActionButton
+              label={'Message ' + cls.student.full_name.split(' ')[0]}
+              onClick={() => window.location.href = `/messages?studentId=${cls.student.id}`}
+            />
           </div>
         </div>
       )}
@@ -196,7 +213,7 @@ function ClassCard({ cls }: { cls: Class }) {
   )
 }
 
-function DayGroup({ dateStr, classes }: { dateStr: string; classes: Class[] }) {
+function DayGroup({ dateStr, classes, onReschedule }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void }) {
   const [open, setOpen] = useState(true)
   const heading = formatDayHeading(dateStr)
 
@@ -218,7 +235,7 @@ function DayGroup({ dateStr, classes }: { dateStr: string; classes: Class[] }) {
       {open && (
         <div className="space-y-2">
           {classes.map(cls => (
-            <ClassCard key={cls.id} cls={cls} />
+            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} />
           ))}
         </div>
       )}
@@ -230,6 +247,49 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted)
   const grouped = groupByDay(classes)
   const days = Object.keys(grouped).sort()
+
+  const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
+  const [rescheduleMessage, setRescheduleMessage] = useState('')
+  const [rescheduleLoading, setRescheduleLoading] = useState(false)
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null)
+  const [rescheduleSuccess, setRescheduleSuccess] = useState(false)
+
+  function handleOpenReschedule(cls: Class) {
+    setRescheduleTarget(cls)
+    setRescheduleMessage('')
+    setRescheduleError(null)
+    setRescheduleSuccess(false)
+  }
+
+  function handleCloseReschedule() {
+    if (rescheduleLoading) return
+    setRescheduleTarget(null)
+    setRescheduleMessage('')
+    setRescheduleError(null)
+    setRescheduleSuccess(false)
+  }
+
+  async function handleConfirmReschedule() {
+    if (!rescheduleTarget) return
+    if (!rescheduleMessage.trim()) {
+      setRescheduleError('You must write a message to your student before rescheduling.')
+      return
+    }
+    setRescheduleLoading(true)
+    setRescheduleError(null)
+    try {
+      const result = await teacherRescheduleLesson(rescheduleTarget.id, rescheduleMessage.trim())
+      if (result.error) {
+        setRescheduleError(result.error)
+      } else {
+        setRescheduleSuccess(true)
+      }
+    } catch {
+      setRescheduleError('Something went wrong. Please try again.')
+    } finally {
+      setRescheduleLoading(false)
+    }
+  }
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -292,8 +352,98 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       ) : (
         <div className="space-y-8">
           {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} />
+            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} />
           ))}
+        </div>
+      )}
+
+      {rescheduleTarget && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) handleCloseReschedule() }}
+        >
+          <div style={{
+            backgroundColor: 'white', borderRadius: '12px', padding: '28px',
+            width: '100%', maxWidth: '480px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+          }}>
+            {rescheduleSuccess ? (
+              <>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '12px' }}>
+                  Message sent
+                </h2>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px', lineHeight: 1.6 }}>
+                  Your message has been sent to {rescheduleTarget.student.full_name} and the class has been cancelled.
+                  They will need to book a new slot.
+                </p>
+                <button
+                  onClick={handleCloseReschedule}
+                  style={{
+                    width: '100%', padding: '10px', borderRadius: '8px',
+                    backgroundColor: '#FF8303', color: 'white',
+                    fontWeight: 600, fontSize: '14px', border: 'none', cursor: 'pointer'
+                  }}
+                >
+                  Close
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
+                  Request reschedule
+                </h2>
+                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
+                  Class with {rescheduleTarget.student.full_name} — {format(new Date(rescheduleTarget.starts_at), 'EEE d MMM, HH:mm')}
+                </p>
+                <p style={{ fontSize: '14px', color: '#111827', marginBottom: '8px', fontWeight: 500 }}>
+                  Message to student <span style={{ color: '#ef4444' }}>*</span>
+                </p>
+                <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '10px', lineHeight: 1.5 }}>
+                  Explain why you need to reschedule. Your student will need to book a new slot themselves.
+                  This message is required before the class can be cancelled.
+                </p>
+                <textarea
+                  value={rescheduleMessage}
+                  onChange={e => setRescheduleMessage(e.target.value)}
+                  placeholder="Hi, I'm sorry but I need to reschedule our class on..."
+                  rows={4}
+                  style={{
+                    width: '100%', padding: '10px 12px', borderRadius: '8px', fontSize: '14px',
+                    border: rescheduleError ? '2px solid #ef4444' : '2px solid #d1d5db',
+                    outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box'
+                  }}
+                />
+                {rescheduleError && (
+                  <p style={{ color: '#ef4444', fontSize: '13px', marginTop: '6px' }}>{rescheduleError}</p>
+                )}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                  <button
+                    onClick={handleCloseReschedule}
+                    disabled={rescheduleLoading}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 500,
+                      border: '2px solid #d1d5db', backgroundColor: 'white', cursor: 'pointer', color: '#374151'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmReschedule}
+                    disabled={rescheduleLoading}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
+                      backgroundColor: rescheduleLoading ? '#fbbf24' : '#FF8303',
+                      color: 'white', border: 'none', cursor: rescheduleLoading ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {rescheduleLoading ? 'Sending...' : 'Send & cancel class'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

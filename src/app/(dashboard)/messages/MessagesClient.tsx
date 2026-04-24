@@ -59,20 +59,21 @@ interface MessagesClientProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-  if (diffDays === 0) {
-    const h = date.getHours().toString().padStart(2, '0')
-    const m = date.getMinutes().toString().padStart(2, '0')
-    return `${h}:${m}`
+  function formatTime(isoString: string): string {
+    const date = new Date(isoString)
+    const now = new Date()
+    const isToday = date.getDate() === now.getDate() &&
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear()
+    if (isToday) {
+      const h = String(date.getHours()).padStart(2, '0')
+      const m = String(date.getMinutes()).padStart(2, '0')
+      return `${h}:${m}`
+    }
+    const day = String(date.getDate()).padStart(2, '0')
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return `${day} ${months[date.getMonth()]}`
   }
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
-  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
-}
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)

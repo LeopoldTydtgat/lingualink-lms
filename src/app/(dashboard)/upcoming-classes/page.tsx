@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import UpcomingClassesClient from './UpcomingClassesClient'
 
@@ -16,16 +17,16 @@ export default async function UpcomingClassesPage() {
   // Do NOT redirect to /login if profile is null — the layout already
   // verified authentication. A missing profile is a data issue, not an auth issue.
 
-  const { data: rawClasses, error } = await supabase
-    .from('classes')
+  const adminClient = createAdminClient()
+  const { data: rawLessons, error } = await adminClient
+    .from('lessons')
     .select(`
       id,
-      starts_at,
-      ends_at,
+      scheduled_at,
+      duration_minutes,
       status,
-      teams_link,
-      lesson_notes,
-      student:students (
+      teams_join_url,
+      students (
         id,
         full_name,
         photo_url
@@ -33,17 +34,27 @@ export default async function UpcomingClassesPage() {
     `)
     .eq('teacher_id', user.id)
     .eq('status', 'scheduled')
-    .gte('starts_at', new Date().toISOString())
-    .order('starts_at', { ascending: true })
+    .gte('scheduled_at', new Date().toISOString())
+    .order('scheduled_at', { ascending: true })
 
   if (error) {
-    console.error('Error fetching classes:', error)
+    console.error('Error fetching lessons:', error)
   }
 
-  const classes = (rawClasses ?? []).map((c: any) => ({
-    ...c,
-    student: Array.isArray(c.student) ? c.student[0] : c.student,
-  }))
+  const classes = (rawLessons ?? []).map((l: any) => {
+    const student = Array.isArray(l.students) ? l.students[0] : l.students
+    const scheduledAt = new Date(l.scheduled_at)
+    const endsAt = new Date(scheduledAt.getTime() + l.duration_minutes * 60 * 1000)
+    return {
+      id: l.id,
+      starts_at: l.scheduled_at,
+      ends_at: endsAt.toISOString(),
+      status: l.status,
+      teams_link: l.teams_join_url,
+      lesson_notes: null,
+      student,
+    }
+  })
 
   return (
     <UpcomingClassesClient

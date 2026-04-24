@@ -99,7 +99,11 @@ export default function RightPanel({
     return () => clearInterval(timer)
   }, [teacherId, nextLesson])
 
-  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 15 * 60
+  const classEndTime = nextLesson
+    ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
+    : null
+  const classEnded = classEndTime ? Date.now() > classEndTime : false
+  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded
 
   return (
     <aside className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
