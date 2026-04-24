@@ -143,6 +143,7 @@ export default function PastClassesClient({
               <Link
                 key={lesson.id}
                 href={`/student/past-classes/${lesson.id}`}
+                prefetch={false}
                 className="block bg-white border border-gray-200 rounded-xl p-4 hover:border-orange-300 hover:shadow-sm transition-all"
               >
                 <div className="flex items-center gap-4">

@@ -1,8 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Underline from '@tiptap/extension-underline'
+import Placeholder from '@tiptap/extension-placeholder'
 import { createBrowserClient } from '@supabase/ssr'
 import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X } from 'lucide-react'
+import dynamic from 'next/dynamic'
+import data from '@emoji-mart/data'
+
+const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 interface Conversation {
   participantId: string
@@ -48,6 +56,12 @@ function formatTime(dateStr: string) {
   return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
 }
 
+function isEmojiOnly(html: string): boolean {
+  const stripped = html.replace(/<[^>]*>/g, '').trim()
+  const emojiRegex = /^[\p{Emoji}\s]+$/u
+  return emojiRegex.test(stripped) && stripped.length <= 8
+}
+
 function Avatar({ name, photoUrl, size = 9 }: { name: string; photoUrl?: string | null; size?: number }) {
   if (photoUrl) {
     return (
@@ -74,7 +88,6 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations)
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [messagesLoaded, setMessagesLoaded] = useState(false)
-  const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [faqs, setFaqs] = useState<Faq[]>(initialFaqs)
   const [newQuestion, setNewQuestion] = useState('')
@@ -85,7 +98,23 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null)
   const [editQuestion, setEditQuestion] = useState('')
   const [editAnswer, setEditAnswer] = useState('')
+  const [, forceUpdate] = useState(0)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [emojiPickerPos, setEmojiPickerPos] = useState<{ bottom: number; left: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const emojiButtonRef = useRef<HTMLButtonElement>(null)
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ underline: false }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Type a reply...' }),
+    ],
+    content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
+  })
 
   const loadMessages = useCallback(async (conv: Conversation) => {
     setMessagesLoaded(false)
@@ -119,6 +148,16 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   // Real-time for open conversation
   useEffect(() => {
     if (!selectedConv) return
@@ -149,13 +188,14 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   }, [selectedConv, supabase])
 
   const handleSend = async () => {
-    if (!selectedConv || !input.trim() || sending) return
-    const text = input.trim()
-    setInput('')
+    if (!editor || !selectedConv || sending) return
+    const html = editor.getHTML()
+    if (!html || html === '<p></p>') return
+    editor.commands.clearContent()
     setSending(true)
 
     const tempId = crypto.randomUUID()
-    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: text, created_at: new Date().toISOString(), read_at: null }])
+    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: html, created_at: new Date().toISOString(), read_at: null }])
 
     const res = await fetch('/api/support/send', {
       method: 'POST',
@@ -164,7 +204,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         participantId: selectedConv.participantId,
         participantType: selectedConv.participantType,
         participantAuthId: selectedConv.participantAuthId,
-        content: text,
+        content: html,
       }),
     })
 
@@ -172,10 +212,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       setMessages(prev => prev.filter(m => m.id !== tempId))
     } else {
       // Replace temp message with real DB message so read_at updates work
-      const data = await res.json()
-      if (data.message) {
+      const json = await res.json()
+      if (json.message) {
         setMessages(prev =>
-          prev.map(m => m.id === tempId ? { ...data.message, read_at: null } : m)
+          prev.map(m => m.id === tempId ? { ...json.message, read_at: null } : m)
         )
       }
     }
@@ -213,6 +253,17 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     await supabase.from('faqs').update({ question: editQuestion, answer: editAnswer }).eq('id', faq.id)
     setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, question: editQuestion, answer: editAnswer } : f))
     setEditingFaqId(null)
+  }
+
+  const handleEmojiButtonClick = () => {
+    if (!showEmojiPicker && emojiButtonRef.current) {
+      const rect = emojiButtonRef.current.getBoundingClientRect()
+      setEmojiPickerPos({
+        bottom: window.innerHeight - rect.top + 4,
+        left: rect.left,
+      })
+    }
+    setShowEmojiPicker(v => !v)
   }
 
   const tabStyle = (tab: 'conversations' | 'faqs') =>
@@ -287,7 +338,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
           </div>
 
           {/* Message thread */}
-          <div className="flex-1 border border-gray-200 rounded-lg flex flex-col bg-white">
+          <div className="flex-1 border border-gray-200 rounded-lg flex flex-col bg-white overflow-hidden">
             {!selectedConv ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <MessageSquare size={32} className="text-gray-200 mb-3" />
@@ -295,7 +346,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
               </div>
             ) : (
               <>
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200">
+                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200 flex-shrink-0">
                   <Avatar name={selectedConv.participantName} photoUrl={selectedConv.participantPhotoUrl} size={9} />
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{selectedConv.participantName}</p>
@@ -314,13 +365,16 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                       <div key={msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'} items-end gap-2`}>
                         {!isAdmin && <Avatar name={selectedConv.participantName} photoUrl={selectedConv.participantPhotoUrl} size={7} />}
                         <div className="max-w-[75%]">
-                          <div className="px-3 py-2 rounded-2xl text-sm"
-                            style={isAdmin
+                          <div
+                            className="admin-support-bubble px-3 py-2 rounded-2xl text-sm"
+                            style={isEmojiOnly(msg.content)
+                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                              : isAdmin
                               ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
-                            }>
-                            {msg.content}
-                          </div>
+                            }
+                            dangerouslySetInnerHTML={{ __html: msg.content }}
+                          />
                           <div className={`flex items-center gap-1 mt-0.5 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isAdmin && (
@@ -341,24 +395,69 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   <div ref={messagesEndRef} />
                 </div>
 
-                <div className="border-t border-gray-200 px-4 py-3 bg-white flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') handleSend() }}
-                    placeholder={`Reply to ${selectedConv.participantName}...`}
-                    className="flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:border-orange-400 bg-gray-50"
-                    disabled={sending}
-                  />
-                  <button
-                    onClick={handleSend}
-                    disabled={!input.trim() || sending}
-                    className="w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-40"
-                    style={{ backgroundColor: '#FF8303' }}
-                  >
-                    <Send size={15} className="text-white" />
-                  </button>
+                <div className="border-t border-gray-200 flex-shrink-0 bg-white">
+                  <style>{`
+                    .admin-support-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
+                    .admin-support-composer .ProseMirror:focus { outline: none !important; border: none !important; }
+                    .admin-support-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+                    .admin-support-composer .ProseMirror ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                    .admin-support-composer .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                    .admin-support-composer .ProseMirror li { margin: 0.1rem 0; }
+                    .admin-support-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                    .admin-support-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                    .admin-support-bubble li { margin: 0.1rem 0; }
+                  `}</style>
+                  <div className="flex items-center gap-1 px-3 pt-2 pb-1">
+                    <button
+                      onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
+                      className="px-2 py-0.5 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
+                      style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                    >B</button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
+                      className="px-2 py-0.5 text-xs rounded italic text-gray-500 hover:bg-gray-100"
+                      style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                    >I</button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
+                      className="px-2 py-0.5 text-xs rounded underline text-gray-500 hover:bg-gray-100"
+                      style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                    >U</button>
+                    <button
+                      onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                      className="px-2 py-0.5 text-xs rounded text-gray-500 hover:bg-gray-100"
+                      style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                    >•≡</button>
+                    <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                      <button
+                        ref={emojiButtonRef}
+                        onClick={handleEmojiButtonClick}
+                        title="Emoji"
+                        style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                      >😊</button>
+                      {showEmojiPicker && emojiPickerPos && (
+                        <div style={{ position: 'fixed', bottom: emojiPickerPos.bottom, left: emojiPickerPos.left, zIndex: 9999 }}>
+                          <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 px-3 pb-3">
+                    <div
+                      className="admin-support-composer flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus-within:border-orange-400 bg-gray-50 min-h-[36px] max-h-[80px] overflow-y-auto cursor-text transition-colors"
+                      onClick={() => editor?.commands.focus()}
+                    >
+                      <EditorContent editor={editor} />
+                    </div>
+                    <button
+                      onClick={handleSend}
+                      disabled={sending}
+                      className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40"
+                      style={{ backgroundColor: '#FF8303' }}
+                    >
+                      <Send size={15} className="text-white" />
+                    </button>
+                  </div>
                 </div>
               </>
             )}

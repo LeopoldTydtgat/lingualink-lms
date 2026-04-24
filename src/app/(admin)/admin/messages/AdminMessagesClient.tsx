@@ -1,8 +1,16 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Underline from '@tiptap/extension-underline'
+import Placeholder from '@tiptap/extension-placeholder'
+import dynamic from 'next/dynamic'
+import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { getAdminThreadMessages, sendAdminMessage, markAdminThreadRead } from './actions'
+
+const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +74,12 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
+function isEmojiOnly(html: string): boolean {
+  const stripped = html.replace(/<[^>]*>/g, '').trim()
+  const emojiRegex = /^[\p{Emoji}\s]+$/u
+  return emojiRegex.test(stripped) && stripped.length <= 8
+}
+
 function Avatar({ name, photoUrl, size = 10 }: {
   name: string
   photoUrl: string | null
@@ -120,15 +134,37 @@ export default function AdminMessagesClient({
   const [selectedConv, setSelectedConv] = useState<AdminConversation | null>(null)
   const [messages, setMessages] = useState<AdminMessage[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
-  const [composerText, setComposerText] = useState('')
   const [sending, setSending] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ underline: false }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Write a message…' }),
+    ],
+    content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
+  })
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const fetchMessages = useCallback(async (conv: AdminConversation) => {
     setLoadingMessages(true)
@@ -144,7 +180,6 @@ export default function AdminMessagesClient({
   const handleSelectConv = useCallback(async (conv: AdminConversation) => {
     setSelectedConv(conv)
     setMessages([])
-    setComposerText('')
     await fetchMessages(conv)
   }, [fetchMessages])
 
@@ -162,6 +197,9 @@ export default function AdminMessagesClient({
           const parties = new Set([selectedConv.teacherSideId, selectedConv.studentId])
           const isDirectExchange =
             parties.has(newMsg.sender_id) && parties.has(newMsg.receiver_id)
+          // Only the teacher-addressed copy is used in the admin thread view.
+          // The student-addressed copy is ignored here to avoid showing the
+          // message twice (sendAdminMessage now inserts one row per party).
           const isAdminInterjection =
             newMsg.sender_type === 'admin' &&
             (newMsg.receiver_id === selectedConv.studentId ||
@@ -191,13 +229,15 @@ export default function AdminMessagesClient({
   }, [selectedConv, supabase])
 
   const handleSend = async () => {
-    if (!selectedConv || !composerText.trim() || sending) return
+    if (!editor || !selectedConv || sending) return
+    const html = editor.getHTML()
+    if (!html || html === '<p></p>') return
     setSending(true)
 
     const result = await sendAdminMessage(
       selectedConv.teacherSideId,
       selectedConv.studentId,
-      composerText.trim()
+      html
     )
 
     if (result?.error) {
@@ -219,9 +259,9 @@ export default function AdminMessagesClient({
       )
     }
 
-    setComposerText('')
+    editor.commands.clearContent()
     setSending(false)
-    textareaRef.current?.focus()
+    editor?.commands.focus()
   }
 
   const filteredConversations = conversations.filter(conv =>
@@ -375,12 +415,13 @@ export default function AdminMessagesClient({
                               admin   = slate (#374151), right-aligned */}
                           <div
                             className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={
-                              isStudent
-                                ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
-                                : isAdmin
-                                ? { backgroundColor: '#374151', color: 'white', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
+                            style={isEmojiOnly(msg.content)
+                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                              : isStudent
+                              ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
+                              : isAdmin
+                              ? { backgroundColor: '#374151', color: 'white', borderBottomRightRadius: '4px' }
+                              : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: msg.content }}
                           />
@@ -405,25 +446,64 @@ export default function AdminMessagesClient({
             </div>
 
             {/* ── Composer ── */}
-            <div className="border-t border-gray-200 p-4 flex-shrink-0 bg-white">
-              <div className="flex gap-3 items-end">
-                <textarea
-                  ref={textareaRef}
-                  value={composerText}
-                  onChange={e => setComposerText(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
-                  placeholder="Write a message… (Enter to send, Shift+Enter for new line)"
-                  rows={2}
-                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-xl resize-none focus:outline-none focus:border-orange-300 transition-colors"
-                />
+            <div className="border-t border-gray-200 flex-shrink-0 bg-white">
+              <style>{`
+                .admin-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
+                .admin-composer .ProseMirror:focus { outline: none !important; border: none !important; }
+                .admin-composer .ProseMirror p.is-editor-empty:first-child::before { color: #9ca3af; content: attr(data-placeholder); float: left; height: 0; pointer-events: none; }
+                .admin-composer .ProseMirror ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .admin-composer .ProseMirror ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+                .admin-composer .ProseMirror li { margin: 0.1rem 0; }
+              `}</style>
+              {/* Formatting toolbar */}
+              <div className="flex items-center gap-1 px-4 pt-3 pb-1">
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
+                  className="px-2 py-1 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >
+                  B
+                </button>
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
+                  className="px-2 py-1 text-xs rounded italic text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >
+                  I
+                </button>
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
+                  className="px-2 py-1 text-xs rounded underline text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >
+                  U
+                </button>
+                <button
+                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                  className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
+                  style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                >
+                  •≡
+                </button>
+                <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                  <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '4px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>😊</button>
+                  {showEmojiPicker && (
+                    <div style={{ position: 'absolute', bottom: '40px', left: 0, zIndex: 50 }}>
+                      <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div
+                className="admin-composer mx-4 mb-2 rounded-xl border border-gray-200 px-3 py-2 text-sm min-h-[72px] max-h-[120px] overflow-y-auto cursor-text focus-within:border-orange-300 transition-colors"
+                onClick={() => editor?.commands.focus()}
+              >
+                <EditorContent editor={editor} />
+              </div>
+              <div className="flex items-center justify-end px-4 pb-3 pt-1">
                 <button
                   onClick={handleSend}
-                  disabled={sending || !composerText.trim()}
+                  disabled={sending}
                   className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-opacity flex-shrink-0"
                   style={{ backgroundColor: '#FF8303' }}
                 >
