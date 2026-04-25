@@ -60,8 +60,9 @@ export default async function StudentsPage() {
   }))
 
   // Split into current and past
-  const currentTrainings = flatTrainings.filter(t => t.status === 'active')
-  const pastTrainings = flatTrainings.filter(t => t.status !== 'active')
+  const now = new Date()
+  const currentTrainings = flatTrainings.filter(t => !t.end_date || new Date(t.end_date) >= now)
+  const pastTrainings = flatTrainings.filter(t => t.end_date && new Date(t.end_date) < now)
 
   return (
     <StudentsClient

@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByTeacherEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 
 export async function teacherRescheduleLesson(
   lessonId: string,
@@ -35,7 +35,7 @@ export async function teacherRescheduleLesson(
   // Get teacher name
   const { data: teacherProfile } = await adminClient
     .from('profiles')
-    .select('full_name')
+    .select('full_name, email, timezone')
     .eq('id', user.id)
     .single()
   const teacherName = teacherProfile?.full_name ?? 'Your teacher'
@@ -59,7 +59,7 @@ export async function teacherRescheduleLesson(
     .update({
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
-      cancellation_reason: 'Teacher requested reschedule',
+      cancellation_reason: messageToStudent,
     })
     .eq('id', lessonId)
 
@@ -82,22 +82,6 @@ export async function teacherRescheduleLesson(
     }
   }
 
-  // Send message to student via messages table
-  const { error: messageError } = await adminClient
-    .from('messages')
-    .insert({
-      sender_id: user.id,
-      sender_type: 'teacher',
-      receiver_id: student.auth_user_id,
-      receiver_type: 'student',
-      content: messageToStudent,
-      attachments: [],
-    })
-
-  if (messageError) {
-    console.error('Message insert failed:', messageError)
-  }
-
   // Send email to student
   try {
     const hoursRefunded = lesson.duration_minutes / 60
@@ -105,7 +89,8 @@ export async function teacherRescheduleLesson(
       teacherName,
       lesson.scheduled_at,
       hoursRefunded,
-      student.timezone ?? 'UTC'
+      student.timezone ?? 'UTC',
+      messageToStudent
     )
     await resend.emails.send({
       from: 'no-reply@lingualinkonline.com',
@@ -120,6 +105,30 @@ export async function teacherRescheduleLesson(
     })
   } catch (emailErr) {
     console.error('Reschedule email failed — lesson still cancelled:', emailErr)
+  }
+
+  // Send confirmation email to the teacher
+  try {
+    if (teacherProfile?.email) {
+      const teacherEmailBody = teacherCancellationEmailContent(
+        student.full_name,
+        lesson.scheduled_at,
+        teacherProfile.timezone ?? 'UTC'
+      )
+      await resend.emails.send({
+        from: 'no-reply@lingualinkonline.com',
+        to: teacherProfile.email,
+        subject: 'Lingualink Online — Class cancellation confirmed',
+        html: buildEmailTemplate({
+          recipientName: teacherName,
+          subject: 'Class cancellation confirmed',
+          bodyHtml: teacherEmailBody,
+          contactEmail: 'support@lingualinkonline.com',
+        }),
+      })
+    }
+  } catch (teacherEmailErr) {
+    console.error('Teacher confirmation email failed — lesson still cancelled:', teacherEmailErr)
   }
 
   revalidatePath('/upcoming-classes')

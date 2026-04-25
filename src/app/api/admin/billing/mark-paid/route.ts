@@ -1,5 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate } from '@/lib/email/templates'
 
 export async function PATCH(req: NextRequest) {
   const supabase = await createClient()
@@ -30,6 +33,45 @@ export async function PATCH(req: NextRequest) {
     .eq('id', invoiceId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  try {
+    const adminClient = createAdminClient()
+
+    const { data: invoice } = await adminClient
+      .from('invoices')
+      .select('teacher_id, month, amount')
+      .eq('id', invoiceId)
+      .single()
+
+    if (invoice) {
+      const { data: teacher } = await adminClient
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', invoice.teacher_id)
+        .single()
+
+      if (teacher?.email) {
+        await resend.emails.send({
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+          to: teacher.email,
+          subject: 'Lingualink Online — Your invoice has been paid',
+          html: buildEmailTemplate({
+            recipientName: teacher.full_name,
+            subject: 'Lingualink Online — Your invoice has been paid',
+            bodyHtml: `
+              <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+                Your invoice for <strong>${invoice.month}</strong> has been processed and payment of
+                <strong>€${invoice.amount}</strong> will be transferred to your account within the agreed timeframe.
+              </p>
+            `,
+            contactEmail: 'teachers@lingualinkonline.com',
+          }),
+        })
+      }
+    }
+  } catch (err) {
+    console.error('Failed to send invoice paid email:', err)
+  }
 
   return NextResponse.json({ success: true })
 }

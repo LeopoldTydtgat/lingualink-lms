@@ -11,7 +11,6 @@ function bookingConfirmationStudentEmail(
   teacherName: string,
   dateTimeFormatted: string,
   durationMinutes: number,
-  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -32,17 +31,8 @@ function bookingConfirmationStudentEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Use the button below to join your class on Microsoft Teams:
-    </p>
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;margin-bottom:24px;"
-    >
-      Join Class on Teams
-    </a>
     <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
-      The Join Class button in your portal also activates 15 minutes before the class starts.
+      The Join Class button in your portal activates 15 minutes before the class starts.
     </p>
   `
 }
@@ -51,7 +41,6 @@ function bookingNotificationTeacherEmail(
   studentName: string,
   dateTimeFormatted: string,
   durationMinutes: number,
-  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -72,12 +61,6 @@ function bookingNotificationTeacherEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
   `
 }
 
@@ -85,7 +68,6 @@ function rescheduleConfirmationStudentEmail(
   teacherName: string,
   dateTimeFormatted: string,
   durationMinutes: number,
-  teamsJoinUrl: string
 ): string {
   const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
   return `
@@ -106,12 +88,6 @@ function rescheduleConfirmationStudentEmail(
         <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
       </tr>
     </table>
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
   `
 }
 
@@ -301,16 +277,16 @@ export async function POST(req: NextRequest) {
       : 'Lingualink Online – Your class is confirmed'
 
     const studentBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
-      : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes, teamsJoinUrl)
+      ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
+      : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
 
     const teacherSubject = isReschedule
       ? `Lingualink Online – Class rescheduled by ${studentRow.full_name}`
       : `Lingualink Online – New class booked with ${studentRow.full_name}`
 
     const teacherBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes, teamsJoinUrl)
-      : bookingNotificationTeacherEmail(studentRow.full_name, teacherDateTime, durationMinutes, teamsJoinUrl)
+      ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes)
+      : bookingNotificationTeacherEmail(studentRow.full_name, teacherDateTime, durationMinutes)
 
     await Promise.allSettled([
       resend.emails.send({

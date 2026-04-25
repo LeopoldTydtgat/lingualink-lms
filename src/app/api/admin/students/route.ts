@@ -3,11 +3,9 @@ import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { createClient as createServerSupabaseClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
+import resend from '@/lib/email/client'
 import { CreateStudentSchema } from '@/lib/validation/schemas'
 import { buildEmailTemplate } from '@/lib/email/templates'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 // ─── GET – list students (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
@@ -199,6 +197,62 @@ export async function POST(req: NextRequest) {
         .from('training_teachers')
         .insert(ttRows)
       if (ttError) console.error('training_teachers insert error:', ttError)
+    }
+
+    // ── 6a. Notify assigned teachers ─────────────────────────────────────────
+    if (data.assigned_teacher_ids.length > 0) {
+      const { data: teacherProfiles } = await adminClient
+        .from('profiles')
+        .select('id, full_name, email')
+        .in('id', data.assigned_teacher_ids)
+
+      if (teacherProfiles && teacherProfiles.length > 0) {
+        const endDateLabel = data.end_date
+          ? new Intl.DateTimeFormat('en-GB', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+              timeZone: 'UTC',
+            }).format(new Date(data.end_date))
+          : 'No end date'
+
+        const teacherEmailBody = `
+          <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+            A new student has been assigned to you on the Lingualink Online portal.
+          </p>
+          <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
+            <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${data.full_name}</td></tr>
+            <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Package:</strong> ${data.package_name}</td></tr>
+            <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>End Date:</strong> ${endDateLabel}</td></tr>
+          </table>
+          <a
+            href="https://teachers.lingualinkonline.com"
+            style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+          >
+            View Student Profile
+          </a>
+        `
+
+        try {
+          await Promise.allSettled(
+            teacherProfiles.map((teacher: { id: string; full_name: string; email: string }) =>
+              resend.emails.send({
+                from: 'no-reply@lingualinkonline.com',
+                to: teacher.email,
+                subject: 'Lingualink Online — You have been assigned a new student',
+                html: buildEmailTemplate({
+                  recipientName: teacher.full_name,
+                  subject: 'Lingualink Online — You have been assigned a new student',
+                  bodyHtml: teacherEmailBody,
+                  contactEmail: 'support@lingualinkonline.com',
+                }),
+              })
+            )
+          )
+        } catch (emailErr) {
+          console.error('Teacher assignment email error:', emailErr)
+        }
+      }
     }
 
     // ── 7. Send welcome email ────────────────────────────────────────────────
