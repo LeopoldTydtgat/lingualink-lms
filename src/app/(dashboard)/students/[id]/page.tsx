@@ -44,7 +44,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         full_name
       )
     `)
-    .eq('student_id', id)
+    .eq('id', id)
     .order('created_at', { ascending: false })
     .limit(1)
     .single()
