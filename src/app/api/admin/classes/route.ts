@@ -160,7 +160,6 @@ export async function POST(request: NextRequest) {
     const [datePart, timePart] = localIso.split('T')
     const [year, month, day] = datePart.split('-').map(Number)
     const [hour, minute] = timePart.split(':').map(Number)
-    // Two-pass offset correction (same pattern as availability route)
     const guessUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
@@ -168,13 +167,23 @@ export async function POST(request: NextRequest) {
       hour: '2-digit', minute: '2-digit', hour12: false
     })
     const parts = formatter.formatToParts(guessUtc)
+    const localYear = parseInt(parts.find(p => p.type === 'year')!.value)
+    const localMonth = parseInt(parts.find(p => p.type === 'month')!.value)
+    const localDay = parseInt(parts.find(p => p.type === 'day')!.value)
     const localHour = parseInt(parts.find(p => p.type === 'hour')!.value)
     const localMinute = parseInt(parts.find(p => p.type === 'minute')!.value)
-    const diffMs = ((hour - localHour) * 60 + (minute - localMinute)) * 60000
+    const targetMs = Date.UTC(year, month - 1, day, hour, minute, 0)
+    const gotMs = Date.UTC(localYear, localMonth - 1, localDay, localHour, localMinute, 0)
+    const diffMs = targetMs - gotMs
     return new Date(guessUtc.getTime() + diffMs).toISOString()
   }
 
   const scheduledAtUtc = localToUtc(scheduled_at, teacherTimezone)
+
+  // Reject bookings set in the past
+  if (new Date(scheduledAtUtc) < new Date()) {
+    return NextResponse.json({ error: 'Cannot book a class in the past. Please select a future date and time.' }, { status: 400 })
+  }
 
   // Verify the training exists and has enough hours remaining
   const { data: training, error: trainingError } = await supabase
@@ -287,7 +296,6 @@ export async function POST(request: NextRequest) {
         teacherProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
-        teamsJoinUrl,
         studentData.timezone ?? 'UTC'
       )
       await resend.emails.send({

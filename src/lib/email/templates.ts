@@ -185,7 +185,6 @@ export function studentBookingConfirmationEmailContent(
   teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
-  teamsJoinUrl: string | null,
   studentTimezone: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
@@ -198,17 +197,6 @@ export function studentBookingConfirmationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <p style="margin:0 0 12px;font-size:14px;color:#6B7280;line-height:1.6;">
-      Your Teams link will be ready to use 10 minutes before your class starts.
-    </p>
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
   `
 }
 
@@ -244,7 +232,8 @@ export function studentCancellationByTeacherEmailContent(
   teacherName: string,
   scheduledAt: string,
   hoursRefunded: number,
-  studentTimezone: string
+  studentTimezone: string,
+  teacherMessage: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
   return `
@@ -256,6 +245,12 @@ export function studentCancellationByTeacherEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
     </table>
+    ${teacherMessage ? `
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Message from your teacher</p>
+      <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${teacherMessage}</p>
+    </div>
+    ` : ''}
     <a
       href="https://students.lingualinkonline.com/student/my-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
@@ -270,7 +265,6 @@ export function studentRescheduledEmailContent(
   oldScheduledAt: string,
   newScheduledAt: string,
   durationMinutes: number,
-  teamsJoinUrl: string | null,
   studentTimezone: string
 ): string {
   const oldTime = formatClassTime(oldScheduledAt, studentTimezone)
@@ -284,14 +278,6 @@ export function studentRescheduledEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>New time:</strong> ${newTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
   `
 }
 
@@ -381,6 +367,59 @@ export function studentNewMessageEmailContent(teacherName: string): string {
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Go to Messages
+    </a>
+  `
+}
+
+export function studentTrainingEndingSoonEmailContent(endDate: string): string {
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      This is a friendly reminder that your current training package is ending on
+      <strong style="color:#FF8303;">${endDate}</strong>.
+    </p>
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      If you'd like to continue your language learning journey, please reach out to Shannon — she'll be happy to help you set up a new package.
+    </p>
+    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
+      Don't forget to use any remaining hours before your training ends — you can book classes directly from your student portal.
+    </p>
+    <a
+      href="mailto:shannon@lingualinkonline.com"
+      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+    >
+      Contact Shannon
+    </a>
+  `
+}
+
+export function studentCancellationByAdminEmailContent(
+  teacherName: string,
+  scheduledAt: string,
+  hoursRefunded: number,
+  studentTimezone: string,
+  cancellationReason?: string
+): string {
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience.
+    </p>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
+    </table>
+    ${cancellationReason ? `
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Reason for cancellation</p>
+      <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${cancellationReason}</p>
+    </div>
+    ` : ''}
+    <a
+      href="https://students.lingualinkonline.com/student/my-classes"
+      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+    >
+      Book a New Class
     </a>
   `
 }

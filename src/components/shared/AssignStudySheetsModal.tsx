@@ -116,6 +116,30 @@ export default function AssignStudySheetsModal({
             assigned_by: user.id,
           }))
         )
+
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .single()
+
+        const addedTitles = sheets
+          .filter(s => toAdd.includes(s.id))
+          .map(s => s.title)
+
+        await fetch('/api/teacher/notify-homework-assigned', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            studentId,
+            teacherName: profile?.full_name ?? 'Your teacher',
+            sheetTitles: addedTitles,
+          }),
+        })
+      } catch {
+        // email failure is non-blocking
+      }
     }
 
     onSaved(sheets.filter(s => selected.has(s.id)))

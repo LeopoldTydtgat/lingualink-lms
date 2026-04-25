@@ -1,7 +1,10 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 
 export async function sendMessage(
   receiverId: string,
@@ -33,6 +36,34 @@ export async function sendMessage(
   })
 
   if (error) return { error: error.message }
+
+  if (receiverType === 'teacher') {
+    try {
+      const adminDb = createAdminClient()
+      const { data: teacher } = await adminDb
+        .from('profiles')
+        .select('full_name, email')
+        .eq('id', receiverId)
+        .single()
+
+      if (teacher?.email) {
+        const subject = `Lingualink Online — New message from ${student.full_name}`
+        await resend.emails.send({
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+          to: teacher.email,
+          subject,
+          html: buildEmailTemplate({
+            recipientName: teacher.full_name,
+            subject,
+            bodyHtml: newMessageEmailContent(student.full_name),
+            contactEmail: 'teachers@lingualinkonline.com',
+          }),
+        })
+      }
+    } catch {
+      // non-blocking
+    }
+  }
 
   revalidatePath('/student/messages')
   return { success: true }
