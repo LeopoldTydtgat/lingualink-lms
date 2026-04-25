@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect, notFound } from 'next/navigation'
 import StudentDetailClient from './StudentDetailClient'
 
@@ -18,7 +19,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const isAdmin = profile?.role === 'admin'
 
   // Fetch the training with student info
-  const { data: training, error } = await supabase
+  const adminClient = createAdminClient()
+  const { data: training, error } = await adminClient
     .from('trainings')
     .select(`
       id,
@@ -42,7 +44,9 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         full_name
       )
     `)
-    .eq('id', id)
+    .eq('student_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
     .single()
 
   if (error || !training) notFound()
@@ -51,7 +55,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   if (!isAdmin && training.teacher_id !== user.id) notFound()
 
   // Fetch all lessons for this training
-  const { data: lessons } = await supabase
+  const { data: lessons } = await adminClient
     .from('lessons')
     .select(`
       id,
@@ -71,7 +75,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const lessonIds = lessons?.map(l => l.id) ?? []
 
   const { data: reports } = lessonIds.length > 0
-    ? await supabase
+    ? await adminClient
         .from('reports')
         .select(`
           id,
