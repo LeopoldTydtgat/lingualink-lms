@@ -296,7 +296,6 @@ export async function POST(request: NextRequest) {
         teacherProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
-        teamsJoinUrl,
         studentData.timezone ?? 'UTC'
       )
       await resend.emails.send({
