@@ -1,5 +1,50 @@
 # LinguaLink Online - Build Journal
 
+## Session 61 - 25 April 2026 - Email System Audit, Bug Fixes, and Missing Notifications
+
+### What was built
+
+- Fixed the Past Classes tab on the individual student detail page - the lessons query was filtering by `.eq('training_id', id)` where `id` was the URL route param. The route param is a training ID (the student list navigates using `training.id`), so the training fetch was corrected to `.eq('id', id)` and the lessons query left to use `id` directly.
+- Fixed a 404 error on all student detail page links - root cause was the same misidentified param.
+- Fixed Past Trainings on the Students and Trainings list page - the split was purely status-based, requiring manual status changes by the client for every completed training. Changed to a date-driven split using `end_date` so trainings automatically move to Past Trainings when their end date passes.
+- Conducted a full email audit across the entire codebase and mapped findings against all three portal briefs.
+- Removed the MS Teams join link from all emails except the 1-hour class reminder - previously the link appeared in booking confirmations and reschedule emails which was incorrect per the brief.
+- Added student cancellation emails - student receives a confirmation and teacher receives a notification when a student cancels a class.
+- Added teacher cancellation confirmation email - teacher now receives a confirmation email when they cancel or reschedule a class.
+- Added message notification emails - when a teacher sends a message the student receives an email notification, and when a student sends a message the teacher receives an email notification.
+- Added homework assigned email - student receives an email when a teacher assigns study sheets from a class report or when admin assigns directly from the library.
+- Added report overdue cron job at `/api/cron/report-overdue` - runs daily at 08:00 UTC, identifies lessons past the 12-hour report deadline with no completed report, and emails the teacher. Requires `report_overdue_sent` boolean column on lessons table - migration applied.
+- Added monthly invoice reminder cron job at `/api/cron/invoice-reminder` - runs on the 1st of every month at 08:00 UTC, emails all active teachers to upload their invoice between the 1st and 10th.
+- Added invoice paid notification - teacher receives an email when the client marks their invoice as paid in the admin billing section.
+- Added new student assigned notification - when the client creates a new student and assigns teachers, each assigned teacher receives an email introducing the student.
+- Added training ending soon cron job at `/api/cron/training-ending-soon` - runs daily at 08:00 UTC, emails students 14 days before their training end date. Requires `training_ending_soon_sent` boolean column on trainings table - migration applied.
+
+### Break/Fix Log
+
+Issue 1
+- Symptom: Past Classes tab on student detail page showed "No past classes yet" for all students
+- Cause: The lessons query used `.eq('training_id', id)` where `id` was the URL route param. The param is a training ID passed from the student list via `router.push('/students/' + training.id)`, but the training fetch was querying `.eq('student_id', id)` - meaning it was looking for a training where student_id equals the training ID. No match was ever found.
+- Fix: Changed training fetch to `.eq('id', id)` and left the lessons query using `id` directly since `id` is already the training ID.
+- Lesson: Always trace the full data flow from URL param to query before assuming a code bug. The param name `id` inside a `[id]` route gives no indication of what entity it actually represents.
+
+Issue 2
+- Symptom: Clicking any student on the Students and Trainings page produced a 404
+- Cause: Same root cause as Issue 1 - the training fetch was using the wrong field to match.
+- Fix: Resolved by the same fix as Issue 1.
+- Lesson: One wrong assumption in a server component can silently break an entire section of the portal.
+
+Issue 3
+- Symptom: Past Trainings column always showed 0 regardless of how many students had finished training
+- Cause: The split used `status === 'active'` but all trainings had status 'active' - there was no mechanism to change status automatically and no UI for the client to do it efficiently at scale.
+- Fix: Changed the split to use `end_date` - trainings with a past end date go to Past Trainings automatically.
+- Lesson: Any data split that requires manual admin action to maintain does not scale. Always prefer computed or date-driven splits where the business logic allows it.
+
+### Session result
+
+This session resolved three interconnected bugs on the student detail and list pages, then conducted a full audit of the email system against all three portal briefs. Eleven email gaps were identified and all eleven were addressed - including new cron jobs, new API routes, and wiring of existing unused email templates. The Teams join link is now correctly restricted to the 1-hour reminder only. Two database migrations were applied for the new cron guard columns. All changes committed and pushed to the dev branch.
+
+---
+
 ## Session 60 - 24 April 2026 - Live Test Bug Fixes & Teacher Portal Repairs
 
 ### What was built
