@@ -371,6 +371,27 @@ export function studentNewMessageEmailContent(teacherName: string): string {
   `
 }
 
+export function studentTrainingEndingSoonEmailContent(endDate: string): string {
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      This is a friendly reminder that your current training package is ending on
+      <strong style="color:#FF8303;">${endDate}</strong>.
+    </p>
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      If you'd like to continue your language learning journey, please reach out to Shannon — she'll be happy to help you set up a new package.
+    </p>
+    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
+      Don't forget to use any remaining hours before your training ends — you can book classes directly from your student portal.
+    </p>
+    <a
+      href="mailto:shannon@lingualinkonline.com"
+      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+    >
+      Contact Shannon
+    </a>
+  `
+}
+
 export function studentCancellationByAdminEmailContent(
   teacherName: string,
   scheduledAt: string,
