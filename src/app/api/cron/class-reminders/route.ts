@@ -73,7 +73,7 @@ export async function GET(request: Request) {
             teacher.full_name,
             lesson.scheduled_at,
             lesson.duration_minutes,
-            lesson.teams_join_url,
+            null,
             student.timezone ?? 'Europe/London',
             24
           ),
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
             student.full_name,
             lesson.scheduled_at,
             lesson.duration_minutes,
-            lesson.teams_join_url,
+            null,
             teacher.timezone ?? 'Africa/Johannesburg',
             24
           ),

@@ -185,7 +185,6 @@ export function studentBookingConfirmationEmailContent(
   teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
-  teamsJoinUrl: string | null,
   studentTimezone: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
@@ -198,17 +197,6 @@ export function studentBookingConfirmationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <p style="margin:0 0 12px;font-size:14px;color:#6B7280;line-height:1.6;">
-      Your Teams link will be ready to use 10 minutes before your class starts.
-    </p>
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
   `
 }
 
@@ -277,7 +265,6 @@ export function studentRescheduledEmailContent(
   oldScheduledAt: string,
   newScheduledAt: string,
   durationMinutes: number,
-  teamsJoinUrl: string | null,
   studentTimezone: string
 ): string {
   const oldTime = formatClassTime(oldScheduledAt, studentTimezone)
@@ -291,14 +278,6 @@ export function studentRescheduledEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>New time:</strong> ${newTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
   `
 }
 
