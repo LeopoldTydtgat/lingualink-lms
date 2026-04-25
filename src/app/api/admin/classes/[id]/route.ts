@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate, studentCancellationByAdminEmailContent } from '@/lib/email/templates'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -161,6 +163,46 @@ export async function PATCH(
         .from('trainings')
         .update({ hours_consumed: Math.max(0, training.hours_consumed - hoursToRefund) })
         .eq('id', existing.training_id)
+    }
+
+    const adminClient = createAdminClient()
+    // Send cancellation email to student
+    try {
+      const { data: teacherProfile } = await adminClient
+        .from('profiles')
+        .select('full_name')
+        .eq('id', existing.teacher_id)
+        .single()
+
+      const { data: studentData } = await adminClient
+        .from('students')
+        .select('full_name, email, timezone')
+        .eq('id', existing.student_id)
+        .single()
+
+      if (studentData?.email) {
+        const hoursRefunded = existing.duration_minutes / 60
+        const emailBody = studentCancellationByAdminEmailContent(
+          teacherProfile?.full_name ?? 'Your teacher',
+          existing.scheduled_at,
+          hoursRefunded,
+          studentData.timezone ?? 'UTC',
+          cancellation_reason ?? undefined
+        )
+        await resend.emails.send({
+          from: 'no-reply@lingualinkonline.com',
+          to: studentData.email,
+          subject: 'Lingualink Online — Your class has been cancelled',
+          html: buildEmailTemplate({
+            recipientName: studentData.full_name ?? 'Student',
+            subject: 'Your class has been cancelled',
+            bodyHtml: emailBody,
+            contactEmail: 'support@lingualinkonline.com',
+          }),
+        })
+      }
+    } catch (emailErr) {
+      console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
     }
 
     return NextResponse.json({ success: true })

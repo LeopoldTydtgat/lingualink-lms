@@ -320,7 +320,7 @@ export default function ClassesListClient({ teachers }: Props) {
         {/* Table header */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr 160px 80px 110px 80px',
+          gridTemplateColumns: filterStatus === 'cancelled' ? '1fr 1fr 160px 80px 110px 1fr 80px' : '1fr 1fr 160px 80px 110px 80px',
           padding: '12px 16px',
           backgroundColor: '#F9FAFB',
           borderBottom: '1px solid #E5E7EB',
@@ -335,6 +335,9 @@ export default function ClassesListClient({ teachers }: Props) {
           <span>Date &amp; Time</span>
           <span>Duration</span>
           <span>Status</span>
+          {filterStatus === 'cancelled' && (
+            <span>Reason</span>
+          )}
           <span>Report</span>
         </div>
 
@@ -355,7 +358,7 @@ export default function ClassesListClient({ teachers }: Props) {
                 onClick={() => router.push(`/admin/classes/${lesson.id}`)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 1fr 160px 80px 110px 80px',
+                  gridTemplateColumns: filterStatus === 'cancelled' ? '1fr 1fr 160px 80px 110px 1fr 80px' : '1fr 1fr 160px 80px 110px 80px',
                   padding: '14px 16px',
                   borderBottom: index < lessons.length - 1 ? '1px solid #F3F4F6' : 'none',
                   cursor: 'pointer',
@@ -442,6 +445,12 @@ export default function ClassesListClient({ teachers }: Props) {
                 }}>
                   {statusMeta.label}
                 </span>
+
+                {filterStatus === 'cancelled' && (
+                  <div onClick={(e) => e.stopPropagation()} style={{ fontSize: '13px', color: '#6B7280' }}>
+                    {lesson.cancellation_reason ?? <span style={{ color: '#D1D5DB', fontStyle: 'italic' }}>No reason provided</span>}
+                  </div>
+                )}
 
                 {/* Report link — stop propagation so clicking it doesn't open class detail */}
                 <div onClick={(e) => e.stopPropagation()}>

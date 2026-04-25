@@ -244,7 +244,8 @@ export function studentCancellationByTeacherEmailContent(
   teacherName: string,
   scheduledAt: string,
   hoursRefunded: number,
-  studentTimezone: string
+  studentTimezone: string,
+  teacherMessage: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
   return `
@@ -256,6 +257,12 @@ export function studentCancellationByTeacherEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
     </table>
+    ${teacherMessage ? `
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Message from your teacher</p>
+      <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${teacherMessage}</p>
+    </div>
+    ` : ''}
     <a
       href="https://students.lingualinkonline.com/student/my-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
@@ -381,6 +388,38 @@ export function studentNewMessageEmailContent(teacherName: string): string {
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Go to Messages
+    </a>
+  `
+}
+
+export function studentCancellationByAdminEmailContent(
+  teacherName: string,
+  scheduledAt: string,
+  hoursRefunded: number,
+  studentTimezone: string,
+  cancellationReason?: string
+): string {
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience.
+    </p>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
+    </table>
+    ${cancellationReason ? `
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Reason for cancellation</p>
+      <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${cancellationReason}</p>
+    </div>
+    ` : ''}
+    <a
+      href="https://students.lingualinkonline.com/student/my-classes"
+      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
+    >
+      Book a New Class
     </a>
   `
 }
