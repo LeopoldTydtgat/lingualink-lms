@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByTeacherEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent } from '@/lib/email/templates'
 
 export async function teacherRescheduleLesson(
   lessonId: string,
@@ -59,7 +59,7 @@ export async function teacherRescheduleLesson(
     .update({
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
-      cancellation_reason: 'Teacher requested reschedule',
+      cancellation_reason: messageToStudent,
     })
     .eq('id', lessonId)
 
@@ -82,22 +82,6 @@ export async function teacherRescheduleLesson(
     }
   }
 
-  // Send message to student via messages table
-  const { error: messageError } = await adminClient
-    .from('messages')
-    .insert({
-      sender_id: user.id,
-      sender_type: 'teacher',
-      receiver_id: student.auth_user_id,
-      receiver_type: 'student',
-      content: messageToStudent,
-      attachments: [],
-    })
-
-  if (messageError) {
-    console.error('Message insert failed:', messageError)
-  }
-
   // Send email to student
   try {
     const hoursRefunded = lesson.duration_minutes / 60
@@ -105,7 +89,8 @@ export async function teacherRescheduleLesson(
       teacherName,
       lesson.scheduled_at,
       hoursRefunded,
-      student.timezone ?? 'UTC'
+      student.timezone ?? 'UTC',
+      messageToStudent
     )
     await resend.emails.send({
       from: 'no-reply@lingualinkonline.com',
