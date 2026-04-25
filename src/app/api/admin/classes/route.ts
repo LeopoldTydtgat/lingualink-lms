@@ -2,6 +2,12 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
+import resend from '@/lib/email/client'
+import {
+  buildEmailTemplate,
+  teacherNewBookingEmailContent,
+  studentBookingConfirmationEmailContent,
+} from '@/lib/email/templates'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -240,7 +246,65 @@ export async function POST(request: NextRequest) {
     // Lesson was created — don't roll back, but log the issue
   }
 
-  // TODO: send confirmation emails to teacher and student via Resend once stubbed
+  // Send confirmation emails to teacher and student
+  try {
+    // Fetch teacher profile for email and timezone
+    const { data: teacherProfile } = await adminClient
+      .from('profiles')
+      .select('full_name, email, timezone')
+      .eq('id', teacher_id)
+      .single()
+
+    // Fetch student for email and timezone
+    const { data: studentData } = await adminClient
+      .from('students')
+      .select('full_name, email, timezone')
+      .eq('id', student_id)
+      .single()
+
+    if (teacherProfile?.email) {
+      const teacherBody = teacherNewBookingEmailContent(
+        studentData?.full_name ?? 'Your student',
+        scheduledAtUtc,
+        duration_minutes,
+        teacherProfile.timezone ?? 'UTC'
+      )
+      await resend.emails.send({
+        from: 'no-reply@lingualinkonline.com',
+        to: teacherProfile.email,
+        subject: `Lingualink Online — New class booked with ${studentData?.full_name ?? 'a student'}`,
+        html: buildEmailTemplate({
+          recipientName: teacherProfile.full_name ?? 'Teacher',
+          subject: 'New class booked',
+          bodyHtml: teacherBody,
+          contactEmail: 'support@lingualinkonline.com',
+        }),
+      })
+    }
+
+    if (studentData?.email) {
+      const studentBody = studentBookingConfirmationEmailContent(
+        teacherProfile?.full_name ?? 'Your teacher',
+        scheduledAtUtc,
+        duration_minutes,
+        teamsJoinUrl,
+        studentData.timezone ?? 'UTC'
+      )
+      await resend.emails.send({
+        from: 'no-reply@lingualinkonline.com',
+        to: studentData.email,
+        subject: 'Lingualink Online — Your class is confirmed',
+        html: buildEmailTemplate({
+          recipientName: studentData.full_name ?? 'Student',
+          subject: 'Your class is confirmed',
+          bodyHtml: studentBody,
+          contactEmail: 'support@lingualinkonline.com',
+        }),
+      })
+    }
+  } catch (emailErr) {
+    console.error('[Email] Booking confirmation emails failed — lesson still created:', emailErr)
+  }
 
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
 }

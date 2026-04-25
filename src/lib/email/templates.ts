@@ -200,7 +200,7 @@ export function studentBookingConfirmationEmailContent(
     </table>
     ${teamsJoinUrl ? `
     <p style="margin:0 0 12px;font-size:14px;color:#6B7280;line-height:1.6;">
-      Your Teams link will be ready to use 15 minutes before your class starts.
+      Your Teams link will be ready to use 10 minutes before your class starts.
     </p>
     <a
       href="${teamsJoinUrl}"

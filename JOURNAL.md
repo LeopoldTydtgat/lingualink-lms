@@ -1,5 +1,71 @@
 # LinguaLink Online - Build Journal
 
+## Session 60 - 24 April 2026 - Live Test Bug Fixes & Teacher Portal Repairs
+
+### What was built
+
+- Teacher upcoming classes page fixed to query the `lessons` table instead of the abandoned `classes` table - all admin-booked classes now appear correctly
+- `lesson_notes` removed from the lessons query (column does not exist on `lessons` table) - was causing a silent Supabase error returning empty results
+- Lessons query switched to `createAdminClient()` to bypass RLS - the regular server client was silently returning no rows for the teacher session
+- Admin SELECT policy added to `lessons` table in Supabase
+- Join Class button window changed from 15 minutes to 10 minutes across teacher portal (UpcomingClassesClient) and right panel (RightPanel)
+- Join Class button now hides after class end time (calculated as `scheduled_at + duration_minutes`) - previously remained visible indefinitely after class ended
+- Reschedule button hidden entirely within 24 hours of class start - no greying out, no tooltip, simply absent
+- Reschedule flow implemented: teacher clicks Reschedule - modal opens requiring a mandatory message to the student - on send, lesson is cancelled, hours refunded, message inserted into messages table, student receives cancellation email
+- New server action `teacherRescheduleLesson` created at `src/app/(dashboard)/upcoming-classes/actions.ts` - enforces 24-hour rule server-side, verifies lesson ownership, cancels with status `cancelled`, refunds training hours, sends message and email
+- Message button added to expanded class card - navigates to `/messages?studentId=<id>` to pre-open the correct conversation
+- Messages page `studentId` query param resolution switched to `createAdminClient()` - regular client was blocked by RLS causing the deep-link to silently fail
+- Booking confirmation emails implemented in admin class booking route - both teacher and student now receive branded confirmation emails immediately on booking
+- `formatTime` function in MessagesClient rewritten with manual date construction - was using locale-dependent formatting causing server/client hydration mismatch
+- Teacher messages contacts list fixed to match by `auth_user_id` instead of `students.id` - contacts were showing as Unknown because `receiver_id` in the messages table stores the auth UUID not the students table primary key
+- Admin messages contacts list fixed with the same `auth_user_id` matching fix
+- Student detail page 404 fixed - page was querying `trainings.eq('id', studentId)` (wrong column) and using the regular client (RLS blocked the students join). Fixed to `.eq('student_id', id)` and switched all three queries (trainings, lessons, reports) to `createAdminClient()`
+- Student name in upcoming class cards made clickable - links to `/students/<id>` with `stopPropagation` so card expand/collapse still works
+- Admin messages view made fully read-only - composer and send button removed, replaced with a static banner: "This is a read-only view of the conversation between [teacher] and [student]." Support section and direct messaging from other parts of the platform unaffected
+- `auth_user_id` data integrity resolved for existing student records - root cause identified as students added before the admin creation flow was fully implemented. Fixed by matching `auth.users` on email and updating `students.auth_user_id` via SQL. Admin creation route confirmed to set `auth_user_id` correctly for all new students going forward
+- `.npmrc` confirmed in repo root with `legacy-peer-deps=true` to fix CI pipeline failures caused by emoji-mart React 19 peer dependency conflict
+
+### Break/Fix Log
+
+**Issue 1 - Teacher upcoming classes showing empty despite bookings existing**
+- Symptom: Teacher portal showed "No upcoming classes" even though classes had been booked through admin
+- Cause: The upcoming classes page queried the `classes` table. All admin bookings write to the `lessons` table. These are two separate tables - nothing ever writes to `classes` making it permanently empty
+- Fix: Updated `src/app/(dashboard)/upcoming-classes/page.tsx` to query `lessons` instead of `classes`, mapping `scheduled_at` to `starts_at`, calculating `ends_at` from `scheduled_at + duration_minutes`, and mapping `teams_join_url` to `teams_link` to match the shape the client component expected
+- Lesson: When two parts of the app write and read from different tables for the same entity, data will never appear. Always verify which table an API route actually writes to before building the read side
+
+**Issue 2 - Silent Supabase error on lessons query**
+- Symptom: Even after switching to the `lessons` table, the query returned an empty error object `{}`
+- Cause: The select included `lesson_notes` which does not exist as a column on the `lessons` table. Supabase returns a silent error object when a non-existent column is selected
+- Fix: Removed `lesson_notes` from the select and set `lesson_notes: null` in the mapping instead
+- Lesson: Supabase does not throw a clear error for missing columns - it returns `{}` which looks like a network or auth issue. Always verify column names against the actual table schema before writing queries
+
+**Issue 3 - Contacts showing as Unknown in teacher and admin messages**
+- Symptom: Message threads sent to students appeared as Unknown in the contacts list on both teacher and admin messages pages
+- Cause: The contacts list extracted `receiver_id` from the messages table (which stores `auth.users.id`) and then looked up the student name by matching against `students.id` (a different UUID). The two IDs never matched so full_name was never found
+- Fix: Updated both the student fetch query and the `.find()` match to use `auth_user_id` consistently in both teacher messages page and admin messages page
+- Lesson: The messages table uses auth UUIDs as sender/receiver identifiers. The students table has its own primary key UUID. These are different values. Always join via `auth_user_id` when resolving student identity from a message record
+
+**Issue 4 - Student detail page returning 404**
+- Symptom: Clicking a student name in the teacher portal returned a 404 page
+- Cause: The student detail page queried `trainings` with `.eq('id', studentId)` - passing the student UUID to the training ID filter. No training matched so the page called `notFound()`. Additionally the regular Supabase client was blocked by RLS on the students join
+- Fix: Changed filter to `.eq('student_id', id)` and switched all three queries (trainings, lessons, reports) to `createAdminClient()`
+- Lesson: Always verify which column a filter applies to. Passing the wrong UUID to the wrong column fails silently with no rows returned
+
+**Issue 5 - Reschedule message routing to wrong student**
+- Symptom: Teacher reschedule message was delivered to the wrong student
+- Cause: Two students had the same `auth_user_id` value - one student row had been manually linked to the wrong auth account during a previous data fix attempt
+- Fix: Located the correct auth account via `auth.users` by email and updated `students.auth_user_id` to the correct UUID
+- Lesson: Always verify `auth_user_id` uniqueness across student records after any manual data operations. Two students sharing an auth ID will cause messages and auth-dependent features to bleed between accounts
+
+### Session result
+
+Session 60 was a focused bug-fix session addressing failures discovered during a live platform test. The most critical fix was the upcoming classes page being permanently empty because admin bookings write to `lessons` while the teacher portal was reading from the abandoned `classes` table. A chain of follow-on fixes resolved silent Supabase errors, RLS blocks, and student identity mismatches across the messages system. The reschedule flow was built from scratch - mandatory teacher message, server-side 24-hour enforcement, lesson cancellation, hours refund, and student email notification. The admin messages view was made read-only. By end of session the core booking and communication loop was working end to end - admin books a class, teacher sees it, teacher can reschedule with a mandatory message to the student, student receives the cancellation email and the personal message in their inbox.
+
+---
+
+
+
+
 ## Session 57 - 20 April 2026 - Custom Domain, Auth Fixes & Form Improvements
 
 ### What was built
