@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByAdminEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -244,6 +244,46 @@ export async function PATCH(
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 })
+  }
+
+  if (fields.scheduled_at) {
+    const adminClient = createAdminClient()
+    try {
+      const { data: teacherProfile } = await adminClient
+        .from('profiles')
+        .select('full_name')
+        .eq('id', existing.teacher_id)
+        .single()
+
+      const { data: studentData } = await adminClient
+        .from('students')
+        .select('full_name, email, timezone')
+        .eq('id', existing.student_id)
+        .single()
+
+      if (studentData?.email) {
+        const emailBody = studentRescheduledEmailContent(
+          teacherProfile?.full_name ?? 'Your teacher',
+          existing.scheduled_at,
+          fields.scheduled_at,
+          fields.duration_minutes ?? existing.duration_minutes,
+          studentData.timezone ?? 'UTC'
+        )
+        await resend.emails.send({
+          from: 'no-reply@lingualinkonline.com',
+          to: studentData.email,
+          subject: 'Lingualink Online — Your class has been rescheduled',
+          html: buildEmailTemplate({
+            recipientName: studentData.full_name ?? 'Student',
+            subject: 'Your class has been rescheduled',
+            bodyHtml: emailBody,
+            contactEmail: 'support@lingualinkonline.com',
+          }),
+        })
+      }
+    } catch (emailErr) {
+      console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
+    }
   }
 
   return NextResponse.json({ success: true })
