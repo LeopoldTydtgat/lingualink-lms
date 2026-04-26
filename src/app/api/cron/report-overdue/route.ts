@@ -79,7 +79,7 @@ export async function GET(request: Request) {
               Timely reports are important for tracking student progress. If you have any difficulties, please contact us and we will help you.
             </p>
             <a
-              href="https://teachers.lingualinkonline.com/reports"
+              href="${process.env.NEXT_PUBLIC_SITE_URL}/reports"
               style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
             >
               Complete My Report

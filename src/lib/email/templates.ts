@@ -42,7 +42,7 @@ export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: Em
           <!-- Footer -->
           <tr>
             <td style="padding:24px 40px;border-top:1px solid #E5E7EB;text-align:center;">
-              <img src="https://lingualink-lms.vercel.app/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
+              <img src="${process.env.NEXT_PUBLIC_SITE_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
                 <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
@@ -98,7 +98,7 @@ export function newMessageEmailContent(senderName: string): string {
       Log in to your portal to read and reply to the message.
     </p>
     <a
-      href="https://teachers.lingualinkonline.com/messages"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/messages"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Go to Messages
@@ -154,7 +154,7 @@ export function teacherNewBookingEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
     <a
-      href="https://teachers.lingualinkonline.com/upcoming-classes"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       View Upcoming Classes
@@ -176,6 +176,10 @@ export function teacherCancellationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
+    <a href="${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes"
+       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">
+      View My Schedule
+    </a>
   `
 }
 
@@ -220,7 +224,7 @@ export function studentCancellationByStudentEmailContent(
       ${refundLine}
     </table>
     <a
-      href="https://students.lingualinkonline.com/student/my-classes"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Book Another Class
@@ -252,7 +256,7 @@ export function studentCancellationByTeacherEmailContent(
     </div>
     ` : ''}
     <a
-      href="https://students.lingualinkonline.com/student/my-classes"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Book a New Class
@@ -326,7 +330,7 @@ export function studentHomeworkAssignedEmailContent(
       ${sheetList}
     </ul>
     <a
-      href="https://students.lingualinkonline.com/student/study"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/study"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Go to My Study
@@ -363,7 +367,7 @@ export function studentNewMessageEmailContent(teacherName: string): string {
       Log in to your portal to read and reply.
     </p>
     <a
-      href="https://students.lingualinkonline.com/student/messages"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/messages"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Go to Messages
@@ -378,16 +382,16 @@ export function studentTrainingEndingSoonEmailContent(endDate: string): string {
       <strong style="color:#FF8303;">${endDate}</strong>.
     </p>
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      If you'd like to continue your language learning journey, please reach out to Shannon — she'll be happy to help you set up a new package.
+      If you'd like to continue your language learning journey, please reach out to our support team — they'll be happy to help you set up a new package.
     </p>
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Don't forget to use any remaining hours before your training ends — you can book classes directly from your student portal.
     </p>
     <a
-      href="mailto:shannon@lingualinkonline.com"
+      href="mailto:support@lingualinkonline.com"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
-      Contact Shannon
+      Contact Support
     </a>
   `
 }
@@ -416,7 +420,7 @@ export function studentCancellationByAdminEmailContent(
     </div>
     ` : ''}
     <a
-      href="https://students.lingualinkonline.com/student/my-classes"
+      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
     >
       Book a New Class
