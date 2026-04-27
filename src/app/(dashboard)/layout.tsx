@@ -32,7 +32,7 @@ export default async function DashboardLayout({
     .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
     .eq('teacher_id', profile?.id)
     .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date().toISOString())
+    .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
     .limit(1)
     .maybeSingle()
