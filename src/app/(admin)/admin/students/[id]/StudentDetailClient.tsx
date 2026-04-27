@@ -28,7 +28,7 @@ export type AdminConversation = {
 export type Assignment = {
   id: string
   assigned_at: string
-  report_id: string | null
+  lesson_id: string | null
   study_sheet: {
     title: string
     category: string
@@ -1115,12 +1115,12 @@ export default function StudentDetailClient({
                           <span
                             className="px-2 py-0.5 rounded-full text-xs font-medium"
                             style={
-                              assignment.report_id
+                              assignment.lesson_id
                                 ? { backgroundColor: '#fff7ed', color: '#c2410c' }
                                 : { backgroundColor: '#f3f4f6', color: '#6b7280' }
                             }
                           >
-                            {assignment.report_id ? 'Class Report' : 'Direct'}
+                            {assignment.lesson_id ? 'From Class' : 'Direct'}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-gray-500">
