@@ -29,7 +29,7 @@ export default async function StudySheetPage({ params, searchParams }: Props) {
   // Fetch the study sheet
   const { data: sheet } = await supabase
     .from('study_sheets')
-    .select('id, title, category, level, difficulty, content')
+    .select('id, title, category, level, difficulty, content, attachments')
     .eq('id', id)
     .eq('is_active', true)
     .single()

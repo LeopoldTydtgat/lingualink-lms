@@ -123,7 +123,7 @@ export async function teacherRescheduleLesson(
           recipientName: teacherName,
           subject: 'Class cancellation confirmed',
           bodyHtml: teacherEmailBody,
-          contactEmail: 'support@lingualinkonline.com',
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
     }

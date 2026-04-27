@@ -450,6 +450,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
             <select className={selectClass} value={form.current_fluency_level}
               onChange={(e) => set('current_fluency_level', e.target.value)}>
               <option value="">— Select —</option>
+              <option value="To be assessed">To be assessed</option>
               {FLUENCY_LEVELS.map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}

@@ -65,6 +65,21 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
+function CategoryBadge({ category }: { category: string }) {
+  const style =
+    category === 'Vocabulary'
+      ? { backgroundColor: '#fff7ed', color: '#c2410c' }
+      : category === 'Grammar'
+      ? { backgroundColor: '#eff6ff', color: '#1d4ed8' }
+      : { backgroundColor: '#e0f2fe', color: '#0369a1' }
+
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
+      {category}
+    </span>
+  )
+}
+
 /** Formats a date string to a readable short date */
 function formatDate(iso: string) {
   const d = new Date(iso)
@@ -229,7 +244,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
             >
               <option value="">All Levels</option>
-              {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((l) => (
+              {['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2'].map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>
@@ -242,6 +257,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
               <option value="">All Categories</option>
               <option value="Vocabulary">Vocabulary</option>
               <option value="Grammar">Grammar</option>
+              <option value="Material">Material</option>
             </select>
           </div>
 
@@ -278,16 +294,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <span
-                            className="px-2 py-0.5 rounded-full text-xs font-medium"
-                            style={
-                              sheet.category === 'Vocabulary'
-                                ? { backgroundColor: '#fff7ed', color: '#c2410c' }
-                                : { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-                            }
-                          >
-                            {sheet.category}
-                          </span>
+                          <CategoryBadge category={sheet.category} />
                         </td>
                         <td className="px-4 py-3 text-gray-700">{sheet.level}</td>
                         <td className="px-4 py-3">
@@ -353,16 +360,7 @@ function AssignmentCard({
         <div>
           <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
           <div className="flex items-center gap-3 mt-1">
-            <span
-              className="px-2 py-0.5 rounded-full text-xs font-medium"
-              style={
-                sheet.category === 'Vocabulary'
-                  ? { backgroundColor: '#fff7ed', color: '#c2410c' }
-                  : { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-              }
-            >
-              {sheet.category}
-            </span>
+            <CategoryBadge category={sheet.category} />
             <span className="text-xs text-gray-500">{sheet.level}</span>
             <DifficultyBars count={sheet.difficulty ?? 1} />
           </div>

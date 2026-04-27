@@ -22,6 +22,12 @@ interface Exercise {
   duration_minutes: number | null
 }
 
+interface Attachment {
+  name: string
+  url: string
+  type: string
+}
+
 interface Sheet {
   id: string
   title: string
@@ -29,6 +35,7 @@ interface Sheet {
   level: string
   difficulty: number
   content: { words?: VocabWord[] } | null
+  attachments: Attachment[] | null
 }
 
 interface Props {
@@ -54,6 +61,58 @@ function DifficultyBars({ count }: { count: number }) {
         }} />
       ))}
     </span>
+  )
+}
+
+function categoryBadgeStyle(category: string): React.CSSProperties {
+  if (category === 'Vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
+  if (category === 'Grammar') return { backgroundColor: '#eff6ff', color: '#1d4ed8' }
+  return { backgroundColor: '#e0f2fe', color: '#0369a1' }
+}
+
+// ── Material file viewer ──────────────────────────────────────────────────────
+
+function MaterialFileViewer({ attachments }: { attachments: Attachment[] }) {
+  if (attachments.length === 0) {
+    return (
+      <div className="mb-6 p-6 border border-gray-200 rounded-xl text-center text-sm text-gray-400">
+        No files attached to this sheet yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-6 space-y-4">
+      {attachments.map((att, idx) => {
+        const isPdf = att.type === 'application/pdf'
+        const isImage = att.type.startsWith('image/')
+
+        return (
+          <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+              <span className="text-xs font-semibold text-gray-500">{att.name}</span>
+            </div>
+            {isPdf ? (
+              <iframe
+                src={att.url}
+                title={att.name}
+                style={{ width: '100%', height: '600px', border: 'none', display: 'block' }}
+              />
+            ) : isImage ? (
+              <img
+                src={att.url}
+                alt={att.name}
+                style={{ maxWidth: '100%', display: 'block' }}
+              />
+            ) : (
+              <div className="px-4 py-8 text-center text-sm text-gray-400">
+                Preview is not available for this file type.
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -85,6 +144,7 @@ export default function StudySheetClient({
   const words: VocabWord[] = sheet.content?.words ?? []
   const currentExercise = exercises[currentExerciseIdx]
   const totalExercises = exercises.length
+  const isMaterial = sheet.category === 'Material'
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -164,19 +224,20 @@ export default function StudySheetClient({
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <span
             className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
-            style={
-              sheet.category === 'Vocabulary'
-                ? { backgroundColor: '#fff7ed', color: '#c2410c' }
-                : { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-            }
+            style={categoryBadgeStyle(sheet.category)}
           >
             {sheet.category}
           </span>
           <span className="text-sm text-gray-500">{sheet.level}</span>
-          <DifficultyBars count={sheet.difficulty ?? 1} />
+          {sheet.difficulty != null && <DifficultyBars count={sheet.difficulty} />}
         </div>
         <h1 className="text-2xl font-bold text-gray-900">{sheet.title}</h1>
       </div>
+
+      {/* Material file viewer — shown only for Material sheets, before the tabs */}
+      {isMaterial && (
+        <MaterialFileViewer attachments={sheet.attachments ?? []} />
+      )}
 
       {/* Tab toggle */}
       <div className="flex gap-2 border-b border-gray-200 mb-6">
