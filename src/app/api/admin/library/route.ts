@@ -53,14 +53,14 @@ export async function POST(request: Request) {
 
   const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments } = body
 
-  if (!title || !category || !level) {
-    return NextResponse.json({ error: 'title, category, and level are required' }, { status: 400 })
+  if (!title || !category) {
+    return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
   }
 
   const insert: Record<string, unknown> = {
     title,
     category,
-    level,
+    level: level || null,
     difficulty: difficulty ?? null,
     intro_text: intro_text ?? null,
     content: content ?? { words: [], exercises: [] },

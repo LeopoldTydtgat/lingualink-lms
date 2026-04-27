@@ -116,7 +116,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const [category, setCategory] = useState<'Vocabulary' | 'Grammar' | 'Material'>(
     (sheet?.category as 'Vocabulary' | 'Grammar' | 'Material') ?? 'Vocabulary'
   )
-  const [level, setLevel] = useState(sheet?.level ?? 'A1')
+  const [level, setLevel] = useState(sheet?.level ?? '')
   const [difficulty, setDifficulty] = useState<1 | 2 | 3 | null>(
     sheet?.difficulty ? (sheet.difficulty as 1 | 2 | 3) : null
   )
@@ -259,7 +259,6 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
-    if (!level) { setError('Level is required.'); setActiveTab('metadata'); return }
 
     setSaving(true)
     setError(null)
@@ -381,12 +380,13 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Level *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
                   <select
                     value={level}
                     onChange={e => setLevel(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                   >
+                    <option value="">Not specified</option>
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
