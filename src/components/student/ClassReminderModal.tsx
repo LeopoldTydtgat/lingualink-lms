@@ -117,6 +117,9 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
 
   if (!lesson) return null
 
+  const lessonEndTime = new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
+  if (lessonEndTime <= Date.now()) return null
+
   return (
     <>
       {/* Backdrop */}
