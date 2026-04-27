@@ -7,28 +7,39 @@
 - Verified Step 14 hardening status item by item - rate limiting confirmed wired into login action via `src/lib/rateLimit.ts` and `createAdminClient()`, security headers confirmed in `next.config.ts`, `NEXT_PUBLIC_SITE_URL` confirmed set to `https://app.lingualinkonline.com` in Vercel, GitHub branch protection confirmed correct for solo developer workflow
 - Added MIME type validation to `src/app/api/messages/upload/route.ts` - allowed types: image/jpeg, image/png, image/webp, image/gif, application/pdf
 - Fixed Join Class button appearing on cancelled and completed classes - added `BLOCKED_STATUSES` check to `src/components/layout/RightPanel.tsx`, `src/components/student/layout/StudentRightPanel.tsx`, `src/app/(dashboard)/students/[id]/StudentDetailClient.tsx`, `src/app/(student)/student/my-classes/MyClassesClient.tsx`, and `src/components/student/ClassReminderModal.tsx`
-- Added "Material" as a third study sheet category alongside Vocabulary and Grammar - sky-blue badge, supports PDF/Word/PowerPoint/image uploads, view-only for teachers and students, no download
+- Fixed Join Class button appearing on expired/past lessons - added 2-hour lookback filter to layout queries and end-time expiry check to all render sites
+- Added Material as a third study sheet category alongside Vocabulary and Grammar - sky-blue badge, supports PDF/Word/PowerPoint/image uploads, view-only for teachers and students, no download
 - Fixed category casing mismatch - admin was storing lowercase, student UI was filtering Title Case, causing student category filters to never match. Standardised to Title Case everywhere
 - Made difficulty optional on all study sheet types - label updated, API validation updated
-- Made level optional on all study sheet types - "Not specified" added as default option, API coerces empty string to null
+- Made level optional on all study sheet types - Not specified added as default option, API coerces empty string to null
 - Added missing level variants (A1+, A2+, B1+, B2+, C1+) to student study filter dropdown
-- Added "To be assessed" option to Current Fluency Level dropdown in admin student creation and edit forms
-- Blocked assignment of empty study sheets - Vocabulary sheets require at least 1 word, Grammar sheets require at least 1 exercise, Material sheets require at least 1 uploaded file. Empty sheets are greyed out with "No content yet" label in the assignment modal and admin library
-- Built `DELETE /api/admin/assignments/[id]/route.ts` - admin only, uses `createAdminClient()`
-- Added Assignments tab to admin student detail page - shows all assigned sheets with category badge, level, source (Direct or From Class Report), date, and inline two-step Revoke button with optimistic row removal
+- Added To be assessed option to Current Fluency Level dropdown in admin student creation and edit forms
+- Blocked assignment of empty study sheets - Vocabulary sheets require at least 1 word, Grammar sheets require at least 1 exercise, Material sheets require at least 1 uploaded file. Empty sheets are greyed out with No content yet label in the assignment modal and admin library
+- Built DELETE /api/admin/assignments/[id]/route.ts - admin only, uses createAdminClient()
+- Added Assignments tab to admin student detail page - shows all assigned sheets with category badge, level, source (Direct or From Class), date, and inline two-step Revoke button with optimistic row removal
 - Added read-only Assigned Study Sheets section to teacher-facing student detail page
+- Fixed hard-coded Lingualink Admin in homework assigned email - now looks up real admin name from profiles table
+- Fixed assignments query using wrong column names - corrected to use lesson_id and explicit FK notation study_sheets!assignments_study_sheet_id_fkey
 
 ### Break/Fix Log
 
 Issue 1: Join Class button active on cancelled class in right panel - Condition only checked time, not lesson status / Added BLOCKED_STATUSES constant and status check to both RightPanel components and all other Join button render sites / Always check both time and status before activating any Join button
 
-Issue 2: Category casing mismatch between admin and student portals - Admin stored lowercase, student filtered Title Case, exact string match always failed / Standardised to Title Case across all dropdowns, badges, and filters / Confirm casing is consistent end-to-end when adding new category values
+Issue 2: Join Class button active on expired past lessons - Math.max(0) clamps negative secondsUntil to 0 which satisfies the 10 min check, stale scheduled lessons from early April were never marked completed / Added 2-hour lookback filter to layout queries and end-time expiry check at all render sites / Always filter by both status and time window at the query level, not just at render time
 
-Issue 3: Empty study sheets assignable to students - No content validation on assignment - students received pending sheets with nothing to complete / Added per-category empty check in AssignStudySheetsModal and LibraryAdminClient / Validate content before allowing assignment, not just after
+Issue 3: Category casing mismatch between admin and student portals - Admin stored lowercase, student filtered Title Case, exact string match always failed / Standardised to Title Case across all dropdowns, badges, and filters / Confirm casing is consistent end-to-end when adding new category values
+
+Issue 4: Empty study sheets assignable to students - No content validation on assignment, students received pending sheets with nothing to complete / Added per-category empty check in AssignStudySheetsModal and LibraryAdminClient / Validate content before allowing assignment not just after
+
+Issue 5: Assignments tab showing 0 despite data existing - Query used non-existent column report_id and ambiguous FK join / Corrected to lesson_id and explicit FK notation / Always verify actual column names against the database schema before writing queries
+
+Issue 6: Homework assigned email showing Lingualink Admin instead of real name - Hard-coded string in admin direct-assign route / Replaced with profiles table lookup using authenticated user ID / Never hard-code display names in email templates, always look up from the database
 
 ### Session result
 
-This session was a hardening verification and bug fix pass. Step 14 hardening was confirmed complete with one gap found and closed - MIME type validation added to the messages upload route. Several bugs discovered during the client's workflow simulation testing were resolved - the most visible being the Join Class button appearing on cancelled classes across multiple components. New features added include the Material study sheet category with view-only file rendering, optional difficulty and level fields, and a full assignment management system allowing admin to revoke assignments from the student detail page.
+This session was a hardening verification and bug fixing pass driven by workflow simulation testing. Step 14 hardening was confirmed complete with one gap found and closed - MIME type validation added to the messages upload route. Several bugs were resolved including the Join Class button appearing on cancelled and expired lessons across multiple components. New features added include the Material study sheet category with view-only file rendering, optional difficulty and level fields, and a full assignment management system allowing the client to revoke assignments from the student detail page with inline confirmation.
+
+---
 
 ## Session 63 - 27 April 2026 - Audit Pass: Outlook Email Fix, Link Prefetch, Auth Hardening, TypeScript Cleanup
 
