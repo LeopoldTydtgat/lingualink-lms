@@ -1,5 +1,5 @@
-﻿// src/components/student/layout/StudentRightPanel.tsx
-// Help & Support section removed â€” the ChatWidget floating bubble replaces it.
+// src/components/student/layout/StudentRightPanel.tsx
+// Help & Support section removed — the ChatWidget floating bubble replaces it.
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -9,6 +9,7 @@ interface NextLesson {
   scheduled_at: string
   teams_join_url: string | null
   duration_minutes: number
+  status: string
 }
 
 interface StudentRightPanelProps {
@@ -48,7 +49,10 @@ function formatEndDate(isoDate: string): string {
   }).format(new Date(isoDate))
 }
 
-function isJoinable(isoString: string, now: number): boolean {
+const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
+
+function isJoinable(isoString: string, status: string, now: number): boolean {
+  if (BLOCKED_STATUSES.includes(status)) return false
   const secondsUntil = Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
   return secondsUntil <= 600 // 10 minutes
 }
@@ -100,7 +104,7 @@ export default function StudentRightPanel({
       }}
     >
 
-      {/* â”€â”€ Next Class â”€â”€ */}
+      {/* ── Next Class ── */}
       <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
           <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -128,7 +132,7 @@ export default function StudentRightPanel({
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (
                 <a
-                  href={mounted && isJoinable(nextLesson.scheduled_at, now)
+                  href={mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                     ? nextLesson.teams_join_url
                     : undefined}
                   target="_blank"
@@ -138,13 +142,13 @@ export default function StudentRightPanel({
                   style={{
                     display: 'block',
                     padding: '7px 12px',
-                    backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, now)
+                    backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                       ? (joinHovered ? '#FF8303' : '#ffffff')
                       : '#E0DFDC',
-                    color: mounted && isJoinable(nextLesson.scheduled_at, now)
+                    color: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                       ? (joinHovered ? '#ffffff' : '#FF8303')
                       : '#9ca3af',
-                    border: mounted && isJoinable(nextLesson.scheduled_at, now)
+                    border: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                       ? '1.5px solid #FF8303'
                       : 'none',
                     borderRadius: '6px',
@@ -152,10 +156,10 @@ export default function StudentRightPanel({
                     fontWeight: '600',
                     textAlign: 'center',
                     textDecoration: 'none',
-                    cursor: mounted && isJoinable(nextLesson.scheduled_at, now)
+                    cursor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                       ? 'pointer'
                       : 'default',
-                    pointerEvents: mounted && isJoinable(nextLesson.scheduled_at, now)
+                    pointerEvents: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, now)
                       ? 'auto'
                       : 'none',
                     transition: 'background-color 0.18s ease, color 0.18s ease',
@@ -180,7 +184,7 @@ export default function StudentRightPanel({
         )}
       </div>
 
-      {/* â”€â”€ Hours Remaining â”€â”€ */}
+      {/* ── Hours Remaining ── */}
       <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
           <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -198,7 +202,7 @@ export default function StudentRightPanel({
 
         {lowHours && hoursRemaining > 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
-            Running low â€” contact admin to purchase more hours.
+            Running low — contact admin to purchase more hours.
           </p>
         )}
         {hoursRemaining === 0 && (
@@ -208,7 +212,7 @@ export default function StudentRightPanel({
         )}
       </div>
 
-      {/* â”€â”€ Training End Date â”€â”€ */}
+      {/* ── Training End Date ── */}
       <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
           <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -219,7 +223,7 @@ export default function StudentRightPanel({
         </p>
       </div>
 
-      {/* â”€â”€ Exercises Progress â”€â”€ */}
+      {/* ── Exercises Progress ── */}
       <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
           <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -271,4 +275,3 @@ export default function StudentRightPanel({
     </aside>
   )
 }
-
