@@ -65,7 +65,7 @@ export default function TeachersListClient({ teachers }: Props) {
 
   const filtered = teachers.filter((t) => {
     const matchesSearch =
-      t.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      (t.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       t.email.toLowerCase().includes(search.toLowerCase())
     const matchesStatus =
       statusFilter === 'All' || t.status === statusFilter
@@ -159,7 +159,7 @@ export default function TeachersListClient({ teachers }: Props) {
                       {teacher.photo_url ? (
                         <img
                           src={teacher.photo_url}
-                          alt={teacher.full_name}
+                          alt={teacher.full_name ?? ''}
                           className="w-8 h-8 rounded-full object-cover"
                         />
                       ) : (

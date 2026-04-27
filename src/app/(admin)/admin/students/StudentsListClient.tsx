@@ -225,7 +225,7 @@ export default function StudentsListClient({ students }: Props) {
                       {student.photo_url ? (
                         <img
                           src={student.photo_url}
-                          alt={student.full_name}
+                          alt={student.full_name ?? ''}
                           className="w-8 h-8 rounded-full object-cover flex-shrink-0"
                         />
                       ) : (

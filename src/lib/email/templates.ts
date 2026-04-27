@@ -64,7 +64,7 @@ export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: Em
   `.trim()
 }
 
-// ─── Shared helper ────────────────────────────────────────────────────────────
+// ─── Shared helpers ────────────────────────────────────────────────────────────
 
 // Formats a UTC timestamp into a readable local-style string for emails.
 // We use explicit date parts to avoid any toISOString / toLocaleTimeString issues.
@@ -86,7 +86,26 @@ function formatClassTime(isoString: string, timezone: string): string {
   }
 }
 
-// ─── Teacher email content builders ──────────────────────────────────────────
+// Builds an email button that renders correctly in Outlook (via VML) and all
+// other clients (via a standard <a> tag). Outlook ignores CSS border-radius on
+// anchor tags entirely — VML roundrect is the only reliable fix.
+// Width of 240px accommodates the longest button label used in these templates.
+function buildButton(href: string, label: string): string {
+  return `
+<table cellpadding="0" cellspacing="0" style="margin:0;">
+  <tr>
+    <td>
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${label}</center></v:roundrect><![endif]-->
+      <!--[if !mso]><!-->
+      <a href="${href}" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">${label}</a>
+      <!--<![endif]-->
+    </td>
+  </tr>
+</table>
+  `.trim()
+}
+
+// ─── Teacher email content builders ───────────────────────────────────────────
 
 export function newMessageEmailContent(senderName: string): string {
   return `
@@ -97,12 +116,7 @@ export function newMessageEmailContent(senderName: string): string {
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Log in to your portal to read and reply to the message.
     </p>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/messages"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Go to Messages
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/messages`, 'Go to Messages')}
   `
 }
 
@@ -126,14 +140,7 @@ export function teacherClassReminderEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
+    ${teamsJoinUrl ? buildButton(teamsJoinUrl, 'Join Class on Teams') : ''}
   `
 }
 
@@ -153,12 +160,7 @@ export function teacherNewBookingEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      View Upcoming Classes
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes`, 'View Upcoming Classes')}
   `
 }
 
@@ -176,14 +178,11 @@ export function teacherCancellationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    <a href="${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes"
-       style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">
-      View My Schedule
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes`, 'View My Schedule')}
   `
 }
 
-// ─── Student email content builders ──────────────────────────────────────────
+// ─── Student email content builders ───────────────────────────────────────────
 
 export function studentBookingConfirmationEmailContent(
   teacherName: string,
@@ -223,12 +222,7 @@ export function studentCancellationByStudentEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       ${refundLine}
     </table>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Book Another Class
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book Another Class')}
   `
 }
 
@@ -255,12 +249,7 @@ export function studentCancellationByTeacherEmailContent(
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${teacherMessage}</p>
     </div>
     ` : ''}
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Book a New Class
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book a New Class')}
   `
 }
 
@@ -304,14 +293,7 @@ export function studentClassReminderEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? `
-    <a
-      href="${teamsJoinUrl}"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Join Class on Teams
-    </a>
-    ` : ''}
+    ${teamsJoinUrl ? buildButton(teamsJoinUrl, 'Join Class on Teams') : ''}
   `
 }
 
@@ -329,12 +311,7 @@ export function studentHomeworkAssignedEmailContent(
     <ul style="margin:0 0 24px;padding-left:20px;">
       ${sheetList}
     </ul>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/study"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Go to My Study
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/study`, 'Go to My Study')}
   `
 }
 
@@ -348,12 +325,7 @@ export function studentLowHoursEmailContent(
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       To continue booking classes without interruption, please contact us to purchase more hours.
     </p>
-    <a
-      href="mailto:support@lingualinkonline.com"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Contact Us
-    </a>
+    ${buildButton('mailto:support@lingualinkonline.com', 'Contact Us')}
   `
 }
 
@@ -366,12 +338,7 @@ export function studentNewMessageEmailContent(teacherName: string): string {
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Log in to your portal to read and reply.
     </p>
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/messages"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Go to Messages
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/messages`, 'Go to Messages')}
   `
 }
 
@@ -387,12 +354,7 @@ export function studentTrainingEndingSoonEmailContent(endDate: string): string {
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Don't forget to use any remaining hours before your training ends — you can book classes directly from your student portal.
     </p>
-    <a
-      href="mailto:support@lingualinkonline.com"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Contact Support
-    </a>
+    ${buildButton('mailto:support@lingualinkonline.com', 'Contact Support')}
   `
 }
 
@@ -419,11 +381,6 @@ export function studentCancellationByAdminEmailContent(
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${cancellationReason}</p>
     </div>
     ` : ''}
-    <a
-      href="${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes"
-      style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-    >
-      Book a New Class
-    </a>
+    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book a New Class')}
   `
 }

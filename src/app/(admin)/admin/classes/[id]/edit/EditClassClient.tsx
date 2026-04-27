@@ -111,7 +111,7 @@ export default function EditClassClient({ lesson, teachers }: Props) {
   return (
     <div style={{ padding: '32px', maxWidth: '600px' }}>
 
-      <Link href={`/admin/classes/${lesson.id}`} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
+      <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
         ← Back to Class Detail
       </Link>
 
@@ -234,7 +234,7 @@ export default function EditClassClient({ lesson, teachers }: Props) {
       )}
 
       <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-        <Link href={`/admin/classes/${lesson.id}`}>
+        <Link href={`/admin/classes/${lesson.id}`} prefetch={false}>
           <button style={{
             padding: '12px 24px', borderRadius: '8px', border: '1px solid #D1D5DB',
             backgroundColor: 'white', fontSize: '14px', cursor: 'pointer', color: '#374151',
