@@ -76,10 +76,12 @@ export async function POST(request: Request) {
 
   try {
     const adminClient = createAdminClient()
-    const [{ data: student }, { data: sheet }] = await Promise.all([
+    const [{ data: student }, { data: sheet }, { data: assignerProfile }] = await Promise.all([
       adminClient.from('students').select('email, full_name').eq('id', student_id).single(),
       adminClient.from('study_sheets').select('title').eq('id', study_sheet_id).single(),
+      adminClient.from('profiles').select('full_name').eq('id', user.id).single(),
     ])
+    const assignerName = assignerProfile?.full_name ?? 'Your teacher'
     if (student?.email && sheet?.title) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
         html: buildEmailTemplate({
           recipientName: student.full_name,
           subject: 'New study sheet assigned',
-          bodyHtml: studentHomeworkAssignedEmailContent('Lingualink Admin', [sheet.title]),
+          bodyHtml: studentHomeworkAssignedEmailContent(assignerName, [sheet.title]),
           contactEmail: 'support@lingualinkonline.com',
         }),
       })
