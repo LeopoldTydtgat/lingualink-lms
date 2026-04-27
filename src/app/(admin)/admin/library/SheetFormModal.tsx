@@ -113,11 +113,13 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   // ── Metadata fields ───────────────────────────────────────────────────────
   const [title, setTitle] = useState(sheet?.title ?? '')
-  const [category, setCategory] = useState<'vocabulary' | 'grammar'>(
-    (sheet?.category as 'vocabulary' | 'grammar') ?? 'vocabulary'
+  const [category, setCategory] = useState<'Vocabulary' | 'Grammar' | 'Material'>(
+    (sheet?.category as 'Vocabulary' | 'Grammar' | 'Material') ?? 'Vocabulary'
   )
-  const [level, setLevel] = useState(sheet?.level ?? 'A1')
-  const [difficulty, setDifficulty] = useState<1 | 2 | 3>((sheet?.difficulty as 1 | 2 | 3) ?? 1)
+  const [level, setLevel] = useState(sheet?.level ?? '')
+  const [difficulty, setDifficulty] = useState<1 | 2 | 3 | null>(
+    sheet?.difficulty ? (sheet.difficulty as 1 | 2 | 3) : null
+  )
   const [introText, setIntroText] = useState(sheet?.intro_text ?? '')
 
   // ── Vocabulary rows ───────────────────────────────────────────────────────
@@ -257,13 +259,12 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
-    if (!level) { setError('Level is required.'); setActiveTab('metadata'); return }
 
     setSaving(true)
     setError(null)
 
     const content: SheetContent = {
-      words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
+      words: category === 'Vocabulary' ? words.filter(w => w.word.trim()) : [],
       exercises: exercises.filter(ex => ex.question.trim()),
     }
 
@@ -271,7 +272,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       title: title.trim(),
       category,
       level,
-      difficulty,
+      difficulty: difficulty ?? null,
       intro_text: introText.trim() || null,
       content,
       allowed_roles: presetToRoles(rolesPreset),
@@ -369,35 +370,37 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
                   <select
                     value={category}
-                    onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
+                    onChange={e => setCategory(e.target.value as 'Vocabulary' | 'Grammar' | 'Material')}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                   >
-                    <option value="vocabulary">Vocabulary</option>
-                    <option value="grammar">Grammar</option>
+                    <option value="Vocabulary">Vocabulary</option>
+                    <option value="Grammar">Grammar</option>
+                    <option value="Material">Material</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Level *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
                   <select
                     value={level}
                     onChange={e => setLevel(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                   >
+                    <option value="">Not specified</option>
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty (optional)</label>
                 <div className="flex gap-2">
                   {([1, 2, 3] as const).map(n => (
                     <DifficultyButton
                       key={n}
                       value={n}
                       selected={difficulty === n}
-                      onClick={() => setDifficulty(n)}
+                      onClick={() => setDifficulty(prev => prev === n ? null : n)}
                     />
                   ))}
                 </div>
@@ -421,12 +424,12 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {/* ── VOCABULARY TAB ── */}
           {activeTab === 'vocabulary' && (
             <div className="space-y-4">
-              {category !== 'vocabulary' && (
+              {category !== 'Vocabulary' && (
                 <p className="text-sm text-gray-400 italic">
                   Vocabulary lists are for Vocabulary sheets only. Switch the category on the Metadata tab if needed.
                 </p>
               )}
-              {category === 'vocabulary' && (
+              {category === 'Vocabulary' && (
                 <>
                   {/* Column headers */}
                   <div className="grid text-xs font-medium text-gray-400 uppercase gap-2"
@@ -607,7 +610,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {activeTab === 'files' && (
             <div className="space-y-4">
               <p className="text-sm text-gray-500">
-                Attach PDF, Word, or PowerPoint files to this study sheet. Students can download them directly. Max 10 MB per file.
+                Attach PDF, Word, or PowerPoint files to this study sheet. Max 10 MB per file.
               </p>
 
               {/* Upload button */}
@@ -666,7 +669,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         {fileTypeLabel(att.type)}
                       </span>
 
-                      {/* Name + download */}
+                      {/* Name + view link */}
                       <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
                       <a
                         href={att.url}
@@ -675,7 +678,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         className="text-xs underline flex-shrink-0"
                         style={{ color: '#FF8303' }}
                       >
-                        Download
+                        View
                       </a>
 
                       {/* Remove */}

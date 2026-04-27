@@ -38,7 +38,7 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string        // 'vocabulary' | 'grammar'
+  category: string        // 'Vocabulary' | 'Grammar' | 'Material'
   level: string           // A1, A1+, A2 … C2
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
@@ -92,6 +92,14 @@ function DifficultyBars({ count }: { count: number }) {
 
 function exerciseCount(sheet: StudySheet): number {
   return sheet.content?.exercises?.length ?? 0
+}
+
+function isSheetEmpty(sheet: StudySheet): boolean {
+  const cat = sheet.category.toLowerCase()
+  if (cat === 'vocabulary') return !(sheet.content?.words?.length)
+  if (cat === 'grammar') return !(sheet.content?.exercises?.length)
+  if (cat === 'material') return !(sheet.attachments?.length)
+  return false
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -267,8 +275,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Categories</option>
-          <option value="vocabulary">Vocabulary</option>
-          <option value="grammar">Grammar</option>
+          <option value="Vocabulary">Vocabulary</option>
+          <option value="Grammar">Grammar</option>
+          <option value="Material">Material</option>
         </select>
         <select
           value={filterLevel}
@@ -408,6 +417,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {/* Rows */}
           <div className="divide-y divide-gray-50">
             {filtered.map(sheet => {
+              const empty = isSheetEmpty(sheet)
               return (
                 <div
                   key={sheet.id}
@@ -434,7 +444,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   </div>
 
                   {/* Category */}
-                  <span className="capitalize text-gray-600">{sheet.category}</span>
+                  <span className="text-gray-600">{sheet.category}</span>
 
                   {/* Level */}
                   <span className="font-mono text-gray-700">{sheet.level}</span>
@@ -456,8 +466,15 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   {/* Actions */}
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <button
-                      onClick={() => { setAssigningSheet(sheet); setShowAssign(true) }}
-                      className="text-xs underline text-gray-400 hover:text-gray-600"
+                      onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
+                      disabled={empty}
+                      title={empty ? 'No content yet' : undefined}
+                      className="text-xs"
+                      style={{
+                        color: empty ? '#d1d5db' : '#9ca3af',
+                        cursor: empty ? 'not-allowed' : 'pointer',
+                        textDecoration: empty ? 'none' : 'underline',
+                      }}
                     >
                       Assign
                     </button>

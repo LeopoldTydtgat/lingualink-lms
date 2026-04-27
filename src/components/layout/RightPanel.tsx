@@ -21,6 +21,7 @@ interface NextLesson {
   duration_minutes: number
   teams_join_url: string | null
   student_name: string
+  status: string
 }
 
 type RightPanelProps = {
@@ -66,6 +67,7 @@ function formatClassTime(isoString: string, durationMinutes: number): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
+const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 export default function RightPanel({
   teacherId,
@@ -103,7 +105,7 @@ export default function RightPanel({
     ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
     : null
   const classEnded = classEndTime ? Date.now() > classEndTime : false
-  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded
+  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded && nextLesson != null && !BLOCKED_STATUSES.includes(nextLesson.status)
 
   return (
     <aside className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
@@ -235,4 +237,3 @@ export default function RightPanel({
     </aside>
   )
 }
-

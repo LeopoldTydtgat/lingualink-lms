@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import StudentDetailClient from './StudentDetailClient'
-import type { AdminConversation } from './StudentDetailClient'
+import type { AdminConversation, Assignment } from './StudentDetailClient'
 
 export default async function StudentDetailPage({
   params,
@@ -50,7 +50,10 @@ export default async function StudentDetailPage({
 
   // Flatten training — use active training or most recent
   const trainingsArr = Array.isArray(student.trainings) ? student.trainings : []
-  const activeTrain = trainingsArr.find((t: any) => t.status === 'active') ?? trainingsArr[0] ?? null
+  const activeTrain =
+    trainingsArr.find((t: { status: string | null }) => t.status === 'active') ??
+    trainingsArr[0] ??
+    null
 
   // Flatten assigned teachers from training_teachers
   const assignedTeachers: { id: string; full_name: string }[] = []
@@ -181,6 +184,30 @@ export default async function StudentDetailPage({
       : (r.profiles as { full_name: string } | null)?.full_name ?? '—',
   }))
 
+  // Fetch assignments for this student joined to study sheet metadata
+  const { data: rawAssignments } = await supabase
+    .from('assignments')
+    .select('id, assigned_at, report_id, study_sheets(title, category, level)')
+    .eq('student_id', id)
+    .order('assigned_at', { ascending: false })
+
+  type RawSheetJoin = { title: string; category: string; level: string } | null
+
+  const assignments: Assignment[] = (rawAssignments || []).map((a) => {
+    const rawSheet: unknown = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
+    const sheet = rawSheet as RawSheetJoin
+    return {
+      id: a.id,
+      assigned_at: a.assigned_at as string,
+      report_id: a.report_id as string | null,
+      study_sheet: {
+        title: sheet?.title ?? '—',
+        category: sheet?.category ?? '—',
+        level: sheet?.level ?? '—',
+      },
+    }
+  })
+
   // ── Purge eligibility: check all linked teachers are 'former' ───────────────
   const { data: linkedLessonRows } = await supabase
     .from('lessons')
@@ -281,6 +308,7 @@ export default async function StudentDetailPage({
       reviews={flatReviews}
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}
+      assignments={assignments}
     />
   )
 }
