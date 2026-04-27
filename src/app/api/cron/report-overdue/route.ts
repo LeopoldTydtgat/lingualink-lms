@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate } from '@/lib/email/templates'
 
 // This route is called by Vercel Cron daily.
-// It finds lessons that ended more than 12 hours ago with no completed report,
-// emails the teacher, and sets report_overdue_sent = true to prevent re-sends.
+// It finds lessons that ended more than 12 hours ago with no completed report
+// and sets report_overdue_sent = true to flag them.
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -63,41 +61,12 @@ export async function GET(request: Request) {
 
     if (completedReport) continue
 
-    try {
-      await resend.emails.send({
-        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-        to: teacher.email,
-        subject: 'Lingualink Online — Please complete your class report',
-        html: buildEmailTemplate({
-          recipientName: teacher.full_name,
-          subject: 'Please complete your class report',
-          bodyHtml: `
-            <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-              The 12-hour deadline to submit your class report has now passed. Please log in to your portal and complete the report as soon as possible.
-            </p>
-            <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-              Timely reports are important for tracking student progress. If you have any difficulties, please contact us and we will help you.
-            </p>
-            <a
-              href="${process.env.NEXT_PUBLIC_SITE_URL}/reports"
-              style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-            >
-              Complete My Report
-            </a>
-          `,
-          contactEmail: 'teachers@lingualinkonline.com',
-        }),
-      })
+    await supabase
+      .from('lessons')
+      .update({ report_overdue_sent: true })
+      .eq('id', lesson.id)
 
-      await supabase
-        .from('lessons')
-        .update({ report_overdue_sent: true })
-        .eq('id', lesson.id)
-
-      sent++
-    } catch (err) {
-      console.error(`Failed to send report overdue email for lesson ${lesson.id}:`, err)
-    }
+    sent++
   }
 
   return NextResponse.json({ ok: true, sent })
