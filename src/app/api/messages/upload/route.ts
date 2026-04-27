@@ -25,6 +25,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File must be under 10MB.' }, { status: 400 })
     }
 
+    const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json({ error: 'File type not allowed.' }, { status: 400 })
+    }
+
     // 4. Upload to the 'messages' storage bucket
     const admin = createAdminClient()
     const timestamp = Date.now()

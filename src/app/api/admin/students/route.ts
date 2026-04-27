@@ -225,12 +225,16 @@ export async function POST(req: NextRequest) {
             <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Package:</strong> ${data.package_name}</td></tr>
             <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>End Date:</strong> ${endDateLabel}</td></tr>
           </table>
-          <a
-            href="https://teachers.lingualinkonline.com"
-            style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-          >
-            View Student Profile
-          </a>
+          <table cellpadding="0" cellspacing="0" style="margin:0;">
+            <tr>
+              <td>
+                <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://teachers.lingualinkonline.com" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">View Student Profile</center></v:roundrect><![endif]-->
+                <!--[if !mso]><!-->
+                <a href="https://teachers.lingualinkonline.com" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">View Student Profile</a>
+                <!--<![endif]-->
+              </td>
+            </tr>
+          </table>
         `
 
         try {
@@ -244,7 +248,7 @@ export async function POST(req: NextRequest) {
                   recipientName: teacher.full_name,
                   subject: 'Lingualink Online — You have been assigned a new student',
                   bodyHtml: teacherEmailBody,
-                  contactEmail: 'support@lingualinkonline.com',
+                  contactEmail: 'teachers@lingualinkonline.com',
                 }),
               })
             )
@@ -262,12 +266,16 @@ export async function POST(req: NextRequest) {
         Your login credentials have been sent to you separately by your admin.
         Click the button below to log in to your portal.
       </p>
-      <a
-        href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login"
-        style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-      >
-        Log In
-      </a>
+      <table cellpadding="0" cellspacing="0" style="margin:0;">
+        <tr>
+          <td>
+            <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">Log In</center></v:roundrect><![endif]-->
+            <!--[if !mso]><!-->
+            <a href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">Log In</a>
+            <!--<![endif]-->
+          </td>
+        </tr>
+      </table>
     `
 
     await resend.emails.send({
