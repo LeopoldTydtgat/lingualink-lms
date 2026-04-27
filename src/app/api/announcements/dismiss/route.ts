@@ -7,20 +7,20 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
   try {
-    const { announcementId, userType, userId } = await req.json()
-
-    if (!announcementId || !userType || !userId) {
+    const { announcementId, userType } = await req.json()
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (!announcementId || !userType) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
-
-    const supabase = await createClient()
-
-    // Insert dismissal — ignore if already exists (user dismissed before)
+    // Insert dismissal using verified session user — never trust userId from request body
+    // Ignore if already exists (user dismissed before)
     const { error } = await supabase
       .from('announcement_dismissals')
       .insert({
         announcement_id: announcementId,
-        user_id: userId,
+        user_id: user.id,
         user_type: userType,
         dismissed_at: new Date().toISOString(),
       })

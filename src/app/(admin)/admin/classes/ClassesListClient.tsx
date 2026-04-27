@@ -126,7 +126,7 @@ export default function ClassesListClient({ teachers }: Props) {
             {total} {total === 1 ? 'class' : 'classes'} found
           </p>
         </div>
-        <Link href="/admin/classes/new">
+        <Link href="/admin/classes/new" prefetch={false}>
           <button
             style={{
               backgroundColor: '#FF8303',
@@ -456,6 +456,7 @@ export default function ClassesListClient({ teachers }: Props) {
                 <div onClick={(e) => e.stopPropagation()}>
                   <Link
                     href={`/admin/reports?lesson_id=${lesson.id}`}
+                    prefetch={false}
                     style={{ fontSize: '13px', color: '#FF8303', textDecoration: 'none', fontWeight: 500 }}
                   >
                     View
