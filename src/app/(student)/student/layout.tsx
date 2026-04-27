@@ -1,4 +1,5 @@
 // src/app/(student)/student/layout.tsx
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -8,6 +9,11 @@ import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ClassReminderModal from '@/components/student/ClassReminderModal'
+
+export const metadata: Metadata = {
+  title: 'LinguaLink Online - Student Portal',
+  description: 'Student portal for LinguaLink Online',
+}
 
 export default async function StudentDashboardLayout({
   children,
