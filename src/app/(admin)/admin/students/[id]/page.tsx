@@ -187,7 +187,7 @@ export default async function StudentDetailPage({
   // Fetch assignments for this student joined to study sheet metadata
   const { data: rawAssignments } = await supabase
     .from('assignments')
-    .select('id, assigned_at, report_id, study_sheets!assignments_study_sheet_id_fkey(title, category, level)')
+    .select('id, assigned_at, lesson_id, study_sheets!assignments_study_sheet_id_fkey(title, category, level)')
     .eq('student_id', id)
     .order('assigned_at', { ascending: false })
 
@@ -199,7 +199,7 @@ export default async function StudentDetailPage({
     return {
       id: a.id,
       assigned_at: a.assigned_at as string,
-      report_id: a.report_id as string | null,
+      lesson_id: a.lesson_id as string | null,
       study_sheet: {
         title: sheet?.title ?? '—',
         category: sheet?.category ?? '—',
