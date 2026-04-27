@@ -9,8 +9,11 @@ interface UpcomingLesson {
   scheduled_at: string
   duration_minutes: number
   teams_join_url: string | null
+  status: string
   teacher_name: string
 }
+
+const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 interface ClassReminderModalProps {
   studentId: string
@@ -69,6 +72,7 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
         id,
         scheduled_at,
         duration_minutes,
+        status,
         teams_join_url,
         teacher:profiles!teacher_id (full_name)
       `)
@@ -95,6 +99,7 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
       scheduled_at: row.scheduled_at,
       duration_minutes: row.duration_minutes,
       teams_join_url: row.teams_join_url,
+      status: row.status,
       teacher_name: teacherName,
     })
   }, [studentId, supabase])
@@ -234,7 +239,7 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
 
         {/* Buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {lesson.teams_join_url ? (
+          {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) ? (
             <a
               href={lesson.teams_join_url}
               target="_blank"

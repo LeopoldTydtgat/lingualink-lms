@@ -87,6 +87,8 @@ function getSecondsUntil(isoString: string, now: number): number {
   return Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
 }
 
+const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
+
 function isJoinable(isoString: string, now: number): boolean {
   return getSecondsUntil(isoString, now) <= 600 // 10 minutes
 }
@@ -344,7 +346,7 @@ export default function MyClassesClient({
 
               {/* Join button */}
               <div style={{ marginBottom: '16px' }}>
-                {nextLesson.teams_join_url ? (
+                {nextLesson.teams_join_url && !BLOCKED_STATUSES.includes(nextLesson.status) ? (
                   <a
                     href={mounted && isJoinable(nextLesson.scheduled_at, now) ? nextLesson.teams_join_url : undefined}
                     target="_blank"
