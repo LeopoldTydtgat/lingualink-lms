@@ -11,7 +11,7 @@ type Teacher = {
 
 type Student = {
   id: string
-  full_name: string
+  full_name: string | null
   email: string
   photo_url: string | null
   status: string | null
@@ -88,7 +88,7 @@ export default function StudentsListClient({ students }: Props) {
 
   const filtered = students.filter((s) => {
     const matchesSearch =
-      s.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      (s.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       s.email.toLowerCase().includes(search.toLowerCase())
 
     const matchesStatus =
@@ -216,6 +216,8 @@ export default function StudentsListClient({ students }: Props) {
                 <tr
                   key={student.id}
                   className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                  onClick={() => router.push(`/admin/students/${student.id}`)}
+                  style={{ cursor: 'pointer' }}
                 >
                   {/* Photo + name as link */}
                   <td className="px-4 py-3">
@@ -231,7 +233,7 @@ export default function StudentsListClient({ students }: Props) {
                           className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                           style={{ backgroundColor: '#FF8303' }}
                         >
-                          {student.full_name.charAt(0).toUpperCase()}
+                          {(student.full_name ?? '?').charAt(0).toUpperCase()}
                         </div>
                       )}
                       <Link
@@ -239,7 +241,7 @@ export default function StudentsListClient({ students }: Props) {
                         prefetch={false}
                         className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
                       >
-                        {student.full_name}
+                        {student.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>}
                       </Link>
                     </div>
                   </td>
