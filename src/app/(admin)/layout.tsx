@@ -1,3 +1,4 @@
+import type { Metadata } from 'next'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
@@ -20,6 +21,11 @@ function getTodayUTCRange() {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
   return { start: utcTimestamp(start), end: utcTimestamp(end) }
+}
+
+export const metadata: Metadata = {
+  title: 'LinguaLink Online - Admin Portal',
+  description: 'Admin portal for LinguaLink Online',
 }
 
 export interface RightPanelStats {
