@@ -33,7 +33,7 @@ export default async function StudentDashboardLayout({
 
   const { data: nextLesson } = await supabase
     .from('lessons')
-    .select('scheduled_at, teams_join_url, duration_minutes')
+    .select('scheduled_at, teams_join_url, duration_minutes, status')
     .eq('student_id', student.id)
     .eq('status', 'scheduled')
     .order('scheduled_at', { ascending: true })

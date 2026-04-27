@@ -29,7 +29,7 @@ export default async function DashboardLayout({
 
   const { data: lessonRow } = await supabase
     .from('lessons')
-    .select('id, scheduled_at, duration_minutes, teams_join_url, student_id')
+    .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
     .eq('teacher_id', profile?.id)
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date().toISOString())
@@ -52,6 +52,7 @@ export default async function DashboardLayout({
       duration_minutes: lessonRow.duration_minutes,
       teams_join_url: lessonRow.teams_join_url,
       student_name: studentRow?.full_name ?? 'Student',
+      status: lessonRow.status,
     }
   }
 
