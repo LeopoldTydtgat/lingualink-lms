@@ -208,7 +208,7 @@ export default function DashboardClient({
         {statCards.map((card) => {
           const Icon = card.icon
           return (
-            <Link key={card.label} href={card.href}>
+            <Link key={card.label} href={card.href} prefetch={false}>
               <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 leading-snug">{card.label}</p>
@@ -288,6 +288,7 @@ export default function DashboardClient({
             </div>
             <Link
               href="/admin/reports?filter=pending"
+              prefetch={false}
               className="text-xs hover:underline"
               style={{ color: '#FF8303' }}
             >
@@ -338,6 +339,7 @@ export default function DashboardClient({
                             <div className="mt-1">
                               <Link
                                 href={`/admin/reports?reopen=${report.id}`}
+                                prefetch={false}
                                 className="text-xs hover:underline"
                                 style={{ color: '#FF8303' }}
                               >
@@ -395,6 +397,7 @@ export default function DashboardClient({
                   </p>
                   <Link
                     href="/admin/students?filter=zero_balance"
+                    prefetch={false}
                     className="text-xs hover:underline mt-0.5 inline-block"
                     style={{ color: '#FF8303' }}
                   >
