@@ -69,6 +69,8 @@ type Props = {
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
 
+const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
+
 function CategoryBadge({ category }: { category: string }) {
   const style =
     category.toLowerCase() === 'vocabulary'
@@ -260,7 +262,7 @@ export default function StudentDetailClient({
               </p>
             </div>
             <div className="flex gap-2">
-              {lesson.teams_join_url && (
+              {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) && (
                 <a
                   href={lesson.teams_join_url}
                   target="_blank"
