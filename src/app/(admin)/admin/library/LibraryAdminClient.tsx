@@ -94,6 +94,14 @@ function exerciseCount(sheet: StudySheet): number {
   return sheet.content?.exercises?.length ?? 0
 }
 
+function isSheetEmpty(sheet: StudySheet): boolean {
+  const cat = sheet.category.toLowerCase()
+  if (cat === 'vocabulary') return !(sheet.content?.words?.length)
+  if (cat === 'grammar') return !(sheet.content?.exercises?.length)
+  if (cat === 'material') return !(sheet.attachments?.length)
+  return false
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function LibraryAdminClient({ adminId }: { adminId: string }) {
@@ -409,6 +417,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {/* Rows */}
           <div className="divide-y divide-gray-50">
             {filtered.map(sheet => {
+              const empty = isSheetEmpty(sheet)
               return (
                 <div
                   key={sheet.id}
@@ -457,8 +466,15 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   {/* Actions */}
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <button
-                      onClick={() => { setAssigningSheet(sheet); setShowAssign(true) }}
-                      className="text-xs underline text-gray-400 hover:text-gray-600"
+                      onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
+                      disabled={empty}
+                      title={empty ? 'No content yet' : undefined}
+                      className="text-xs"
+                      style={{
+                        color: empty ? '#d1d5db' : '#9ca3af',
+                        cursor: empty ? 'not-allowed' : 'pointer',
+                        textDecoration: empty ? 'none' : 'underline',
+                      }}
                     >
                       Assign
                     </button>

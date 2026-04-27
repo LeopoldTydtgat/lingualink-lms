@@ -12,6 +12,8 @@ type StudySheet = {
   category: string
   level: string
   difficulty: number
+  content: { words?: unknown[]; exercises?: unknown[] } | null
+  attachments: unknown[] | null
 }
 
 type Props = {
@@ -39,6 +41,14 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
+function isSheetEmpty(sheet: StudySheet): boolean {
+  const cat = sheet.category.toLowerCase()
+  if (cat === 'vocabulary') return !(sheet.content?.words?.length)
+  if (cat === 'grammar') return !(sheet.content?.exercises?.length)
+  if (cat === 'material') return !(sheet.attachments?.length)
+  return false
+}
+
 export default function AssignStudySheetsModal({
   studentName,
   lessonId,
@@ -61,7 +71,7 @@ export default function AssignStudySheetsModal({
     async function load() {
       const { data } = await supabase
         .from('study_sheets')
-        .select('id, title, category, level, difficulty')
+        .select('id, title, category, level, difficulty, content, attachments')
         .eq('is_active', true)
         .order('title')
       setSheets(data ?? [])
@@ -77,7 +87,8 @@ export default function AssignStudySheetsModal({
     return matchesSearch && matchesCategory && matchesLevel
   })
 
-  function toggleSheet(id: string) {
+  function toggleSheet(id: string, empty: boolean) {
+    if (empty) return
     setSelected(prev => {
       const next = new Set(prev)
       if (next.has(id)) {
@@ -223,26 +234,29 @@ export default function AssignStudySheetsModal({
           ) : (
             <div className="space-y-1">
               {filtered.map(sheet => {
+                const empty = isSheetEmpty(sheet)
                 const isSelected = selected.has(sheet.id)
                 return (
                   <div
                     key={sheet.id}
-                    onClick={() => toggleSheet(sheet.id)}
-                    className="flex items-center gap-4 px-4 py-3 rounded-lg cursor-pointer transition-colors"
+                    onClick={() => toggleSheet(sheet.id, empty)}
+                    className="flex items-center gap-4 px-4 py-3 rounded-lg transition-colors"
                     style={{
-                      backgroundColor: isSelected ? '#FFF3E0' : 'transparent',
-                      border: isSelected ? '1px solid #FF8303' : '1px solid transparent',
+                      cursor: empty ? 'default' : 'pointer',
+                      backgroundColor: empty ? '#f9fafb' : isSelected ? '#FFF3E0' : 'transparent',
+                      border: isSelected && !empty ? '1px solid #FF8303' : '1px solid transparent',
+                      opacity: empty ? 0.6 : 1,
                     }}
                   >
                     {/* Checkbox */}
                     <div
                       className="w-5 h-5 rounded border-2 flex items-center justify-center shrink-0"
                       style={{
-                        borderColor: isSelected ? '#FF8303' : '#d1d5db',
-                        backgroundColor: isSelected ? '#FF8303' : 'white',
+                        borderColor: empty ? '#d1d5db' : isSelected ? '#FF8303' : '#d1d5db',
+                        backgroundColor: empty ? '#f3f4f6' : isSelected ? '#FF8303' : 'white',
                       }}
                     >
-                      {isSelected && (
+                      {isSelected && !empty && (
                         <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                         </svg>
@@ -251,9 +265,11 @@ export default function AssignStudySheetsModal({
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">{sheet.title}</p>
+                      <p className="text-sm font-medium truncate" style={{ color: empty ? '#9ca3af' : '#111827' }}>
+                        {sheet.title}
+                      </p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-500 capitalize">{sheet.category}</span>
+                        <span className="text-xs text-gray-400 capitalize">{sheet.category}</span>
                         <span className="text-xs text-gray-300">·</span>
                         <span
                           className="text-xs px-1.5 py-0.5 rounded-full font-medium"
@@ -261,7 +277,10 @@ export default function AssignStudySheetsModal({
                         >
                           {sheet.level}
                         </span>
-                        <DifficultyBars count={sheet.difficulty} />
+                        {!empty && <DifficultyBars count={sheet.difficulty} />}
+                        {empty && (
+                          <span className="text-xs text-gray-400 italic">No content yet</span>
+                        )}
                       </div>
                     </div>
 
@@ -271,7 +290,7 @@ export default function AssignStudySheetsModal({
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={e => e.stopPropagation()}
-                      className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors"
+                      className="p-1.5 text-gray-300 hover:text-gray-500 transition-colors"
                       title="Preview sheet"
                     >
                       <Eye className="w-4 h-4" />

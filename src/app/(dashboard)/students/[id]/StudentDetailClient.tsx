@@ -47,6 +47,16 @@ type Report = {
   completed_at: string | null
 }
 
+type Assignment = {
+  id: string
+  assigned_at: string
+  study_sheet: {
+    title: string
+    category: string
+    level: string
+  }
+}
+
 type Props = {
   training: Training
   upcomingLessons: Lesson[]
@@ -54,16 +64,33 @@ type Props = {
   reports: Report[]
   isAdmin: boolean
   currentUserId: string
+  assignments: Assignment[]
 }
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
+
+function CategoryBadge({ category }: { category: string }) {
+  const style =
+    category.toLowerCase() === 'vocabulary'
+      ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
+      : category.toLowerCase() === 'grammar'
+      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      : category.toLowerCase() === 'material'
+      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
+      : { backgroundColor: '#f3f4f6', color: '#374151' }
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
+      {category}
+    </span>
+  )
+}
 
 export default function StudentDetailClient({
   training,
   upcomingLessons,
   pastLessons,
   reports,
-  isAdmin,
+  assignments,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('General Info')
@@ -292,7 +319,7 @@ export default function StudentDetailClient({
               </p>
               {report?.feedback_text && (
                 <p className="text-sm text-gray-600 mt-2 line-clamp-2 italic">
-                  "{report.feedback_text}"
+                  &ldquo;{report.feedback_text}&rdquo;
                 </p>
               )}
             </div>
@@ -382,6 +409,50 @@ export default function StudentDetailClient({
       {activeTab === 'Next Classes' && <NextClassesTab />}
       {activeTab === 'Past Classes' && <PastClassesTab />}
       {activeTab === 'Messages' && <MessagesTab />}
+
+      {/* ── Study Sheets (read-only, always visible below tabs) ── */}
+      {assignments.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">
+            Assigned Study Sheets ({assignments.length})
+          </h2>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-500">Sheet</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-500">Category</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-500">Level</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assignments.map(a => (
+                  <tr key={a.id} className="border-b border-gray-50 last:border-0">
+                    <td className="px-4 py-3 font-medium text-gray-900">{a.study_sheet.title}</td>
+                    <td className="px-4 py-3">
+                      <CategoryBadge category={a.study_sheet.category} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                        style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                      >
+                        {a.study_sheet.level}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {new Date(a.assigned_at).toLocaleDateString('en-GB', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
     </div>
   )

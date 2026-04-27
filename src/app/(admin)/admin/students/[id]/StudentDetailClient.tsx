@@ -25,6 +25,17 @@ export type AdminConversation = {
   messages: AdminMessage[]
 }
 
+export type Assignment = {
+  id: string
+  assigned_at: string
+  report_id: string | null
+  study_sheet: {
+    title: string
+    category: string
+    level: string
+  }
+}
+
 // ── Domain types ─────────────────────────────────────────────────────────────
 
 type Teacher = { id: string; full_name: string }
@@ -90,9 +101,10 @@ type Props = {
   reviews: Review[]
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
+  assignments: Assignment[]
 }
 
-type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'messages' | 'reviews'
+type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messages' | 'reviews'
 
 // ── Small reusable components ─────────────────────────────────────────────────
 
@@ -154,6 +166,22 @@ function HoursTypeBadge({ type }: { type: string }) {
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={colour}>
       {label[type] ?? type}
+    </span>
+  )
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  const style =
+    category.toLowerCase() === 'vocabulary'
+      ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
+      : category.toLowerCase() === 'grammar'
+      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      : category.toLowerCase() === 'material'
+      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
+      : { backgroundColor: '#f3f4f6', color: '#374151' }
+  return (
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
+      {category}
     </span>
   )
 }
@@ -338,6 +366,7 @@ export default function StudentDetailClient({
   reviews,
   conversations,
   purgeBlockedBy,
+  assignments: initialAssignments,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -370,6 +399,12 @@ export default function StudentDetailClient({
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
+
+  // Assignments state
+  const [localAssignments, setLocalAssignments] = useState<Assignment[]>(initialAssignments)
+  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
+  const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [revokeError, setRevokeError] = useState<string | null>(null)
 
   const id = student.id as string
   const fullName = student.full_name as string
@@ -482,11 +517,30 @@ export default function StudentDetailClient({
     }
   }
 
+  async function handleRevoke(assignmentId: string) {
+    setRevokingId(assignmentId)
+    setRevokeError(null)
+    try {
+      const res = await fetch(`/api/admin/assignments/${assignmentId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to revoke assignment.')
+      }
+      setLocalAssignments(prev => prev.filter(a => a.id !== assignmentId))
+      setConfirmRevokeId(null)
+    } catch (err: unknown) {
+      setRevokeError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setRevokingId(null)
+    }
+  }
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'classes', label: `Classes (${lessons.length})` },
     { key: 'hours', label: `Hours Log (${hoursLog.length})` },
     { key: 'reports', label: `Reports (${reports.length})` },
+    { key: 'assignments', label: `Assignments (${localAssignments.length})` },
     { key: 'messages', label: `Messages (${conversations.length})` },
     { key: 'reviews', label: `Reviews (${reviews.length})` },
   ]
@@ -1006,6 +1060,109 @@ export default function StudentDetailClient({
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ── Assignments ── */}
+      {activeTab === 'assignments' && (
+        <div className="space-y-3">
+          {revokeError && (
+            <div className="px-4 py-3 rounded-lg text-sm"
+              style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+              {revokeError}
+            </div>
+          )}
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Sheet</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Category</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Level</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Source</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date Assigned</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody>
+                {localAssignments.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-gray-400">
+                      No study sheets assigned yet.
+                    </td>
+                  </tr>
+                ) : (
+                  localAssignments.map((assignment) => {
+                    const isConfirming = confirmRevokeId === assignment.id
+                    const isRevoking = revokingId === assignment.id
+                    return (
+                      <tr key={assignment.id} className="border-b border-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">
+                          {assignment.study_sheet.title}
+                        </td>
+                        <td className="px-4 py-3">
+                          <CategoryBadge category={assignment.study_sheet.category} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                          >
+                            {assignment.study_sheet.level}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-medium"
+                            style={
+                              assignment.report_id
+                                ? { backgroundColor: '#fff7ed', color: '#c2410c' }
+                                : { backgroundColor: '#f3f4f6', color: '#6b7280' }
+                            }
+                          >
+                            {assignment.report_id ? 'Class Report' : 'Direct'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500">
+                          {new Date(assignment.assigned_at).toLocaleDateString('en-GB', {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                          })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {isConfirming ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => setConfirmRevokeId(null)}
+                                disabled={isRevoking}
+                                className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => handleRevoke(assignment.id)}
+                                disabled={isRevoking}
+                                className="text-xs px-3 py-1 rounded text-white disabled:opacity-50"
+                                style={{ backgroundColor: '#dc2626' }}
+                              >
+                                {isRevoking ? 'Revoking…' : 'Confirm Revoke'}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setRevokeError(null); setConfirmRevokeId(assignment.id) }}
+                              className="text-xs underline text-red-400 hover:text-red-600"
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
