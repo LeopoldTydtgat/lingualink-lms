@@ -38,7 +38,7 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string        // 'vocabulary' | 'grammar'
+  category: string        // 'Vocabulary' | 'Grammar' | 'Material'
   level: string           // A1, A1+, A2 … C2
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
@@ -267,8 +267,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Categories</option>
-          <option value="vocabulary">Vocabulary</option>
-          <option value="grammar">Grammar</option>
+          <option value="Vocabulary">Vocabulary</option>
+          <option value="Grammar">Grammar</option>
+          <option value="Material">Material</option>
         </select>
         <select
           value={filterLevel}
@@ -434,7 +435,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   </div>
 
                   {/* Category */}
-                  <span className="capitalize text-gray-600">{sheet.category}</span>
+                  <span className="text-gray-600">{sheet.category}</span>
 
                   {/* Level */}
                   <span className="font-mono text-gray-700">{sheet.level}</span>
