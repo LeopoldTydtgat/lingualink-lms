@@ -262,7 +262,7 @@ export default function StudentDetailClient({
               </p>
             </div>
             <div className="flex gap-2">
-              {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) && (
+              {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) && new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000 > Date.now() && (
                 <a
                   href={lesson.teams_join_url}
                   target="_blank"

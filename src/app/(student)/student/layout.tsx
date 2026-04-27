@@ -36,6 +36,7 @@ export default async function StudentDashboardLayout({
     .select('scheduled_at, teams_join_url, duration_minutes, status')
     .eq('student_id', student.id)
     .eq('status', 'scheduled')
+    .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
     .limit(1)
     .maybeSingle()
