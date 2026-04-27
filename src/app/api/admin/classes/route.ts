@@ -286,7 +286,7 @@ export async function POST(request: NextRequest) {
           recipientName: teacherProfile.full_name ?? 'Teacher',
           subject: 'New class booked',
           bodyHtml: teacherBody,
-          contactEmail: 'support@lingualinkonline.com',
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
     }

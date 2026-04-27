@@ -9,7 +9,8 @@
       "Read(//tmp/**)",
       "Bash(grep -v \"^--$\")",
       "Bash(xargs grep *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
