@@ -216,7 +216,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
                         {(r.status === 'completed' || r.status === 'flagged') && (
-                          <Link href={`/admin/reports/${r.id}`} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
+                          <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                         )}
                         {r.status === 'flagged' && (
                           <button onClick={() => setReopenId(r.id)} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
@@ -322,7 +322,7 @@ function LiveTrace() {
                   </td>
                   <td className="py-3 px-3">
                     {l.report?.id && (
-                      <Link href={`/admin/reports/${l.report.id}`} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View report →</Link>
+                      <Link href={`/admin/reports/${l.report.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View report →</Link>
                     )}
                   </td>
                 </tr>

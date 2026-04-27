@@ -141,7 +141,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
 
   return (
     <div className="p-6 max-w-4xl">
-      <Link href="/admin/reports" className="text-sm hover:underline mb-5 inline-flex items-center gap-1" style={{ color: '#FF8303' }}>← Back to Reports</Link>
+      <Link href="/admin/reports" prefetch={false} className="text-sm hover:underline mb-5 inline-flex items-center gap-1" style={{ color: '#FF8303' }}>← Back to Reports</Link>
 
       <div className="flex items-center justify-between mt-3 mb-6">
         <h1 className="text-xl font-semibold text-gray-900">Report Detail</h1>

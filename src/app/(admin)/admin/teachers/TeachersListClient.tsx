@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 
 type Teacher = {
   id: string
-  full_name: string
+  full_name: string | null
   email: string
   photo_url: string | null
   status: string | null
@@ -65,7 +65,7 @@ export default function TeachersListClient({ teachers }: Props) {
 
   const filtered = teachers.filter((t) => {
     const matchesSearch =
-      t.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      (t.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       t.email.toLowerCase().includes(search.toLowerCase())
     const matchesStatus =
       statusFilter === 'All' || t.status === statusFilter
@@ -150,6 +150,8 @@ export default function TeachersListClient({ teachers }: Props) {
                 <tr
                   key={teacher.id}
                   className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                  onClick={() => router.push(`/admin/teachers/${teacher.id}`)}
+                  style={{ cursor: 'pointer' }}
                 >
                   {/* Photo + name as link */}
                   <td className="px-4 py-3">
@@ -157,7 +159,7 @@ export default function TeachersListClient({ teachers }: Props) {
                       {teacher.photo_url ? (
                         <img
                           src={teacher.photo_url}
-                          alt={teacher.full_name}
+                          alt={teacher.full_name ?? ''}
                           className="w-8 h-8 rounded-full object-cover"
                         />
                       ) : (
@@ -165,7 +167,7 @@ export default function TeachersListClient({ teachers }: Props) {
                           className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                           style={{ backgroundColor: '#FF8303' }}
                         >
-                          {teacher.full_name.charAt(0).toUpperCase()}
+                          {(teacher.full_name ?? '?').charAt(0).toUpperCase()}
                         </div>
                       )}
                       <Link
@@ -173,7 +175,7 @@ export default function TeachersListClient({ teachers }: Props) {
                         prefetch={false}
                         className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
                       >
-                        {teacher.full_name}
+                        {teacher.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>}
                       </Link>
                     </div>
                   </td>

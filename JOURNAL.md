@@ -1,5 +1,47 @@
 # LinguaLink Online - Build Journal
 
+## Session 63 - 27 April 2026 - Audit Pass: Outlook Email Fix, Link Prefetch, Auth Hardening, TypeScript Cleanup
+
+### What was built
+
+- Confirmed src/app/api/test-emails/route.ts was already deleted from the previous session - no action needed
+- Replaced all 11 email buttons in src/lib/email/templates.ts with a new buildButton() helper that outputs VML v:roundrect for Outlook and a standard anchor tag for all other clients - fixes square corner rendering in Outlook caused by CSS border-radius being ignored on anchor tags
+- Fixed src/app/api/announcements/dismiss/route.ts - was trusting userId from the request body; now calls getUser() and uses the verified session user ID instead
+- Added prefetch={false} to all Link tags found missing it across 5 files: EditClassClient.tsx (2 tags), ClassesListClient.tsx (2 tags), ReportDetailClient.tsx (1 tag), ReportsClient.tsx (2 tags), DashboardClient.tsx (4 tags) - full codebase scan confirmed zero remaining after fixes
+- Fixed TypeScript errors in StudentsListClient.tsx and TeachersListClient.tsx - alt attributes now coerce null to empty string via nullish coalescing, and the teacher search filter no longer calls toLowerCase() on a potentially null full_name
+
+### Break/Fix Log
+
+Issue 1: Outlook renders email buttons with square corners
+Symptom: Orange CTA buttons displayed without rounded corners in Outlook desktop.
+Cause: Outlook ignores CSS border-radius on anchor tags entirely.
+Fix: Introduced buildButton(href, label) helper in templates.ts that wraps every button in VML conditional comments - the mso block renders a v:roundrect with arcsize 13%, the non-mso block renders the standard anchor tag. All other clients ignore the VML block.
+Lesson: Outlook requires VML for rounded buttons - CSS alone will never work.
+
+Issue 2: Announcement dismiss route trusted client-supplied userId
+Symptom: The dismiss endpoint accepted userId from the POST body without verifying the caller.
+Cause: Original implementation passed userId from the client rather than reading it from the server session.
+Fix: Route now calls getUser() first and uses user.id from the verified session. userId removed from the request body entirely.
+Lesson: Never trust identity data from the request body - always derive it from the verified server session.
+
+Issue 3: Link tags missing prefetch={false}
+Symptom: Several Link components across admin pages were missing the required prefetch={false} prop.
+Cause: Some were missed during original build, others were found during this audit pass.
+Fix: Full codebase scan using PowerShell confirmed all instances - all fixed and re-scanned to zero remaining.
+Lesson: After any audit fix, always re-run the scan to confirm zero remaining instances.
+
+Issue 4: TypeScript errors in admin list components
+Symptom: tsc --noEmit reported 3 errors - null not assignable to string or undefined on alt attributes, and toLowerCase() called on possibly null full_name.
+Cause: full_name typed as string or null but used in contexts expecting string or undefined.
+Fix: Applied nullish coalescing (?? '') to alt attributes and the search filter. TypeScript check now passes with zero errors.
+Lesson: Run tsc --noEmit at the start of every session to catch pre-existing type errors before adding new code.
+
+### Session result
+
+Full audit pass session with no new features built. Identified and resolved four categories of issues across the codebase - Outlook email button rendering, missing Link prefetch props, an auth hardening gap in the announcement dismiss route, and pre-existing TypeScript errors. The codebase now passes tsc --noEmit with zero errors and every Link tag has prefetch={false}. No regressions introduced.
+
+---
+
 ## Session 61 - 25 April 2026 - Email System Audit, Bug Fixes, and Missing Notifications
 
 ### What was built
