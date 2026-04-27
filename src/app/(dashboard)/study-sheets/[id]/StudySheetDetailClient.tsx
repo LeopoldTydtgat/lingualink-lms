@@ -21,6 +21,12 @@ type Exercise = {
   duration_minutes: number
 }
 
+type Attachment = {
+  name: string
+  url: string
+  type: string
+}
+
 type StudySheet = {
   id: string
   title: string
@@ -28,6 +34,7 @@ type StudySheet = {
   level: string
   difficulty: number
   content: { words: Word[] }
+  attachments: Attachment[] | null
 }
 
 type Props = {
@@ -50,6 +57,12 @@ function DifficultyBars({ count }: { count: number }) {
       ))}
     </span>
   )
+}
+
+function categoryBadgeStyle(category: string): React.CSSProperties {
+  if (category === 'Vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
+  if (category === 'Grammar') return { backgroundColor: '#eff6ff', color: '#1d4ed8' }
+  return { backgroundColor: '#e0f2fe', color: '#0369a1' }
 }
 
 function ExerciseCard({ exercise }: { exercise: Exercise }) {
@@ -128,6 +141,8 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
 export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Props) {
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
+  const isMaterial = sheet.category === 'Material'
+  const attachments = sheet.attachments ?? []
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -148,8 +163,8 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
             <h1 className="text-2xl font-semibold text-gray-900 mb-2">{sheet.title}</h1>
             <div className="flex items-center gap-3">
               <span
-                className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
-                style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                style={categoryBadgeStyle(sheet.category)}
               >
                 {sheet.category}
               </span>
@@ -159,11 +174,46 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
               >
                 {sheet.level}
               </span>
-              <DifficultyBars count={sheet.difficulty} />
+              {sheet.difficulty != null && <DifficultyBars count={sheet.difficulty} />}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Material file viewer — view-only, no download */}
+      {isMaterial && attachments.length > 0 && (
+        <div className="mb-6 space-y-4">
+          {attachments.map((att, idx) => {
+            const isPdf = att.type === 'application/pdf'
+            const isImage = att.type.startsWith('image/')
+
+            return (
+              <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+                <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-500">{att.name}</span>
+                </div>
+                {isPdf ? (
+                  <iframe
+                    src={att.url}
+                    title={att.name}
+                    style={{ width: '100%', height: '600px', border: 'none', display: 'block' }}
+                  />
+                ) : isImage ? (
+                  <img
+                    src={att.url}
+                    alt={att.name}
+                    style={{ maxWidth: '100%', display: 'block' }}
+                  />
+                ) : (
+                  <div className="px-4 py-8 text-center text-sm text-gray-400">
+                    Preview is not available for this file type.
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Vocabulary table */}
       {words.length > 0 && (
