@@ -106,6 +106,5 @@ export default withSentryConfig(nextConfig, {
   project: 'lingualinkonline-lms',
   silent: true,
   widenClientFileUpload: true,
-  hideSourceMaps: true,
-  disableLogger: true,
+  sourcemaps: { deleteSourcemapsAfterUpload: true },
 })
