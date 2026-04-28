@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
@@ -188,6 +189,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
+    // ── 4b. Check teacher is not already booked at this time ─────────────────
+    const adminClient = createAdminClient()
+    const newStart = new Date(scheduledAt)
+    const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000)
+
+    const { data: clashLessons } = await adminClient
+      .from('lessons')
+      .select('id, scheduled_at, duration_minutes')
+      .eq('teacher_id', teacherId)
+      .eq('status', 'scheduled')
+      .lt('scheduled_at', newEnd.toISOString())
+      .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+    const hasClash = (clashLessons ?? []).some(
+      (l) =>
+        new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000 >
+        newStart.getTime()
+    )
+
+    if (hasClash) {
+      return NextResponse.json(
+        { error: 'This time slot is no longer available. Please select a different time.' },
+        { status: 409 }
+      )
+    }
+
     // ── 5. If rescheduling – cancel the old lesson ────────────────────────────
     if (rescheduleId) {
       const { error: cancelError } = await supabase
@@ -211,7 +238,7 @@ export async function POST(req: NextRequest) {
     // Meeting is created under the shared organiser account.
     // The join URL is tied to the lesson slot – not the teacher –
     // so teacher swaps never break the student's link.
-    let teamsJoinUrl = 'TEAMS_LINK_PENDING'
+    let teamsJoinUrl: string | null = null
     let teamsMeetingId: string | null = null
 
     try {
