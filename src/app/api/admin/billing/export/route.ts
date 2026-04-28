@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ────────────────────────────────────────────────────────────────────────────
 
 function formatDateTimeCSV(dateStr: string): string {
   const d = new Date(dateStr)
@@ -72,7 +72,7 @@ function lessonAmount(durationMinutes: number, hourlyRate: number): number {
   return Math.round((durationMinutes / 60) * hourlyRate * 100) / 100
 }
 
-// â”€â”€ Route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Route ──────────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -104,7 +104,7 @@ export async function GET(req: NextRequest) {
   let csv = ''
   let filename = 'export.csv'
 
-  // â”€â”€ 1. Teacher Invoice Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 1. Teacher Invoice Summary ────────────────────────────────────────────────────────
   if (type === 'teacher_invoices') {
     let query = supabase
       .from('invoices')
@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
 
     const { data: invoices } = await query
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount (â‚¬)', 'Status', 'Uploaded At', 'Paid At']
+    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount (€)', 'Status', 'Uploaded At', 'Paid At']
     const rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return [
@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
     filename = 'teacher-invoices.csv'
   }
 
-  // â”€â”€ 2. Teacher Earnings Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 2. Teacher Earnings Summary ───────────────────────────────────────────────────────
   else if (type === 'teacher_earnings') {
     const { data: teachers } = await supabase
       .from('profiles')
@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    // Group lessons by teacher Ã— month
+    // Group lessons by teacher × month
     const earningsMap: Record<string, {
       teacherName: string
       teacherEmail: string
@@ -197,7 +197,7 @@ export async function GET(req: NextRequest) {
       entry.totalOwed += lessonAmount(lesson.duration_minutes, teacher.hourly_rate || 0)
     }
 
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (â‚¬)', 'Total Owed (â‚¬)']
+    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed (€)']
     const rows = Object.values(earningsMap).map(e => [
       e.teacherName,
       e.teacherEmail,
@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
     filename = 'teacher-earnings.csv'
   }
 
-  // â”€â”€ 3. Student Hours Usage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 3. Student Hours Usage ────────────────────────────────────────────────────────────
   else if (type === 'student_hours') {
     let studentsQuery = supabase
       .from('students')
@@ -250,7 +250,7 @@ export async function GET(req: NextRequest) {
     filename = 'student-hours.csv'
   }
 
-  // â”€â”€ 4. Company Billing Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 4. Company Billing Report ─────────────────────────────────────────────────────────
   else if (type === 'company_billing') {
     let companiesQuery = supabase
       .from('companies')
@@ -270,7 +270,7 @@ export async function GET(req: NextRequest) {
 
     let lessonsQuery = supabase
       .from('lessons')
-      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name)')
+      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
 
     if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount (â‚¬)']
+    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount (€)']
     const rows: (string | number | boolean | null)[][] = []
 
     for (const company of (companies || [])) {
@@ -309,6 +309,7 @@ export async function GET(req: NextRequest) {
             lesson.status,
             billableToTeacher ? 'Yes' : 'No',
             billable48hr ? 'Yes' : 'No',
+            lessonAmount(lesson.duration_minutes, teacher?.hourly_rate ?? 0),
           ])
         }
       }
@@ -318,7 +319,7 @@ export async function GET(req: NextRequest) {
     filename = 'company-billing.csv'
   }
 
-  // â”€â”€ 5. Student Progress Report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 5. Student Progress Report ────────────────────────────────────────────────────────
   else if (type === 'student_progress') {
     let reportsQuery = supabase
       .from('reports')
@@ -334,7 +335,7 @@ export async function GET(req: NextRequest) {
     const headers = ['Student', 'Class Date', 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
     const rows = (reports || []).map(r => {
       const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
-      // Use unknown as intermediate to safely bridge the arrayâ†’object cast for nested profiles
+      // Use unknown as intermediate to safely bridge the array→object cast for nested profiles
       const lessonWithProfiles = lesson as unknown as { scheduled_at: string; profiles: { full_name: string }[] } | null
       const teacher = lessonWithProfiles
         ? (Array.isArray(lessonWithProfiles.profiles) ? lessonWithProfiles.profiles[0] : null)
@@ -359,7 +360,7 @@ export async function GET(req: NextRequest) {
     filename = 'student-progress.csv'
   }
 
-  // â”€â”€ 6. Pending Reports Log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 6. Pending Reports Log ────────────────────────────────────────────────────────────
   else if (type === 'pending_reports') {
     let query = supabase
       .from('lessons')
