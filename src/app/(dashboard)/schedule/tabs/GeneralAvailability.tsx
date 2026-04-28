@@ -62,7 +62,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = 264
+      scrollRef.current.scrollTop = 8 * 2 * 22
     }
   }, [])
 
