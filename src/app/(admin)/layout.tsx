@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import AdminLayoutClient from './AdminLayoutClient'
@@ -42,34 +41,23 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const cookieStore = await cookies()
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
+  const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const adminDb = createAdminClient()
+
+  const { data: profile } = await adminDb
     .from('profiles')
     .select('id, full_name, role, photo_url')
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') redirect('/dashboard')
+  if (!profile) redirect('/login?error=profile_error')
+  if (profile.role !== 'admin') redirect('/dashboard')
 
   // ── right panel stats ─────────────────────────────────────────────────────
   const { start: todayStart, end: todayEnd } = getTodayUTCRange()
-
-  const adminDb = createAdminClient()
 
   const [
     todayRes,

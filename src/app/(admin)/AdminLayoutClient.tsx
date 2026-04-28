@@ -1,6 +1,6 @@
-﻿'use client'
+'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
@@ -70,12 +70,15 @@ export default function AdminLayoutClient({
   const [liveUnreadMessages, setLiveUnreadMessages] = useState(unreadMessagesCount)
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  const supabaseRef = useRef(
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
   )
 
   useEffect(() => {
+    const supabase = supabaseRef.current
     const channel = supabase
       .channel('admin-nav-unread')
       .on('postgres_changes', {
@@ -113,10 +116,10 @@ export default function AdminLayoutClient({
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [supabase])
+  }, [])
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await supabaseRef.current.auth.signOut()
     router.push('/login')
   }
 
@@ -202,6 +205,7 @@ export default function AdminLayoutClient({
       <div className="px-3 py-4 border-t border-gray-700 space-y-1">
         <Link
           href="/dashboard"
+          prefetch={false}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
           style={{ color: '#9ca3af' }}
         >
@@ -377,6 +381,3 @@ export default function AdminLayoutClient({
     </div>
   )
 }
-
-
-
