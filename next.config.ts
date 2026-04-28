@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { withSentryConfig } from '@sentry/nextjs'
 
 // ── Derive Supabase hostname for CSP ─────────────────────────────────────────
 // Falls back to wildcard if the env var isn't available at config load time.
@@ -100,4 +101,11 @@ const nextConfig: NextConfig = {
   },
 }
 
-export default nextConfig
+export default withSentryConfig(nextConfig, {
+  org: 'lingualink-lms',
+  project: 'lingualinkonline-lms',
+  silent: true,
+  widenClientFileUpload: true,
+  hideSourceMaps: true,
+  disableLogger: true,
+})

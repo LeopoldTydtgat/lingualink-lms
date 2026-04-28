@@ -197,6 +197,31 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Check teacher is not already booked at this time
+  const newStart = new Date(scheduledAtUtc)
+  const newEnd = new Date(newStart.getTime() + duration_minutes * 60 * 1000)
+
+  const { data: clashLessons } = await adminClient
+    .from('lessons')
+    .select('id, scheduled_at, duration_minutes')
+    .eq('teacher_id', teacher_id)
+    .eq('status', 'scheduled')
+    .lt('scheduled_at', newEnd.toISOString())
+    .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+  const hasClash = (clashLessons ?? []).some(
+    (l) =>
+      new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000 >
+      newStart.getTime()
+  )
+
+  if (hasClash) {
+    return NextResponse.json(
+      { error: 'This time slot is no longer available. Please select a different time.' },
+      { status: 409 }
+    )
+  }
+
   // Create Teams meeting before inserting the lesson so the URL is available immediately
   let teamsJoinUrl: string | null = null
   let teamsMeetingId: string | null = null
