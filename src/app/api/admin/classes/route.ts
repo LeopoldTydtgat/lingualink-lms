@@ -154,28 +154,19 @@ export async function POST(request: NextRequest) {
     .single()
   const teacherTimezone = teacherProfile?.timezone || 'UTC'
 
-  // Convert naive local datetime to UTC using teacher's timezone
-  // "2026-04-22T09:30:00" in teacherTimezone → UTC ISO string
+  // Convert a naive local datetime string (YYYY-MM-DDTHH:MM) to a UTC ISO string
+  // using the given IANA timezone. Works correctly across DST boundaries.
   function localToUtc(localIso: string, tz: string): string {
-    const [datePart, timePart] = localIso.split('T')
-    const [year, month, day] = datePart.split('-').map(Number)
-    const [hour, minute] = timePart.split(':').map(Number)
-    const guessUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false
-    })
-    const parts = formatter.formatToParts(guessUtc)
-    const localYear = parseInt(parts.find(p => p.type === 'year')!.value)
-    const localMonth = parseInt(parts.find(p => p.type === 'month')!.value)
-    const localDay = parseInt(parts.find(p => p.type === 'day')!.value)
-    const localHour = parseInt(parts.find(p => p.type === 'hour')!.value)
-    const localMinute = parseInt(parts.find(p => p.type === 'minute')!.value)
-    const targetMs = Date.UTC(year, month - 1, day, hour, minute, 0)
-    const gotMs = Date.UTC(localYear, localMonth - 1, localDay, localHour, localMinute, 0)
-    const diffMs = targetMs - gotMs
-    return new Date(guessUtc.getTime() + diffMs).toISOString()
+    const [y, mo, d, h, min] = localIso.split(/[-T:]/).map(Number)
+    const probe = new Date(Date.UTC(y, mo - 1, d, h, min, 0))
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(probe)
+    const get = (t: string) => parseInt(parts.find(p => p.type === t)!.value)
+    const diffMs = Date.UTC(y, mo - 1, d, h, min, 0)
+                 - Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
+    return new Date(probe.getTime() + diffMs).toISOString()
   }
 
   const scheduledAtUtc = localToUtc(scheduled_at, teacherTimezone)
