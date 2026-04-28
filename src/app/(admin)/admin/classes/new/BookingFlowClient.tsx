@@ -55,6 +55,20 @@ function generateTimeSlots(): string[] {
   return slots
 }
 
+// Convert a UTC ISO slot start to "HH:MM" in the given IANA timezone
+function slotLocalTime(startIso: string, timezone: string): string {
+  const date = new Date(startIso)
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: timezone,
+  }).formatToParts(date)
+  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
+  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  return `${hh.padStart(2, '0')}:${mm.padStart(2, '0')}`
+}
+
 export default function BookingFlowClient({ teachers, students }: Props) {
   const router = useRouter()
 
@@ -68,6 +82,8 @@ export default function BookingFlowClient({ teachers, students }: Props) {
   const [error, setError] = useState('')
   const [teacherSearch, setTeacherSearch] = useState('')
   const [studentSearch, setStudentSearch] = useState('')
+  const [checkingAvailability, setCheckingAvailability] = useState(false)
+  const [availabilityWarning, setAvailabilityWarning] = useState(false)
 
   const timeSlots = generateTimeSlots()
 
@@ -80,6 +96,36 @@ export default function BookingFlowClient({ teachers, students }: Props) {
     ? selectedStudent.training.total_hours - selectedStudent.training.hours_consumed
     : 0
   const hoursAfterBooking = hoursRemaining - hoursRequested
+
+  async function handleContinue() {
+    if (!selectedDate || !selectedTime || !selectedTeacher) return
+    setCheckingAvailability(true)
+    setAvailabilityWarning(false)
+
+    try {
+      const res = await fetch(
+        `/api/student/availability?teacherId=${selectedTeacher.id}&weekStart=${selectedDate}`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[selectedDate] ?? []
+        const teacherTz = selectedTeacher.timezone ?? 'UTC'
+        const isAvailable = slotsForDate.some(
+          (slot) => slot.available && slotLocalTime(slot.startIso, teacherTz) === selectedTime
+        )
+        if (isAvailable) {
+          setStep(5)
+          return
+        }
+      }
+      // Fetch failed or slot not found in available slots — show warning
+      setAvailabilityWarning(true)
+    } catch {
+      setAvailabilityWarning(true)
+    } finally {
+      setCheckingAvailability(false)
+    }
+  }
 
   async function handleConfirm() {
     if (!selectedTeacher || !selectedStudent || !selectedDuration || !selectedDate || !selectedTime) return
@@ -336,7 +382,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
                 type="date"
                 min={todayString}
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => { setSelectedDate(e.target.value); setAvailabilityWarning(false) }}
                 style={{
                   width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
                   padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
@@ -349,7 +395,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
               </label>
               <select
                 value={selectedTime}
-                onChange={(e) => setSelectedTime(e.target.value)}
+                onChange={(e) => { setSelectedTime(e.target.value); setAvailabilityWarning(false) }}
                 style={{
                   width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
                   padding: '10px 12px', fontSize: '14px', outline: 'none',
@@ -366,19 +412,57 @@ export default function BookingFlowClient({ teachers, students }: Props) {
           <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
             Time will be automatically converted from the teacher&apos;s timezone ({selectedTeacher?.timezone ?? '—'}) to UTC.
           </p>
-          <button
-            onClick={() => { if (selectedDate && selectedTime) setStep(5) }}
-            disabled={!selectedDate || !selectedTime}
-            style={{
-              marginTop: '24px', padding: '12px 28px', borderRadius: '8px',
-              backgroundColor: selectedDate && selectedTime ? '#FF8303' : '#E5E7EB',
-              color: selectedDate && selectedTime ? 'white' : '#9CA3AF',
-              border: 'none', fontSize: '14px', fontWeight: 600,
-              cursor: selectedDate && selectedTime ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Continue →
-          </button>
+
+          {/* Availability warning — shown when selected slot is outside teacher's set availability */}
+          {availabilityWarning && (
+            <div style={{
+              backgroundColor: '#FFFBEB', border: '1px solid #FCD34D',
+              borderRadius: '8px', padding: '14px 16px', marginTop: '16px',
+            }}>
+              <p style={{ fontSize: '13px', color: '#92400E', margin: '0 0 12px' }}>
+                This time slot is outside <strong>{selectedTeacher?.full_name}&apos;s</strong> set availability.
+                They have not indicated they are free at this time. Do you want to proceed anyway?
+              </p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setStep(5)}
+                  style={{
+                    padding: '8px 16px', borderRadius: '6px', border: 'none',
+                    backgroundColor: '#F59E0B', color: 'white',
+                    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Proceed anyway
+                </button>
+                <button
+                  onClick={() => setAvailabilityWarning(false)}
+                  style={{
+                    padding: '8px 16px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                    backgroundColor: 'white', color: '#374151',
+                    fontSize: '13px', cursor: 'pointer',
+                  }}
+                >
+                  Go back
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!availabilityWarning && (
+            <button
+              onClick={handleContinue}
+              disabled={!selectedDate || !selectedTime || checkingAvailability}
+              style={{
+                marginTop: '24px', padding: '12px 28px', borderRadius: '8px',
+                backgroundColor: selectedDate && selectedTime && !checkingAvailability ? '#FF8303' : '#E5E7EB',
+                color: selectedDate && selectedTime && !checkingAvailability ? 'white' : '#9CA3AF',
+                border: 'none', fontSize: '14px', fontWeight: 600,
+                cursor: selectedDate && selectedTime && !checkingAvailability ? 'pointer' : 'not-allowed',
+              }}
+            >
+              {checkingAvailability ? 'Checking...' : 'Continue →'}
+            </button>
+          )}
         </div>
       )}
 
