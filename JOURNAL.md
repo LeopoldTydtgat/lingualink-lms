@@ -1,5 +1,47 @@
 # LinguaLink Online - Build Journal
 
+## Session 66 - 28 April 2026 - Security Audit, Sentry Setup and Critical Bug Fixes
+
+### What was built
+- Verified session bleed issue was caused by shared email address between teacher and student test accounts, not a code bug. All session security fixes from Session 65 confirmed valid and retained
+- Added subdomain separation (teacher/student/admin.lingualinkonline.com) to Step 14 hardening list - all three portals currently share app.lingualinkonline.com which means one shared session cookie per browser
+- Added database-level double booking prevention: enabled btree_gist extension in Supabase and created an EXCLUDE constraint using tstzrange on the lessons table scoped to status = 'scheduled'. Added application-level overlap check in both /api/student/book/route.ts and /api/admin/classes/route.ts before the lesson insert, returning 409 if a conflict is found
+- Fixed TEAMS_LINK_PENDING sentinel string in /api/student/book/route.ts - teamsJoinUrl now initialises as null instead of the string 'TEAMS_LINK_PENDING', so failed Graph API calls are correctly surfaced in the admin dashboard alert
+- Wired up Sentry error monitoring - created sentry.client.config.ts, sentry.server.config.ts, sentry.edge.config.ts, and src/instrumentation.ts. Wrapped next.config.ts with withSentryConfig. Added SENTRY_DSN to Vercel environment variables. Confirmed events are being received in Sentry dashboard
+- Fixed teacher timezone display in UpcomingClassesClient.tsx - all date and time formatting now uses Intl.DateTimeFormat with the teacher's stored profile timezone instead of the browser's local timezone. Added formatTime(), formatDate(), and getLocalDateKey() helpers matching the student portal pattern. Added mounted guard to prevent hydration mismatches
+- Fixed company billing CSV export missing Amount column - the 9th column header existed but no value was pushed into the row. Updated the lessons query to fetch hourly_rate from the teacher profile join and added lessonAmount(duration_minutes, hourly_rate) as the 9th row value
+- Identified and logged additional bugs for a future fix session (see break/fix log)
+
+### Break/Fix Log
+Issue 1: Session bleed between teacher and student portals / Cause: Test accounts shared the same email address, which maps to a single Supabase auth user. One session cookie overwrites the other on the shared domain / Fix: Deleted the duplicate teacher account, recreated student with the same email as a clean auth user. Not a code bug / Lesson: Never share email addresses across teacher and student test accounts. Permanent fix is subdomain separation in Step 14
+
+Issue 2: Double booking not prevented / Cause: Neither booking route checked for overlapping lessons before inserting. No database constraint existed / Fix: Added btree_gist extension, EXCLUDE constraint on lessons table, and overlap query in both booking routes / Lesson: Any write that must be exclusive needs both a DB constraint and an application check
+
+Issue 3: TEAMS_LINK_PENDING invisible to admin dashboard / Cause: Student booking route initialised teamsJoinUrl as the string 'TEAMS_LINK_PENDING' on Graph API failure. The admin alert filters for null, so these failures were never surfaced / Fix: Changed initialiser to null / Lesson: Sentinel strings bypass null checks silently
+
+Issue 4: Sentry not initialised / Cause: sentry.server.config.ts is not auto-loaded by Next.js App Router. An instrumentation.ts hook is required in v8+ / Fix: Created src/instrumentation.ts with the register() function importing server and edge configs per runtime / Lesson: Always verify third-party SDK initialisation with a test event before considering it done
+
+Issue 5: Teacher times shown in browser timezone / Cause: UpcomingClassesClient used date-fns format() which reads the browser's local clock, not the teacher's profile timezone / Fix: Replaced all date-fns calls with Intl.DateTimeFormat using teacherTimezone passed from the server component / Lesson: Always pass an explicit timezone to every date formatting function
+
+Issue 6: Company billing CSV amount column always blank / Cause: The 9th column header was declared but the row push only contained 8 values. hourly_rate was also not fetched in the query / Fix: Added hourly_rate to the profile join and appended lessonAmount() as the 9th row value
+
+### Bugs identified for next fix session
+- Purge modal shows blank confirmation text when teacher or student has no full name - should fall back to email address
+- Purge button not disabled when confirmation field is empty - allows purge with no input
+- Purge does not cancel upcoming lessons before deletion - orphaned lessons remain and can trigger notification emails to deleted users
+- Purge does not clean up cross-portal profiles - purging a teacher does not remove a student profile on the same auth user
+- Purge does not invalidate active sessions - purged users retain portal access until their JWT expires. Fix: call auth.admin.signOut(userId) before deletion
+- Database trigger auto-creates a teacher profile row for every new Supabase auth user - student account creation silently generates a ghost teacher record
+- Create student form - "To be assessed" fluency level rejected by server-side validation - should save as null
+- Student self-assessed level has no "I am not sure" option - should map to null
+- Countdown format on teacher portal shows hours only (71h 19m 44s) - should show days and hours like student portal (2d 23h 19m)
+- Request reschedule modal title and button label are inconsistent
+
+### Session result
+This session completed a full audit of six critical systems identified in the Session 65 handover. Double booking prevention was absent at both the application and database level and has now been added. Sentry was installed but never wired up and is now confirmed live and capturing errors. The TEAMS_LINK_PENDING sentinel string was silently bypassing the admin dashboard alert and has been corrected. Teacher timezone display was using the browser clock rather than the teacher's profile setting. The company billing CSV was missing its amount column entirely. All six items are now resolved. A separate list of lower-priority bugs was identified during exploratory testing and will be addressed in the next session.
+
+---
+
 ## Session 65 - 28 April 2026 - Calendar and Booking System Overhaul
 
 ### What was built
