@@ -1,5 +1,32 @@
 # LinguaLink Online - Build Journal
 
+## Session 65 - 28 April 2026 - Calendar and Booking System Overhaul
+
+### What was built
+- Fixed student and admin portal browser tab titles - both were inheriting "Teacher Portal" from root layout. Added correct metadata exports to src/app/(student)/student/layout.tsx and src/app/(admin)/layout.tsx
+- Fixed DayToDay calendar showing no booked lessons - root cause was three bugs: wrong table name ('classes' instead of 'lessons'), wrong column names ('starts_at'/'ends_at' instead of 'scheduled_at'/'duration_minutes'), and missing Array.isArray() guard on the students join
+- Fixed hours not rolling back on booking failure - if trainings.hours_consumed update failed after lesson insert, the lesson now gets deleted before returning a 500 error. Previously the lesson persisted with no hours deducted, corrupting the training balance
+- Added revalidatePath('/schedule') to both availability API route handlers (POST and DELETE) so the schedule page cache invalidates correctly after availability changes
+- Fixed General Availability default scroll position - was opening at 06:00 (offset 264), corrected to 08:00 (offset 8 * 2 * 22 = 352)
+- Cleaned up localToUtc() DST handling in admin booking route - same correct algorithm, reduced from 20 lines to 12
+- Added Supabase Realtime subscription to DayToDay.tsx - teacher calendar now updates in real time when any lesson is created, updated, or cancelled, without a page reload. Uses a visibleRangeRef to always fetch the currently visible week
+- Added 30-second router.refresh() poll to student my-classes page - catches external changes (admin or teacher cancellations) without restructuring the server-component architecture
+- Added availability warning modal to admin class booking flow - when admin selects a slot outside the teacher's set availability, an amber warning appears before proceeding. Admin can proceed anyway (intentional override) or go back and adjust. Warning clears automatically if date or time is changed
+
+### Break/Fix Log
+Issue 1: DayToDay calendar showing no booked lessons / Cause: Query used wrong table name 'classes', wrong column names 'starts_at' and 'ends_at', and accessed students join without Array.isArray() guard / Fix: Corrected to 'lessons' table, 'scheduled_at' and 'duration_minutes' columns, computed end time as scheduled_at + duration_minutes, added Array.isArray() guard / Lesson: Always verify table and column names against a working query elsewhere in the codebase before writing a new one
+
+Issue 2: Hours balance corruption on booking failure / Cause: If the hours deduction update failed after lesson insert, execution continued with only a console.error log - lesson persisted, hours not deducted / Fix: Added compensating delete of the lesson if hours update fails, then returns 500 / Lesson: Any two-step write operation that is not in a transaction needs explicit rollback logic on the second step
+
+Issue 3: Availability saves showing stale data after navigation / Cause: Availability API routes had no revalidatePath call, so Next.js server cache was never invalidated after saves / Fix: Added revalidatePath('/schedule') to success path of both POST and DELETE availability route handlers
+
+Issue 4: Admin could book outside teacher availability with no warning / Cause: Admin booking flow had no availability awareness - Step 4 was a bare date/time picker with no checks / Fix: Added availability fetch on Continue, with amber warning modal if selected slot is outside teacher's availability. Admin retains override ability via "Proceed anyway"
+
+### Session result
+This session addressed the core booking and calendar reliability issues that had been present since the initial build. The DayToDay calendar was silently broken - querying a non-existent table - meaning booked lessons never appeared on the teacher's schedule view. Combined with the addition of Supabase Realtime and the 30-second student poll, the platform now reflects booking state in real time across all three portals. Data integrity is strengthened by the hours rollback fix. A full audit was also conducted across all booking and scheduling code, identifying remaining critical items to address in the next session - server-side double booking prevention, cron job verification, Teams link failure handling, invoice calculation accuracy, timezone display correctness, and Sentry configuration on live.
+
+---
+
 ## Session 64 - 27 April 2026 - Hardening Verification and Bug Fixes
 
 ### What was built
