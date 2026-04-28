@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import timeGridPlugin from '@fullcalendar/timegrid'
 import interactionPlugin from '@fullcalendar/interaction'
@@ -106,6 +106,14 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [exportMsg, setExportMsg] = useState('')
   const [actionError, setActionError] = useState('')
 
+  // Tracks the current visible range without causing the Realtime subscription to
+  // re-subscribe on every week navigation. The subscription callback reads this ref
+  // at event time so it always fetches the week the user is currently viewing.
+  const visibleRangeRef = useRef<{ start: string; end: string } | null>(null)
+  useEffect(() => {
+    visibleRangeRef.current = visibleRange
+  }, [visibleRange])
+
   async function fetchClassesForRange(startStr: string, endStr: string) {
     setIsLoading(true)
     const { data } = await supabase
@@ -131,6 +139,31 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     }
     setIsLoading(false)
   }
+
+  // Subscribe to any change on this teacher's lessons and re-fetch the visible week.
+  // profile.id is stable for the lifetime of the component so the effect runs once.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`lessons-daytodday-${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'lessons',
+          filter: `teacher_id=eq.${profile.id}`,
+        },
+        () => {
+          const range = visibleRangeRef.current
+          if (range) fetchClassesForRange(range.start, range.end)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [profile.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Memoised so FullCalendar only receives a new events array when the underlying
   // data actually changes — not on every state update (mode, isSaving, actionError, etc.).

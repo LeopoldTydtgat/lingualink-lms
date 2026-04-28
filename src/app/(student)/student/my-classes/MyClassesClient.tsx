@@ -129,7 +129,12 @@ export default function MyClassesClient({
 
     // Tick every second for countdowns
     const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
+    // Catch external changes (e.g. teacher or admin cancellations)
+    const pollInterval = setInterval(() => router.refresh(), 30_000)
+    return () => {
+      clearInterval(interval)
+      clearInterval(pollInterval)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // First scheduled lesson gets the prominent next class card
