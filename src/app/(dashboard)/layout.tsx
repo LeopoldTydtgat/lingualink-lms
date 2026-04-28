@@ -98,7 +98,8 @@ export default async function DashboardLayout({
     .from('profiles')
     .select('id, full_name, photo_url')
     .eq('role', 'admin')
-    .single()
+    .limit(1)
+    .maybeSingle()
 
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
