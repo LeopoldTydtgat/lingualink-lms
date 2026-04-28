@@ -8,6 +8,7 @@ export async function GET() {
     throw new Error('Sentry test error - delete this route after confirming')
   } catch (error) {
     Sentry.captureException(error)
+    await Sentry.flush(2000)
     return NextResponse.json({
       error: 'Test error captured',
       dsnPresent: !!process.env.SENTRY_DSN
