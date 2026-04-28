@@ -61,6 +61,7 @@ export default async function UpcomingClassesPage() {
       classes={classes}
       profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
       profileCompleted={profile?.profile_completed ?? true}
+      teacherTimezone={profile?.timezone ?? 'Europe/London'}
     />
   )
 }
