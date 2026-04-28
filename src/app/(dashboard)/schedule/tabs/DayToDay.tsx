@@ -17,8 +17,8 @@ interface Props {
 
 interface ClassEvent {
   id: string
-  starts_at: string
-  ends_at: string
+  scheduled_at: string
+  duration_minutes: number
   student_name: string
 }
 
@@ -109,21 +109,24 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   async function fetchClassesForRange(startStr: string, endStr: string) {
     setIsLoading(true)
     const { data } = await supabase
-      .from('classes')
-      .select(`id, starts_at, ends_at, students ( full_name )`)
+      .from('lessons')
+      .select(`id, scheduled_at, duration_minutes, students ( full_name )`)
       .eq('teacher_id', profile.id)
-      .gte('starts_at', startStr)
-      .lte('starts_at', endStr)
+      .gte('scheduled_at', startStr)
+      .lte('scheduled_at', endStr)
       .neq('status', 'cancelled')
 
     if (data) {
       setClasses(
-        data.map((c: any) => ({
-          id: c.id,
-          starts_at: c.starts_at,
-          ends_at: c.ends_at,
-          student_name: c.students?.full_name ?? 'Unknown student',
-        }))
+        data.map((c: any) => {
+          const student = Array.isArray(c.students) ? c.students[0] : c.students
+          return {
+            id: c.id,
+            scheduled_at: c.scheduled_at,
+            duration_minutes: c.duration_minutes,
+            student_name: student?.full_name ?? 'Unknown student',
+          }
+        })
       )
     }
     setIsLoading(false)
@@ -182,11 +185,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
     // 4. Booked classes — orange with student name (the only labelled events)
     classes.forEach(c => {
+      const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60 * 1000).toISOString()
       events.push({
         id: `class-${c.id}`,
         title: c.student_name,
-        start: c.starts_at,
-        end: c.ends_at,
+        start: c.scheduled_at,
+        end: endsAt,
         backgroundColor: '#FF8303',
         borderColor: '#FF8303',
         textColor: '#ffffff',
@@ -233,11 +237,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       'PRODID:-//LinguaLink Online//Teacher Portal//EN',
     ]
     classes.forEach(c => {
+      const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60 * 1000).toISOString()
       lines.push(
         'BEGIN:VEVENT',
         `UID:${c.id}`,
-        `DTSTART:${toIcsDate(c.starts_at)}`,
-        `DTEND:${toIcsDate(c.ends_at)}`,
+        `DTSTART:${toIcsDate(c.scheduled_at)}`,
+        `DTEND:${toIcsDate(endsAt)}`,
         `SUMMARY:${c.student_name}`,
         `DESCRIPTION:Class with ${c.student_name}`,
         'END:VEVENT',

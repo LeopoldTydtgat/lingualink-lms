@@ -261,7 +261,9 @@ export async function POST(req: NextRequest) {
       .eq('id', trainingId)
 
     if (hoursError) {
-      console.error('CRITICAL: Lesson created but hours deduction failed. Lesson ID:', newLesson.id, hoursError)
+      console.error('CRITICAL: Hours deduction failed after lesson insert. Deleting lesson:', newLesson.id, hoursError)
+      await supabase.from('lessons').delete().eq('id', newLesson.id)
+      return NextResponse.json({ error: 'Failed to complete booking. Please try again.' }, { status: 500 })
     }
 
     // ── 9. Send confirmation emails ───────────────────────────────────────────
