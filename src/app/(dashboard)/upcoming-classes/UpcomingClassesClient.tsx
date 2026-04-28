@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { format, isToday, isTomorrow } from 'date-fns'
+import { isToday, isTomorrow } from 'date-fns'
 import { teacherRescheduleLesson } from './actions'
 
 type Student = {
@@ -31,22 +31,50 @@ type Props = {
   classes: Class[]
   profile: Profile
   profileCompleted: boolean
+  teacherTimezone: string
 }
 
-function groupByDay(classes: Class[]): Record<string, Class[]> {
+function formatTime(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: timezone,
+    hour12: false,
+  }).format(new Date(isoString))
+}
+
+function formatDate(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: timezone,
+  }).format(new Date(isoString))
+}
+
+function getLocalDateKey(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: timezone,
+  }).format(new Date(isoString))
+}
+
+function groupByDay(classes: Class[], timezone: string): Record<string, Class[]> {
   return classes.reduce((groups, cls) => {
-    const day = format(new Date(cls.starts_at), 'yyyy-MM-dd')
+    const day = getLocalDateKey(cls.starts_at, timezone)
     if (!groups[day]) groups[day] = []
     groups[day].push(cls)
     return groups
   }, {} as Record<string, Class[]>)
 }
 
-function formatDayHeading(dateStr: string): string {
-  const date = new Date(dateStr)
+function formatDayHeading(isoString: string, timezone: string): string {
+  const date = new Date(isoString)
   if (isToday(date)) return 'Today'
   if (isTomorrow(date)) return 'Tomorrow'
-  return format(date, 'EEE d MMM')
+  return formatDate(isoString, timezone)
 }
 
 function Countdown({ startsAt }: { startsAt: string }) {
@@ -117,10 +145,8 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
   )
 }
 
-function ClassCard({ cls, onReschedule }: { cls: Class; onReschedule: (cls: Class) => void }) {
+function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean }) {
   const [expanded, setExpanded] = useState(false)
-  const startTime = format(new Date(cls.starts_at), 'HH:mm')
-  const endTime = format(new Date(cls.ends_at), 'HH:mm')
   const now = Date.now()
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
@@ -169,7 +195,9 @@ function ClassCard({ cls, onReschedule }: { cls: Class; onReschedule: (cls: Clas
           >
             <p className="font-semibold">{cls.student.full_name}</p>
           </a>
-          <p className="text-sm text-gray-500">{startTime} - {endTime}</p>
+          <p className="text-sm text-gray-500">
+            {mounted ? `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}` : ''}
+          </p>
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -213,9 +241,9 @@ function ClassCard({ cls, onReschedule }: { cls: Class; onReschedule: (cls: Clas
   )
 }
 
-function DayGroup({ dateStr, classes, onReschedule }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void }) {
+function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean }) {
   const [open, setOpen] = useState(true)
-  const heading = formatDayHeading(dateStr)
+  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
 
   return (
     <div className="space-y-3">
@@ -235,7 +263,7 @@ function DayGroup({ dateStr, classes, onReschedule }: { dateStr: string; classes
       {open && (
         <div className="space-y-2">
           {classes.map(cls => (
-            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} />
+            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
           ))}
         </div>
       )}
@@ -243,9 +271,15 @@ function DayGroup({ dateStr, classes, onReschedule }: { dateStr: string; classes
   )
 }
 
-export default function UpcomingClassesClient({ classes, profile, profileCompleted }: Props) {
+export default function UpcomingClassesClient({ classes, profile, profileCompleted, teacherTimezone }: Props) {
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted)
-  const grouped = groupByDay(classes)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  const grouped = groupByDay(classes, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -352,7 +386,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       ) : (
         <div className="space-y-8">
           {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} />
+            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
           ))}
         </div>
       )}
@@ -395,7 +429,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   Request reschedule
                 </h2>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
-                  Class with {rescheduleTarget.student.full_name} — {format(new Date(rescheduleTarget.starts_at), 'EEE d MMM, HH:mm')}
+                  Class with {rescheduleTarget.student.full_name} — {mounted ? `${formatDate(rescheduleTarget.starts_at, teacherTimezone)}, ${formatTime(rescheduleTarget.starts_at, teacherTimezone)}` : ''}
                 </p>
                 <p style={{ fontSize: '14px', color: '#111827', marginBottom: '8px', fontWeight: 500 }}>
                   Message to student <span style={{ color: '#ef4444' }}>*</span>
