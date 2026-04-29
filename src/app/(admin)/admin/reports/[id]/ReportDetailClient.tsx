@@ -7,14 +7,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 interface LevelData {
-  grammar?:       number;
-  expression?:    number;
-  comprehension?: number;
-  vocabulary?:    number;
-  accent?:        number;
-  spoken?:        number;
-  written?:       number;
-  [key: string]:  number | undefined;
+  grammar?:        string;
+  expression?:     string;
+  comprehension?:  string;
+  vocabulary?:     string;
+  accent?:         string;
+  overall_spoken?: string;
+  overall_written?: string;
+  [key: string]:   string | undefined;
 }
 
 interface Report {
@@ -63,21 +63,28 @@ function formatDateTime(iso: string) {
   return `${day} ${mon} ${yr} at ${hr}:${min}`;
 }
 
-const CEFR_LABELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2'];
+const CEFR_TO_NUM: Record<string, number> = {
+  A1: 1, 'A1+': 1.5,
+  A2: 2, 'A2+': 2.5,
+  B1: 3, 'B1+': 3.5,
+  B2: 4, 'B2+': 4.5,
+  C1: 5, 'C1+': 5.5,
+  C2: 6,
+}
 
 const SKILLS = [
-  { key: 'grammar',       label: 'Grammar' },
-  { key: 'expression',    label: 'Expression' },
-  { key: 'comprehension', label: 'Comprehension' },
-  { key: 'vocabulary',    label: 'Vocabulary' },
-  { key: 'accent',        label: 'Accent' },
-  { key: 'spoken',        label: 'Spoken' },
-  { key: 'written',       label: 'Written' },
+  { key: 'grammar',         label: 'Grammar' },
+  { key: 'expression',      label: 'Expression' },
+  { key: 'comprehension',   label: 'Comprehension' },
+  { key: 'vocabulary',      label: 'Vocabulary' },
+  { key: 'accent',          label: 'Accent' },
+  { key: 'overall_spoken',  label: 'Spoken' },
+  { key: 'overall_written', label: 'Written' },
 ];
 
 function RadarChart({ levelData }: { levelData: LevelData }) {
   const size = 280; const cx = size / 2; const cy = size / 2;
-  const maxRadius = 90; const n = SKILLS.length; const maxValue = 10;
+  const maxRadius = 90; const n = SKILLS.length;
 
   function angle(i: number) { return (Math.PI * 2 * i) / n - Math.PI / 2; }
   function axisPoint(i: number, fraction: number) {
@@ -88,7 +95,7 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
   const gridPolygons = [0.2, 0.4, 0.6, 0.8, 1].map((f) =>
     SKILLS.map((_, i) => { const p = axisPoint(i, f); return `${p.x},${p.y}`; }).join(' ')
   );
-  const dataPoints  = SKILLS.map((s, i) => axisPoint(i, Math.max(0.02, (levelData[s.key] ?? 0) / maxValue)));
+  const dataPoints  = SKILLS.map((s, i) => axisPoint(i, (CEFR_TO_NUM[levelData[s.key] ?? ''] ?? 0) / 6));
   const dataPolygon = dataPoints.map((p) => `${p.x},${p.y}`).join(' ');
   const labelPoints = SKILLS.map((_, i) => {
     const r = maxRadius + 20;
@@ -104,7 +111,7 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
       {SKILLS.map((s, i) => {
         const lp = labelPoints[i];
         const val = levelData[s.key];
-        const cefrLabel = val !== undefined ? CEFR_LABELS[Math.round(val)] ?? '' : '';
+        const cefrLabel = val ?? '';
         return (
           <g key={i}>
             <text x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="Inter, sans-serif" fill="#374151" fontWeight="500">{s.label}</text>
@@ -247,7 +254,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
             <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
               {SKILLS.map((s) => {
                 const val = report.level_data![s.key];
-                const cefrLabel = val !== undefined ? CEFR_LABELS[Math.round(val)] ?? '—' : '—';
+                const cefrLabel = val ?? '—';
                 return (
                   <div key={s.key} className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#FF8303' }} />

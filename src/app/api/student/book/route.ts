@@ -33,7 +33,7 @@ function bookingConfirmationStudentEmail(
       </tr>
     </table>
     <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
-      The Join Class button in your portal activates 15 minutes before the class starts.
+      The Join Class button in your portal activates 10 minutes before the class starts.
     </p>
   `
 }
