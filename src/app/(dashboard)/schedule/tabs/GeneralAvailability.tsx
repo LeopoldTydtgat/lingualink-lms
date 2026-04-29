@@ -252,14 +252,14 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
       )}
 
       <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
-              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', borderBottom: '2px solid #E5E7EB' }} />
+              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', borderBottom: '3px solid #A8533F', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB' }} />
               {DAYS.map(day => (
                 <th
                   key={day}
-                  style={{ width: '96px', padding: '8px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#374151', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', borderRight: '1px solid #E5E7EB', borderBottom: '2px solid #E5E7EB' }}
+                  style={{ padding: '12px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#5C1F0A', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', borderRight: '1px solid #E5E7EB', borderBottom: '3px solid #A8533F' }}
                 >
                   {day.slice(0, 3)}
                 </th>
@@ -268,26 +268,26 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           </thead>
           <tbody>
             {SLOTS.map(({ hour, minute }) => (
-              <tr key={`${hour}-${minute}`}>
+              <tr key={`${hour}-${minute}`} style={{ borderTop: '1px solid #E5E7EB' }}>
                 {/* Only show the label on the hour, not on the :30 row — keeps it clean */}
-                <td style={{ padding: '1px 12px 1px 0', textAlign: 'right', fontSize: '11px', color: '#9CA3AF', whiteSpace: 'nowrap' }}>
-                  {minute === 0 ? slotLabel(hour, minute) : ''}
+                <td style={{ padding: '1px 12px 1px 8px', textAlign: 'right', fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB' }}>
+                  {minute === 0 ? slotLabel(hour, minute) : <span style={{ fontSize: '9px', color: '#9CA3AF' }}>{slotLabel(hour, minute)}</span>}
                 </td>
                 {DAYS.map(day => {
                   const active = isSlotActive(localGeneral, day, hour, minute)
                   return (
-                    <td key={day} style={{ padding: '1px 3px', borderRight: '1px solid #E5E7EB' }}>
+                    <td key={day} style={{ padding: '1px 3px', borderRight: '1px solid #D1D5DB' }}>
                       <button
                         onMouseDown={() => handleSlotMouseDown(day, hour, minute)}
                         onMouseEnter={() => handleSlotMouseEnter(day, hour, minute)}
                         onDragStart={e => e.preventDefault()}
                         style={{
-                          width: '90px',
-                          height: '20px',
+                          width: '100%',
+                          height: '28px',
                           borderRadius: '4px',
-                          border: active ? '1px solid #FF8303' : '1px solid #E5E7EB',
-                          backgroundColor: active ? '#FF8303' : '#F3F4F6',
-                          color: active ? '#ffffff' : '#9CA3AF',
+                          border: active ? '1px solid #FF8303' : 'none',
+                          backgroundColor: active ? '#FFF0DC' : 'transparent',
+                          color: active ? '#CC6600' : '#9CA3AF',
                           fontSize: '10px',
                           cursor: 'pointer',
                           transition: 'background-color 0.1s ease',

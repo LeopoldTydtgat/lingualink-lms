@@ -568,7 +568,7 @@ function StepDateTime({
                     marginBottom: '6px',
                     padding: '6px 4px',
                     borderRadius: '6px',
-                    backgroundColor: isPast ? '#f9fafb' : '#f3f4f6',
+                    backgroundColor: isPast ? '#f9fafb' : '#E8F4F8',
                   }}
                 >
                   <p
