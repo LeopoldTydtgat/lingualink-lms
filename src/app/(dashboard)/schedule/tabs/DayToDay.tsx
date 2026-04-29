@@ -373,6 +373,26 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         .fc-day-today {
           background-color: #EFF6FF !important;
         }
+        .fc-col-header-cell {
+          background-color: #F6C5B8 !important;
+          border-bottom: 3px solid #A8533F !important;
+        }
+        .fc-col-header-cell-cushion {
+          color: #5C1F0A !important;
+          font-weight: 600 !important;
+          padding: 12px 4px !important;
+        }
+        .fc-timegrid-axis {
+          background-color: #F6C5B8 !important;
+          border-bottom: 3px solid #A8533F !important;
+        }
+        .fc-timegrid-slot-label {
+          font-size: 11px !important;
+          color: #4B5563 !important;
+        }
+        .fc-timegrid-slot-label-cushion {
+          padding-right: 8px !important;
+        }
       `}</style>
 
       {/* Mode buttons */}
@@ -508,7 +528,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           slotMinTime="05:00:00"
           slotMaxTime="23:00:00"
           slotDuration="00:30:00"
-          slotLabelInterval="01:00:00"
+          slotLabelInterval="00:30:00"
+          slotLabelFormat={{ hour: '2-digit', minute: '2-digit', hour12: false }}
           nowIndicator={true}
           height="700px"
           eventDisplay="block"

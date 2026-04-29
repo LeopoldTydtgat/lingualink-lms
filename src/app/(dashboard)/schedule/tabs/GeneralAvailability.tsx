@@ -251,15 +251,15 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         </p>
       )}
 
-      <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+      <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
-              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', borderBottom: '3px solid #A8533F', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB' }} />
+              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', boxShadow: 'inset 0 -3px 0 #A8533F', borderRight: '1px solid #D1D5DB' }} />
               {DAYS.map(day => (
                 <th
                   key={day}
-                  style={{ padding: '12px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#5C1F0A', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', borderRight: '1px solid #E5E7EB', borderBottom: '3px solid #A8533F' }}
+                  style={{ padding: '12px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#5C1F0A', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#F6C5B8', borderRight: '1px solid #E5E7EB', boxShadow: 'inset 0 -3px 0 #A8533F' }}
                 >
                   {day.slice(0, 3)}
                 </th>
@@ -270,7 +270,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
             {SLOTS.map(({ hour, minute }) => (
               <tr key={`${hour}-${minute}`} style={{ borderTop: '1px solid #E5E7EB' }}>
                 {/* Only show the label on the hour, not on the :30 row — keeps it clean */}
-                <td style={{ padding: '1px 12px 1px 8px', textAlign: 'right', fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB' }}>
+                <td style={{ padding: '1px 12px 1px 8px', textAlign: 'right', fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB', backgroundColor: '#F6C5B8' }}>
                   {minute === 0 ? slotLabel(hour, minute) : <span style={{ fontSize: '9px', color: '#9CA3AF' }}>{slotLabel(hour, minute)}</span>}
                 </td>
                 {DAYS.map(day => {
