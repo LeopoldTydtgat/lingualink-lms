@@ -1,5 +1,52 @@
 # LinguaLink Online - Build Journal
 
+## Session 67 - 29 April 2026 - Scheduling Fixes, UTC Storage Bug, and DayToDay UX Improvements
+
+### What was built
+
+- Fixed UTC storage bug in DayToDay - teacher availability blocks were being saved as local time instead of UTC. Added localIsoToUtcIso helper function and wired it into handleDateSelect. timezone field added to Profile interface and propagated through schedule/page.tsx and ScheduleClient.tsx
+- Fixed delete modal not appearing on unavailability blocks - root cause was a past-date guard in handleEventClick that fired on wrongly-stored blocks. Guard removed entirely; ownership check in the API route provides the necessary protection
+- Fixed null push bug in handleDateSelect - POST route uses maybeSingle() which can return null on duplicate upsert. Added null guard before calling onAvailabilityChange to prevent corrupted state array
+- Fixed General Availability scroll - replaced hardcoded pixel calculation with DOM-based offsetTop read from the actual 08:00 row minus 40px offset
+- Fixed DayToDay scroll - height="auto" was preventing FullCalendar from scrolling. Changed to height="700px" with overflowY auto on wrapper, added useEffect with 150ms delay to scroll .fc-scroller-liquid-absolute to the 08:00 position
+- Fixed "15 minutes" references - ClassReminderModal.tsx REMINDER_WINDOW_S changed from 15*60 to 10*60, booking confirmation email copy updated, stale comment in RightPanel.tsx updated
+- DayToDay UX improvements - slotMinTime 05:00, slotMaxTime 23:00, Escape key exits add/unavailability mode, instruction text updated, navigation arrows repositioned to either side of week title, today column highlight changed from yellow to #EFF6FF
+
+### Break/Fix Log
+
+Issue 1 - DayToDay blocks displaying at wrong time
+Symptom: Unavailability blocks set at 09:00 appearing at 02:00-03:00 on the calendar
+Cause: FullCalendar with timeZone="local" produces local-time ISO strings with no UTC offset. The POST handler passed these verbatim to Supabase. The student availability reader assumed timestamps were UTC. For a UTC+2 teacher every block was stored 2 hours early
+Fix: Added localIsoToUtcIso two-pass Intl correction function. Added timezone to Profile interface and fetched it in the page server component
+Lesson: When timeZone="local" is set on FullCalendar, info.startStr and info.endStr are local time strings - never treat them as UTC
+
+Issue 2 - Delete modal not appearing
+Symptom: Clicking a red unavailability block did nothing
+Cause: handleEventClick contained a past-date guard that compared info.event.startStr.slice(0,10) against today. Wrongly-stored blocks appeared to be in the past, so the guard fired and returned early before setPendingDelete could run
+Fix: Removed the three-line past-date guard. API ownership check is sufficient protection
+Lesson: Silent early returns with no error feedback make bugs very hard to diagnose
+
+Issue 3 - Adding blocks would not stick after first add
+Symptom: First block saved fine, subsequent blocks disappeared on next render
+Cause: maybeSingle() returns null when upsert ignores a duplicate. Spreading null into the availability array caused a TypeError on the next render when calendarEvents tried to access properties on null
+Fix: Added if (data) guard before calling onAvailabilityChange
+
+Issue 4 - General Availability scroll landing at 06:30
+Symptom: Page opened showing 06:30 instead of 08:00
+Cause: Hardcoded scrollTop = 8 * 2 * 22 assumed 22px row height. Actual rendered height was larger due to browser default button sizing
+Fix: Replaced with DOM-based offsetTop read from the actual tr at index 16, minus 40px
+
+Issue 5 - DayToDay scroll ignoring initialScrollTime
+Symptom: Calendar opened at midnight despite initialScrollTime="08:00:00"
+Cause: height="auto" causes FullCalendar to expand to fit all slots - no scrollable container exists so initialScrollTime has nothing to scroll
+Fix: Changed to height="700px", added overflowY auto on wrapper div, added useEffect that queries .fc-scroller-liquid-absolute after 150ms and sets scrollTop proportionally
+
+### Session result
+
+All six Priority 1 scheduling bugs from the Session 65 backlog are resolved. The UTC storage fix corrects how new availability blocks are saved going forward - the client must delete and recreate any unavailability blocks set before this session as they contain wrong timestamps. Ten bugs from the Priority 2-4 list remain and carry forward to Session 68.
+
+---
+
 ## Session 66 - 28 April 2026 - Security Audit, Sentry Setup and Critical Bug Fixes
 
 ### What was built
