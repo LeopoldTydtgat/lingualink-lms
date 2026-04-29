@@ -7,7 +7,7 @@ import interactionPlugin from '@fullcalendar/interaction'
 import { createClient } from '@/lib/supabase/client'
 import { AvailabilityRecord } from '../ScheduleClient'
 
-interface Profile { id: string; full_name: string; role: string }
+interface Profile { id: string; full_name: string; role: string; timezone: string }
 
 interface Props {
   profile: Profile
@@ -92,6 +92,30 @@ function expandGeneralSlots(
   return events
 }
 
+function localIsoToUtcIso(localIso: string, timezone: string): string {
+  const [datePart, timePart] = localIso.split('T')
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hour, minute] = timePart.split(':').map(Number)
+  const probe = new Date(Date.UTC(year, month - 1, day, hour, minute, 0))
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(probe)
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? '0')
+  const diffMs = ((hour - get('hour')) * 60 + (minute - get('minute'))) * 60 * 1000
+  const corrected = new Date(probe.getTime() + diffMs)
+  const parts2 = formatter.formatToParts(corrected)
+  const get2 = (type: string) => Number(parts2.find(p => p.type === type)?.value ?? '0')
+  if (get2('hour') !== hour || get2('minute') !== minute) {
+    const diffMs2 = ((hour - get2('hour')) * 60 + (minute - get2('minute'))) * 60 * 1000
+    return new Date(corrected.getTime() + diffMs2).toISOString()
+  }
+  return corrected.toISOString()
+}
+
 export default function DayToDay({ profile, availability, onAvailabilityChange }: Props) {
   const supabase = createClient()
   const calendarRef = useRef<FullCalendar>(null)
@@ -100,6 +124,23 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMode(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const scroller = document.querySelector('.fc-scroller-liquid-absolute') as HTMLElement
+      if (scroller) scroller.scrollTop = scroller.scrollHeight * (3 / 18)
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [])
+
   // Store as strings so useMemo gets stable primitive deps — Date objects are never ===
   const [visibleRange, setVisibleRange] = useState<{ start: string; end: string } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
@@ -238,9 +279,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   async function handleEventClick(info: any) {
     const { type, recordId } = info.event.extendedProps
     if (type !== 'specific') return
-    const eventStart = info.event.startStr.slice(0, 10)
-    const today = toLocalDateStr(new Date())
-    if (eventStart < today) return
 
     setActionError('')
     setPendingDelete(recordId)
@@ -306,14 +344,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       body: JSON.stringify({
         teacher_id: profile.id,
         type: 'specific',
-        start_at: info.startStr,
-        end_at: info.endStr,
+        start_at: localIsoToUtcIso(info.startStr, profile.timezone),
+        end_at: localIsoToUtcIso(info.endStr, profile.timezone),
         is_available: mode === 'available',
       }),
     })
     if (res.ok) {
       const data = await res.json()
-      onAvailabilityChange([...availability, data as AvailabilityRecord])
+      if (data) {
+        onAvailabilityChange([...availability, data as AvailabilityRecord])
+      }
     } else {
       const body = await res.json().catch(() => ({}))
       setActionError(body.error ?? 'Failed to save. Please try again.')
@@ -329,6 +369,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         .fc-event:hover {
           filter: brightness(0.85);
           cursor: pointer;
+        }
+        .fc-day-today {
+          background-color: #EFF6FF !important;
         }
       `}</style>
 
@@ -375,7 +418,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             ? 'Click or drag on the calendar to mark yourself available'
             : mode === 'unavailable'
             ? 'Click or drag on the calendar to mark yourself unavailable'
-            : 'Select a mode on the left, then click or drag on the calendar'}
+            : 'Select a mode, drag to add blocks. Press Esc to exit.'}
         </span>
 
         <button
@@ -434,15 +477,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         padding: '16px',
         border: '1px solid #E5E7EB',
         cursor: mode ? 'crosshair' : 'default',
+        overflowY: 'auto',
       }}>
         <FullCalendar
           ref={calendarRef}
           plugins={[timeGridPlugin, interactionPlugin]}
           initialView="timeGridWeek"
           headerToolbar={{
-            left: 'prev,next',
+            left: 'prev',
             center: 'title',
-            right: '',
+            right: 'next',
           }}
           buttonText={{ prev: '←', next: '→' }}
           timeZone="local"
@@ -461,13 +505,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           select={handleDateSelect}
           eventClick={handleEventClick}
           allDaySlot={false}
-          slotMinTime="00:00:00"
-          slotMaxTime="24:00:00"
+          slotMinTime="05:00:00"
+          slotMaxTime="23:00:00"
           slotDuration="00:30:00"
           slotLabelInterval="01:00:00"
           nowIndicator={true}
-          height="auto"
-          expandRows={true}
+          height="700px"
           eventDisplay="block"
           selectOverlap={event => event.extendedProps.type !== 'class'}
         />

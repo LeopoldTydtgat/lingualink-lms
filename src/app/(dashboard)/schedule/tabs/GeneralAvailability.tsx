@@ -62,7 +62,11 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = 8 * 2 * 22
+      const rows = scrollRef.current.querySelectorAll('tr')
+      const targetRow = rows[8 * 2] // 08:00 = slot index 16
+      if (targetRow) {
+        scrollRef.current.scrollTop = (targetRow as HTMLElement).offsetTop - 40
+      }
     }
   }, [])
 

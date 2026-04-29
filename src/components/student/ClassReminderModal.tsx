@@ -21,7 +21,7 @@ interface ClassReminderModalProps {
 
 const DISMISSED_KEY = 'lingualink_dismissed_reminders'
 const CHECK_INTERVAL_MS = 60 * 1000  // check every 60 seconds
-const REMINDER_WINDOW_S  = 15 * 60  // fire when class is within 15 minutes
+const REMINDER_WINDOW_S  = 10 * 60  // fire when class is within 10 minutes
 
 function getDismissed(): string[] {
   try {

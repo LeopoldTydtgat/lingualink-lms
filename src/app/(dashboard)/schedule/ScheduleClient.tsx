@@ -9,6 +9,7 @@ interface Profile {
   id: string
   full_name: string
   role: string
+  timezone: string
 }
 
 export interface AvailabilityRecord {
