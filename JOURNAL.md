@@ -1,5 +1,32 @@
 # LinguaLink Online - Build Journal
 
+## Session 69 - 29 April 2026 - Right Panel Wheel Forwarding (All Three Portals)
+
+### What was built
+- Added wheel event forwarding from the right panel to the middle main content area on all three portals (Teacher, Student, Admin).
+- Fix touches three files: src/components/layout/RightPanel.tsx, src/components/student/layout/StudentRightPanel.tsx, and src/app/(admin)/AdminLayoutClient.tsx.
+- Pattern is identical across all three: a useRef on the right panel root, plus an onWheel handler that forwards e.deltaY to document.querySelector('main')?.scrollBy(). The handler only forwards when the panel itself cannot scroll further in the wheel direction; if the panel still has internal scroll headroom, the wheel event is left alone for the panel to handle natively.
+- Manual testing confirmed expected behaviour across all three portals: hovering the right panel and scrolling now scrolls the middle content area, while internal scroll containers (calendars, message threads, contact lists, Tiptap editors) still scroll their own content when hovered directly.
+
+### Break/Fix Log
+
+Issue 1: Initial misdiagnosis of the problem
+- Symptom: The session began with a handover brief proposing a full layout architecture refactor - removing h-screen, fixed-positioning the sidebar and right panel, and converting the page itself into the scroll container.
+- Cause: The original handover misread the underlying UX complaint. The actual frustration was narrow: when the cursor hovered the right panel, the mousewheel did nothing because the right panel's overflow-y-auto caught the wheel event and dropped it. The user expected the middle content to scroll regardless of cursor position. This is a wheel-event capture problem, not a layout architecture problem.
+- Fix: Discarded the layout refactor plan entirely. Replaced it with a 10-line wheel-forwarding handler on each right panel.
+- Lesson: When a UX complaint is presented as architectural, restate the actual user behaviour in plain terms before drafting any fix. The proposed Session 68 refactor would have introduced significant risk to existing scheduling, messages, and calendar logic for no actual gain over the simpler fix.
+
+Issue 2: Pre-flight rollback discipline
+- Symptom: No prior session had captured a known-good rollback hash before applying changes.
+- Cause: Habit gap, not a technical issue.
+- Fix: Captured commit aeb1cb82bd4fff9eb8788e70e4da419be131aec3 as the pre-change rollback point before applying any diffs. Recorded this hash before the apply step in case the fix needed to be unwound.
+- Lesson: Every code-change session now starts by recording the current dev branch HEAD commit hash as a named rollback point. Costs nothing, protects everything.
+
+### Session result
+Right panel wheel forwarding works correctly on all three portals. Hovering the right panel and scrolling the wheel scrolls the middle content area as expected, while internal scroll regions like calendars and message threads remain unaffected and still scroll their own content. The fix is small, isolated, and fully reversible via the captured rollback hash. A separate radar chart NaN bug surfaced on the admin reports detail page during testing - this is unrelated to the wheel fix and will be addressed in the next session.
+
+---
+
 ## Session 67 - 29 April 2026 - Scheduling Fixes, UTC Storage Bug, and DayToDay UX Improvements
 
 ### What was built
