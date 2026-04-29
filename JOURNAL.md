@@ -1,29 +1,35 @@
 # LinguaLink Online - Build Journal
 
-## Session 69 - 29 April 2026 - Right Panel Wheel Forwarding (All Three Portals)
+## Session 69 - 29 April 2026 - Right Panel Wheel Forwarding and Admin Radar Chart Fix
 
 ### What was built
-- Added wheel event forwarding from the right panel to the middle main content area on all three portals (Teacher, Student, Admin).
-- Fix touches three files: src/components/layout/RightPanel.tsx, src/components/student/layout/StudentRightPanel.tsx, and src/app/(admin)/AdminLayoutClient.tsx.
-- Pattern is identical across all three: a useRef on the right panel root, plus an onWheel handler that forwards e.deltaY to document.querySelector('main')?.scrollBy(). The handler only forwards when the panel itself cannot scroll further in the wheel direction; if the panel still has internal scroll headroom, the wheel event is left alone for the panel to handle natively.
-- Manual testing confirmed expected behaviour across all three portals: hovering the right panel and scrolling now scrolls the middle content area, while internal scroll containers (calendars, message threads, contact lists, Tiptap editors) still scroll their own content when hovered directly.
+
+- Added wheel event forwarding from the right panel to the middle main content area on all three portals (Teacher, Student, Admin). Touches three files: src/components/layout/RightPanel.tsx, src/components/student/layout/StudentRightPanel.tsx, and src/app/(admin)/AdminLayoutClient.tsx. Pattern is identical across all three: a useRef on the right panel root, plus an onWheel handler that forwards e.deltaY to document.querySelector('main')?.scrollBy(). The handler only forwards when the panel itself cannot scroll further in the wheel direction; if the panel still has internal scroll headroom, the wheel event is left alone for the panel to handle natively. Manual testing across all three portals confirmed expected behaviour: hovering the right panel and scrolling now scrolls the middle content area, while internal scroll containers (calendars, message threads, contact lists, Tiptap editors) still scroll their own content when hovered directly.
+
+- Fixed two bugs in the admin radar chart at src/app/(admin)/admin/reports/[id]/ReportDetailClient.tsx. Bug 1: the LevelData interface was typed as number, but the database stores CEFR strings ("B1+", "B2", etc.). String arithmetic was producing NaN, throwing console errors on every report view. Bug 2: the SKILLS array used wrong keys 'spoken' and 'written' when the database stores them as 'overall_spoken' and 'overall_written'. Those two skills had been silently rendering at zero on the admin chart since launch, regardless of what the teacher had actually entered. Fix copied the working CEFR_TO_NUM lookup pattern from the student portal's ProgressClient.tsx exactly, replaced the broken arithmetic with a string-to-fraction conversion, and corrected the two skill keys. Removed the now-unused maxValue and CEFR_LABELS constants. Manual testing confirmed the chart now renders all seven skills correctly with no console errors.
 
 ### Break/Fix Log
 
-Issue 1: Initial misdiagnosis of the problem
-- Symptom: The session began with a handover brief proposing a full layout architecture refactor - removing h-screen, fixed-positioning the sidebar and right panel, and converting the page itself into the scroll container.
-- Cause: The original handover misread the underlying UX complaint. The actual frustration was narrow: when the cursor hovered the right panel, the mousewheel did nothing because the right panel's overflow-y-auto caught the wheel event and dropped it. The user expected the middle content to scroll regardless of cursor position. This is a wheel-event capture problem, not a layout architecture problem.
-- Fix: Discarded the layout refactor plan entirely. Replaced it with a 10-line wheel-forwarding handler on each right panel.
-- Lesson: When a UX complaint is presented as architectural, restate the actual user behaviour in plain terms before drafting any fix. The proposed Session 68 refactor would have introduced significant risk to existing scheduling, messages, and calendar logic for no actual gain over the simpler fix.
+Issue 1: Initial misdiagnosis of the right panel scroll problem
+- Symptom: The session started with a Session 68 handover brief proposing a full layout architecture refactor - removing h-screen, fixed-positioning the sidebar and right panel, and converting the page itself into the scroll container.
+- Cause: The handover misread the underlying UX complaint. The actual frustration was narrow: when the cursor hovered the right panel, the mousewheel did nothing because the panel's overflow-y-auto caught the wheel event and dropped it. The user expected the middle content to scroll regardless of cursor position. This is a wheel-event capture issue, not a layout architecture issue.
+- Fix: Discarded the layout refactor plan entirely. Replaced it with a small wheel-forwarding handler on each right panel root.
+- Lesson: When a UX complaint is presented as architectural, restate the actual user behaviour in plain terms before drafting any fix. The originally proposed refactor would have introduced significant risk to existing scheduling, messages, and calendar logic for no actual gain over the simpler fix.
 
-Issue 2: Pre-flight rollback discipline
-- Symptom: No prior session had captured a known-good rollback hash before applying changes.
-- Cause: Habit gap, not a technical issue.
-- Fix: Captured commit aeb1cb82bd4fff9eb8788e70e4da419be131aec3 as the pre-change rollback point before applying any diffs. Recorded this hash before the apply step in case the fix needed to be unwound.
-- Lesson: Every code-change session now starts by recording the current dev branch HEAD commit hash as a named rollback point. Costs nothing, protects everything.
+Issue 2: Admin radar chart silently showing zero on Spoken and Written for every report since launch
+- Symptom: Console errors of "Received NaN for the cx attribute" and "Received NaN for the cy attribute" surfaced when viewing any admin report detail page.
+- Cause: Two compounding bugs in ReportDetailClient.tsx. The chart code expected numeric level data but the database stores CEFR strings, producing NaN on every coordinate calculation. Separately, the SKILLS array used 'spoken' and 'written' as keys when the actual database keys are 'overall_spoken' and 'overall_written'. The wrong keys silently fell back to zero through the ?? 0 fallback, hiding behind the NaN error noise.
+- Fix: Read both student-portal radar chart files to find the working pattern. ProgressClient.tsx already had a CEFR_TO_NUM lookup table converting strings to numbers correctly. Copied that exact lookup into the admin file, replaced the broken arithmetic, and corrected the two skill keys.
+- Lesson: When fixing a visible bug, always check whether other bugs are hiding behind it. The NaN errors were noisy enough that they obscured the silent zero-data bug on Spoken and Written. The audit-before-fix discipline caught this; a quick null-guard patch would have left the wrong-keys bug undiscovered.
+
+Issue 3: Pre-flight rollback discipline
+- Symptom: No formal rollback hash had been captured at the start of code-change sessions previously.
+- Cause: Habit gap rather than a technical issue.
+- Fix: Captured commit aeb1cb82 as the rollback point before applying the wheel-forward fix, and commit 0835b037 as the rollback point before applying the radar chart fix. Recorded both before any apply step.
+- Lesson: Every code-change session now opens by recording the current dev branch HEAD commit hash as a named rollback point. Costs nothing, protects everything.
 
 ### Session result
-Right panel wheel forwarding works correctly on all three portals. Hovering the right panel and scrolling the wheel scrolls the middle content area as expected, while internal scroll regions like calendars and message threads remain unaffected and still scroll their own content. The fix is small, isolated, and fully reversible via the captured rollback hash. A separate radar chart NaN bug surfaced on the admin reports detail page during testing - this is unrelated to the wheel fix and will be addressed in the next session.
+Two fixes shipped in one session, both small and isolated, both fully reversible. Right panel wheel forwarding works correctly across Teacher, Student, and Admin portals: hovering the right panel and scrolling moves the middle content as expected, while internal scroll regions (calendars, message threads) still scroll their own content when interacted with directly. Admin radar chart now renders all seven skills correctly, console is clean, and the previously hidden Spoken and Written zero-data bug is resolved. Session demonstrated the value of the audit-before-fix rule twice: once by replacing an unnecessarily large layout refactor with a 10-line wheel-forwarding handler, and once by surfacing a silent secondary bug behind the NaN errors. Both rollback hashes (aeb1cb82 and 0835b037) remain available if either fix needs to be unwound.
 
 ---
 
