@@ -568,20 +568,20 @@ function StepDateTime({
                     marginBottom: '6px',
                     padding: '6px 4px',
                     borderRadius: '6px',
-                    backgroundColor: isPast ? '#f9fafb' : '#f3f4f6',
+                    backgroundColor: isPast ? '#f9fafb' : '#F6C5B8',
                   }}
                 >
                   <p
                     style={{
                       fontSize: '11px',
                       fontWeight: '600',
-                      color: isPast ? '#d1d5db' : '#374151',
+                      color: isPast ? '#d1d5db' : '#5C1F0A',
                       textTransform: 'uppercase',
                     }}
                   >
                     {formatDayLabel(day, studentTimezone).split(' ')[0]}
                   </p>
-                  <p style={{ fontSize: '13px', fontWeight: '700', color: isPast ? '#d1d5db' : '#111827' }}>
+                  <p style={{ fontSize: '13px', fontWeight: '700', color: isPast ? '#d1d5db' : '#5C1F0A' }}>
                   {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
                   </p>
                 </div>
@@ -625,7 +625,7 @@ function StepDateTime({
                           backgroundColor: isSelected
                             ? '#FF8303'
                             : canBook
-                            ? '#fff7ed'
+                            ? '#FFF0DC'
                             : '#f3f4f6',
                           color: isSelected ? '#ffffff' : canBook ? '#FF8303' : '#d1d5db',
                           fontSize: '11px',
@@ -649,7 +649,7 @@ function StepDateTime({
       {/* Legend */}
       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#fff7ed', border: '1px solid #E0DFDC' }} />
+          <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#FFF0DC', border: '1px solid #E0DFDC' }} />
           <span style={{ fontSize: '12px', color: '#6b7280' }}>Available</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

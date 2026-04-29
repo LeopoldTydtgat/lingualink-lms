@@ -58,7 +58,9 @@ export default async function DashboardLayout({
 
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+  const year = now.getUTCFullYear()
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0')
+  const monthStart = `${year}-${month}-01T00:00:00.000Z`
 
   const { data: monthLessons } = await supabase
     .from('lessons')
