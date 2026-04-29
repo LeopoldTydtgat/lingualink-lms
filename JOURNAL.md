@@ -1,5 +1,48 @@
 # LinguaLink Online - Build Journal
 
+## Session 70 - 29 April 2026 - UTC bug fix and unified calendar visual redesign
+
+### What was built
+
+- Completed the Priority 1 UTC bug audit. Cross-codebase scan of all 72 toISOString() usages identified one genuine bug in src/app/(dashboard)/layout.tsx where the billing month-start was constructed using server-local Date parts before being converted to UTC. Replaced with explicit UTC construction. The bug was latent in production because Vercel runs in UTC but would have broken on AWS migration to any non-UTC region.
+- Audited and ruled out src/app/api/student/availability/route.ts as a false positive. The toISOString().slice() pattern there is safe because the base date is pinned to UTC midnight via an explicit Z suffix and all subsequent operations use setUTCDate consistently.
+- Redesigned the General Availability grid in src/app/(dashboard)/schedule/tabs/GeneralAvailability.tsx. Table now stretches to full width. Day headers use a soft red palette (#F6C5B8 background, #5C1F0A text) drawn from the brand colour set. Inactive slots are fully transparent so active orange slots dominate the grid visually. Whole table sits inside a white card with rounded corners and a 1px grey border. Solid horizontal dividers between every 30-minute row, plus subtle smaller half-hour labels for time-grid scanning.
+- Brought the Day to Day calendar in line with the General Availability design via CSS class overrides on FullCalendar's internal classes (.fc-col-header-cell, .fc-timegrid-axis, .fc-timegrid-slot-label). Time axis received the same soft red tinting which actually framed the calendar nicely. Enabled half-hour slot labels by changing slotLabelInterval from "01:00:00" to "00:30:00", and forced 24-hour zero-padded format via slotLabelFormat to match the rest of the portal.
+- Aligned the student portal booking calendar (src/app/(student)/student/book/BookingClient.tsx) with the teacher portal palette. Day headers switched from the earlier blue tint to the soft red, header text colours updated for contrast, and available slot fills set to #FFF0DC for exact consistency with the General Availability grid.
+- Saved the full Lingualink brand colour palette to memory for future reference. White #FFFFFF, Grey #E0DFDC, Black #000000, Yellow #FFB942, Orange #FF8303 as the primary, and Red #FD5602. All permitted on portals so future design work can introduce variety without breaking the brand.
+
+### Break/Fix Log
+
+Issue 1 - UTC date construction in teacher portal layout
+Symptom: Audit flagged a toISOString() call on a locally-constructed Date object.
+Cause: new Date(year, month, 1) produces midnight in the runtime's local timezone before .toISOString() converts to UTC. On any non-UTC server, the resulting string shifts by one day depending on offset.
+Fix: Replaced with a templated UTC string built from getUTCFullYear and getUTCMonth.
+Lesson: The prohibited pattern needs to be removed at source even when the current runtime happens to be UTC. Latent bugs become invisible until the environment changes, and AWS migration is on the roadmap.
+
+Issue 2 - Sticky table headers refused to render their bottom border
+Symptom: The General Availability day headers had a borderBottom defined in their style props but the divider line was not visible in the rendered output.
+Cause: When position sticky is applied to a table cell inside a table with border-collapse collapse, browsers do not render the bottom border reliably. The border collapses away during sticky positioning calculations.
+Fix: Replaced the borderBottom with an inset box-shadow at the same position. Inset box-shadows render correctly on sticky elements regardless of border-collapse behaviour.
+Lesson: Sticky table cells and border-collapse have a known interaction issue. Reach for box-shadow or pseudo-element overlays when borders refuse to render on sticky cells.
+
+Issue 3 - FullCalendar header styling needed CSS class overrides
+Symptom: Wanted to apply the same soft red header treatment to Day to Day but FullCalendar renders its own DOM and does not accept inline style props on day headers.
+Cause: FullCalendar generates its column headers via internal classes that are not React-controlled.
+Fix: Added CSS rules inside the existing style block at the top of the component, targeting FullCalendar's class names with important flags to override the library defaults.
+Lesson: When working with calendar libraries that render their own DOM, plan for CSS class overrides up front. Use important sparingly but it is unavoidable here because FullCalendar's own styles are also specific.
+
+Issue 4 - Inconsistent time label formats between the two calendars
+Symptom: Day to Day rendered lowercase "8am" style labels while General Availability used "08:00" zero-padded labels. The two views in the same tab looked like they came from different products.
+Cause: FullCalendar defaults to a locale-abbreviated time format. No slotLabelFormat prop was set on the component.
+Fix: Added slotLabelFormat with hour 2-digit, minute 2-digit, hour12 false to force 24-hour zero-padded format.
+Lesson: FullCalendar's default formatting is locale-dependent. For consistency across views, set slotLabelFormat explicitly even when defaults look acceptable in development.
+
+### Session result
+
+The UTC audit closed cleanly with one genuine bug fixed and one false positive ruled out. A larger visual redesign ran in parallel covering all three calendar surfaces in the application: General Availability, Day to Day, and the student booking flow. All three now share a unified soft red header palette drawn from the Lingualink brand colours, with consistent slot styling, time-grid dividers, and time formats across the portal. TypeScript compiles cleanly across the project, the full Next.js build of all 78 pages succeeds, and visual checks on localhost confirm all calendar surfaces render correctly. Brand colour palette saved to memory for future design work. All changes merged to dev branch.
+
+---
+
 ## Session 69 - 29 April 2026 - Right Panel Wheel Forwarding and Admin Radar Chart Fix
 
 ### What was built
