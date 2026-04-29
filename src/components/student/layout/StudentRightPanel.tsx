@@ -2,7 +2,7 @@
 // Help & Support section removed — the ChatWidget floating bubble replaces it.
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 
 interface NextLesson {
@@ -71,6 +71,17 @@ export default function StudentRightPanel({
   const [joinHovered, setJoinHovered] = useState(false)
   const [exercisesHovered, setExercisesHovered] = useState(false)
 
+  const panelRef = useRef<HTMLElement>(null)
+
+  const handleWheel = (e: React.WheelEvent<HTMLElement>) => {
+    const panel = panelRef.current
+    if (!panel) return
+    const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight
+    const atTop = panel.scrollTop === 0
+    if ((e.deltaY > 0 && !atBottom) || (e.deltaY < 0 && !atTop)) return
+    document.querySelector('main')?.scrollBy({ top: e.deltaY })
+  }
+
   useEffect(() => {
     setNow(Date.now())
     setMounted(true)
@@ -90,6 +101,8 @@ export default function StudentRightPanel({
 
   return (
     <aside
+      ref={panelRef}
+      onWheel={handleWheel}
       style={{
         width: '240px',
         minWidth: '240px',

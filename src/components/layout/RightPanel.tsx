@@ -1,7 +1,7 @@
 // src/components/layout/RightPanel.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
@@ -81,6 +81,17 @@ export default function RightPanel({
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
 
+  const panelRef = useRef<HTMLElement>(null)
+
+  const handleWheel = (e: React.WheelEvent<HTMLElement>) => {
+    const panel = panelRef.current
+    if (!panel) return
+    const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight
+    const atTop = panel.scrollTop === 0
+    if ((e.deltaY > 0 && !atBottom) || (e.deltaY < 0 && !atTop)) return
+    document.querySelector('main')?.scrollBy({ top: e.deltaY })
+  }
+
   useEffect(() => {
     setMounted(true)
 
@@ -108,7 +119,7 @@ export default function RightPanel({
   const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded && nextLesson != null && !BLOCKED_STATUSES.includes(nextLesson.status)
 
   return (
-    <aside className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
+    <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}
