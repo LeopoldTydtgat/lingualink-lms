@@ -1,5 +1,85 @@
 # LinguaLink Online - Build Journal
 
+## Session 69 - 29 April 2026 - Right Panel Wheel Forwarding and Admin Radar Chart Fix
+
+### What was built
+
+- Added wheel event forwarding from the right panel to the middle main content area on all three portals (Teacher, Student, Admin). Touches three files: src/components/layout/RightPanel.tsx, src/components/student/layout/StudentRightPanel.tsx, and src/app/(admin)/AdminLayoutClient.tsx. Pattern is identical across all three: a useRef on the right panel root, plus an onWheel handler that forwards e.deltaY to document.querySelector('main')?.scrollBy(). The handler only forwards when the panel itself cannot scroll further in the wheel direction; if the panel still has internal scroll headroom, the wheel event is left alone for the panel to handle natively. Manual testing across all three portals confirmed expected behaviour: hovering the right panel and scrolling now scrolls the middle content area, while internal scroll containers (calendars, message threads, contact lists, Tiptap editors) still scroll their own content when hovered directly.
+
+- Fixed two bugs in the admin radar chart at src/app/(admin)/admin/reports/[id]/ReportDetailClient.tsx. Bug 1: the LevelData interface was typed as number, but the database stores CEFR strings ("B1+", "B2", etc.). String arithmetic was producing NaN, throwing console errors on every report view. Bug 2: the SKILLS array used wrong keys 'spoken' and 'written' when the database stores them as 'overall_spoken' and 'overall_written'. Those two skills had been silently rendering at zero on the admin chart since launch, regardless of what the teacher had actually entered. Fix copied the working CEFR_TO_NUM lookup pattern from the student portal's ProgressClient.tsx exactly, replaced the broken arithmetic with a string-to-fraction conversion, and corrected the two skill keys. Removed the now-unused maxValue and CEFR_LABELS constants. Manual testing confirmed the chart now renders all seven skills correctly with no console errors.
+
+### Break/Fix Log
+
+Issue 1: Initial misdiagnosis of the right panel scroll problem
+- Symptom: The session started with a Session 68 handover brief proposing a full layout architecture refactor - removing h-screen, fixed-positioning the sidebar and right panel, and converting the page itself into the scroll container.
+- Cause: The handover misread the underlying UX complaint. The actual frustration was narrow: when the cursor hovered the right panel, the mousewheel did nothing because the panel's overflow-y-auto caught the wheel event and dropped it. The user expected the middle content to scroll regardless of cursor position. This is a wheel-event capture issue, not a layout architecture issue.
+- Fix: Discarded the layout refactor plan entirely. Replaced it with a small wheel-forwarding handler on each right panel root.
+- Lesson: When a UX complaint is presented as architectural, restate the actual user behaviour in plain terms before drafting any fix. The originally proposed refactor would have introduced significant risk to existing scheduling, messages, and calendar logic for no actual gain over the simpler fix.
+
+Issue 2: Admin radar chart silently showing zero on Spoken and Written for every report since launch
+- Symptom: Console errors of "Received NaN for the cx attribute" and "Received NaN for the cy attribute" surfaced when viewing any admin report detail page.
+- Cause: Two compounding bugs in ReportDetailClient.tsx. The chart code expected numeric level data but the database stores CEFR strings, producing NaN on every coordinate calculation. Separately, the SKILLS array used 'spoken' and 'written' as keys when the actual database keys are 'overall_spoken' and 'overall_written'. The wrong keys silently fell back to zero through the ?? 0 fallback, hiding behind the NaN error noise.
+- Fix: Read both student-portal radar chart files to find the working pattern. ProgressClient.tsx already had a CEFR_TO_NUM lookup table converting strings to numbers correctly. Copied that exact lookup into the admin file, replaced the broken arithmetic, and corrected the two skill keys.
+- Lesson: When fixing a visible bug, always check whether other bugs are hiding behind it. The NaN errors were noisy enough that they obscured the silent zero-data bug on Spoken and Written. The audit-before-fix discipline caught this; a quick null-guard patch would have left the wrong-keys bug undiscovered.
+
+Issue 3: Pre-flight rollback discipline
+- Symptom: No formal rollback hash had been captured at the start of code-change sessions previously.
+- Cause: Habit gap rather than a technical issue.
+- Fix: Captured commit aeb1cb82 as the rollback point before applying the wheel-forward fix, and commit 0835b037 as the rollback point before applying the radar chart fix. Recorded both before any apply step.
+- Lesson: Every code-change session now opens by recording the current dev branch HEAD commit hash as a named rollback point. Costs nothing, protects everything.
+
+### Session result
+Two fixes shipped in one session, both small and isolated, both fully reversible. Right panel wheel forwarding works correctly across Teacher, Student, and Admin portals: hovering the right panel and scrolling moves the middle content as expected, while internal scroll regions (calendars, message threads) still scroll their own content when interacted with directly. Admin radar chart now renders all seven skills correctly, console is clean, and the previously hidden Spoken and Written zero-data bug is resolved. Session demonstrated the value of the audit-before-fix rule twice: once by replacing an unnecessarily large layout refactor with a 10-line wheel-forwarding handler, and once by surfacing a silent secondary bug behind the NaN errors. Both rollback hashes (aeb1cb82 and 0835b037) remain available if either fix needs to be unwound.
+
+---
+
+## Session 67 - 29 April 2026 - Scheduling Fixes, UTC Storage Bug, and DayToDay UX Improvements
+
+### What was built
+
+- Fixed UTC storage bug in DayToDay - teacher availability blocks were being saved as local time instead of UTC. Added localIsoToUtcIso helper function and wired it into handleDateSelect. timezone field added to Profile interface and propagated through schedule/page.tsx and ScheduleClient.tsx
+- Fixed delete modal not appearing on unavailability blocks - root cause was a past-date guard in handleEventClick that fired on wrongly-stored blocks. Guard removed entirely; ownership check in the API route provides the necessary protection
+- Fixed null push bug in handleDateSelect - POST route uses maybeSingle() which can return null on duplicate upsert. Added null guard before calling onAvailabilityChange to prevent corrupted state array
+- Fixed General Availability scroll - replaced hardcoded pixel calculation with DOM-based offsetTop read from the actual 08:00 row minus 40px offset
+- Fixed DayToDay scroll - height="auto" was preventing FullCalendar from scrolling. Changed to height="700px" with overflowY auto on wrapper, added useEffect with 150ms delay to scroll .fc-scroller-liquid-absolute to the 08:00 position
+- Fixed "15 minutes" references - ClassReminderModal.tsx REMINDER_WINDOW_S changed from 15*60 to 10*60, booking confirmation email copy updated, stale comment in RightPanel.tsx updated
+- DayToDay UX improvements - slotMinTime 05:00, slotMaxTime 23:00, Escape key exits add/unavailability mode, instruction text updated, navigation arrows repositioned to either side of week title, today column highlight changed from yellow to #EFF6FF
+
+### Break/Fix Log
+
+Issue 1 - DayToDay blocks displaying at wrong time
+Symptom: Unavailability blocks set at 09:00 appearing at 02:00-03:00 on the calendar
+Cause: FullCalendar with timeZone="local" produces local-time ISO strings with no UTC offset. The POST handler passed these verbatim to Supabase. The student availability reader assumed timestamps were UTC. For a UTC+2 teacher every block was stored 2 hours early
+Fix: Added localIsoToUtcIso two-pass Intl correction function. Added timezone to Profile interface and fetched it in the page server component
+Lesson: When timeZone="local" is set on FullCalendar, info.startStr and info.endStr are local time strings - never treat them as UTC
+
+Issue 2 - Delete modal not appearing
+Symptom: Clicking a red unavailability block did nothing
+Cause: handleEventClick contained a past-date guard that compared info.event.startStr.slice(0,10) against today. Wrongly-stored blocks appeared to be in the past, so the guard fired and returned early before setPendingDelete could run
+Fix: Removed the three-line past-date guard. API ownership check is sufficient protection
+Lesson: Silent early returns with no error feedback make bugs very hard to diagnose
+
+Issue 3 - Adding blocks would not stick after first add
+Symptom: First block saved fine, subsequent blocks disappeared on next render
+Cause: maybeSingle() returns null when upsert ignores a duplicate. Spreading null into the availability array caused a TypeError on the next render when calendarEvents tried to access properties on null
+Fix: Added if (data) guard before calling onAvailabilityChange
+
+Issue 4 - General Availability scroll landing at 06:30
+Symptom: Page opened showing 06:30 instead of 08:00
+Cause: Hardcoded scrollTop = 8 * 2 * 22 assumed 22px row height. Actual rendered height was larger due to browser default button sizing
+Fix: Replaced with DOM-based offsetTop read from the actual tr at index 16, minus 40px
+
+Issue 5 - DayToDay scroll ignoring initialScrollTime
+Symptom: Calendar opened at midnight despite initialScrollTime="08:00:00"
+Cause: height="auto" causes FullCalendar to expand to fit all slots - no scrollable container exists so initialScrollTime has nothing to scroll
+Fix: Changed to height="700px", added overflowY auto on wrapper div, added useEffect that queries .fc-scroller-liquid-absolute after 150ms and sets scrollTop proportionally
+
+### Session result
+
+All six Priority 1 scheduling bugs from the Session 65 backlog are resolved. The UTC storage fix corrects how new availability blocks are saved going forward - the client must delete and recreate any unavailability blocks set before this session as they contain wrong timestamps. Ten bugs from the Priority 2-4 list remain and carry forward to Session 68.
+
+---
+
 ## Session 66 - 28 April 2026 - Security Audit, Sentry Setup and Critical Bug Fixes
 
 ### What was built
