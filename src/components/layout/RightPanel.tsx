@@ -152,7 +152,7 @@ export default function RightPanel({
                 See Training
               </Button>
 
-              {/* Join Class — only appears 15 minutes before class */}
+              {/* Join Class — only appears 10 minutes before class */}
               {isJoinable && nextLesson.teams_join_url && (
                 <a
                   href={nextLesson.teams_join_url}

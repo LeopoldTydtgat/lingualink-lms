@@ -12,7 +12,7 @@ export default async function SchedulePage() {
   // Get the teacher's profile so we know their role and id
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, role')
+    .select('id, full_name, role, timezone')
     .eq('id', user.id)
     .single()
 
