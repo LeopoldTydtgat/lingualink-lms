@@ -1,5 +1,67 @@
 # LinguaLink Online - Build Journal
 
+## Session 72 - 30 April 2026 - Bug 7: "To be assessed" fluency level rejected by validation
+
+### What was built
+- Admin student create form: collapsed two sentinel <option> entries (`— Select —` and `To be assessed`) into a single `<option value="">To be assessed</option>` so the displayed default option sends an empty string.
+- Admin student create form: added explicit `current_fluency_level: form.current_fluency_level || null` to the POST submit body so the empty string coerces to null before reaching the server.
+- Admin student edit form: same `<option>` collapse. Submit handler already had `|| null` from a previous fix — left untouched.
+
+### Break/Fix Log
+Issue: Selecting "To be assessed" on the admin student create form returned HTTP 400.
+Cause: The dropdown sent the literal string "To be assessed" as the option value. The POST route validates the body with `CreateStudentSchema`, where `current_fluency_level: z.enum(CEFR_LEVELS).optional().nullable()` only accepts the eleven CEFR literals, null, or undefined. Zod rejected the string and the route returned 400. The edit form had the same dropdown but its PATCH route has no Zod validation, so it silently saved the literal "To be assessed" to the DB column whenever it was used (the column is unconstrained text).
+Fix: Two-part. (1) Both forms now use `<option value="">To be assessed</option>` so the visible default sends an empty string instead of the literal label. (2) The create form's submit body explicitly coerces empty string to null with `|| null`, matching the pattern the edit form already used. Net effect: selecting "To be assessed" now writes null to the DB on both forms.
+Lesson: Zod schemas on POST routes catch garbage that PATCH routes silently accept. When two forms share a component pattern but only one has server-side validation, bugs hide on the unvalidated path until someone audits the column. Pre-fix SELECT confirmed zero existing rows had the literal "To be assessed" value, so no data cleanup was needed — but only because nobody had successfully used the option. The audit-before-fix pattern paid for itself again: read paths in admin detail view, student portal, and teacher portal all already handled null correctly via existing `|| '—'` and `?? '—'` fallbacks, so the change carried zero ripple risk.
+
+### Session result
+Bug 7 closed. Post-fix rollback hash cf54f10 on dev branch (not yet merged to main). Five open bugs remain: Bug 11 (phase out is_active), Bug 6 (DB trigger ghost profile), P5 UI fixes (countdown format, reschedule modal labelling), P4 (self-assessed level "I am not sure" option). Pinned low-priority: centre booking wizard card, inactivity timeout question.
+
+---
+
+## Session 71 - 30 April 2026 - Auth Hardening, Messaging Cleanup, Cross-Portal Cleanup on Purge
+
+### What was built
+- Bug 3: Cross-portal cleanup of ghost profiles row on student purge. New delete added to the student purge route inside the existing if (authUserId) block, runs before the auth signOut and deleteUser calls. Closes the orphan-profile gap left by the database trigger that auto-creates a profiles row at student auth-user creation.
+- Bug 10: Student names now resolve correctly on the teacher and admin messages pages. Two pages were querying students.auth_user_id when the messages table actually stores students.id. Four lines changed across two files - .in('auth_user_id', ...) and the matching .find((s) => s.auth_user_id === ...) corrected to use id in both call sites. Student-side messages pages audited - no inverted bug exists.
+- Bug 9 (revised): One-time data cleanup of a single orphan message row. Discovered during the Bug 3 audit when a message row was found pointing at a student's auth UUID instead of the canonical students.id. Audit of all three message-insert sites in the codebase confirmed every current code path uses students.id correctly - the orphan was a historical anomaly, not a systemic bug. Deleted via direct SQL.
+- Bug 8: Former and on_hold accounts can no longer log in. Five files modified as one coordinated fix:
+  - Teacher login action: queries profiles.status after successful credential check, rejects former/on_hold with signOut and clears the proxy cache cookie. Now also rejects auth users with no profiles row.
+  - Student login action: same status guard added alongside the existing is_active check.
+  - Teacher PATCH route: when admin sets status to former or on_hold, calls auth.admin.signOut(id, 'global') to kill all existing sessions immediately.
+  - Student PATCH route: same pattern, using students.auth_user_id resolved from the existing pre-check select.
+  - Proxy: per-request status check with a 60-second cookie-based cache. Uses the admin client (not the user-scoped client) to avoid RLS lockout. Falls through profiles then students. Blocks former/on_hold and any orphaned auth user with no business record. Preserves Supabase auth-cookie writes onto the redirect response to avoid stale-cookie redirect loops.
+
+### Break/Fix Log
+
+Issue 1: Ghost profiles row left behind after every student purge.
+- Symptom: Every student in the database had a corresponding profiles row created at auth-user creation by a database trigger. The student purge cascade did not clean it up. Auth account and students row were deleted; the profiles row stayed as an orphan.
+- Cause: The auto-create trigger on auth.users fires for every new auth user regardless of role. The student creation flow does not need this row but inherits it. The student purge route was never updated to clean up the orphan.
+- Fix: Added one delete to the student purge route inside the if (authUserId) block - .from('profiles').delete().eq('id', authUserId) - placed after all per-table deletes and before the auth signOut.
+- Lesson: The database schema is not in the repo as SQL. FK behaviour and trigger behaviour have to be inferred from purge cascade order and journal entries. When the audit cannot read the schema directly, runtime SQL queries against real data are the next-best evidence. The audit predicted the orphan would have no FK references; runtime data showed one - which led directly to discovering Bug 10.
+
+Issue 2: Student names rendering as "Unknown" on teacher and admin messages pages.
+- Symptom: When loading historical conversations, the student contact name appeared as "Unknown" instead of the student's real name.
+- Cause: Both the teacher messages page and the admin messages page resolve student display names by querying the students table with the IDs harvested from message rows. They were querying .in('auth_user_id', studentIds) but the messages table stores students.id (the row PK), not auth_user_id. Lookup returned nothing, .find returned undefined, fallback rendered "Unknown".
+- Fix: Four lines changed across two files - .in('auth_user_id', ...) corrected to .in('id', ...), and the corresponding .find((s) => s.auth_user_id === contact.id) corrected to s.id === contact.id.
+- Lesson: Code-level audit of all message-insert sites was essential. The bug existed for weeks without anyone noticing because most users see real-time conversations rather than reloaded history. A surface-level "messages work" check would have missed it. Reading every insert site for the actual id-vs-auth_user_id pattern surfaced the bug.
+
+Issue 3: Former and on_hold accounts could log in and access the portals.
+- Symptom: A teacher or student set to status='former' (or 'on_hold') could still log in cleanly. Existing sessions of newly-archived users were never invalidated.
+- Cause: Three layered gaps. Login flows did not check status at all (teacher) or only checked is_active (student, which the archive action did not even set). Archive PATCH routes only updated the database row - no session invalidation. The proxy validated the JWT cryptographically but never consulted the database, so an archived user could keep navigating until their refresh token naturally expired.
+- Fix: Five files changed in one commit. Login flows now reject former and on_hold with signOut. Archive PATCH routes call auth.admin.signOut(id, 'global') after the database update. Proxy adds a per-request status check with a 60-second cookie cache to protect against any path that bypasses the login and archive guards. The proxy uses the admin client to avoid RLS lockout and preserves Supabase auth-cookie writes onto the blocked-redirect response.
+- Lesson: A clean Claude Code "build passes" report and a clean diff are not proof of correctness. Reading the actual file contents top to bottom caught three concrete bugs in the first attempt - RLS lockout from using the user-scoped client, stale cache cookies leaking across logins, and lost auth-cookie state on the blocked redirect. A second pass caught two more - .single() throwing on no-row, and the teacher login silently logging in users with no profiles row. None would have been caught by the build. All would have shipped if the rule "always read the actual code, never trust the summary" had not been applied.
+
+Issue 4: Inconsistency between is_active and status as the source of truth for active accounts.
+- Symptom: Teacher archive sets both { status: 'former', is_active: false }. Student archive sets only { status: 'former' } and ignores is_active. The student login's is_active check therefore did nothing for former students.
+- Cause: Two flags doing similar work, set inconsistently across portals. Drift over time.
+- Fix: Bug 8 establishes status as the canonical source of truth at every layer (login flows, archive routes, proxy). is_active left in place for now alongside status to keep the security fix scoped. Cleanup of is_active deferred to its own session as Bug 11.
+- Lesson: When two flags express overlapping state, one must be the source of truth and the other must either be removed or kept in lockstep automatically. Manual lockstep across multiple code paths drifts.
+
+### Session result
+Three real bugs shipped, one historical anomaly cleaned up, one new bug logged for a dedicated future session. All commits separately rollback-able. The session was driven by a strict working rule: read the actual code, never trust summaries. That rule paid for itself five times over - five distinct correctness issues caught in code that had already been reported as "build clean, diff matches". The portal's auth surface is now genuinely hardened, the messaging UI now shows real names instead of "Unknown", and the database is one orphan row lighter.
+
+---
+
 ## Session 70 - 29 April 2026 - UTC bug fix and unified calendar visual redesign
 
 ### What was built

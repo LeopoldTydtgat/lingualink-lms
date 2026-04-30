@@ -442,8 +442,7 @@ export default function EditStudentClient({
             <Field label="Current Fluency Level (Admin Assessed)">
               <select className={selectClass} value={form.current_fluency_level}
                 onChange={(e) => set('current_fluency_level', e.target.value)}>
-                <option value="">— Select —</option>
-                <option value="To be assessed">To be assessed</option>
+                <option value="">To be assessed</option>
                 {FLUENCY_LEVELS.map((l) => (
                   <option key={l} value={l}>{l}</option>
                 ))}

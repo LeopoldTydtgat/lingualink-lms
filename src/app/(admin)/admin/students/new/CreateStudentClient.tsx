@@ -183,6 +183,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           // Blank strings become null for optional FK fields
           company_id: form.company_id || null,
           academic_advisor_id: form.academic_advisor_id || null,
+          current_fluency_level: form.current_fluency_level || null,
         }),
       })
 
@@ -449,8 +450,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           <Field label="Current Fluency Level (Admin Assessed)">
             <select className={selectClass} value={form.current_fluency_level}
               onChange={(e) => set('current_fluency_level', e.target.value)}>
-              <option value="">— Select —</option>
-              <option value="To be assessed">To be assessed</option>
+              <option value="">To be assessed</option>
               {FLUENCY_LEVELS.map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
