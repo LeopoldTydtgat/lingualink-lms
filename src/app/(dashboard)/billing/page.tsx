@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import BillingClient from './BillingClient'
 
@@ -7,7 +8,9 @@ export default async function BillingPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const admin = createAdminClient()
+
+  const { data: profile } = await admin
     .from('profiles')
     .select('id, full_name, role')
     .eq('id', user.id)
@@ -17,10 +20,10 @@ export default async function BillingPage() {
     <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
   )
 
-  // Fetch billing info server-side to avoid client 403
-  const { data: billingInfo } = await supabase
+  // Fetch billing info server-side via admin client — hourly_rate has a column-level REVOKE for anon/authenticated roles
+  const { data: billingInfo } = await admin
     .from('profiles')
-    .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate, currency')
+    .select('preferred_payment_type, paypal_email, iban, bic, tax_number, street_address, area_code, city, hourly_rate, currency, timezone')
     .eq('id', user.id)
     .single()
 

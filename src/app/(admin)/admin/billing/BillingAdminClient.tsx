@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { CheckCircle } from 'lucide-react'
+import { getBillability } from '@/lib/billing/billability'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -76,40 +77,10 @@ function formatDateTime(dateStr: string): string {
   return `${day}/${month}/${year} ${h}:${m}`
 }
 
-function lessonAmount(durationMinutes: number, hourlyRate: number): number {
-  return Math.round((durationMinutes / 60) * hourlyRate * 100) / 100
-}
-
-// Core billability logic — single source of truth, mirrors the export route
-function getBillability(
-  status: string,
-  scheduledAt: string,
-  cancelledAt: string | null,
-  cancellationPolicy: string | null
-): { billableToTeacher: boolean; billable48hr: boolean; label: string; labelColor: string } {
-  if (status === 'completed') {
-    return { billableToTeacher: true, billable48hr: false, label: 'Billable', labelColor: '#16a34a' }
-  }
-  if (status === 'student_no_show') {
-    return { billableToTeacher: true, billable48hr: false, label: 'Billable (no-show)', labelColor: '#16a34a' }
-  }
-  if (status === 'teacher_no_show') {
-    return { billableToTeacher: false, billable48hr: false, label: 'Not billable', labelColor: '#6b7280' }
-  }
-  if (status === 'cancelled' && cancelledAt) {
-    const classTime = new Date(scheduledAt).getTime()
-    const cancelTime = new Date(cancelledAt).getTime()
-    const hoursNotice = (classTime - cancelTime) / (1000 * 60 * 60)
-
-    if (hoursNotice < 24) {
-      return { billableToTeacher: true, billable48hr: false, label: 'Billable (<24hr)', labelColor: '#16a34a' }
-    }
-    if (hoursNotice >= 24 && hoursNotice < 48 && cancellationPolicy === '48hr') {
-      return { billableToTeacher: false, billable48hr: true, label: '48hr policy', labelColor: '#FF8303' }
-    }
-    return { billableToTeacher: false, billable48hr: false, label: 'Not billable (>24hr)', labelColor: '#6b7280' }
-  }
-  return { billableToTeacher: false, billable48hr: false, label: 'Not billable', labelColor: '#6b7280' }
+function currencySymbol(code: string | null | undefined): string {
+  if (code === 'USD') return '$'
+  if (code === 'GBP') return '£'
+  return '€'
 }
 
 function getInvoiceStatusColor(status: string): string {
@@ -450,8 +421,15 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
   // ── Student billing totals ─────────────────────────────────────────────────
   const sbBillableTotal = sbLessons.reduce((sum, l) => {
-    const { billableToTeacher } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
-    return billableToTeacher ? sum + lessonAmount(l.duration_minutes, l.hourlyRate) : sum
+    const bill = getBillability({
+      status: l.status,
+      scheduledAt: l.scheduled_at,
+      cancelledAt: l.cancelled_at,
+      cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+      hourlyRate: l.hourlyRate,
+      durationMinutes: l.duration_minutes,
+    })
+    return bill.billableToTeacher ? sum + bill.amount : sum
   }, 0)
 
   // ── Company billing: group by company then student ─────────────────────────
@@ -597,8 +575,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                   const lessonKey = `${inv.teacher_id}_${inv.billing_month}`
                   const lessonData = invoiceLessons[lessonKey] || []
                   const isLoadingThis = loadingLessons === lessonKey
-                  const teacherCur = lessonData[0]?.teacherCurrency
-                  const currSym = teacherCur === 'USD' ? '$' : teacherCur === 'GBP' ? '£' : '€'
+                  const currSym = currencySymbol(lessonData[0]?.teacherCurrency)
 
                   return (
                     <div key={inv.id}>
@@ -703,18 +680,22 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                                 <span className="text-right">Amount</span>
                               </div>
                               {lessonData.map(l => {
-                                const { billableToTeacher, label, labelColor } = getBillability(
-                                  l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy
-                                )
-                                const amount = billableToTeacher ? lessonAmount(l.duration_minutes, l.hourlyRate) : 0
+                                const bill = getBillability({
+                                  status: l.status,
+                                  scheduledAt: l.scheduled_at,
+                                  cancelledAt: l.cancelled_at,
+                                  cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                                  hourlyRate: l.hourlyRate,
+                                  durationMinutes: l.duration_minutes,
+                                })
                                 return (
                                   <div key={l.id} className="grid grid-cols-6 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
                                     <span className="col-span-2 text-gray-900 truncate">{l.studentName}</span>
                                     <span className="text-gray-500">{formatDateTime(l.scheduled_at)}</span>
                                     <span className="text-gray-500">{l.duration_minutes} min</span>
-                                    <span className="text-xs font-medium" style={{ color: labelColor }}>{label}</span>
+                                    <span className="text-xs font-medium" style={{ color: bill.labelColor }}>{bill.label}</span>
                                     <span className="text-right text-gray-700">
-                                      {billableToTeacher ? `${l.teacherCurrency === 'USD' ? '$' : l.teacherCurrency === 'GBP' ? '£' : '€'}${amount.toFixed(2)}` : '—'}
+                                      {bill.billableToTeacher ? `${currencySymbol(l.teacherCurrency)}${bill.amount.toFixed(2)}` : '—'}
                                     </span>
                                   </div>
                                 )
@@ -722,8 +703,15 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                               <div className="flex justify-end mt-3 pt-2 border-t border-gray-200">
                                 <span className="text-sm font-semibold text-gray-900">
                                   Total: {currSym}{lessonData.reduce((sum, l) => {
-                                    const { billableToTeacher } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
-                                    return billableToTeacher ? sum + lessonAmount(l.duration_minutes, l.hourlyRate) : sum
+                                    const bill = getBillability({
+                                      status: l.status,
+                                      scheduledAt: l.scheduled_at,
+                                      cancelledAt: l.cancelled_at,
+                                      cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                                      hourlyRate: l.hourlyRate,
+                                      durationMinutes: l.duration_minutes,
+                                    })
+                                    return bill.billableToTeacher ? sum + bill.amount : sum
                                   }, 0).toFixed(2)}
                                 </span>
                               </div>
@@ -828,9 +816,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 </div>
                 <div className="divide-y divide-gray-50">
                   {sbLessons.map(l => {
-                    const { label, labelColor } = getBillability(
-                      l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy
-                    )
+                    const bill = getBillability({
+                      status: l.status,
+                      scheduledAt: l.scheduled_at,
+                      cancelledAt: l.cancelled_at,
+                      cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                      hourlyRate: l.hourlyRate,
+                      durationMinutes: l.duration_minutes,
+                    })
                     return (
                       <div key={l.id} className="grid grid-cols-6 gap-3 px-5 py-3 text-sm">
                         <div className="col-span-2">
@@ -840,8 +833,8 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                         <span className="text-gray-600 self-center">{formatDateTime(l.scheduled_at)}</span>
                         <span className="text-gray-600 self-center">{l.duration_minutes} min</span>
                         <span className="text-gray-600 self-center">{getLessonStatusLabel(l.status)}</span>
-                        <span className="text-right self-center text-xs font-medium" style={{ color: labelColor }}>
-                          {label}
+                        <span className="text-right self-center text-xs font-medium" style={{ color: bill.labelColor }}>
+                          {bill.label}
                         </span>
                       </div>
                     )
@@ -924,13 +917,27 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
             <div className="space-y-5">
               {Object.entries(cbByCompany).map(([companyId, { companyName, lessons }]) => {
                 const flags48hr = lessons.filter(l => {
-                  const { billable48hr } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
-                  return billable48hr
+                  const bill = getBillability({
+                    status: l.status,
+                    scheduledAt: l.scheduled_at,
+                    cancelledAt: l.cancelled_at,
+                    cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                    hourlyRate: l.hourlyRate,
+                    durationMinutes: l.duration_minutes,
+                  })
+                  return bill.billable48hr
                 })
 
                 const billableToTeacherLessons = lessons.filter(l => {
-                  const { billableToTeacher } = getBillability(l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy)
-                  return billableToTeacher
+                  const bill = getBillability({
+                    status: l.status,
+                    scheduledAt: l.scheduled_at,
+                    cancelledAt: l.cancelled_at,
+                    cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                    hourlyRate: l.hourlyRate,
+                    durationMinutes: l.duration_minutes,
+                  })
+                  return bill.billableToTeacher
                 })
 
                 const totalHours = billableToTeacherLessons.reduce((sum, l) => sum + l.duration_minutes / 60, 0)
@@ -977,9 +984,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                         <span className="text-right">Billing Flag</span>
                       </div>
                       {lessons.map(l => {
-                        const { label, labelColor } = getBillability(
-                          l.status, l.scheduled_at, l.cancelled_at, l.cancellationPolicy
-                        )
+                        const bill = getBillability({
+                          status: l.status,
+                          scheduledAt: l.scheduled_at,
+                          cancelledAt: l.cancelled_at,
+                          cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                          hourlyRate: l.hourlyRate,
+                          durationMinutes: l.duration_minutes,
+                        })
                         return (
                           <div key={l.id} className="grid grid-cols-6 gap-3 px-5 py-3 text-sm">
                             <div className="col-span-2">
@@ -989,8 +1001,8 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                             <span className="text-gray-600 self-center">{formatDateTime(l.scheduled_at)}</span>
                             <span className="text-gray-600 self-center">{l.duration_minutes} min</span>
                             <span className="text-gray-600 self-center">{getLessonStatusLabel(l.status)}</span>
-                            <span className="text-right self-center text-xs font-medium" style={{ color: labelColor }}>
-                              {label}
+                            <span className="text-right self-center text-xs font-medium" style={{ color: bill.labelColor }}>
+                              {bill.label}
                             </span>
                           </div>
                         )
