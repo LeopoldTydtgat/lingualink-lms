@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { getBillability } from '@/lib/billing/billability'
+import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
@@ -33,43 +35,6 @@ function toCSV(headers: string[], rows: (string | number | boolean | null | unde
     lines.push(row.map(escapeCSV).join(','))
   }
   return lines.join('\n')
-}
-
-// A lesson is billable to the teacher when:
-//   - status = 'completed'
-//   - status = 'student_no_show'
-//   - status = 'cancelled' AND cancelled_at is within 24hr of scheduled_at
-// A lesson is a 48hr B2B flag when:
-//   - status = 'cancelled'
-//   - cancelled_at is between 24hr and 48hr before scheduled_at
-//   - student.cancellation_policy = '48hr'
-function billabilityFlags(
-  status: string,
-  scheduledAt: string,
-  cancelledAt: string | null,
-  cancellationPolicy: string | null
-): { billableToTeacher: boolean; billable48hr: boolean } {
-  if (status === 'completed' || status === 'student_no_show') {
-    return { billableToTeacher: true, billable48hr: false }
-  }
-
-  if (status === 'cancelled' && cancelledAt) {
-    const classTime = new Date(scheduledAt).getTime()
-    const cancelTime = new Date(cancelledAt).getTime()
-    const hoursNotice = (classTime - cancelTime) / (1000 * 60 * 60)
-
-    if (hoursNotice < 24) return { billableToTeacher: true, billable48hr: false }
-
-    if (hoursNotice >= 24 && hoursNotice < 48 && cancellationPolicy === '48hr') {
-      return { billableToTeacher: false, billable48hr: true }
-    }
-  }
-
-  return { billableToTeacher: false, billable48hr: false }
-}
-
-function lessonAmount(durationMinutes: number, hourlyRate: number): number {
-  return Math.round((durationMinutes / 60) * hourlyRate * 100) / 100
 }
 
 // ── Route ──────────────────────────────────────────────────────────────────────────────
@@ -108,7 +73,7 @@ export async function GET(req: NextRequest) {
   if (type === 'teacher_invoices') {
     let query = supabase
       .from('invoices')
-      .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email)')
+      .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency)')
       .order('billing_month', { ascending: false })
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
@@ -116,7 +81,7 @@ export async function GET(req: NextRequest) {
 
     const { data: invoices } = await query
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount (€)', 'Status', 'Uploaded At', 'Paid At']
+    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', 'Uploaded At', 'Paid At']
     const rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return [
@@ -125,6 +90,7 @@ export async function GET(req: NextRequest) {
         teacher?.email,
         formatMonthCSV(inv.billing_month),
         inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00',
+        (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
         inv.status,
         inv.uploaded_at ? formatDateTimeCSV(inv.uploaded_at) : '',
         inv.paid_at ? formatDateTimeCSV(inv.paid_at) : '',
@@ -139,7 +105,7 @@ export async function GET(req: NextRequest) {
   else if (type === 'teacher_earnings') {
     const { data: teachers } = await supabase
       .from('profiles')
-      .select('id, full_name, email, hourly_rate')
+      .select('id, full_name, email, hourly_rate, timezone, currency')
       .in('role', ['teacher', 'admin'])
       .order('full_name')
 
@@ -154,7 +120,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    // Group lessons by teacher × month
+    // Group lessons by teacher × month (in the teacher's local timezone)
     const earningsMap: Record<string, {
       teacherName: string
       teacherEmail: string
@@ -163,6 +129,7 @@ export async function GET(req: NextRequest) {
       noShows: number
       totalHours: number
       hourlyRate: number
+      currency: string
       totalOwed: number
     }> = {}
 
@@ -170,34 +137,41 @@ export async function GET(req: NextRequest) {
       const teacher = (teachers || []).find(t => t.id === lesson.teacher_id)
       if (!teacher) continue
 
-      const { billableToTeacher } = billabilityFlags(lesson.status, lesson.scheduled_at, lesson.cancelled_at, null)
-      if (!billableToTeacher) continue
+      const bill = getBillability({
+        status: lesson.status,
+        scheduledAt: lesson.scheduled_at,
+        cancelledAt: lesson.cancelled_at,
+        cancellationPolicy: null,
+        hourlyRate: teacher.hourly_rate || 0,
+        durationMinutes: lesson.duration_minutes,
+      })
+      if (!bill.billableToTeacher) continue
 
-      const d = new Date(lesson.scheduled_at)
-      const monthKey = `${teacher.id}_${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-      const monthLabel = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+      const monthKey = getMonthKeyInTz(new Date(lesson.scheduled_at), teacher.timezone || 'UTC')
+      const mapKey = `${teacher.id}_${monthKey}`
 
-      if (!earningsMap[monthKey]) {
-        earningsMap[monthKey] = {
+      if (!earningsMap[mapKey]) {
+        earningsMap[mapKey] = {
           teacherName: teacher.full_name,
           teacherEmail: teacher.email,
-          month: monthLabel,
+          month: monthKey,
           completed: 0,
           noShows: 0,
           totalHours: 0,
           hourlyRate: teacher.hourly_rate || 0,
+          currency: teacher.currency || 'EUR',
           totalOwed: 0,
         }
       }
 
-      const entry = earningsMap[monthKey]
+      const entry = earningsMap[mapKey]
       if (lesson.status === 'completed') entry.completed++
       if (lesson.status === 'student_no_show') entry.noShows++
       entry.totalHours += lesson.duration_minutes / 60
-      entry.totalOwed += lessonAmount(lesson.duration_minutes, teacher.hourly_rate || 0)
+      entry.totalOwed += bill.amount
     }
 
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed (€)']
+    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed', 'Currency']
     const rows = Object.values(earningsMap).map(e => [
       e.teacherName,
       e.teacherEmail,
@@ -207,6 +181,7 @@ export async function GET(req: NextRequest) {
       e.totalHours.toFixed(2),
       e.hourlyRate.toFixed(2),
       e.totalOwed.toFixed(2),
+      e.currency,
     ])
 
     csv = toCSV(headers, rows)
@@ -270,7 +245,7 @@ export async function GET(req: NextRequest) {
 
     let lessonsQuery = supabase
       .from('lessons')
-      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate)')
+      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
 
     if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
@@ -278,7 +253,7 @@ export async function GET(req: NextRequest) {
 
     const { data: lessons } = await lessonsQuery
 
-    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount (€)']
+    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
     const rows: (string | number | boolean | null)[][] = []
 
     for (const company of (companies || [])) {
@@ -288,17 +263,19 @@ export async function GET(req: NextRequest) {
         const sLessons = (lessons || []).filter(l => l.student_id === student.id)
 
         for (const lesson of sLessons) {
-          const { billableToTeacher, billable48hr } = billabilityFlags(
-            lesson.status,
-            lesson.scheduled_at,
-            lesson.cancelled_at,
-            student.cancellation_policy
-          )
+          const teacher = Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
+
+          const bill = getBillability({
+            status: lesson.status,
+            scheduledAt: lesson.scheduled_at,
+            cancelledAt: lesson.cancelled_at,
+            cancellationPolicy: student.cancellation_policy as '24hr' | '48hr' | null,
+            hourlyRate: teacher?.hourly_rate ?? 0,
+            durationMinutes: lesson.duration_minutes,
+          })
 
           // Skip lessons that are neither billable in any way
-          if (!billableToTeacher && !billable48hr) continue
-
-          const teacher = Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
+          if (!bill.billableToTeacher && !bill.billable48hr) continue
 
           rows.push([
             company.name,
@@ -307,9 +284,10 @@ export async function GET(req: NextRequest) {
             formatDateTimeCSV(lesson.scheduled_at),
             lesson.duration_minutes,
             lesson.status,
-            billableToTeacher ? 'Yes' : 'No',
-            billable48hr ? 'Yes' : 'No',
-            lessonAmount(lesson.duration_minutes, teacher?.hourly_rate ?? 0),
+            bill.billableToTeacher ? 'Yes' : 'No',
+            bill.billable48hr ? 'Yes' : 'No',
+            bill.amount,
+            teacher?.currency || 'EUR',
           ])
         }
       }
