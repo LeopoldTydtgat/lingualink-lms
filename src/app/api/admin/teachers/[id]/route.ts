@@ -165,6 +165,14 @@ export async function PATCH(
       }
     }
 
+    if (body.status === 'former' || body.status === 'on_hold') {
+      try {
+        await adminClient.auth.admin.signOut(id, 'global')
+      } catch (signOutError) {
+        console.error('[archive teacher] signOut failed:', signOutError)
+      }
+    }
+
     revalidatePath('/account')
     revalidatePath('/upcoming-classes')
     revalidatePath('/dashboard')
