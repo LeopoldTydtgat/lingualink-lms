@@ -80,7 +80,7 @@ export async function PATCH(
 
     const { data: current, error: fetchError } = await adminClient
       .from('students')
-      .select('id')
+      .select('id, auth_user_id')
       .eq('id', id)
       .single()
 
@@ -149,6 +149,14 @@ export async function PATCH(
           console.error('training_teachers insert error:', insertError)
           return NextResponse.json({ error: 'Failed to assign teachers.' }, { status: 500 })
         }
+      }
+    }
+
+    if ((body.status === 'former' || body.status === 'on_hold') && current.auth_user_id) {
+      try {
+        await adminClient.auth.admin.signOut(current.auth_user_id, 'global')
+      } catch (e) {
+        console.error('[archive student] signOut failed:', e)
       }
     }
 
@@ -280,6 +288,8 @@ export async function DELETE(
     // 3m. Delete Supabase auth user
     const authUserId = student.auth_user_id as string | null
     if (authUserId) {
+      // Cross-portal cleanup: ghost profiles row created by auth-trigger at student creation
+      await adminClient.from('profiles').delete().eq('id', authUserId)
       // Invalidate all active sessions for this user before deletion.
       // signOut with global scope kills every refresh token across every device.
       // Wrapped in try/catch and non-fatal — if signOut fails for any reason,
