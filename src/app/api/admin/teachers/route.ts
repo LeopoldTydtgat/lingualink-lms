@@ -109,6 +109,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // ── Cross-role email guard: reject if a student already uses this email ──
+    const guardClient = createAdminClient()
+    const { data: existingStudent } = await guardClient
+      .from('students')
+      .select('id')
+      .eq('email', data.email)
+      .maybeSingle()
+    if (existingStudent) {
+      return NextResponse.json(
+        { error: 'This email is already in use by a student account. Each email can only belong to one role.' },
+        { status: 409 }
+      )
+    }
+
     // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createAdminClient()
 

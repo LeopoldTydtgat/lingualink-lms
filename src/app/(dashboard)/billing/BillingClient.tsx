@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getBillability } from '@/lib/billing/billability'
+import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 
 interface Profile {
   id: string
@@ -26,6 +28,7 @@ interface Lesson {
   scheduled_at: string
   duration_minutes: number
   status: string
+  cancelled_at: string | null
   students: { full_name: string } | { full_name: string }[] | null
 }
 
@@ -40,6 +43,7 @@ interface BillingInfoDisplay {
   city: string | null
   hourly_rate: number | null
   currency: string | null
+  timezone: string | null
 }
 
 // "2026-04-01" → "April 2026"
@@ -65,6 +69,7 @@ function getStatusLabel(status: string): string {
     case 'student_no_show': return 'Student absent'
     case 'teacher_no_show': return 'Teacher absent'
     case 'cancelled': return 'Cancelled'
+    case 'cancelled_by_student': return 'Cancelled by student'
     default: return status
   }
 }
@@ -74,6 +79,8 @@ function getLessonStatusColor(status: string): string {
     case 'completed': return '#16a34a'
     case 'student_no_show': return '#FF8303'
     case 'teacher_no_show': return '#FD5602'
+    case 'cancelled':
+    case 'cancelled_by_student': return '#6b7280'
     default: return '#6b7280'
   }
 }
@@ -87,19 +94,17 @@ function getInvoiceStatusColor(status: string): string {
   }
 }
 
+function currencySymbol(code: string | null | undefined): string {
+  if (code === 'USD') return '$'
+  if (code === 'GBP') return '£'
+  return '€'
+}
+
 // Supabase joins return object or array depending on relationship — flatten safely
 function getStudentName(lesson: Lesson): string {
   if (!lesson.students) return 'Unknown'
   if (Array.isArray(lesson.students)) return lesson.students[0]?.full_name || 'Unknown'
   return (lesson.students as { full_name: string }).full_name || 'Unknown'
-}
-
-// Calculate the billable amount for a set of lessons at a given hourly rate
-function calculateAmount(lessons: Lesson[], hourlyRate: number): number {
-  const total = lessons.reduce((sum, lesson) => {
-    return sum + (lesson.duration_minutes / 60) * hourlyRate
-  }, 0)
-  return Math.round(total * 100) / 100
 }
 
 export default function BillingClient({
@@ -113,7 +118,7 @@ export default function BillingClient({
   const isAdmin = profile.role === 'admin'
 
   const now = new Date()
-  const currentMonthDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const currentMonthDate = getMonthKeyInTz(now, initialBillingInfo?.timezone || 'UTC')
   const isUploadWindow = now.getDate() >= 1 && now.getDate() <= 10
 
   const [activeView, setActiveView] = useState<'billing' | 'billingInfo' | 'admin'>('billing')
@@ -129,7 +134,7 @@ export default function BillingClient({
 
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
-  const currencySymbol = billingInfo?.currency === 'USD' ? '$' : billingInfo?.currency === 'GBP' ? '£' : '€'
+  const sym = currencySymbol(billingInfo?.currency)
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
@@ -170,18 +175,18 @@ export default function BillingClient({
       .order('billing_month', { ascending: false })
 
     const hourlyRate = billingInfo?.hourly_rate ?? 0
+    const tz = billingInfo?.timezone || 'UTC'
 
     const { data: allLessons } = await supabase
       .from('lessons')
-      .select('id, scheduled_at, duration_minutes, status, students(full_name)')
+      .select('id, scheduled_at, duration_minutes, status, cancelled_at, students(full_name)')
       .eq('teacher_id', profile.id)
-      .in('status', ['completed', 'student_no_show'])
+      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student'])
       .order('scheduled_at', { ascending: true })
 
     const grouped: Record<string, Lesson[]> = {}
     for (const lesson of (allLessons as Lesson[]) || []) {
-      const d = new Date(lesson.scheduled_at)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+      const key = getMonthKeyInTz(new Date(lesson.scheduled_at), tz)
       if (!grouped[key]) grouped[key] = []
       grouped[key].push(lesson)
     }
@@ -190,8 +195,24 @@ export default function BillingClient({
     if (hourlyRate > 0 && invoicesData) {
       const updates = invoicesData
         .map(invoice => {
+          // Never rewrite the amount on a paid invoice
+          if (invoice.status === 'paid') return null
           const lessons = grouped[invoice.billing_month] || []
-          const calculated = calculateAmount(lessons, hourlyRate)
+          const sumRaw = lessons.reduce((sum, lesson) => {
+            const bill = getBillability({
+              status: lesson.status,
+              scheduledAt: lesson.scheduled_at,
+              cancelledAt: lesson.cancelled_at,
+              // cancellation_policy has a column-level REVOKE and cannot be read
+              // by the browser client. Teachers are never paid under the 48hr branch
+              // (billableToTeacher is false there), so null gives correct amounts.
+              cancellationPolicy: null,
+              hourlyRate,
+              durationMinutes: lesson.duration_minutes,
+            })
+            return bill.billableToTeacher ? sum + bill.amount : sum
+          }, 0)
+          const calculated = Math.round(sumRaw * 100) / 100
           if (invoice.amount_eur === calculated) return null
           return supabase
             .from('invoices')
@@ -432,8 +453,8 @@ export default function BillingClient({
                     <div className="flex items-center gap-3">
                       <span className="text-base font-medium text-gray-700">
                         {invoice.amount_eur != null
-                          ? `${currencySymbol}${Number(invoice.amount_eur).toFixed(2)}`
-                          : `${currencySymbol}0.00`}
+                          ? `${sym}${Number(invoice.amount_eur).toFixed(2)}`
+                          : `${sym}0.00`}
                       </span>
                       <span
                         className="text-xs font-medium px-2.5 py-1 rounded-full text-white"
@@ -455,27 +476,63 @@ export default function BillingClient({
                   <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
                     {lessons.length === 0 ? (
                       <p className="text-sm text-gray-400">No billable classes for this month.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {lessons.map(lesson => (
-                          <div key={lesson.id} className="flex items-center justify-between text-sm py-1">
+                    ) : (() => {
+                      const rate = billingInfo?.hourly_rate ?? 0
+                      const rows = lessons.map(lesson => ({
+                        lesson,
+                        bill: getBillability({
+                          status: lesson.status,
+                          scheduledAt: lesson.scheduled_at,
+                          cancelledAt: lesson.cancelled_at,
+                          cancellationPolicy: null,
+                          hourlyRate: rate,
+                          durationMinutes: lesson.duration_minutes,
+                        }),
+                      }))
+                      const total = rows.reduce((s, { bill }) => bill.billableToTeacher ? s + bill.amount : s, 0)
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between text-xs text-gray-400 font-medium pb-1 mb-1 border-b border-gray-200">
                             <div className="flex items-center gap-6">
-                              <span className="font-medium text-gray-900 w-40 truncate">
-                                {getStudentName(lesson)}
-                              </span>
-                              <span className="text-gray-500">{formatDateTime(lesson.scheduled_at)}</span>
-                              <span className="text-gray-500">{lesson.duration_minutes} min</span>
+                              <span className="w-40">Student</span>
+                              <span>Date &amp; Time</span>
+                              <span className="w-16">Duration</span>
                             </div>
-                            <span
-                              className="text-xs px-2 py-0.5 rounded-full text-white"
-                              style={{ backgroundColor: getLessonStatusColor(lesson.status) }}
-                            >
-                              {getStatusLabel(lesson.status)}
+                            <div className="flex items-center gap-6">
+                              <span>Status</span>
+                              <span className="w-20 text-right">Amount</span>
+                            </div>
+                          </div>
+                          {rows.map(({ lesson, bill }) => (
+                            <div key={lesson.id} className="flex items-center justify-between text-sm py-1">
+                              <div className="flex items-center gap-6">
+                                <span className="font-medium text-gray-900 w-40 truncate">
+                                  {getStudentName(lesson)}
+                                </span>
+                                <span className="text-gray-500">{formatDateTime(lesson.scheduled_at)}</span>
+                                <span className="text-gray-500 w-16">{lesson.duration_minutes} min</span>
+                              </div>
+                              <div className="flex items-center gap-6">
+                                <span
+                                  className="text-xs px-2 py-0.5 rounded-full text-white"
+                                  style={{ backgroundColor: getLessonStatusColor(lesson.status) }}
+                                >
+                                  {getStatusLabel(lesson.status)}
+                                </span>
+                                <span className="text-sm text-gray-900 w-20 text-right">
+                                  {bill.billableToTeacher ? `${sym}${bill.amount.toFixed(2)}` : `${sym}0.00`}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex justify-end pt-2 mt-1 border-t border-gray-200">
+                            <span className="text-sm font-semibold text-gray-900">
+                              Total: {sym}{total.toFixed(2)}
                             </span>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 
@@ -654,7 +711,7 @@ export default function BillingClient({
                             </span>
                             <span className="font-medium text-gray-900">{formatMonth(invoice.billing_month)}</span>
                             <span className="text-gray-700">
-                              {invoice.amount_eur != null ? `${currencySymbol}${Number(invoice.amount_eur).toFixed(2)}` : `${currencySymbol}0.00`}
+                              {invoice.amount_eur != null ? `${sym}${Number(invoice.amount_eur).toFixed(2)}` : `${sym}0.00`}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">
@@ -693,7 +750,7 @@ export default function BillingClient({
                         {markingPaidId === invoice.id && (
                           <div className="mt-3 flex items-center gap-3">
                             <p className="text-sm text-gray-600">
-                              Mark <strong>{currencySymbol}{invoice.amount_eur != null ? Number(invoice.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(invoice.billing_month)}?
+                              Mark <strong>{sym}{invoice.amount_eur != null ? Number(invoice.amount_eur).toFixed(2) : '0.00'}</strong> as paid for {formatMonth(invoice.billing_month)}?
                             </p>
                             <button
                               onClick={() => handleMarkPaid(invoice.id)}

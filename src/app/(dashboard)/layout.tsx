@@ -2,6 +2,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
+import { getMonthRangeInTz } from '@/lib/billing/monthRange'
+import { getBillability, getProjectedAmount } from '@/lib/billing/billability'
 import LeftNav from '@/components/layout/LeftNav'
 import TopHeader from '@/components/layout/TopHeader'
 import RightPanel from '@/components/layout/RightPanel'
@@ -21,7 +23,7 @@ export default async function DashboardLayout({
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, must_change_password')
+    .select('id, full_name, email, photo_url, role, must_change_password, timezone')
     .eq('id', user.id)
     .single()
 
@@ -58,16 +60,16 @@ export default async function DashboardLayout({
 
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
-  const year = now.getUTCFullYear()
-  const month = String(now.getUTCMonth() + 1).padStart(2, '0')
-  const monthStart = `${year}-${month}-01T00:00:00.000Z`
+  const tz = profile?.timezone ?? 'UTC'
+  const { startUtc, endUtc } = getMonthRangeInTz(now, tz)
 
   const { data: monthLessons } = await supabase
     .from('lessons')
-    .select('duration_minutes, status')
+    .select('duration_minutes, status, cancelled_at, scheduled_at')
     .eq('teacher_id', profile?.id)
-    .gte('scheduled_at', monthStart)
-    .in('status', ['completed', 'student_no_show', 'scheduled'])
+    .gte('scheduled_at', startUtc)
+    .lt('scheduled_at', endUtc)
+    .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'scheduled'])
 
   const { data: rateRow } = await admin
     .from('profiles')
@@ -81,11 +83,25 @@ export default async function DashboardLayout({
   let projectedAmount = 0
 
   for (const lesson of monthLessons ?? []) {
-    const amount = (lesson.duration_minutes / 60) * hourlyRate
-    if (lesson.status === 'completed' || lesson.status === 'student_no_show') {
-      currentAmount += amount
+    if (lesson.status !== 'scheduled') {
+      const bill = getBillability({
+        status: lesson.status,
+        scheduledAt: lesson.scheduled_at,
+        cancelledAt: lesson.cancelled_at,
+        cancellationPolicy: null,
+        hourlyRate,
+        durationMinutes: lesson.duration_minutes,
+      })
+      if (bill.billableToTeacher) currentAmount += bill.amount
     }
-    projectedAmount += amount
+    projectedAmount += getProjectedAmount({
+      status: lesson.status,
+      scheduledAt: lesson.scheduled_at,
+      cancelledAt: lesson.cancelled_at,
+      cancellationPolicy: null,
+      hourlyRate,
+      durationMinutes: lesson.duration_minutes,
+    })
   }
 
   const billingData = { currentAmount, projectedAmount }
