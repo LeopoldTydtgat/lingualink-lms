@@ -299,7 +299,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
   const [passwordSuccess, setPasswordSuccess] = useState(false)
 
   const id = teacher.id as string
-  const fullName = teacher.full_name as string
+  const fullName = (teacher.full_name as string | null) || (teacher.email as string | null) || 'this account'
   const photoUrl = teacher.photo_url as string | null
   const status = teacher.status as string | null
   const accountTypes = (teacher.account_types as string[]) ?? []
