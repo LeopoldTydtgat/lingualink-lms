@@ -280,6 +280,15 @@ export async function DELETE(
     // 3m. Delete Supabase auth user
     const authUserId = student.auth_user_id as string | null
     if (authUserId) {
+      // Invalidate all active sessions for this user before deletion.
+      // signOut with global scope kills every refresh token across every device.
+      // Wrapped in try/catch and non-fatal — if signOut fails for any reason,
+      // we still proceed with deleteUser to ensure the account is removed.
+      try {
+        await adminClient.auth.admin.signOut(authUserId, 'global')
+      } catch (signOutError) {
+        console.error('[purge student] signOut failed but proceeding with delete:', signOutError)
+      }
       const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(authUserId)
       if (authDeleteError) {
         console.error('Auth user delete error (non-fatal):', authDeleteError)
