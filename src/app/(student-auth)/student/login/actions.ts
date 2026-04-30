@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { headers } from 'next/headers'
+import { headers, cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/lib/rateLimit'
 
@@ -35,9 +35,9 @@ export async function studentLoginAction(formData: FormData) {
   // ── Verify the user has a student account ───────────────────────────────────
   const { data: student, error: studentError } = await supabase
     .from('students')
-    .select('id, is_active')
+    .select('id, is_active, status')
     .eq('auth_user_id', authData.user.id)
-    .single()
+    .maybeSingle()
 
   if (studentError || !student) {
     await supabase.auth.signOut()
@@ -45,9 +45,11 @@ export async function studentLoginAction(formData: FormData) {
     return { error: 'No student account found for this email address. If you are a teacher, please log in at the teacher portal.' }
   }
 
-  if (!student.is_active) {
+  if (!student.is_active || student.status === 'former' || student.status === 'on_hold') {
     await supabase.auth.signOut()
-    return { error: 'Your account has been deactivated. Please contact admin.' }
+    const cookieStore = await cookies()
+    cookieStore.delete('ll_status_checked_at')
+    return { error: 'Your account is not active. Please contact admin.' }
   }
 
   const returnUrl = (formData.get('returnUrl') as string) ?? ''
