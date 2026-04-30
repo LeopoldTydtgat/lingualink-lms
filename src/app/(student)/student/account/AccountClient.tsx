@@ -483,13 +483,13 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             value={selfLevel}
             onChange={e => setSelfLevel(e.target.value)}
           >
-            <option value="">Select level…</option>
+            <option value="">I'm not sure</option>
             {LEVELS.map(l => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>
           <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-            Your teacher will assess your actual level during classes.
+            No problem if you don't know — your teacher will assess your level during classes.
           </p>
         </div>
 
