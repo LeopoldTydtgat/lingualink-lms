@@ -1,3 +1,70 @@
+## Session 74 - 30 April 2026 - Billing refactor: single source of truth
+
+### What was built
+- src/lib/billing/billability.ts - canonical billability function 
+  covering all lesson statuses including <24h cancellations and 48hr policy
+- src/lib/billing/monthRange.ts - timezone-aware month boundary helper 
+  using the two-pass UTC conversion pattern
+- Refactored 6 billing calculation sites onto the shared util:
+  * teacher right panel (current and projected amounts)
+  * teacher billing page
+  * admin billing client (student billing + company billing tabs)
+  * admin export route (teacher_earnings, company_billing, teacher_invoices)
+- Added per-row Amount column + Total to the teacher invoice detail view 
+  (previously admin-only)
+- Split "Amount (currency symbol)" into separate Amount + Currency 
+  columns across all three CSV exports
+
+### Break/Fix Log
+
+Issue 1: Teachers were silently underpaid in their own billing view.
+Cause: Right panel and teacher billing page never queried cancelled 
+lessons - only completed and student no-show. The 24h cancellation rule 
+existed in admin code but not in teacher-facing code.
+Fix: Shared util applied to all 6 calc sites with consistent rules.
+Lesson: Three duplicate implementations of the same logic is two too many.
+
+Issue 2: Month boundary inconsistency across the codebase.
+Cause: Right panel used server UTC, teacher billing page used browser 
+local time, admin/export used server local time. A teacher in Cape Town 
+near month-end could see a class belong to two different months 
+depending on which page rendered.
+Fix: All sites now use getMonthRangeInTz / getMonthKeyInTz with the 
+teacher's profiles.timezone.
+Lesson: Never trust new Date() local time for anything timezone-sensitive.
+
+Issue 3: Invoice writeback overwrote paid invoices.
+Cause: Reactive recalculation in BillingClient fired on every load and 
+silently rewrote amount_eur even when status = 'paid'.
+Fix: Added explicit skip when invoice.status === 'paid'.
+Lesson: Reactive write-backs need state guards or they become a foot-gun.
+
+Issue 4: Teacher billing page showed zero amount and wrong currency.
+Cause: page.tsx fetched billingInfo with createClient (auth/RLS), but 
+hourly_rate, currency, and timezone are column-REVOKE'd from the 
+authenticated role. The fetch silently returned null for these fields.
+Fix: Switched to createAdminClient, mirroring the pattern already used 
+in (dashboard)/layout.tsx.
+Lesson: Column-level REVOKEs on profiles need an admin client server-side 
+or they fail silently. Not the first time this has caught us.
+
+Issue 5: Stale paid_at and status='paid' on a test invoice.
+Cause: Test data created during earlier sessions, never cleaned up.
+Fix: Manual SQL update in Supabase to clear status and paid_at.
+Lesson: Test data needs an owner. Add a cleanup script if this keeps 
+recurring.
+
+### Session result
+The billing system now has one canonical billability function used 
+across every calculation site - teacher right panel, teacher billing 
+page, admin billing tabs, and all CSV exports. Three real bugs caught 
+and fixed along the way: teachers being underpaid for <24h cancellations, 
+month boundaries drifting between sites, and the page.tsx auth client 
+silently returning null for hourly_rate. Currency and timezone are now 
+fully dynamic and respect each teacher's profile settings end-to-end.
+
+---
+
 ## Session 73 - 30 April 2026 - Auth signal cleanup, cross-role email guard, UX polish
 
 ### What was built
