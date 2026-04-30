@@ -142,7 +142,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     ? await admin
         .from('students')
         .select('id, auth_user_id, full_name, email, photo_url')
-        .in('auth_user_id', studentContactIds)
+        .in('id', studentContactIds)
     : { data: [] }
 
   // Fetch profile details for teacher/admin contacts
@@ -157,7 +157,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // Combine contact map with display details
   const contacts = Array.from(contactMap.values()).map(contact => {
     const details = contact.type === 'student'
-      ? (studentDetails || []).find((s: any) => s.auth_user_id === contact.id)
+      ? (studentDetails || []).find((s: any) => s.id === contact.id)
       : (profileDetails || []).find((p: any) => p.id === contact.id)
 
     return {
