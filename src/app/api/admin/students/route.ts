@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { createClient as createServerSupabaseClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { CreateStudentSchema } from '@/lib/validation/schemas'
@@ -94,11 +94,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // ── Cross-role email guard: reject if a teacher already uses this email ──
+    const guardClient = createAdminClient()
+    const { data: existingTeacher } = await guardClient
+      .from('profiles')
+      .select('id')
+      .eq('email', data.email)
+      .maybeSingle()
+    if (existingTeacher) {
+      return NextResponse.json(
+        { error: 'This email is already in use by a teacher account. Each email can only belong to one role.' },
+        { status: 409 }
+      )
+    }
+
     // ── 3. Create the Supabase auth user using the service role key ──────────
-    const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const adminClient = createAdminClient()
 
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email: data.email,
