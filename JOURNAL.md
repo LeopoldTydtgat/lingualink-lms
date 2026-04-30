@@ -1,5 +1,23 @@
 # LinguaLink Online - Build Journal
 
+## Session 72 - 30 April 2026 - Bug 7: "To be assessed" fluency level rejected by validation
+
+### What was built
+- Admin student create form: collapsed two sentinel <option> entries (`— Select —` and `To be assessed`) into a single `<option value="">To be assessed</option>` so the displayed default option sends an empty string.
+- Admin student create form: added explicit `current_fluency_level: form.current_fluency_level || null` to the POST submit body so the empty string coerces to null before reaching the server.
+- Admin student edit form: same `<option>` collapse. Submit handler already had `|| null` from a previous fix — left untouched.
+
+### Break/Fix Log
+Issue: Selecting "To be assessed" on the admin student create form returned HTTP 400.
+Cause: The dropdown sent the literal string "To be assessed" as the option value. The POST route validates the body with `CreateStudentSchema`, where `current_fluency_level: z.enum(CEFR_LEVELS).optional().nullable()` only accepts the eleven CEFR literals, null, or undefined. Zod rejected the string and the route returned 400. The edit form had the same dropdown but its PATCH route has no Zod validation, so it silently saved the literal "To be assessed" to the DB column whenever it was used (the column is unconstrained text).
+Fix: Two-part. (1) Both forms now use `<option value="">To be assessed</option>` so the visible default sends an empty string instead of the literal label. (2) The create form's submit body explicitly coerces empty string to null with `|| null`, matching the pattern the edit form already used. Net effect: selecting "To be assessed" now writes null to the DB on both forms.
+Lesson: Zod schemas on POST routes catch garbage that PATCH routes silently accept. When two forms share a component pattern but only one has server-side validation, bugs hide on the unvalidated path until someone audits the column. Pre-fix SELECT confirmed zero existing rows had the literal "To be assessed" value, so no data cleanup was needed — but only because nobody had successfully used the option. The audit-before-fix pattern paid for itself again: read paths in admin detail view, student portal, and teacher portal all already handled null correctly via existing `|| '—'` and `?? '—'` fallbacks, so the change carried zero ripple risk.
+
+### Session result
+Bug 7 closed. Post-fix rollback hash cf54f10 on dev branch (not yet merged to main). Five open bugs remain: Bug 11 (phase out is_active), Bug 6 (DB trigger ghost profile), P5 UI fixes (countdown format, reschedule modal labelling), P4 (self-assessed level "I am not sure" option). Pinned low-priority: centre booking wizard card, inactivity timeout question.
+
+---
+
 ## Session 71 - 30 April 2026 - Auth Hardening, Messaging Cleanup, Cross-Portal Cleanup on Purge
 
 ### What was built
