@@ -280,6 +280,8 @@ export async function DELETE(
     // 3m. Delete Supabase auth user
     const authUserId = student.auth_user_id as string | null
     if (authUserId) {
+      // Cross-portal cleanup: ghost profiles row created by auth-trigger at student creation
+      await adminClient.from('profiles').delete().eq('id', authUserId)
       // Invalidate all active sessions for this user before deletion.
       // signOut with global scope kills every refresh token across every device.
       // Wrapped in try/catch and non-fatal — if signOut fails for any reason,
