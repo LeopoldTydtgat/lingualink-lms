@@ -1,17 +1,45 @@
+## Session 73 - 30 April 2026 - Auth signal cleanup, cross-role email guard, UX polish
+
+### What was built
+- src/app/(student-auth)/student/login/actions.ts: student login now gates on status alone to match proxy.ts. The is_active read was removed.
+- src/app/(student)/student/layout.tsx: student layout guard now checks status instead of is_active.
+- src/app/api/admin/teachers/route.ts: added a pre-flight email lookup against the students table. Rejects with 409 if the email is already in use by a student account.
+- src/app/api/admin/students/route.ts: added a pre-flight email lookup against the profiles table. Rejects with 409 if the email is already in use by a teacher account. Standardised to use createAdminClient() to match teachers/route.ts.
+- src/app/(dashboard)/upcoming-classes/UpcomingClassesClient.tsx: countdown timer now matches the student portal format (Xd Yh ZZm when 24 hours or more away, live HH MM SS ticker otherwise). Reschedule modal title, helper text, and confirm button reworded to consistently lead with the cancel action.
+- src/app/(student)/student/account/AccountClient.tsx: self-assessed level dropdown default changed from "Select level..." to "I'm not sure". Helper text reassures students that not knowing is fine.
+
+### Break/Fix Log
+Issue 1 (Bug 11): Symptom: student auth was checked twice using two different signals. proxy.ts gated on status while the student login action and student layout gated on is_active. Cause: the two checks could drift out of sync, leading to inconsistent access enforcement. Fix: removed is_active reads from the student login action and student layout, replaced with the same status check used by proxy.ts. Lesson: when the same access decision is made in multiple places, every layer must read the same column or drift is inevitable.
+
+Issue 2 (Bug 6 closed): Symptom: historic concern that creating a teacher and student with the same email caused a duplicate or ghost profile. Cause: a Supabase trigger on auth.users (on_auth_user_created calling handle_new_user) inserts a profiles row automatically when an auth user is created. The admin create routes had been changed in earlier sessions to use upsert with onConflict on email, which already handles the trigger correctly. Fix: a read-only audit confirmed zero orphan profiles, zero ghost profiles, and a 1:1 ratio between auth users and profiles. No code change needed. The bug is closed. Lesson: not every flagged bug is still a bug. Audit before assuming.
+
+Issue 3 (cross-role email collision): Symptom: when a teacher account was deleted that shared an email with a student, the student row survived but lost its auth_user_id link, leaving the student unable to log in. Cause: Supabase deletes the auth.users row on teacher deletion. The students.auth_user_id foreign key was set to ON DELETE SET NULL, so the link was nulled. Sharing an email across two roles meant deleting one role corrupted the other. Fix: added a pre-flight email lookup to both admin create routes that rejects with a clear 409 error if the email is already in use by the other role. Lesson: shared identifiers across roles invite cascade corruption. Block them at the create step.
+
+Issue 4 (P5 countdown format): Symptom: teacher portal countdown showed values like "71h 19m 44s" instead of "2d 23h 19m" when classes were more than a day away. The student portal already had the correct format. Cause: the teacher Countdown component computed total raw hours without extracting days first. Fix: rewrote the formatting logic to match the student portal. When days is greater than zero, format as Xd Yh ZZm with no seconds. Otherwise keep the live HH MM SS ticker. Lesson: when two portals share visual conventions, format helpers should live in one place rather than being duplicated.
+
+Issue 5 (P5 reschedule modal labelling): Symptom: teacher reschedule modal title said "Request reschedule" while the confirm button said "Send & cancel class". Inconsistent language confused users about whether the action was rescheduling or cancelling. Cause: the labels were written at different times during the build. Fix: title is now "Cancel class & request reschedule", confirm button is "Send message & cancel class", and the helper text was rewritten to clearly explain that the class is cancelled and the student books a new time themselves. Lesson: every label in a single flow should describe the same action.
+
+Issue 6 (P4 self-assessed level): Symptom: student account page forced students to either pick a CEFR level or leave a "Select level..." placeholder, with no friendly opt-out. Cause: the dropdown was built with the assumption that students could self-assess accurately, which most cannot. Fix: replaced the placeholder option with "I'm not sure" (still maps to empty string then null on save). Updated helper text to reassure students that not knowing is fine and the teacher will assess. Lesson: optional fields should make the opt-out the default, not the placeholder.
+
+### Session result
+Cleared four pinned bugs in a single session. Bug 11 removed the auth signal drift between proxy.ts and the student path. Bug 6 was investigated and closed clean with zero orphans found. The cross-role email guard was added to both admin create routes, eliminating an entire class of corruption that occurred when a single email was shared across roles. Two P5 UX issues (countdown format and reschedule modal labelling) and one P4 polish item ("I'm not sure" option) were shipped. Four commits on dev: 3f3c958, a001281, 67c0bed, 4141da8. The session followed the working rules throughout: audit first, capture rollback hash, line-by-line diff review, local test before commit.
+
+---
+
 # LinguaLink Online - Build Journal
 
 ## Session 72 - 30 April 2026 - Bug 7: "To be assessed" fluency level rejected by validation
 
 ### What was built
-- Admin student create form: collapsed two sentinel <option> entries (`— Select —` and `To be assessed`) into a single `<option value="">To be assessed</option>` so the displayed default option sends an empty string.
+- Admin student create form: collapsed two sentinel <option> entries (`- Select -` and `To be assessed`) into a single `<option value="">To be assessed</option>` so the displayed default option sends an empty string.
 - Admin student create form: added explicit `current_fluency_level: form.current_fluency_level || null` to the POST submit body so the empty string coerces to null before reaching the server.
-- Admin student edit form: same `<option>` collapse. Submit handler already had `|| null` from a previous fix — left untouched.
+- Admin student edit form: same `<option>` collapse. Submit handler already had `|| null` from a previous fix - left untouched.
 
 ### Break/Fix Log
 Issue: Selecting "To be assessed" on the admin student create form returned HTTP 400.
 Cause: The dropdown sent the literal string "To be assessed" as the option value. The POST route validates the body with `CreateStudentSchema`, where `current_fluency_level: z.enum(CEFR_LEVELS).optional().nullable()` only accepts the eleven CEFR literals, null, or undefined. Zod rejected the string and the route returned 400. The edit form had the same dropdown but its PATCH route has no Zod validation, so it silently saved the literal "To be assessed" to the DB column whenever it was used (the column is unconstrained text).
 Fix: Two-part. (1) Both forms now use `<option value="">To be assessed</option>` so the visible default sends an empty string instead of the literal label. (2) The create form's submit body explicitly coerces empty string to null with `|| null`, matching the pattern the edit form already used. Net effect: selecting "To be assessed" now writes null to the DB on both forms.
-Lesson: Zod schemas on POST routes catch garbage that PATCH routes silently accept. When two forms share a component pattern but only one has server-side validation, bugs hide on the unvalidated path until someone audits the column. Pre-fix SELECT confirmed zero existing rows had the literal "To be assessed" value, so no data cleanup was needed — but only because nobody had successfully used the option. The audit-before-fix pattern paid for itself again: read paths in admin detail view, student portal, and teacher portal all already handled null correctly via existing `|| '—'` and `?? '—'` fallbacks, so the change carried zero ripple risk.
+Lesson: Zod schemas on POST routes catch garbage that PATCH routes silently accept. When two forms share a component pattern but only one has server-side validation, bugs hide on the unvalidated path until someone audits the column. Pre-fix SELECT confirmed zero existing rows had the literal "To be assessed" value, so no data cleanup was needed - but only because nobody had successfully used the option. The audit-before-fix pattern paid for itself again: read paths in admin detail view, student portal, and teacher portal all already handled null correctly via existing `|| '-'` and `?? '-'` fallbacks, so the change carried zero ripple risk.
 
 ### Session result
 Bug 7 closed. Post-fix rollback hash cf54f10 on dev branch (not yet merged to main). Five open bugs remain: Bug 11 (phase out is_active), Bug 6 (DB trigger ghost profile), P5 UI fixes (countdown format, reschedule modal labelling), P4 (self-assessed level "I am not sure" option). Pinned low-priority: centre booking wizard card, inactivity timeout question.
@@ -464,7 +492,7 @@ Session 60 was a focused bug-fix session addressing failures discovered during a
 - Custom domain app.lingualinkonline.com configured in Vercel and DNS CNAME record added by domain manager - domain live and green with valid SSL certificate
 - NEXT_PUBLIC_SITE_URL updated in Vercel environment variables from http://localhost:3000 to https://app.lingualinkonline.com
 - Supabase URL Configuration updated - Site URL changed to https://app.lingualinkonline.com, wildcard redirect URL https://app.lingualinkonline.com/** added to whitelist
-- Client login email updated from shannon@lingualinkonline.com to info@lingualinkonline.com in both auth.users and profiles table via SQL
+- Client login email updated from the previous address to info@lingualinkonline.com in both auth.users and profiles table via SQL
 - returnUrl pattern implemented in proxy.ts and both login components - navigating to a protected route while logged out now preserves the intended destination and redirects there after login
 - Contact emails corrected on login pages - teacher login shows teachers@lingualinkonline.com, student login shows support@lingualinkonline.com
 - Self-assessed level field removed from Add Student form and Zod validation schema - the client assesses all students herself
@@ -608,11 +636,11 @@ Support chat fully decoupled from regular messaging. Teachers contact the client
 - public/lingualink-logo-email.png - logo extracted from base64 and committed as static file
 
 ### Break/Fix Log
-Issue 1: Admin messages hydration error — timestamp format differed between server and client / Cause: locale-dependent date formatting / Fix: replaced with hardcoded DAYS/MONTHS arrays and midnight-normalised calendar day diff / Lesson: never use toLocaleDateString() or toLocaleTimeString() in components that render on both server and client
+Issue 1: Admin messages hydration error - timestamp format differed between server and client / Cause: locale-dependent date formatting / Fix: replaced with hardcoded DAYS/MONTHS arrays and midnight-normalised calendar day diff / Lesson: never use toLocaleDateString() or toLocaleTimeString() in components that render on both server and client
 
-Issue 2: Build failed on PR — TS2322 type error in admin messages page / Cause: RawMessage type missing attachments field / Fix: added attachments to RawMessage interface and Supabase select column list / Lesson: always run npx tsc --noEmit before pushing
+Issue 2: Build failed on PR - TS2322 type error in admin messages page / Cause: RawMessage type missing attachments field / Fix: added attachments to RawMessage interface and Supabase select column list / Lesson: always run npx tsc --noEmit before pushing
 
-Issue 3: Email logo not rendering in Gmail / Cause: base64 data URIs stripped by Gmail security / Fix: extracted PNG to public/ and referenced via hosted URL / Lesson: Gmail blocks base64 image URIs — always use hosted URLs. Final fix deferred to custom domain setup
+Issue 3: Email logo not rendering in Gmail / Cause: base64 data URIs stripped by Gmail security / Fix: extracted PNG to public/ and referenced via hosted URL / Lesson: Gmail blocks base64 image URIs - always use hosted URLs. Final fix deferred to custom domain setup
 
 ### Session result
 Admin messages section built and deployed - the client can now monitor and participate in all teacher/student conversations from the admin portal. Login pages cleaned up. Email logo partially fixed - will complete when custom domain is live.
@@ -624,7 +652,7 @@ Admin messages section built and deployed - the client can now monitor and parti
 
 ### What was built
 - `src/app/api/keep-alive/route.ts` - new GET route that pings Supabase daily to prevent free tier pausing
-- `vercel.json` — added midnight UTC daily cron entry for `/api/keep-alive`
+- `vercel.json` - added midnight UTC daily cron entry for `/api/keep-alive`
 - `src/app/(admin)/admin/teachers/[id]/edit/page.tsx` - removed redirect after save, replaced with inline "Changes saved!" toast
 - `src/app/(admin)/admin/students/[id]/edit/page.tsx` - same save confirmation fix
 - `src/app/api/admin/teachers/[id]/route.ts` - fixed save not persisting, added revalidatePath calls, surfaced real Supabase errors to client
@@ -635,9 +663,9 @@ Admin messages section built and deployed - the client can now monitor and parti
 - `src/app/(admin)/admin/_components/DatePartInput.tsx` - new three-part DD/MM/YYYY input component with auto-advance focus
 - `src/app/(admin)/admin/teachers/new/CreateTeacherClient.tsx` - YouTube URL field removed, all date fields replaced with DatePartInput, date validation fixed
 - `src/app/(admin)/admin/teachers/[id]/edit/EditTeacherClient.tsx` - same date and validation fixes
-- `src/app/(admin)/admin/students/new/CreateStudentClient.tsx` — date fields replaced with DatePartInput, end_date made optional
+- `src/app/(admin)/admin/students/new/CreateStudentClient.tsx` - date fields replaced with DatePartInput, end_date made optional
 - `src/app/(admin)/admin/students/[id]/edit/EditStudentClient.tsx` - end_date made optional, validation removed
-- `src/app/(admin)/admin/teachers/schemas.ts` — date validation updated to accept YYYY-MM-DD or null
+- `src/app/(admin)/admin/teachers/schemas.ts` - date validation updated to accept YYYY-MM-DD or null
 - `src/app/(teacher)/dashboard/account/AccountClient.tsx` - currency symbol now dynamic, hourly rate section removed from teacher view
 - `src/app/(teacher)/dashboard/_components/RightPanel.tsx` - billing section currency symbol now dynamic
 - `src/app/api/admin/teachers/route.ts` - new teachers created with `must_change_password: true` and `profile_completed: false`
@@ -675,7 +703,7 @@ A large batch of admin portal fixes were completed this session. Teacher profile
   `DifficultyDots` (●●●) with `DifficultyBars` in 5 files:
   `StudySheetsClient.tsx`, `StudySheetDetailClient.tsx`, 
   `AssignStudySheetsModal.tsx`, `StudySheetClient.tsx`, `StudyClient.tsx`
-- `StudySheetFormClient.tsx` (teacher portal new sheet form) — difficulty 
+- `StudySheetFormClient.tsx` (teacher portal new sheet form) - difficulty 
   selector updated to signal bar button style matching admin modal
 - Admin library table column alignment fixed using percentage-based 
   `gridTemplateColumns` instead of rem values
@@ -750,7 +778,7 @@ and colour logic.
 - Purge (hard delete) functionality added to Teacher Detail and Student Detail pages in admin portal
 - Cascade delete order implemented: messages, exercise_completions, assignments, reports, invoices, classes, training records, hours_log, reviews, then auth user
 - Purge blocked if any linked teachers or students are not yet archived - shows named list of blockers
-- Purge confirmation modal requires Shannon to type the full name before confirming
+- Purge confirmation modal requires the client to type the full name before confirming
 - Native browser confirm() and alert() dialogs replaced with styled modal dialogs on both Archive and Purge actions
 - Modals match portal design system throughout
 
@@ -826,13 +854,13 @@ impersonation. The email logo remains unresolved and is deferred.
 - **Messages bullet list** - added a bullet list toolbar button to the message composer (StarterKit already included support; button was missing). Fixed Tailwind's preflight reset stripping list styles in both the composer and sent message bubbles by scoping CSS rules to `.messages-composer .ProseMirror` and `.message-bubble`.
 - **Messages file attachments** - implemented end-to-end: created `messages` Supabase Storage bucket (private, 10MB limit, JPEG/PNG/WebP/PDF only) with three RLS policies; built `api/messages/upload/route.ts` POST handler; updated `sendMessage` action to accept and persist attachments; added paperclip button, hidden file input, pending attachment list with remove buttons, and attachment chip rendering in sent/received bubbles using signed URLs (7-day expiry).
 - **RightPanel billing calculation** - wired up real billing data replacing hardcoded `€ –`. Layout now fetches current month lessons and calculates `currentAmount` (completed + student no-show) and `projectedAmount` (+ scheduled), passed as `billingData` prop to `RightPanel`.
-- **Admin nav regression fix** - `hourly_rate` added to the profile select during billing work caused the entire profile query to fail silently (column-level RLS restriction). Fixed by removing `hourly_rate` from the regular profile select and fetching it separately via `createAdminClient()` which uses the service role. Admin Controls link restored to Shannon's nav.
+- **Admin nav regression fix** - `hourly_rate` added to the profile select during billing work caused the entire profile query to fail silently (column-level RLS restriction). Fixed by removing `hourly_rate` from the regular profile select and fetching it separately via `createAdminClient()` which uses the service role. Admin Controls link restored to the client's nav.
 - **Student detail back button** - added a `← Back to Students` button at the top of the student detail page. Fixed a `router is not defined` runtime error by adding the missing `const router = useRouter()` call inside the component body.
 
 ### Break/Fix Log
 
 **Issue 1: Silent profile query failure killing admin nav**
-Symptom: Admin Controls link disappeared from Shannon's nav after billing work.
+Symptom: Admin Controls link disappeared from the client's nav after billing work.
 Cause: `hourly_rate` added to the regular Supabase profile select - this field has column-level privileges revoked for non-service-role clients, causing the entire query to return nothing silently. `profile` became null, role defaulted to `'teacher'`, admin link was filtered out.
 Fix: Removed `hourly_rate` from the regular profile select. Fetched it separately using `createAdminClient()` (service role) which bypasses column restrictions.
 Lesson: Never add restricted columns to regular client selects. Any column touched by `REVOKE` at the column level must always be fetched via the admin client.
@@ -856,7 +884,7 @@ Fix: Added `const router = useRouter()` as the first line of the component funct
 Lesson: Confirm hook instantiation exists in the component body, not just the import.
 
 ### Session result
-A focused hardening session addressing four teacher portal issues raised by the client. Student email addresses are now fully removed from all teacher-facing views, protecting student privacy. The messages feature received two significant upgrades - bullet list formatting now renders correctly in both the composer and sent bubbles, and file attachments are fully functional end-to-end using a private Supabase Storage bucket with signed URLs. The RightPanel billing summary now shows real calculated values instead of hardcoded dashes. A silent profile query failure - introduced when `hourly_rate` was incorrectly added to a column-restricted select - caused the admin nav link to disappear for Shannon; this was diagnosed and resolved by moving the restricted field fetch to the admin client. A back navigation button was added to the student detail page.
+A focused hardening session addressing four teacher portal issues raised by the client. Student email addresses are now fully removed from all teacher-facing views, protecting student privacy. The messages feature received two significant upgrades - bullet list formatting now renders correctly in both the composer and sent bubbles, and file attachments are fully functional end-to-end using a private Supabase Storage bucket with signed URLs. The RightPanel billing summary now shows real calculated values instead of hardcoded dashes. A silent profile query failure - introduced when `hourly_rate` was incorrectly added to a column-restricted select - caused the admin nav link to disappear for the client; this was diagnosed and resolved by moving the restricted field fetch to the admin client. A back navigation button was added to the student detail page.
 
 ---
 
@@ -1018,11 +1046,11 @@ Claude Code is now the primary development tool for this project, replacing the 
 
 **Issue 1 - Auth redirect loop on Vercel (Teacher and Student portals)**
 - Symptom: Login succeeds, page loads briefly, then user is redirected back to the login page within 1–3 seconds. Only occurs on Vercel - not reproducible on localhost.
-- Cause: `proxy.ts` (Next.js 16 middleware) created a Supabase client but never called `getUser()`, so auth tokens were never refreshed server-side. On Vercel's serverless architecture, each request hits a fresh function — without token refresh in the proxy, stale tokens caused server components to see unauthenticated sessions.
+- Cause: `proxy.ts` (Next.js 16 middleware) created a Supabase client but never called `getUser()`, so auth tokens were never refreshed server-side. On Vercel's serverless architecture, each request hits a fresh function - without token refresh in the proxy, stale tokens caused server components to see unauthenticated sessions.
 - Fix: Added `await supabase.auth.getUser()` before the return statement in `proxy.ts`.
 - Lesson: Supabase SSR with Next.js requires the middleware/proxy to call `getUser()` on every request to keep the session alive. This is documented in Supabase's Next.js guide but was missing from the original implementation.
 
-**Issue 2 — Next.js Link prefetching causing token race condition**
+**Issue 2 - Next.js Link prefetching causing token race condition**
 - Symptom: Even after the proxy fix, the teacher portal loaded the landing page successfully but was redirected to login 3 seconds later. Vercel logs showed 9+ simultaneous GET requests for navigation routes immediately after page load.
 - Cause: Next.js `<Link>` components prefetch their target pages by default. The LeftNav and TopHeader had Links to 9+ pages, all prefetched in parallel. Each prefetch went through the proxy calling `getUser()`. Supabase's refresh token is single-use - the first request consumed it, and the remaining parallel requests failed authentication, returning redirect instructions in their RSC payloads.
 - Fix: Added `prefetch={false}` to every `<Link>` in `LeftNav.tsx`, `StudentLeftNav.tsx`, `TopHeader.tsx`, and `StudentTopHeader.tsx`.
@@ -1032,7 +1060,7 @@ Claude Code is now the primary development tool for this project, replacing the 
 - Symptom: Pages redirected to `/login` even when the user was authenticated, because the profile database query returned null.
 - Cause: Multiple `page.tsx` files checked `if (!profile) redirect('/login')` after the layout had already verified authentication. A null profile is a data issue (e.g. missing database row), not an authentication failure. This created a redirect loop: layout says "user is logged in," page says "no profile, go to login," login says "already authenticated, go to dashboard."
 - Fix: Removed `if (!profile) redirect('/login')` from `upcoming-classes/page.tsx` and `account/page.tsx`. Added sensible defaults for null profiles instead of redirecting.
-- Lesson: Never use a missing database record as a proxy for "not authenticated." Separate auth checks (is the user logged in?) from data checks (does the user have a profile?). The layout handles auth — pages should handle missing data gracefully.
+- Lesson: Never use a missing database record as a proxy for "not authenticated." Separate auth checks (is the user logged in?) from data checks (does the user have a profile?). The layout handles auth - pages should handle missing data gracefully.
 
 **Issue 4 - React `cache()` import crashed all server components**
 - Symptom: All pages returned `---` status (no response) on Vercel after wrapping `createClient` in React's `cache()` function.
@@ -1046,7 +1074,7 @@ The live portal authentication is now fully functional. The teacher portal login
 ---
 
 
-## Session 42 - 10 April 2026 — Vercel 404 Fix
+## Session 42 - 10 April 2026 - Vercel 404 Fix
 
 ### What was built
 - Diagnosed and resolved Vercel production 404 error affecting all routes (root, /login, /student/login)
@@ -1058,7 +1086,7 @@ The live portal authentication is now fully functional. The teacher portal login
 - **Symptom:** All routes on lingualink-lms.vercel.app returned 404 NOT_FOUND. Vercel logs showed "Middleware: 404 Not Found" even though no middleware file existed. Build logs showed all routes compiled successfully.
 - **Cause:** Vercel Framework Preset was set to "Other" instead of "Next.js". Without the correct preset, Vercel did not know how to serve the Next.js build output, so every route returned 404 despite a successful build.
 - **Fix:** Changed Framework Preset from "Other" to "Next.js" in Vercel → Settings → Build and Deployment, then redeployed without build cache.
-- **Lesson:** Always verify the Vercel Framework Preset matches the actual framework. A successful build does not guarantee correct serving — Vercel needs the preset to know how to route requests to the build output.
+- **Lesson:** Always verify the Vercel Framework Preset matches the actual framework. A successful build does not guarantee correct serving - Vercel needs the preset to know how to route requests to the build output.
 
 **Issue 2**
 - **Symptom:** Latest code changes (root redirect, ClassReminderModal) were not on the production deployment.
@@ -1076,7 +1104,7 @@ Short diagnostic session focused on resolving the Vercel 404 that was blocking a
 ### What was built
 
 - **Item 1 (carried over):** Fixed all TypeScript errors across 8 files, removed `ignoreBuildErrors` and ESLint suppression flags from `next.config.ts`. Clean `tsc --noEmit` and clean `npx next build` achieved.
-- **Item 2 - Server-side input validation:** Created `src/lib/validation/schemas.ts` using Zod 4 with schemas for `CreateTeacherSchema`, `CreateStudentSchema`, `HoursAdjustmentSchema`, and `BookClassSchema`. Applied to four high-priority API routes: `admin/teachers`, `admin/students`, `admin/students/[id]/hours`, and `student/book`. Raw `body` is no longer passed directly to Supabase in any of these routes — all input flows through `parsed.data`.
+- **Item 2 - Server-side input validation:** Created `src/lib/validation/schemas.ts` using Zod 4 with schemas for `CreateTeacherSchema`, `CreateStudentSchema`, `HoursAdjustmentSchema`, and `BookClassSchema`. Applied to four high-priority API routes: `admin/teachers`, `admin/students`, `admin/students/[id]/hours`, and `student/book`. Raw `body` is no longer passed directly to Supabase in any of these routes - all input flows through `parsed.data`.
 - **Item 3 - File upload restrictions:** Audited all upload handlers across the codebase. Teacher and student photo uploads already had type and size checks. Added missing 10MB size check to `handleTemplateUpload` in both `BillingClient.tsx` and `BillingAdminClient.tsx`.
 - **Item 4 - Rate limiting on login:** Created `src/lib/rate-limit.ts` - an in-memory rate limiter tracking failed attempts per IP. Applied to both teacher (`/login/actions.ts`) and student (`/student/login/actions.ts`) login actions. 5 failed attempts within 15 minutes triggers a 15-minute lockout. Also fixed the teacher login action which was previously returning raw Supabase error messages to the browser, leaking whether an email address exists.
 - **Item 5 - Security headers:** Updated `next.config.ts` with a full security header set: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Strict-Transport-Security`, `Permissions-Policy`, and a Content Security Policy covering `script-src`, `style-src`, `font-src`, `img-src`, `connect-src`, `form-action`, and `frame-ancestors`. Supabase hostname derived dynamically from `NEXT_PUBLIC_SUPABASE_URL`.
@@ -1088,7 +1116,7 @@ Short diagnostic session focused on resolving the Vercel 404 that was blocking a
 ### Break/Fix Log
 
 **Issue 1**
-- Symptom: `npx tsc --noEmit` returned 2 errors after placing `schemas.ts` — `errorMap` property not recognised on `z.enum()` and `z.union()`
+- Symptom: `npx tsc --noEmit` returned 2 errors after placing `schemas.ts` - `errorMap` property not recognised on `z.enum()` and `z.union()`
 - Cause: Zod v4 renamed `errorMap` to `error` in the params object
 - Fix: Replaced `{ errorMap: () => ({ message: '...' }) }` with `{ error: '...' }` in both locations
 - Lesson: Always check breaking changes when a major version is already installed. Zod v4 has several API differences from v3.
@@ -1144,7 +1172,7 @@ This session completed items 1 through 8 of the Step 14 hardening pass. The most
 **Issue 2**
 - Symptom: `Set-Content` with here-strings silently failing on paths containing parentheses
 - Cause: PowerShell here-strings and `-LiteralPath` don't always cooperate with special characters in directory names like `(auth)` and `(student-auth)`
-- Fix: Used `[System.IO.File]::WriteAllText()` with explicit UTF8 encoding — bypasses PowerShell string handling entirely
+- Fix: Used `[System.IO.File]::WriteAllText()` with explicit UTF8 encoding - bypasses PowerShell string handling entirely
 - Lesson: For any file path containing parentheses, always use `[System.IO.File]::WriteAllText()` instead of `Set-Content`
 
 **Issue 3**
@@ -1157,7 +1185,7 @@ This session completed items 1 through 8 of the Step 14 hardening pass. The most
 - Symptom: Active nav state disappearing after page load on Upcoming Classes
 - Cause: Nav item href was `/dashboard` but the actual route is `/upcoming-classes` - `pathname.startsWith('/dashboard')` never matched
 - Fix: Added `matchPaths` array to nav item type, Upcoming Classes now matches both `/upcoming-classes` and `/dashboard`
-- Lesson: Always verify nav hrefs match actual Next.js route paths — mismatches cause active state failures silently
+- Lesson: Always verify nav hrefs match actual Next.js route paths - mismatches cause active state failures silently
 
 ### Session result
 All three portals now have a cohesive, professional look. The gradient top band unifies the sidebar and header into one visual element. The login pages are a significant upgrade - split panel with dark brand panel makes a strong first impression. Active nav states are reliable. The build is in a clean.
@@ -1167,7 +1195,7 @@ All three portals now have a cohesive, professional look. The gradient top band 
 
 
 
-## Session 39 - 09 April 2026 — Logo and header styling across all three portals
+## Session 39 - 09 April 2026 - Logo and header styling across all three portals
 
 ### What was built
 - Added the official LinguaLink Online logo SVG to all three portals (teacher, student, admin)
@@ -1175,7 +1203,7 @@ All three portals now have a cohesive, professional look. The gradient top band 
 - Created `/public/lingualink-chat-icon.svg` and `/public/lingualink-logo-white.svg` as supporting assets
 - Updated `TopHeader.tsx` (teacher portal) - header height increased to 72px, logo at 52px height, greeting text corrected to white, avatar placeholder updated to white semi-transparent style
 - Updated `StudentTopHeader.tsx` (student portal) - same header treatment applied
-- Updated `AdminLayoutClient.tsx` - replaced plain text "Lingualink Online — Admin" with the logo SVG, header height aligned to 72px
+- Updated `AdminLayoutClient.tsx` - replaced plain text "Lingualink Online - Admin" with the logo SVG, header height aligned to 72px
 - Fixed `ChatWidget.tsx` type error - `sendMessageAction` receiver type extended to include `'student'` in student messages `actions.ts`
 - Fixed student portal Join Class button colour from black (`#111827`) to orange (`#FF8303`)
 
@@ -1185,7 +1213,7 @@ All three portals now have a cohesive, professional look. The gradient top band 
 - Symptom: Logo appeared tiny and faded on the orange header
 - Cause: Original SVG had a white background rect baked in covering the full 394×225 canvas, leaving the actual logo content occupying a small fraction of the rendered area
 - Fix: Stripped the white background rect and rewrote the SVG with a cropped viewBox (`28 26 348 172`) tightly around the actual content, all fills set to white
-- Lesson: Always check SVG viewBox and background rects before placing a logo on a coloured background — dead space in the viewBox causes the logo to render smaller than expected
+- Lesson: Always check SVG viewBox and background rects before placing a logo on a coloured background - dead space in the viewBox causes the logo to render smaller than expected
 
 **Issue 2**
 - Symptom: Multiple logo approaches tried (outlined stroke, pill background, white version) all looked poor on the orange header at various sizes
@@ -1201,7 +1229,7 @@ All three portals now have a cohesive, professional look. The gradient top band 
 
 **Issue 4**
 - Symptom: Admin portal header still showed plain text after logo update commands
-- Cause: The admin header lives in `AdminLayoutClient.tsx` not a separate `TopHeader` component — regex replacement targeted the wrong file initially
+- Cause: The admin header lives in `AdminLayoutClient.tsx` not a separate `TopHeader` component - regex replacement targeted the wrong file initially
 - Fix: Located the correct file path `src/app/(admin)/AdminLayoutClient.tsx`, added `Image` import, replaced the text span with an `Image` tag
 - Lesson: Always confirm which component owns the header for each portal before writing replacement commands
 
@@ -1215,9 +1243,9 @@ All three portals now display the official LinguaLink Online logo in the top hea
 
 ### What was built
 
-- **ChatWidget** - built a floating Intercom-style chat bubble (fixed bottom-right) that appears on every page of both the teacher and student portals. The widget has two tabs: Messages (pre-connected to Shannon's admin account) and FAQ (portal-specific content). Teacher and student portals pass their own server actions as props, keeping the component fully portal-agnostic. FAQ content is stored in named arrays (`TEACHER_FAQS`, `STUDENT_FAQS`) at the top of the file - The client can update the wording without touching component code.
+- **ChatWidget** - built a floating Intercom-style chat bubble (fixed bottom-right) that appears on every page of both the teacher and student portals. The widget has two tabs: Messages (pre-connected to the client's admin account) and FAQ (portal-specific content). Teacher and student portals pass their own server actions as props, keeping the component fully portal-agnostic. FAQ content is stored in named arrays (`TEACHER_FAQS`, `STUDENT_FAQS`) at the top of the file - The client can update the wording without touching component code.
 - **What's New** - wired the RightPanel What's New section to real announcement data fetched and filtered in the layout. An orange badge shows the count when active announcements exist.
-- **Teacher RightPanel next class** - replaced the placeholder countdown with real data fetched from the `lessons` table. Now displays "Next class from Xh Xm Xs", the date and time range, and the student name — matching the LearnCube reference style. Join Class button appears 15 minutes before the class start time.
+- **Teacher RightPanel next class** - replaced the placeholder countdown with real data fetched from the `lessons` table. Now displays "Next class from Xh Xm Xs", the date and time range, and the student name - matching the LearnCube reference style. Join Class button appears 15 minutes before the class start time.
 - **Message bubble redesign** - sent messages are #FF8303 orange with white text; received messages are #1F2937 dark charcoal with white text. Applied consistently across the teacher MessagesClient, student StudentMessagesClient, and the ChatWidget.
 - **Read ticks** - added WhatsApp-style read receipts to both MessagesClient and StudentMessagesClient. Single grey tick = sent. Double orange tick = read. Ticks update in real time via Supabase Realtime UPDATE subscriptions without a page refresh.
 - **Composer fix** - removed the box-within-a-box issue in the Tiptap editor by adding a scoped `<style>` tag that suppresses ProseMirror's own default focus border. One clean rounded container remains.
@@ -1230,7 +1258,7 @@ All three portals now display the official LinguaLink Online logo in the top hea
 - Symptom: Student could not send messages - "new row violates row-level security policy for table messages"
 - Cause: The INSERT policy on messages only covered teachers (auth.uid() = sender_id). Students have a different auth structure - their sender_id is students.id, not auth.uid()
 - Fix: Added a dedicated INSERT policy using `SELECT id FROM students WHERE auth_user_id = auth.uid()` to resolve the student's sender_id correctly
-- Lesson: Any RLS policy on a shared table must account for both auth patterns — teacher (profiles) and student (students with auth_user_id)
+- Lesson: Any RLS policy on a shared table must account for both auth patterns - teacher (profiles) and student (students with auth_user_id)
 
 **Issue 2**
 - Symptom: Read ticks were not updating in real time on either portal despite the UPDATE subscription being in place
@@ -1242,11 +1270,11 @@ All three portals now display the official LinguaLink Online logo in the top hea
 - Symptom: Read ticks updated for students but not for teachers even after REPLICA IDENTITY FULL was set
 - Cause: The SELECT policy "Users see their own messages" only matched `auth.uid() = sender_id`, which works for teachers but not students. When Supabase tried to return the updated row to the student's real-time subscription, the SELECT policy blocked it
 - Fix: Dropped and rewrote both the SELECT and UPDATE policies to include the student auth lookup pattern on sender_id, receiver_id, and the admin role check
-- Lesson: REPLICA IDENTITY FULL is necessary but not sufficient — the SELECT policy must also permit the subscribing user to read the updated row or the event is silently dropped
+- Lesson: REPLICA IDENTITY FULL is necessary but not sufficient - the SELECT policy must also permit the subscribing user to read the updated row or the event is silently dropped
 
 ### Session result
 
-The Admin Controls phase is complete. Both portals now have a fully working floating chat widget connected to Shannon's admin account, with an FAQ tab that can be updated without code changes. The messaging system is polished across all three portals - consistent bubble colours, real-time read receipts, and a clean composer. RLS policies on the messages table now correctly cover every user type. The project is ready to move into the Step 14 hardening pass.
+The Admin Controls phase is complete. Both portals now have a fully working floating chat widget connected to the client's admin account, with an FAQ tab that can be updated without code changes. The messaging system is polished across all three portals - consistent bubble colours, real-time read receipts, and a clean composer. RLS policies on the messages table now correctly cover every user type. The project is ready to move into the Step 14 hardening pass.
 
 
 ---
@@ -1302,7 +1330,7 @@ The Data Exports page is now fully usable in production. The client can filter a
 
 ### What was built
 
-- **Step 12: Tasks** - Full internal task management system for Shannon and staff
+- **Step 12: Tasks** - Full internal task management system for the client and staff
   - `GET /api/admin/tasks` - filterable task list with resolved names for assigned user, linked entity, and creator
   - `POST /api/admin/tasks` - create task with validation
   - `PATCH /api/admin/tasks/[id]` - complete, reopen, or edit a task
@@ -1329,7 +1357,7 @@ No issues this session. All features worked on first test.
 
 ### Session result
 
-Admin Portal Steps 12 and 13 are complete and tested. The Tasks system is fully functional - Shannon can create, assign, prioritise, complete, and delete internal follow-up tasks, with the TasksMini component ready to embed into teacher and student detail pages when those are revisited. All six Data Exports produce correct CSVs and download cleanly in the browser. The Admin Portal now has one step remaining: Step 14 Settings, followed by the Admin Controls phase and the final hardening pass before go-live.
+Admin Portal Steps 12 and 13 are complete and tested. The Tasks system is fully functional - the client can create, assign, prioritise, complete, and delete internal follow-up tasks, with the TasksMini component ready to embed into teacher and student detail pages when those are revisited. All six Data Exports produce correct CSVs and download cleanly in the browser. The Admin Portal now has one step remaining: Step 14 Settings, followed by the Admin Controls phase and the final hardening pass before go-live.
 
 ---
 
@@ -1369,17 +1397,17 @@ Once that's pushed, start a fresh chat and paste the handover brief from that se
 - Symptom: Announcement form returning `null value in column "created_by" violates not-null constraint`
 - Cause: `AnnouncementForm.tsx` was not fetching the current user ID and not including `created_by` in the insert payload
 - Fix: Added `useEffect` to fetch the current auth user on mount via `supabase.auth.getUser()` and included `created_by: currentUserId` in the payload
-- Lesson: Always include required non-null database columns in insert payloads. Client components cannot access the server session directly — must use `supabase.auth.getUser()` on the browser client.
+- Lesson: Always include required non-null database columns in insert payloads. Client components cannot access the server session directly - must use `supabase.auth.getUser()` on the browser client.
 
 **Issue 3**
-- Symptom: Announcement banner blending into the orange top header — visually indistinct
+- Symptom: Announcement banner blending into the orange top header - visually indistinct
 - Cause: Banner used the same `#FF8303` background as the header
-- Fix: Changed banner style to dark charcoal background (`#1f2937`) with orange left border (`4px solid #FF8303`) — clearly distinct from header while remaining on-brand
+- Fix: Changed banner style to dark charcoal background (`#1f2937`) with orange left border (`4px solid #FF8303`) - clearly distinct from header while remaining on-brand
 - Lesson: Notification banners directly below a coloured header must use a contrasting background to be readable and visually intentional.
 
 ### Session result
 
-The MS Graph API integration is fully operational after resolving a Microsoft 365 licence constraint — the Calendar Events endpoint is now used instead of the dedicated onlineMeetings endpoint, producing identical Teams join URLs with no impact on the rest of the codebase. The organiser account (`Admin@LingualinkOnline.onmicrosoft.com`) can be swapped to a dedicated shared mailbox at any time by changing a single constant in `graph.ts`. Admin Portal Step 11 (Announcements) is complete and fully tested — admins can create, edit, toggle, and delete announcements, banners appear correctly on both the Teacher and Student portals, and dismissals are persisted per user. Remaining Admin Portal steps are 12 (Tasks), 13 (Exports), 14 (Settings), and 15 (Testing & Hardening).
+The MS Graph API integration is fully operational after resolving a Microsoft 365 licence constraint - the Calendar Events endpoint is now used instead of the dedicated onlineMeetings endpoint, producing identical Teams join URLs with no impact on the rest of the codebase. The organiser account (`Admin@LingualinkOnline.onmicrosoft.com`) can be swapped to a dedicated shared mailbox at any time by changing a single constant in `graph.ts`. Admin Portal Step 11 (Announcements) is complete and fully tested - admins can create, edit, toggle, and delete announcements, banners appear correctly on both the Teacher and Student portals, and dismissals are persisted per user. Remaining Admin Portal steps are 12 (Tasks), 13 (Exports), 14 (Settings), and 15 (Testing & Hardening).
 
 ---
 
@@ -1447,13 +1475,13 @@ Admin Portal Step 9 is fully complete. The Billing section gives the client full
 
 **Issue 1**
 - Symptom: Reports list showed "No reports match these filters" despite the right panel showing 3 flagged reports
-- Cause: Three-level nested Supabase join (`reports → lessons → students`) causes silent empty results — Supabase returns no rows without any error when a join is nested this deeply
-- Fix: Split into two queries — Query 1 fetches reports + lessons + teacher profile (two levels), Query 2 fetches students by their IDs collected from Query 1 results using `.in('id', studentIds)`
+- Cause: Three-level nested Supabase join (`reports → lessons → students`) causes silent empty results - Supabase returns no rows without any error when a join is nested this deeply
+- Fix: Split into two queries - Query 1 fetches reports + lessons + teacher profile (two levels), Query 2 fetches students by their IDs collected from Query 1 results using `.in('id', studentIds)`
 - Lesson: Never nest Supabase joins more than two levels deep. Always use the two-query pattern when a student or third entity needs to be resolved
 
 **Issue 2**
 - Symptom: API route returned 500 with `column lessons_1.start_time does not exist`
-- Cause: The `lessons` table uses `scheduled_at`, not `start_time` — assumed the wrong column name without verifying schema first
+- Cause: The `lessons` table uses `scheduled_at`, not `start_time` - assumed the wrong column name without verifying schema first
 - Fix: Queried `information_schema.columns` for the `lessons` table, confirmed correct column name, updated all 7 files
 - Lesson: Always run the schema verification query before writing any database-connected code. The `lessons` table uses `scheduled_at` (not `start_time`) and `teams_join_url` (not `teams_link`)
 
@@ -1486,10 +1514,10 @@ Admin Portal Step 8 is fully complete. The Reports section gives the client full
 
 ### Break/Fix Log
 Issue 1: Class detail page threw "Failed to parse URL from undefined" / Server components were fetching from the API using NEXT_PUBLIC_SITE_URL which is not set in dev / Replaced API fetch with direct Supabase queries in both detail and edit server components / Always query Supabase directly in server components - never self-fetch API routes
-Issue 2: Cancel modal confirmed but class status did not update / RLS had no UPDATE policy covering admin users — Supabase silently updated 0 rows and returned 200 / Added "Admins can update lessons" RLS policy / Always audit UPDATE policies separately from SELECT - missing UPDATE policies fail silently with no error
+Issue 2: Cancel modal confirmed but class status did not update / RLS had no UPDATE policy covering admin users - Supabase silently updated 0 rows and returned 200 / Added "Admins can update lessons" RLS policy / Always audit UPDATE policies separately from SELECT - missing UPDATE policies fail silently with no error
 
 ### Session result
-Admin Portal Step 7 complete. The Classes section gives the client full visibility and control over all lessons across all teachers — list view with filters, manual booking flow, class detail with cancellation, and edit capabilities with no time restrictions.
+Admin Portal Step 7 complete. The Classes section gives the client full visibility and control over all lessons across all teachers - list view with filters, manual booking flow, class detail with cancellation, and edit capabilities with no time restrictions.
 
 ---
 
@@ -1540,7 +1568,7 @@ Issue 3: Duplicate file in Downloads causing stale copy to be deployed / Symptom
 Issue 4: Admin portal content not centred / Symptom: all admin pages rendered left-aligned instead of centred like the teacher and student portals. Cause: `<main>` in `AdminLayoutClient.tsx` had no max-width or margin auto. Fix: wrapped `{children}` in `<div className="max-w-6xl mx-auto">`. Lesson: layout-level centring belongs in the shell, not individual pages.
 
 ### Session result
-Student Management for the Admin Portal is now partially complete. The student list, create student flow, and student detail page are all working end to end. A new student can be created with full personal, learning, training, and notes data — the auth user, student row, training record, and teacher assignments all save correctly in one API call. The student detail page shows all data across six tabs, and the Hours Log tab supports adding and removing hours with full transaction history. The next session will continue with Edit Student and then move on to the remaining Admin Portal steps.
+Student Management for the Admin Portal is now partially complete. The student list, create student flow, and student detail page are all working end to end. A new student can be created with full personal, learning, training, and notes data - the auth user, student row, training record, and teacher assignments all save correctly in one API call. The student detail page shows all data across six tabs, and the Hours Log tab supports adding and removing hours with full transaction history. The next session will continue with Edit Student and then move on to the remaining Admin Portal steps.
 
 ---
 
@@ -1566,7 +1594,7 @@ Issue 1: Supabase trigger auto-creates profile row on auth user creation / Profi
 
 Issue 2: Clicking teacher row caused "Router action dispatched before initialization" error / `onClick` with `router.push()` fired before Next.js router was ready / Replaced row onClick with a `Link` component wrapping the teacher name / Use `Link` for navigation in tables, not `router.push()` on row click.
 
-Issue 3: Edit form save failed with PGRST204 - columns not found / `date_of_birth`, `title`, `gender`, `nationality`, `phone`, `qualifications` did not exist on the profiles table / Added all missing columns via `ALTER TABLE` in Supabase SQL Editor / Always verify column existence in Supabase before writing any update payload — schema additions from the brief are not automatically applied.
+Issue 3: Edit form save failed with PGRST204 - columns not found / `date_of_birth`, `title`, `gender`, `nationality`, `phone`, `qualifications` did not exist on the profiles table / Added all missing columns via `ALTER TABLE` in Supabase SQL Editor / Always verify column existence in Supabase before writing any update payload - schema additions from the brief are not automatically applied.
 
 ### Session result
 Admin Portal Step 4 is complete. The full teacher management flow is working: the client can view all teachers in a searchable list, create new teacher accounts (which triggers a welcome email with a password reset link), view full teacher detail across four tabs, edit all profile fields, and deactivate teachers with a soft delete. All profile changes are recorded in the teacher_history_log for audit purposes. Admin-only fields (hourly rate, VAT, date of birth, admin notes, follow-up) are clearly labelled and will be protected at the RLS level in the Step 15 hardening pass.
@@ -1619,7 +1647,7 @@ All database schema updates for the Admin Portal are in place. Existing tables e
 
 ### What was built
 - `src/lib/microsoft/graph.ts` - MS Graph API service with three functions: `createTeamsMeeting`, `updateTeamsMeeting`, `cancelTeamsMeeting`. All meetings created under a shared M365 organiser account tied to the client's tenant.
-- `src/app/api/student/book/route.ts` - stub replaced with real Graph API call. Teams join URL now included in confirmation emails to both student and teacher. Booking proceeds safely if Graph API fails — lesson is saved with `TEAMS_LINK_PENDING` and Sentry captures the error.
+- `src/app/api/student/book/route.ts` - stub replaced with real Graph API call. Teams join URL now included in confirmation emails to both student and teacher. Booking proceeds safely if Graph API fails - lesson is saved with `TEAMS_LINK_PENDING` and Sentry captures the error.
 - `src/proxy.ts` - admin route protection added. Checks `profiles.role === 'admin'`; redirects unauthenticated users to `/login` and non-admin users to `/upcoming-classes`.
 - `src/app/(admin)/layout.tsx` - admin layout server component with auth and role gate.
 - `src/app/(admin)/AdminLayoutClient.tsx` - full admin shell: dark sidebar, orange header, right panel with placeholder widgets, mobile hamburger menu, Back to Teacher Portal and Log Out links.
@@ -1627,14 +1655,14 @@ All database schema updates for the Admin Portal are in place. Existing tables e
 - Installed `@microsoft/microsoft-graph-client` and `@azure/identity` packages.
 
 ### Break/Fix Log
-Issue 1: middleware.ts conflict / Cause: Project uses `proxy.ts` instead of standard `middleware.ts` — both cannot coexist. / Fix: Deleted `middleware.ts` and merged admin route protection into existing `proxy.ts`. / Lesson: Always check for `proxy.ts` before creating `middleware.ts` in this project.
+Issue 1: middleware.ts conflict / Cause: Project uses `proxy.ts` instead of standard `middleware.ts` - both cannot coexist. / Fix: Deleted `middleware.ts` and merged admin route protection into existing `proxy.ts`. / Lesson: Always check for `proxy.ts` before creating `middleware.ts` in this project.
 
 Issue 2: Graph API - wrong tenant ID / Cause: `AZURE_TENANT_ID` and `AZURE_CLIENT_ID` were swapped in `.env.local`. / Fix: Corrected both values in `.env.local` using the app registration Overview page. / Lesson: Both values are UUIDs and look identical - always verify against the Azure portal labels, not position on the page.
 
 Issue 3: Graph API - 404 UnknownError on onlineMeetings endpoint / Cause: The client's Microsoft 365 Business Basic subscription was purchased today and the license has not yet propagated to the organiser account. Microsoft can take up to 24 hours to activate. / Fix: Deferred - code is correct. Retest tomorrow once license is active. / Lesson: New M365 subscriptions are not instant - build the stub fallback pattern so the app never breaks while waiting.
 
 ### Session result
-Admin Portal Step 1 is complete and the MS Graph API is wired in across the student booking flow. Authentication is confirmed working - the 404 error on meeting creation is a license propagation delay, not a code issue. The admin portal shell loads correctly for the client's admin account and redirects all other users appropriately. Both the admin portal and Graph API work are committed to the dev branch. Next session starts with Admin Portal Step 2 — database schema updates.
+Admin Portal Step 1 is complete and the MS Graph API is wired in across the student booking flow. Authentication is confirmed working - the 404 error on meeting creation is a license propagation delay, not a code issue. The admin portal shell loads correctly for the client's admin account and redirects all other users appropriately. Both the admin portal and Graph API work are committed to the dev branch. Next session starts with Admin Portal Step 2 - database schema updates.
 
 ---
 
@@ -1747,9 +1775,9 @@ Student Portal Step 7 is complete. Students can now view all past classes in a s
 - Updated Join Class label text to "available 10 min before"
 
 ### Break/Fix Log
-Issue 1: Book a Class button redirecting back to My Classes / Cause: training_teachers table had no RLS SELECT policy — Supabase join returned empty array, page redirected as safety measure / Fix: Added SELECT policy with `true` on training_teachers / Lesson: Always audit RLS policies on junction tables, not just main tables
+Issue 1: Book a Class button redirecting back to My Classes / Cause: training_teachers table had no RLS SELECT policy - Supabase join returned empty array, page redirected as safety measure / Fix: Added SELECT policy with `true` on training_teachers / Lesson: Always audit RLS policies on junction tables, not just main tables
 
-Issue 2: profiles table blocked student from reading teacher data / Cause: Only "Users can view own profile" SELECT policy existed — students couldn't read teacher profile rows / Fix: Added "Students can view teacher profiles" SELECT policy with `true` / Lesson: Teacher profiles are not sensitive - any authenticated user should be able to read them
+Issue 2: profiles table blocked student from reading teacher data / Cause: Only "Users can view own profile" SELECT policy existed - students couldn't read teacher profile rows / Fix: Added "Students can view teacher profiles" SELECT policy with `true` / Lesson: Teacher profiles are not sensitive - any authenticated user should be able to read them
 
 Issue 3: Booking confirmation returning 500 / Cause: lessons table had no INSERT policy for students / Fix: Added "Students can insert their own lessons" INSERT policy with `true`
 
@@ -1830,7 +1858,7 @@ enforcement is in place. Booking flow (Step 6) is next.
 - `src/app/(student-auth)/student/login/page.tsx` - student login page; Lingualink Orange branding, error display, forgot password link, teacher portal redirect at bottom
 - `src/app/(student-auth)/student/forgot-password/actions.ts` - sends Supabase password reset email with redirect to `/student/reset-password`; always returns success regardless of whether email exists (security best practice)
 - `src/app/(student-auth)/student/forgot-password/page.tsx` - forgot password page with success state
-- `src/app/(student-auth)/student/reset-password/page.tsx` - reset password page; client component that listens for Supabase `PASSWORD_RECOVERY` event before showing form; handles first-time password setup for new students Shannon invites
+- `src/app/(student-auth)/student/reset-password/page.tsx` - reset password page; client component that listens for Supabase `PASSWORD_RECOVERY` event before showing form; handles first-time password setup for new students the client invites
 - `src/proxy.ts` - updated to exclude `/student/forgot-password` and `/student/reset-password` from auth protection; removed authenticated-student redirect that was causing a redirect loop
 - `src/app/(student)/student/layout.tsx` - added `is_active` check; deactivated students redirected to login even with a valid session
 - `src/components/student/layout/StudentLeftNav.tsx` - corrected nav colours to match teacher portal (white background, grey border, dark text)
@@ -1850,7 +1878,7 @@ Issue 5: `StudentRightPanel.tsx` overwritten with forgot-password page code / Ca
 Issue 6: Student portal nav rendered with black background (#1a1a1a) / Cause: `StudentLeftNav.tsx` was created in Step 1 with a dark sidebar - colour consistency rule was not yet established / Fix: Updated to white background with grey border matching teacher portal; colour rule now saved to memory and applies to all future portals
 
 ### Session result
-Student Portal Step 2 is complete. The authentication system is fully functional — students can log in, reset their password, and set a new password via email link. The role check correctly blocks teachers from accessing the student portal. A test student account was created in Supabase to verify all flows. The student portal shell now matches the teacher portal colour scheme exactly. A hard colour consistency rule has been saved to memory and applies to all future portal components including the Admin portal.
+Student Portal Step 2 is complete. The authentication system is fully functional - students can log in, reset their password, and set a new password via email link. The role check correctly blocks teachers from accessing the student portal. A test student account was created in Supabase to verify all flows. The student portal shell now matches the teacher portal colour scheme exactly. A hard colour consistency rule has been saved to memory and applies to all future portal components including the Admin portal.
 
 ---
 
@@ -1859,7 +1887,7 @@ Student Portal Step 2 is complete. The authentication system is fully functional
 ### What was built
 - Updated `src/proxy.ts` to protect all `/student/*` routes - unauthenticated users are redirected to `/student/login`
 - Created route group `src/app/(student)/student/` with `layout.tsx` - validates session, fetches student record by `auth_user_id`, and renders the three-panel shell
-- Created route group `src/app/(student-auth)/student/login/` with stub `page.tsx` — placeholder replaced in Step 2
+- Created route group `src/app/(student-auth)/student/login/` with stub `page.tsx` - placeholder replaced in Step 2
 - Created placeholder `page.tsx` files for all 6 student nav pages: `my-classes`, `past-classes`, `progress`, `messages`, `study`, `account`
 - Created `src/components/student/layout/StudentLeftNav.tsx` - dark sidebar with orange active state using inline style props (Tailwind v4 pattern)
 - Created `src/components/student/layout/StudentTopHeader.tsx` - orange header bar with greeting and profile photo linking to My Account
@@ -1883,7 +1911,7 @@ Student Portal Step 1 is complete. The shell is in place - the three-panel layou
 - `src/app/(dashboard)/account/AccountClient.tsx` - full My Account page with four tabs: General Info, Professional Info, Useful Resources, Student Feedback
 - `resources` table - admin-managed useful links with RLS policies (all authenticated users read, admin manages)
 - `reviews` table - student feedback and star ratings per teacher with RLS policies
-- `avatars` Supabase Storage bucket — public bucket for profile photos with per-user upload policies
+- `avatars` Supabase Storage bucket - public bucket for profile photos with per-user upload policies
 - Profile photo upload - validates type (JPG/PNG/WebP) and size (max 2MB), stores at `avatars/{userId}/avatar.{ext}`, cache-busts URL on upload
 - Tag input component - keyboard-friendly add/remove for teaching and speaking languages (stored as arrays)
 - Timezone selector - drives all class time display for the teacher
@@ -2013,7 +2041,7 @@ Step 11 is complete. The study sheets library is fully functional - the client c
 - Lesson: When wrapping Tiptap in a styled container, always forward clicks to the editor
 
 **Issue 3**
-- Symptom: Tiptap warning — duplicate extension names for 'underline'
+- Symptom: Tiptap warning - duplicate extension names for 'underline'
 - Cause: StarterKit includes its own underline extension by default
 - Fix: Added StarterKit.configure({ underline: false }) to disable the built-in one
 - Lesson: When adding individual Tiptap extensions, always check if StarterKit already includes them and disable the duplicate
@@ -2025,7 +2053,7 @@ Step 11 is complete. The study sheets library is fully functional - the client c
 - Lesson: Never use toLocaleTimeString() in components that render on both server and client - locale differences cause hydration failures
 
 ### Session result
-Built the full in-portal messaging system and wired up the Resend email layer in a single session. Teachers can start conversations with students, send rich text messages with bold, italic, and underline formatting, and see their full message history with real-time updates. The unread badge in the left nav reflects live data from Supabase. On every new message, the recipient receives a branded Lingualink Online email with a direct link to the Messages page — confirmed working via the Resend dashboard. The same email template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
+Built the full in-portal messaging system and wired up the Resend email layer in a single session. Teachers can start conversations with students, send rich text messages with bold, italic, and underline formatting, and see their full message history with real-time updates. The unread badge in the left nav reflects live data from Supabase. On every new message, the recipient receives a branded Lingualink Online email with a direct link to the Messages page - confirmed working via the Resend dashboard. The same email template infrastructure will be reused for class reminders, report overdue alerts, and invoice reminders in later steps.
 
 ---
 
@@ -2132,7 +2160,7 @@ Fixed the CI/CD pipeline which had been failing since the Class Reports build. R
 - Lesson: Never manually edit inside globals.css - always replace the whole file to avoid bracket mismatches
 
 ### Session result
-Built the complete Class Reports feature including the reports list page, full report form with CEFR level assessment, automatic 12-hour deadline flagging via pg_cron, and admin reopen functionality. All flows tested end to end — pending reports appear correctly, the form submits and redirects, flagging works on demand and will run automatically every 15 minutes in production, and admin reopen moves a flagged report back to pending instantly. Also switched the portal font from Poppins to Inter at 15px base size, significantly improving readability and the overall professional feel of the UI.
+Built the complete Class Reports feature including the reports list page, full report form with CEFR level assessment, automatic 12-hour deadline flagging via pg_cron, and admin reopen functionality. All flows tested end to end - pending reports appear correctly, the form submits and redirects, flagging works on demand and will run automatically every 15 minutes in production, and admin reopen moves a flagged report back to pending instantly. Also switched the portal font from Poppins to Inter at 15px base size, significantly improving readability and the overall professional feel of the UI.
 
 
 ---
@@ -2224,7 +2252,7 @@ Built the first real feature page of the LinguaLink portal - the Upcoming Classe
 ## Session 4 - 1 April 2026 - Brand Colours, Layout Shell & Navigation
 
 ### What was built
-- Brand colours registered in `src/app/globals.css` under the `@theme inline` block using Tailwind v4 syntax — `brand-orange`, `brand-orange-light`, `brand-red`, `brand-yellow`, `brand-yellow-light`, `brand-grey`
+- Brand colours registered in `src/app/globals.css` under the `@theme inline` block using Tailwind v4 syntax - `brand-orange`, `brand-orange-light`, `brand-red`, `brand-yellow`, `brand-yellow-light`, `brand-grey`
 - Dashboard layout created at `src/app/(dashboard)/layout.tsx` - fetches the authenticated user's profile from Supabase server-side and passes name, photo URL, and role down to all layout components. Automatically wraps every page inside the `(dashboard)` route group
 - Left navigation component created at `src/components/layout/LeftNav.tsx` - all 9 nav items with icons, active route highlighted in Lingualink orange, Admin Controls visible to admin role only, unread badge on Messages, Log Out button pinned to the bottom
 - Top header component created at `src/components/layout/TopHeader.tsx` - logo placeholder on the left, first name greeting and profile photo on the right, photo links to My Account
@@ -2263,10 +2291,10 @@ Brand colours registered and available across the entire project, layout shell f
 ### What was built
 - Supabase browser client created at `src/lib/supabase/client.ts`
 - Supabase server client created at `src/lib/supabase/server.ts`
-- Middleware created at `src/middleware.ts` — refreshes user sessions on every request and handles route protection
+- Middleware created at `src/middleware.ts` - refreshes user sessions on every request and handles route protection
 - Full database schema written and executed in Supabase SQL Editor - 13 tables created: `profiles`, `students`, `trainings`, `training_teachers`, `lessons`, `reports`, `study_sheets`, `exercises`, `assignments`, `availability_templates`, `availability_overrides`, `invoices`, `messages`
 - Row Level Security (RLS) enabled on all 13 tables with policies ensuring teachers can only access their own data
-- Automatic profile creation trigger set up — a profile row is created in the `profiles` table whenever a new auth user is added
+- Automatic profile creation trigger set up - a profile row is created in the `profiles` table whenever a new auth user is added
 - Login page built at `src/app/(auth)/login/page.tsx` with Lingualink branding - orange button, Poppins font, grey background
 - Server action for authentication created at `src/app/(auth)/login/actions.ts`
 - Placeholder dashboard page created at `src/app/(dashboard)/dashboard/page.tsx`
@@ -2342,7 +2370,7 @@ Next.js application successfully initialised with the full agreed stack, folder 
 ## Session 1 - 31 March 2026 - Environment Setup
 
 ### What was built
-- GitHub repository created at github.com/LeopoldTydtgat/lingualink-lms with README, .gitignore, and MIT license
+- Created the GitHub repository with README, .gitignore, and MIT license
 - Main branch protected, dev branch created as the daily working branch
 - Git configured locally with name, email, and SSH authentication to GitHub
 - Project cloned to `C:\Projects\lingualink-lms` - intentionally outside OneDrive
