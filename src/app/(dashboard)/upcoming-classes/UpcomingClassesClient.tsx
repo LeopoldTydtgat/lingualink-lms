@@ -87,12 +87,16 @@ function Countdown({ startsAt }: { startsAt: string }) {
         setTimeLeft('Starting now')
         return
       }
-      const hours = Math.floor(diff / 1000 / 60 / 60)
-      const minutes = Math.floor((diff / 1000 / 60) % 60)
-      const seconds = Math.floor((diff / 1000) % 60)
-      setTimeLeft(
-        hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's'
-      )
+      const totalSeconds = Math.floor(diff / 1000)
+      const days = Math.floor(totalSeconds / 86400)
+      const hours = Math.floor((totalSeconds % 86400) / 3600)
+      const minutes = Math.floor((totalSeconds % 3600) / 60)
+      const seconds = totalSeconds % 60
+      if (days > 0) {
+        setTimeLeft(days + 'd ' + hours + 'h ' + String(minutes).padStart(2, '0') + 'm')
+      } else {
+        setTimeLeft(hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's')
+      }
     }
     update()
     const interval = setInterval(update, 1000)
@@ -426,7 +430,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             ) : (
               <>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
-                  Request reschedule
+                  Cancel class & request reschedule
                 </h2>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
                   Class with {rescheduleTarget.student.full_name} — {mounted ? `${formatDate(rescheduleTarget.starts_at, teacherTimezone)}, ${formatTime(rescheduleTarget.starts_at, teacherTimezone)}` : ''}
@@ -435,8 +439,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   Message to student <span style={{ color: '#ef4444' }}>*</span>
                 </p>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '10px', lineHeight: 1.5 }}>
-                  Explain why you need to reschedule. Your student will need to book a new slot themselves.
-                  This message is required before the class can be cancelled.
+                  Write a message to your student explaining why. The class will be cancelled and they will book a new time themselves. This message is required.
                 </p>
                 <textarea
                   value={rescheduleMessage}
@@ -472,7 +475,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                       color: 'white', border: 'none', cursor: rescheduleLoading ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    {rescheduleLoading ? 'Sending...' : 'Send & cancel class'}
+                    {rescheduleLoading ? 'Sending...' : 'Send message & cancel class'}
                   </button>
                 </div>
               </>
