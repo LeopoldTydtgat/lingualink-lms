@@ -35,7 +35,7 @@ export async function studentLoginAction(formData: FormData) {
   // ── Verify the user has a student account ───────────────────────────────────
   const { data: student, error: studentError } = await supabase
     .from('students')
-    .select('id, is_active, status')
+    .select('id, status')
     .eq('auth_user_id', authData.user.id)
     .maybeSingle()
 
@@ -45,7 +45,7 @@ export async function studentLoginAction(formData: FormData) {
     return { error: 'No student account found for this email address. If you are a teacher, please log in at the teacher portal.' }
   }
 
-  if (!student.is_active || student.status === 'former' || student.status === 'on_hold') {
+  if (student.status === 'former' || student.status === 'on_hold') {
     await supabase.auth.signOut()
     const cookieStore = await cookies()
     cookieStore.delete('ll_status_checked_at')
