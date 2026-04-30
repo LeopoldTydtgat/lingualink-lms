@@ -407,7 +407,7 @@ export default function StudentDetailClient({
   const [revokeError, setRevokeError] = useState<string | null>(null)
 
   const id = student.id as string
-  const fullName = student.full_name as string
+  const fullName = (student.full_name as string | null) || (student.email as string | null) || 'this account'
   const photoUrl = student.photo_url as string | null
   const status = student.status as string | null
 
