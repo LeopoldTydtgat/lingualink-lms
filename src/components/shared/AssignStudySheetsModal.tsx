@@ -226,7 +226,7 @@ export default function AssignStudySheetsModal({
         </div>
 
         {/* Sheet list */}
-        <div className="flex-1 overflow-y-auto px-6 py-3">
+        <div className="flex-1 overflow-y-auto px-6 py-3 thin-scroll">
           {loading ? (
             <p className="text-sm text-gray-400 text-center py-8">Loading...</p>
           ) : filtered.length === 0 ? (

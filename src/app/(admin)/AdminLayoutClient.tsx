@@ -215,7 +215,7 @@ export default function AdminLayoutClient({
           />
         </Link>
       </div>
-      <nav className="flex-1 px-3 pt-6 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 pt-6 space-y-1 overflow-y-auto thin-scroll">
         {navItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
@@ -298,7 +298,7 @@ export default function AdminLayoutClient({
 
         {/* Desktop sidebar */}
         <aside className="hidden lg:flex flex-col w-56 flex-shrink-0 bg-gray-900">
-          <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto admin-sidebar-scroll">
             {navItems.map((item) => (
               <NavLink key={item.href} item={item} />
             ))}
@@ -329,7 +329,7 @@ export default function AdminLayoutClient({
           <div className="lg:hidden fixed inset-0 z-40 flex">
             <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
             <aside className="relative flex flex-col w-56 bg-gray-900 z-50">
-              <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto">
+              <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto admin-sidebar-scroll">
                 {navItems.map((item) => (
                   <NavLink key={item.href} item={item} />
                 ))}
@@ -358,14 +358,14 @@ export default function AdminLayoutClient({
         )}
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto thin-scroll">
           <div className="max-w-6xl mx-auto">
             {children}
           </div>
         </main>
 
         {/* Right panel */}
-        <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+        <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto thin-scroll">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
             <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>At a Glance</p>

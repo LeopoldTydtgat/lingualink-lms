@@ -301,7 +301,7 @@ export default function DashboardClient({
               All reports submitted ✓
             </div>
           ) : (
-            <div className="divide-y divide-gray-50 overflow-y-auto max-h-80">
+            <div className="divide-y divide-gray-50 overflow-y-auto max-h-80 thin-scroll">
               {pendingAndFlagged.map((report) => {
                 const isFlagged = report.status === 'flagged'
                 const overdue = hoursOverdue(report)

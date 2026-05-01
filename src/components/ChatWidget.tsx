@@ -362,7 +362,7 @@ export default function ChatWidget({
           {/* Messages tab */}
           {activeTab === 'messages' && (
             <>
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50">
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
                 {!messagesLoaded ? (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-xs text-gray-400">Loading...</p>
@@ -478,7 +478,7 @@ export default function ChatWidget({
 
           {/* FAQ tab */}
           {activeTab === 'faq' && (
-            <div className="flex-1 overflow-y-auto bg-white">
+            <div className="flex-1 overflow-y-auto bg-white thin-scroll">
               {!faqsLoaded ? (
                 <div className="flex items-center justify-center h-full">
                   <p className="text-xs text-gray-400">Loading...</p>

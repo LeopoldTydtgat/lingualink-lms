@@ -193,7 +193,7 @@ function AutocompleteInput({
         </div>
       )}
       {open && suggestions.length > 0 && (
-        <div style={{
+        <div className="thin-scroll" style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
           backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '2px',

@@ -240,6 +240,7 @@ export default function TimezoneSelect({ value, onChange, className }: Props) {
       {isOpen && (
         <div
           ref={listRef}
+          className="thin-scroll"
           style={{
             position: 'absolute',
             top: '100%',

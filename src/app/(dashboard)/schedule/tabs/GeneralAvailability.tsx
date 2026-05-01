@@ -251,7 +251,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         </p>
       )}
 
-      <div ref={scrollRef} className="overflow-x-auto select-none" style={{ maxHeight: '600px', overflowY: 'auto', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
+      <div ref={scrollRef} className="overflow-x-auto select-none thin-scroll" style={{ maxHeight: '600px', overflowY: 'auto', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #E5E7EB' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
