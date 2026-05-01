@@ -11,6 +11,7 @@ function StudentLoginPageContent() {
   const [showPassword, setShowPassword] = useState(false)
   const searchParams = useSearchParams()
   const returnUrl = searchParams.get('returnUrl') ?? ''
+  const idleSignOut = searchParams.get('reason') === 'idle'
 
   function handleSubmit(formData: FormData) {
     setError(null)
@@ -52,6 +53,20 @@ function StudentLoginPageContent() {
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
             </h1>
+
+            {idleSignOut && (
+              <div style={{
+                padding: '12px 16px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: '#92400e',
+                marginBottom: '16px',
+              }}>
+                You were signed out due to inactivity.
+              </div>
+            )}
 
             {error && (
               <div style={{ backgroundColor: '#fff4f4', border: '1px solid #FD5602', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '14px', color: '#FD5602' }}>

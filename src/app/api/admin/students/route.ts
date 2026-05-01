@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
         native_language: data.native_language ?? null,
         learning_language: data.learning_language ?? null,
         current_fluency_level: data.current_fluency_level ?? null,
-        self_reported_level: null,
+        self_assessed_level: null,
         learning_goals: data.learning_goals ?? null,
         interests: data.interests ?? null,
         cancellation_policy: data.cancellation_policy,

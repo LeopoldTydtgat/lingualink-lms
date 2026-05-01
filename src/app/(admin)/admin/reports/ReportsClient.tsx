@@ -176,7 +176,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
       ) : reports.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No reports match these filters.</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto thin-scroll">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -296,7 +296,7 @@ function LiveTrace() {
       ) : lessons.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No classes found.</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto thin-scroll">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100">

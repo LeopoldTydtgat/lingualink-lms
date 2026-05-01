@@ -201,7 +201,7 @@ function MessageThread({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 thin-scroll">
         <style>{`
           .admin-msg-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
           .admin-msg-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
@@ -770,7 +770,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               <div className="px-4 py-3 border-b border-gray-100">
                 <p className="text-sm font-semibold text-gray-700">Student conversations</p>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto thin-scroll">
                 {conversations.map((conv) => {
                   const lastMsg = conv.messages[conv.messages.length - 1]
                   const isSelected = selectedConversation?.contactId === conv.contactId

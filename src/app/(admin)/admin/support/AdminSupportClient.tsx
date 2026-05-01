@@ -301,7 +301,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       {activeTab === 'conversations' && (
         <div className="flex gap-4" style={{ height: '600px' }}>
           {/* Conversation list */}
-          <div className="w-72 flex-shrink-0 border border-gray-200 rounded-lg overflow-y-auto bg-white">
+          <div className="w-72 flex-shrink-0 border border-gray-200 rounded-lg overflow-y-auto bg-white thin-scroll">
             {initialConversations.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <MessageSquare size={32} className="text-gray-200 mb-3" />
@@ -354,7 +354,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50">
+                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
                   {!messagesLoaded ? (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-xs text-gray-400">Loading...</p>

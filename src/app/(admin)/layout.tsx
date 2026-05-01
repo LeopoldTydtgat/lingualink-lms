@@ -142,12 +142,24 @@ export default async function AdminLayout({
   const unreadMessagesCount = unreadMessagesRes.count ?? 0
   const unreadSupportCount = unreadSupportRes.count ?? 0
 
+  // ── protected lesson for idle timeout — 90-min lookback catches in-progress classes ─
+  const { data: protectedLesson } = await supabase
+    .from('lessons')
+    .select('scheduled_at, duration_minutes')
+    .eq('teacher_id', profile.id)
+    .eq('status', 'scheduled')
+    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
+    .order('scheduled_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
   return (
     <AdminLayoutClient
       profile={profile}
       rightPanelStats={rightPanelStats}
       unreadMessagesCount={unreadMessagesCount}
       unreadSupportCount={unreadSupportCount}
+      protectedLesson={protectedLesson ?? null}
     >
       {children}
     </AdminLayoutClient>

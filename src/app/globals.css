@@ -143,3 +143,40 @@
   background-color: #e67300 !important;
   transition: background-color 0.18s ease;
 }
+
+/* Admin sidebar nav scrollbar - styled to match brand */
+.admin-sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #E0DFDC #111827;
+}
+.admin-sidebar-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.admin-sidebar-scroll::-webkit-scrollbar-track {
+  background: #111827;
+}
+.admin-sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: #E0DFDC;
+  border-radius: 2px;
+}
+
+/* Thin scrollbar - applies thickness only, lets browser default colours through */
+.thin-scroll {
+  scrollbar-width: thin;
+}
+.thin-scroll::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+/* FullCalendar internal scrollers - thin scrollbar (arrows remain, accepted) */
+.fc-scroller {
+  scrollbar-width: thin;
+}
+.fc-scroller::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.fc-scroller::-webkit-scrollbar-button {
+  display: none;
+}

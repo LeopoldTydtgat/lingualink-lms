@@ -262,6 +262,7 @@ function PublicProfileModal({
       onClick={onClose}
     >
       <div
+        className="thin-scroll"
         style={{
           backgroundColor: 'white',
           borderRadius: '14px',

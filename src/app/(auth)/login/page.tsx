@@ -34,6 +34,8 @@ function LoginPageContent() {
     })
   }
 
+  const idleSignOut = searchParams.get('reason') === 'idle'
+
   return (
     <>
       <style>{`html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }`}</style>
@@ -66,6 +68,20 @@ function LoginPageContent() {
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
             </h1>
+
+            {idleSignOut && (
+              <div style={{
+                padding: '12px 16px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: '#92400e',
+                marginBottom: '16px',
+              }}>
+                You were signed out due to inactivity.
+              </div>
+            )}
 
             <form action={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
