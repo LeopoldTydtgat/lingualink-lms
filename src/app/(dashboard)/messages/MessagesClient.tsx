@@ -393,7 +393,7 @@ export default function MessagesClient({
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto thin-scroll">
           {filteredContacts.length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-400">
               {contacts.length === 0
@@ -464,7 +464,7 @@ export default function MessagesClient({
             </div>
 
             {/* Message thread */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll">
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">Loading...</div>
               ) : messages.length === 0 ? (
@@ -691,7 +691,7 @@ export default function MessagesClient({
                 autoFocus
               />
             </div>
-            <div className="px-3 pb-4 max-h-72 overflow-y-auto">
+            <div className="px-3 pb-4 max-h-72 overflow-y-auto thin-scroll">
               {filteredStudents.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">No students found</p>
               ) : (

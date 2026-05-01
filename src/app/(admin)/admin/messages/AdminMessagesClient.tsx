@@ -289,7 +289,7 @@ export default function AdminMessagesClient({
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto thin-scroll">
           {filteredConversations.length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-400">
               {conversations.length === 0
@@ -373,7 +373,7 @@ export default function AdminMessagesClient({
             </div>
 
             {/* Message thread */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll">
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">
                   Loading...

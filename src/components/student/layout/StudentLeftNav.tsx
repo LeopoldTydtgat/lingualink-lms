@@ -100,7 +100,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
         </Link>
       </div>
 
-      <div style={{ flex: 1, padding: '12px 0', overflowY: 'auto', borderRight: '1px solid #E0DFDC', borderTop: 'none' }}>
+      <div className="thin-scroll" style={{ flex: 1, padding: '12px 0', overflowY: 'auto', borderRight: '1px solid #E0DFDC', borderTop: 'none' }}>
         {navItems.map((item) => {
           const isActive =
             pathname === item.href || pathname.startsWith(item.href + '/')

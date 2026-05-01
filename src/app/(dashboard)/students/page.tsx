@@ -33,7 +33,7 @@ export default async function StudentsPage() {
         id,
         full_name,
         photo_url,
-        self_reported_level
+        self_assessed_level
       ),
       profiles!trainings_teacher_id_fkey (
         id,
@@ -52,7 +52,7 @@ export default async function StudentsPage() {
     console.error('Error fetching trainings:', error)
   }
 
-  // Supabase returns nested joins as arrays â€” flatten students and profiles to single objects
+  // Supabase returns nested joins as arrays â€" flatten students and profiles to single objects
   const flatTrainings = (trainings ?? []).map(t => ({
     ...t,
     students: Array.isArray(t.students) ? t.students[0] : t.students,

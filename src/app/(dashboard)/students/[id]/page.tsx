@@ -44,7 +44,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         id,
         full_name,
         photo_url,
-        self_reported_level,
+        self_assessed_level,
         timezone
       ),
       profiles!trainings_teacher_id_fkey (

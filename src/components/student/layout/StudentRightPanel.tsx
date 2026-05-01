@@ -103,6 +103,7 @@ export default function StudentRightPanel({
     <aside
       ref={panelRef}
       onWheel={handleWheel}
+      className="thin-scroll"
       style={{
         width: '240px',
         minWidth: '240px',

@@ -119,7 +119,7 @@ export default function RightPanel({
   const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded && nextLesson != null && !BLOCKED_STATUSES.includes(nextLesson.status)
 
   return (
-    <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto" style={{ backgroundColor: '#f9fafb' }}>
+    <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#f9fafb' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}

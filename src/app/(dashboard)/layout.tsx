@@ -10,6 +10,7 @@ import RightPanel from '@/components/layout/RightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget from '@/components/ChatWidget'
+import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 
 export default async function DashboardLayout({
   children,
@@ -57,6 +58,17 @@ export default async function DashboardLayout({
       status: lessonRow.status,
     }
   }
+
+  // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
+  const { data: protectedLesson } = await supabase
+    .from('lessons')
+    .select('scheduled_at, duration_minutes')
+    .eq('teacher_id', profile?.id)
+    .eq('status', 'scheduled')
+    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
+    .order('scheduled_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
 
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
@@ -158,7 +170,7 @@ export default async function DashboardLayout({
           teacherPhotoUrl={profile?.photo_url ?? null}
         />
         <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto bg-gray-50">
+          <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
             <AnnouncementBanner
               announcements={announcements}
               userType="teacher"
@@ -187,6 +199,12 @@ export default async function DashboardLayout({
           adminPhotoUrl={adminProfile?.photo_url ?? null}
         />
       )}
+
+      <IdleTimeoutWatcher
+        nextLessonStartIso={protectedLesson?.scheduled_at ?? null}
+        nextLessonDurationMinutes={protectedLesson?.duration_minutes ?? null}
+        loginPath="/login"
+      />
     </div>
   )
 }

@@ -348,7 +348,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         </div>
 
         {/* Tab content — scrollable */}
-        <div className="overflow-y-auto flex-1 px-6 py-5">
+        <div className="overflow-y-auto flex-1 px-6 py-5 thin-scroll">
 
           {/* ── METADATA TAB ── */}
           {activeTab === 'metadata' && (

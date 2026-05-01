@@ -912,7 +912,7 @@ export default function BookingClient({
   }
 
   return (
-    <div style={{ maxWidth: '680px' }}>
+    <div style={{ maxWidth: '680px', margin: '0 auto' }}>
       {/* Page header */}
       <div style={{ marginBottom: '8px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>

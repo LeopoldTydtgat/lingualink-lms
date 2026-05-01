@@ -11,7 +11,8 @@
       "Bash(xargs grep *)",
       "Bash(npm install *)",
       "Bash(npx tsc *)",
-      "PowerShell(git push *)"
+      "PowerShell(git push *)",
+      "PowerShell(claude doctor *)"
     ]
   }
 }
