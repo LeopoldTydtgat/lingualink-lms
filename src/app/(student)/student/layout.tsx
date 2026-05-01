@@ -9,6 +9,7 @@ import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ClassReminderModal from '@/components/student/ClassReminderModal'
+import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 
 export const metadata: Metadata = {
   title: 'LinguaLink Online - Student Portal',
@@ -43,6 +44,17 @@ export default async function StudentDashboardLayout({
     .eq('student_id', student.id)
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+    .order('scheduled_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
+  const { data: protectedLesson } = await supabase
+    .from('lessons')
+    .select('scheduled_at, duration_minutes')
+    .eq('student_id', student.id)
+    .eq('status', 'scheduled')
+    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
     .limit(1)
     .maybeSingle()
@@ -134,6 +146,12 @@ export default async function StudentDashboardLayout({
 
       {/* Class reminder modal — renders on all student pages */}
       <ClassReminderModal studentId={student.id} />
+
+      <IdleTimeoutWatcher
+        nextLessonStartIso={protectedLesson?.scheduled_at ?? null}
+        nextLessonDurationMinutes={protectedLesson?.duration_minutes ?? null}
+        loginPath="/student/login"
+      />
     </div>
   )
 }

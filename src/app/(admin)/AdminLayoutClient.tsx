@@ -24,6 +24,7 @@ import {
   Menu,
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
+import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 
 interface Profile {
   id: string
@@ -32,11 +33,17 @@ interface Profile {
   photo_url: string | null
 }
 
+interface ProtectedLesson {
+  scheduled_at: string
+  duration_minutes: number | null
+}
+
 interface AdminLayoutClientProps {
   profile: Profile
   rightPanelStats: RightPanelStats
   unreadMessagesCount: number
   unreadSupportCount: number
+  protectedLesson: ProtectedLesson | null
   children: React.ReactNode
 }
 
@@ -62,6 +69,7 @@ export default function AdminLayoutClient({
   rightPanelStats,
   unreadMessagesCount,
   unreadSupportCount,
+  protectedLesson,
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
@@ -389,6 +397,12 @@ export default function AdminLayoutClient({
           )}
         </aside>
       </div>
+
+      <IdleTimeoutWatcher
+        nextLessonStartIso={protectedLesson?.scheduled_at ?? null}
+        nextLessonDurationMinutes={protectedLesson?.duration_minutes ?? null}
+        loginPath="/login"
+      />
     </div>
   )
 }
