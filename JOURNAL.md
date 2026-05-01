@@ -1,3 +1,43 @@
+## Session 75 - 1 May 2026 - Invoice Upload Window + Self-Assessed Level Consolidation
+
+### What was built
+- Layer 1 client fix: hid invoice upload/replace button on the current-month card and outside the 1st-10th window in src/app/(dashboard)/billing/BillingClient.tsx. Both gate conditions now check (isUploadWindow && !isCurrentMonth).
+- Layer 2 server enforcement: replaced the existing UPDATE RLS policy on the invoices table with one that enforces the upload window in the database. Teachers can only update invoices where billing_month equals the previous month in their timezone AND day-of-month is between 1 and 10 in their timezone. Admins retain full access.
+- Added missing storage UPDATE policy on the invoices bucket (was missing entirely; upsert: true on Replace was failing silently before this).
+- handleUpload now uses .select() to detect 0-row updates from RLS blocks and surfaces a clear error message instead of false success.
+- Added CRON_SECRET auth check to /api/keep-alive to match the rest of the cron surface.
+- Consolidated split-brain student level columns: dropped self_reported_level, kept self_assessed_level as canonical, backfilled data, renamed all 6 read sites in the teacher portal and admin create route. Updated UI label from "self-reported" to "self-assessed".
+
+### Break/Fix Log
+
+Issue 1: Current-month invoice card was showing an upload button on day 1 of the month
+Symptom: On the first of any month, teachers saw an Upload Invoice button on the running-month card (e.g. May 2026) which should not be uploadable until the month closes.
+Cause: Both render conditions for the upload and replace buttons in BillingClient.tsx checked only isUploadWindow (day 1-10) and missed an !isCurrentMonth check. The current-month invoice row exists because ensureCurrentInvoice creates it on page load to display the running total, but it should not be uploadable.
+Fix: Added && !isCurrentMonth to both gate conditions. The fallback text "Upload window opens on the 1st of next month." became reachable for the current month during the upload window.
+Lesson: A display-time card and an upload-eligible card are not the same thing. When the same data structure drives both, the eligibility check must be a separate predicate, not assumed from membership in the list.
+
+Issue 2: Replace button was failing silently after Layer 2 RLS was added
+Symptom: After adding the table-level RLS policy, replacing an existing invoice PDF returned "Upload failed. Please try again." even within the valid window.
+Cause: The error came from Supabase Storage, not the table policy. The invoices bucket had INSERT, SELECT, and DELETE policies but no UPDATE policy. upsert: true on an existing object requires UPDATE permission. The Replace flow had been working before only because no policy was actively blocking it during prior testing; the gap had always been there.
+Fix: Added a "Teachers can update own invoices" policy on storage.objects scoped to the invoices bucket and the teacher's own folder.
+Lesson: Storage policies are independent from table policies. upsert: true is INSERT plus UPDATE under the hood and needs both permissions explicitly. Audit storage policies separately whenever upsert is in play.
+
+Issue 3: Silent no-op when RLS blocks an UPDATE
+Symptom: Without client-side detection, an out-of-window upload would write the PDF to storage, then have its DB update silently blocked by RLS, and show a green success indicator to the teacher.
+Cause: The .update() call destructured only error. Supabase returns 0 rows updated with no error when RLS blocks a write.
+Fix: Switched to .update(...).select() and checked the returned array. Empty array now surfaces "Invoice upload is only allowed between the 1st and 10th of the month following the billing period."
+Lesson: For any UPDATE behind RLS, always use .select() and check the returned rows. Treating "no error" as success is unsafe.
+
+Issue 4: Split-brain on student self-assessed level
+Symptom: Teachers viewing a student's profile always saw a blank or stale self-assessed level even after the student had updated it.
+Cause: Two columns existed on the students table: self_assessed_level and self_reported_level. The student portal wrote to self_assessed_level. The teacher portal and the admin create route used self_reported_level. Data lived in different columns depending on who last touched the row.
+Fix: Backfilled self_reported_level into self_assessed_level where the latter was null. Renamed all 6 code sites that referenced self_reported_level. Dropped the self_reported_level column. Updated the UI label "Student Level (self-reported)" to "Student Level (self-assessed)" to match the brief.
+Lesson: When two near-synonym column names exist for the same concept, half the system will pick one and half will pick the other. Catch this in code review or with a single canonical types file. A grep across all read and write sites for both names is a 5-minute audit that prevents months of silent data loss.
+
+### Session result
+Two production bugs fixed end-to-end with both client and server enforcement. The invoice upload window is now defended in three layers: the UI hides the button outside the valid window, the table RLS policy blocks the DB write outside the window, and the client surfaces a clear error if a write is silently blocked. The student self-assessed level column split was a hidden data-integrity bug that had been quietly losing student input for an unknown duration; resolving it required a backfill, a code rename across 6 sites, a column drop, and a copy update. Both fixes pushed to dev (commits d8c5376 and 012e773).
+
+---
 ## Session 74 - 30 April 2026 - Billing refactor: single source of truth
 
 ### What was built
