@@ -305,13 +305,16 @@ export default function BillingClient({
       return
     }
 
-    const { error: dbError } = await supabase
+    const { data: updatedRows, error: dbError } = await supabase
       .from('invoices')
       .update({ file_path: fileName, uploaded_at: new Date().toISOString() })
       .eq('id', targetInvoice.id)
+      .select()
 
     if (dbError) {
       setUploadError('File uploaded but record update failed. Please contact admin.')
+    } else if (!updatedRows || updatedRows.length === 0) {
+      setUploadError('Invoice upload is only allowed between the 1st and 10th of the month following the billing period.')
     } else {
       setUploadSuccessId(targetInvoice.id)
       setTimeout(() => setUploadSuccessId(null), 4000)
@@ -551,7 +554,7 @@ export default function BillingClient({
                         </svg>
                         Invoice uploaded {invoice.uploaded_at ? formatDateTime(invoice.uploaded_at) : ''}
                       </div>
-                      {isUploadWindow && (
+                      {isUploadWindow && !isCurrentMonth && (
                         <button
                           onClick={() => triggerUpload(invoice.id, invoice.billing_month)}
                           disabled={isThisUploading}
@@ -561,7 +564,7 @@ export default function BillingClient({
                         </button>
                       )}
                     </>
-                  ) : isUploadWindow ? (
+                  ) : (isUploadWindow && !isCurrentMonth) ? (
                     <>
                       <button
                         onClick={() => triggerUpload(invoice.id, invoice.billing_month)}
