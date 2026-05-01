@@ -491,7 +491,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       </div>
 
       {/* Calendar */}
-      <div style={{
+      <div className="thin-scroll" style={{
         background: '#ffffff',
         borderRadius: '8px',
         padding: '16px',

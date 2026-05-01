@@ -170,7 +170,7 @@ export default async function DashboardLayout({
           teacherPhotoUrl={profile?.photo_url ?? null}
         />
         <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto bg-gray-50">
+          <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
             <AnnouncementBanner
               announcements={announcements}
               userType="teacher"

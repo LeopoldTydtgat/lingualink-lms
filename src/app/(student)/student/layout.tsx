@@ -123,7 +123,7 @@ export default async function StudentDashboardLayout({
           photoUrl={student.photo_url ?? null}
         />
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <main style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
+          <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
             <AnnouncementBanner
               announcements={announcements}
               userType="student"

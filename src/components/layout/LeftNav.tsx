@@ -100,7 +100,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
   }
 
   return (
-    <nav className="w-60 bg-white flex flex-col shrink-0 h-screen overflow-y-auto">
+    <nav className="w-60 bg-white flex flex-col shrink-0 h-screen overflow-y-auto thin-scroll">
       {/* Logo area — gradient matches header, no dividing line */}
       <div
         className="flex items-center justify-center px-4 shrink-0"
