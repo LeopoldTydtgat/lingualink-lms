@@ -168,3 +168,15 @@
   width: 4px;
   height: 4px;
 }
+
+/* FullCalendar internal scrollers - thin scrollbar (arrows remain, accepted) */
+.fc-scroller {
+  scrollbar-width: thin;
+}
+.fc-scroller::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.fc-scroller::-webkit-scrollbar-button {
+  display: none;
+}
