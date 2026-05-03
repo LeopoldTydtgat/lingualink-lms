@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, Suspense } from 'react'
+import { useState, useTransition, Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { signIn } from './actions'
@@ -15,10 +15,19 @@ import { Label } from '@/components/ui/label'
 function LoginPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
+  const [retryAfter, setRetryAfter] = useState<number>(0)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (retryAfter <= 0) return
+    const id = setInterval(() => {
+      setRetryAfter((s) => (s <= 1 ? 0 : s - 1))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [retryAfter])
 
   function handleSubmit(formData: FormData) {
     setError(null)
@@ -26,6 +35,9 @@ function LoginPageContent() {
       const result = await signIn(formData)
       if (result?.error) {
         setError(result.error)
+        if ('retryAfterSeconds' in result && typeof result.retryAfterSeconds === 'number') {
+          setRetryAfter(result.retryAfterSeconds)
+        }
         return
       }
       if (result?.success) {
@@ -128,23 +140,28 @@ function LoginPageContent() {
               </div>
 
               {error && (
-                <p style={{ fontSize: '13px', color: '#FD5602', backgroundColor: '#fff4f0', padding: '10px 14px', borderRadius: '6px', margin: 0 }}>
-                  {error}
-                </p>
+                <div style={{ fontSize: '13px', color: '#FD5602', backgroundColor: '#fff4f0', padding: '10px 14px', borderRadius: '6px', margin: 0 }}>
+                  <p style={{ margin: 0 }}>{error}</p>
+                  {retryAfter > 0 && (
+                    <p style={{ margin: '6px 0 0', fontWeight: 600 }}>
+                      Try again in {Math.floor(retryAfter / 60)}:{String(retryAfter % 60).padStart(2, '0')}
+                    </p>
+                  )}
+                </div>
               )}
 
               <Button
                 type="submit"
-                disabled={isPending}
+                disabled={isPending || retryAfter > 0}
                 style={{
                   height: '44px',
-                  backgroundColor: isPending ? '#ffb366' : '#FF8303',
+                  backgroundColor: (isPending || retryAfter > 0) ? '#ffb366' : '#FF8303',
                   color: '#ffffff',
                   fontWeight: 600,
                   fontSize: '15px',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: isPending ? 'not-allowed' : 'pointer',
+                  cursor: (isPending || retryAfter > 0) ? 'not-allowed' : 'pointer',
                   width: '100%',
                   marginTop: '4px',
                 }}

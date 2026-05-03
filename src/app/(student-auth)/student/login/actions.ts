@@ -3,15 +3,18 @@
 import { redirect } from 'next/navigation'
 import { headers, cookies } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { checkRateLimit } from '@/lib/rateLimit'
+import { checkRateLimit, clearRateLimit } from '@/lib/rateLimit'
 
 export async function studentLoginAction(formData: FormData) {
   // ── Rate limit check ────────────────────────────────────────────────────────
   const headersList = await headers()
   const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-  const isBlocked = await checkRateLimit(ip, 'student')
-  if (isBlocked) {
-    return { error: 'Too many login attempts. Please wait 10 minutes before trying again.' }
+  const rateLimit = await checkRateLimit(ip, 'student')
+  if (rateLimit.blocked) {
+    return {
+      error: 'Too many login attempts. Please wait before trying again.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    }
   }
 
   const email = (formData.get('email') as string)?.trim().toLowerCase()
@@ -52,6 +55,7 @@ export async function studentLoginAction(formData: FormData) {
     return { error: 'Your account is not active. Please contact admin.' }
   }
 
+  await clearRateLimit(ip, 'student')
   const returnUrl = (formData.get('returnUrl') as string) ?? ''
   redirect(returnUrl.startsWith('/') ? returnUrl : '/student/my-classes')
 }
