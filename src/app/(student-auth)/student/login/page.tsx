@@ -7,6 +7,7 @@ import { studentLoginAction } from './actions'
 
 function StudentLoginPageContent() {
   const [error, setError] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const searchParams = useSearchParams()
@@ -88,6 +89,8 @@ function StudentLoginPageContent() {
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   style={{ width: '100%', padding: '11px 14px', fontSize: '14px', border: '1px solid #E0DFDC', borderRadius: '8px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#111827' }}
                 />
               </div>
