@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 
 function LoginPageContent() {
   const [error, setError] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const router = useRouter()
@@ -95,6 +96,8 @@ function LoginPageContent() {
                   placeholder="you@lingualinkonline.com"
                   required
                   autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   style={{ height: '44px', fontSize: '14px' }}
                 />
               </div>
