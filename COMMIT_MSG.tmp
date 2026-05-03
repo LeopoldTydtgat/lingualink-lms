@@ -1,6 +1,0 @@
-feat(ui): add thin-scroll to schedule calendar wrappers (commit 2 of 3)
-
-Applied .thin-scroll to GeneralAvailability and DayToDay outer wrappers.
-GeneralAvailability gets thin scrollbar successfully.
-DayToDay uses FullCalendar internal scroller - default scrollbar retained,
-attempts to override caused no visible change and were reverted.
