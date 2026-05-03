@@ -77,7 +77,7 @@ export default async function MyClassesPage() {
       lessons={lessons}
       lastFeedback={lastFeedback}
       studentTimezone={student.timezone ?? 'Europe/London'}
-      profileCompleted={student.profile_completed ?? true}
+      profileCompleted={student.profile_completed ?? false}
     />
   )
 }
