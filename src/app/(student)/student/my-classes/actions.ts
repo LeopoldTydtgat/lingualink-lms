@@ -131,6 +131,8 @@ export async function cancelLessonAction(lessonId: string) {
     console.error('[Email] Cancellation emails failed:', emailErr)
   }
 
+  revalidatePath('/upcoming-classes')
   revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return { success: true, refunded: isRefundable }
 }

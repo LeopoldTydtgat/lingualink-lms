@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { localTimeToUtcMs, rangesOverlap } from '@/lib/availability'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,43 +23,6 @@ interface BookedLesson {
 interface Slot {
   startIso: string   // UTC ISO string
   available: boolean
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-// Convert a "HH:MM:SS" time on a specific YYYY-MM-DD date from a named timezone to UTC ms.
-// e.g. "08:00:00" on "2026-04-07" in "Europe/London" → UTC ms for 07:00:00Z
-function localTimeToUtcMs(dateStr: string, timeStr: string, timezone: string): number {
-  const [h, m] = timeStr.split(':').map(Number)
-
-  // Build an ISO-like string that represents this wall-clock time in the given timezone,
-  // then use Intl to figure out the UTC offset at that moment.
-  // Strategy: format a known UTC time in the target timezone until we find the one
-  // whose local representation matches our target. We do this by constructing the
-  // local datetime string and resolving it via a binary-search-free offset calculation.
-
-  // Step 1: Assume UTC first as a starting guess
-  const guessUtc = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`)
-
-  // Step 2: Find what local time that UTC moment corresponds to in the teacher's timezone
-  const localHour = Number(
-    new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: timezone }).format(guessUtc)
-  )
-  const localMinute = Number(
-    new Intl.DateTimeFormat('en-GB', { minute: '2-digit', timeZone: timezone }).format(guessUtc)
-  )
-
-  // Step 3: Calculate the offset difference and adjust.
-  // diffMinutes is negative for timezones ahead of UTC (e.g. UTC+4: local is 4h ahead,
-  // so the UTC equivalent is earlier). Adding diffMinutes shifts the guess in the right
-  // direction: guess + diffMinutes moves backwards for positive offsets, forwards for negative.
-  const diffMinutes = (h - localHour) * 60 + (m - localMinute)
-  return guessUtc.getTime() + diffMinutes * 60 * 1000
-}
-
-// Check whether two time ranges overlap
-function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && aEnd > bStart
 }
 
 // ─── Main handler ─────────────────────────────────────────────────────────────

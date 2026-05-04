@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
 
@@ -206,6 +207,9 @@ export async function PATCH(
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
     }
 
+    revalidatePath('/upcoming-classes')
+    revalidatePath('/student/my-classes')
+    revalidatePath('/admin/classes')
     return NextResponse.json({ success: true })
   }
 
@@ -288,6 +292,9 @@ export async function PATCH(
     }
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ success: true })
 }
 
@@ -341,5 +348,8 @@ export async function DELETE(
     return NextResponse.json({ error: deleteError.message }, { status: 500 })
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ success: true })
 }

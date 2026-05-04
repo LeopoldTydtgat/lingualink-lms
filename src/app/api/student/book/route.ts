@@ -5,6 +5,8 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
+import { revalidatePath } from 'next/cache'
+import { isSlotAvailable } from '@/lib/availability'
 
 // ── Email content builders ────────────────────────────────────────────────────
 
@@ -178,6 +180,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const adminClient = createAdminClient()
+
+    // ── 3c. Re-check teacher availability server-side ─────────────────────────
+    const slotAvailable = await isSlotAvailable(teacherId, scheduledAt, durationMinutes, adminClient)
+    if (!slotAvailable) {
+      return NextResponse.json(
+        { error: 'This time slot is no longer available. Please pick another.', code: 'SLOT_NOT_AVAILABLE' },
+        { status: 409 }
+      )
+    }
+
     // ── 4. Load the teacher's profile for emails ──────────────────────────────
     const { data: teacher, error: teacherError } = await supabase
       .from('profiles')
@@ -190,7 +203,6 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4b. Check teacher is not already booked at this time ─────────────────
-    const adminClient = createAdminClient()
     const newStart = new Date(scheduledAt)
     const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000)
 
@@ -344,6 +356,9 @@ export async function POST(req: NextRequest) {
       }),
     ])
 
+    revalidatePath('/upcoming-classes')
+    revalidatePath('/student/my-classes')
+    revalidatePath('/admin/classes')
     // ── 10. Return success ────────────────────────────────────────────────────
     return NextResponse.json({ success: true, lessonId: newLesson.id })
 
