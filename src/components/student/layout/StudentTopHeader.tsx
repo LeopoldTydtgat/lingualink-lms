@@ -38,6 +38,7 @@ export default function StudentTopHeader({
               height={36}
               style={{
                 borderRadius: '50%',
+                objectFit: 'cover',
                 border: '2px solid rgba(255,255,255,0.6)',
                 cursor: 'pointer',
               }}

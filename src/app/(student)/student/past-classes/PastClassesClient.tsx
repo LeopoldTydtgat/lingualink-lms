@@ -148,19 +148,18 @@ export default function PastClassesClient({
               >
                 <div className="flex items-center gap-4">
                   {/* Teacher photo */}
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
+                  <div style={{ width: '48px', height: '48px', borderRadius: '50%', overflow: 'hidden', backgroundColor: '#f3f4f6', flexShrink: 0 }}>
                     {lesson.teacher?.photo_url ? (
                       <Image
                         src={lesson.teacher.photo_url}
                         alt={lesson.teacher.full_name}
                         width={48}
                         height={48}
-                        className="object-cover w-full h-full"
+                        style={{ objectFit: 'cover', width: '100%', height: '100%' }}
                       />
                     ) : (
                       <div
-                        className="w-full h-full flex items-center justify-center text-white text-sm font-bold"
-                        style={{ backgroundColor: '#FF8303' }}
+                        style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF8303', color: 'white', fontSize: '14px', fontWeight: '700' }}
                       >
                         {lesson.teacher?.full_name?.[0] ?? '?'}
                       </div>
