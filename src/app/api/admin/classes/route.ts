@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
 import resend from '@/lib/email/client'
 import {
@@ -332,5 +333,8 @@ export async function POST(request: NextRequest) {
     console.error('[Email] Booking confirmation emails failed — lesson still created:', emailErr)
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
 }
