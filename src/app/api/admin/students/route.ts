@@ -140,7 +140,6 @@ export async function POST(req: NextRequest) {
         is_active: true,
         is_private: data.is_private ?? true,
         profile_completed: false,
-        must_change_password: true,
         company_id: data.company_id ?? null,
         academic_advisor_id: data.academic_advisor_id ?? null,
         customer_number: data.customer_number ?? null,
@@ -269,37 +268,6 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-
-    // ── 7. Send welcome email ────────────────────────────────────────────────
-    const welcomeBody = `
-      <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-        Your Lingualink Online student account has been created.
-        Your login credentials have been sent to you separately by your admin.
-        Click the button below to log in to your portal.
-      </p>
-      <table cellpadding="0" cellspacing="0" style="margin:0;">
-        <tr>
-          <td>
-            <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">Log In</center></v:roundrect><![endif]-->
-            <!--[if !mso]><!-->
-            <a href="${process.env.NEXT_PUBLIC_SITE_URL}/student/login" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">Log In</a>
-            <!--<![endif]-->
-          </td>
-        </tr>
-      </table>
-    `
-
-    await resend.emails.send({
-      from: 'no-reply@lingualinkonline.com',
-      to: data.email,
-      subject: 'Welcome to Lingualink Online',
-      html: buildEmailTemplate({
-        recipientName: data.full_name,
-        subject: 'Welcome to Lingualink Online',
-        bodyHtml: welcomeBody,
-        contactEmail: 'support@lingualinkonline.com',
-      }),
-    })
 
     return NextResponse.json({ success: true, id: studentId })
   } catch (err) {

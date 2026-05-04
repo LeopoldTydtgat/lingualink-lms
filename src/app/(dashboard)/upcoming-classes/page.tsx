@@ -60,7 +60,7 @@ export default async function UpcomingClassesPage() {
     <UpcomingClassesClient
       classes={classes}
       profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
-      profileCompleted={profile?.profile_completed ?? true}
+      profileCompleted={profile?.profile_completed ?? false}
       teacherTimezone={profile?.timezone ?? 'Europe/London'}
     />
   )

@@ -2,14 +2,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { headers, cookies } from 'next/headers'
-import { checkRateLimit } from '@/lib/rateLimit'
+import { checkRateLimit, clearRateLimit } from '@/lib/rateLimit'
 
 export async function signIn(formData: FormData) {
   const headersList = await headers()
   const ip = headersList.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
-  const isBlocked = await checkRateLimit(ip, 'teacher')
-  if (isBlocked) {
-    return { error: 'Too many login attempts. Please wait 10 minutes before trying again.' }
+  const rateLimit = await checkRateLimit(ip, 'teacher')
+  if (rateLimit.blocked) {
+    return {
+      error: 'Too many login attempts. Please wait before trying again.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    }
   }
   const email = (formData.get('email') as string)?.trim().toLowerCase()
   const password = formData.get('password') as string
@@ -42,6 +45,7 @@ export async function signIn(formData: FormData) {
     return { error: 'This account is not active. Please contact admin.' }
   }
 
+  await clearRateLimit(ip, 'teacher')
   return { success: true }
 }
 
