@@ -195,6 +195,7 @@ export async function PATCH(
           subject: 'Lingualink Online — Your class has been cancelled',
           html: buildEmailTemplate({
             recipientName: studentData.full_name ?? 'Student',
+            recipientFallback: 'Student',
             subject: 'Your class has been cancelled',
             bodyHtml: emailBody,
             contactEmail: 'support@lingualinkonline.com',
@@ -275,6 +276,7 @@ export async function PATCH(
           subject: 'Lingualink Online — Your class has been rescheduled',
           html: buildEmailTemplate({
             recipientName: studentData.full_name ?? 'Student',
+            recipientFallback: 'Student',
             subject: 'Your class has been rescheduled',
             bodyHtml: emailBody,
             contactEmail: 'support@lingualinkonline.com',

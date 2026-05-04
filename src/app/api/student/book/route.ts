@@ -324,6 +324,7 @@ export async function POST(req: NextRequest) {
         subject: studentSubject,
         html: buildEmailTemplate({
           recipientName: studentRow.full_name,
+          recipientFallback: 'Student',
           subject: studentSubject,
           bodyHtml: studentBodyHtml,
           contactEmail: 'support@lingualinkonline.com',
@@ -335,6 +336,7 @@ export async function POST(req: NextRequest) {
         subject: teacherSubject,
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
+          recipientFallback: 'Teacher',
           subject: teacherSubject,
           bodyHtml: teacherBodyHtml,
           contactEmail: 'teachers@lingualinkonline.com',

@@ -56,6 +56,7 @@ export async function sendMessage(
           subject,
           html: buildEmailTemplate({
             recipientName: student.full_name,
+            recipientFallback: 'Student',
             subject,
             bodyHtml: studentNewMessageEmailContent(profile.full_name),
             contactEmail: 'support@lingualinkonline.com',

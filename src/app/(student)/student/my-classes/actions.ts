@@ -92,6 +92,7 @@ export async function cancelLessonAction(lessonId: string) {
         subject: 'Lingualink Online — Your class has been cancelled',
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject: 'Your class has been cancelled',
           bodyHtml: studentCancellationByStudentEmailContent(
             teacher?.full_name ?? 'Your teacher',
@@ -112,6 +113,7 @@ export async function cancelLessonAction(lessonId: string) {
           subject: `Lingualink Online — Class cancelled by ${student.full_name}`,
           html: buildEmailTemplate({
             recipientName: teacher.full_name ?? 'Teacher',
+            recipientFallback: 'Teacher',
             subject: 'Class cancelled by student',
             bodyHtml: teacherCancellationEmailContent(
               student.full_name,
