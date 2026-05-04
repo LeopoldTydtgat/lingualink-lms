@@ -3,13 +3,14 @@
 
 
 interface EmailTemplateOptions {
-  recipientName: string
+  recipientName: string | null | undefined
+  recipientFallback?: string
   subject: string
   bodyHtml: string
   contactEmail: string
 }
 
-export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: EmailTemplateOptions): string {
+export function buildEmailTemplate({ recipientName, recipientFallback = 'there', bodyHtml, contactEmail }: EmailTemplateOptions): string {
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -33,7 +34,7 @@ export function buildEmailTemplate({ recipientName, bodyHtml, contactEmail }: Em
           <tr>
             <td style="padding:36px 40px;">
               <p style="margin:0 0 16px;font-size:15px;color:#111827;">
-                Dear ${recipientName},
+                Dear ${recipientName || recipientFallback},
               </p>
               ${bodyHtml}
             </td>
