@@ -2,10 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
-import { Resend } from 'resend'
 import { CreateTeacherSchema } from '@/lib/validation/schemas'
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 // ─── GET – list teachers (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
@@ -178,7 +175,6 @@ export async function POST(req: NextRequest) {
         specialties: data.specialties ?? null,
         quote: data.quote ?? null,
         video_url: data.video_url ?? null,
-        must_change_password: true,
         profile_completed: false,
       })
 
@@ -189,37 +185,6 @@ export async function POST(req: NextRequest) {
         { error: 'Failed to create teacher profile.' },
         { status: 500 }
       )
-    }
-
-    // ── 5. Send welcome email with password reset link ───────────────────────
-    const { data: resetData, error: resetError } =
-      await adminClient.auth.admin.generateLink({
-        type: 'recovery',
-        email: data.email,
-      })
-
-    if (!resetError && resetData?.properties?.action_link) {
-      await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
-        to: data.email,
-        subject: 'Welcome to Lingualink Online – Set Your Password',
-        html: `
-          <div style="font-family: Inter, sans-serif; max-width: 560px; margin: 0 auto;">
-            <div style="background-color: #FF8303; padding: 24px; border-radius: 8px 8px 0 0;">
-              <h1 style="color: white; margin: 0; font-size: 20px;">Welcome to Lingualink Online</h1>
-            </div>
-            <div style="padding: 24px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-              <p style="color: #374151;">Dear ${data.full_name},</p>
-              <p style="color: #374151;">Your teacher account has been created. Please click the button below to set your password and access the portal.</p>
-              <a href="${resetData.properties.action_link}"
-                style="display: inline-block; background-color: #FF8303; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
-                Set My Password
-              </a>
-              <p style="color: #6b7280; font-size: 13px;">This link expires in 24 hours. If you have any questions contact us at ${process.env.ADMIN_EMAIL ?? 'teachers@lingualinkonline.com'}.</p>
-            </div>
-          </div>
-        `,
-      })
     }
 
     return NextResponse.json({ success: true, id: newUserId })

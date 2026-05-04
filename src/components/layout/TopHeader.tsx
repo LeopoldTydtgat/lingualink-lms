@@ -13,21 +13,35 @@ export default function TopHeader({ teacherName, teacherPhotoUrl }: TopHeaderPro
 
   return (
     <header
-      className="flex items-center justify-end px-6 shrink-0 z-10"
-      style={{ background: 'linear-gradient(to right, #fff3e8, #FF8303 40%)', height: '72px' }}
+      style={{
+        background: 'linear-gradient(to right, #fff3e8, #FF8303 40%)',
+        height: '72px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        padding: '0 24px',
+        flexShrink: 0,
+        zIndex: 10,
+      }}
     >
-      <div className="flex items-center gap-4">
-        <span className="text-sm font-medium" style={{ color: '#ffffff' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: '500' }}>
           Hello {firstName}!
         </span>
-        <Link href="/account" prefetch={false} className="shrink-0">
+        <Link href="/account" prefetch={false} style={{ display: 'flex' }}>
           {teacherPhotoUrl ? (
             <Image
               src={teacherPhotoUrl}
               alt={`${teacherName} profile photo`}
               width={36}
               height={36}
-              className="rounded-full object-cover border-2 border-white hover:border-orange-100 transition-colors"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '2px solid rgba(255,255,255,0.6)',
+              }}
             />
           ) : (
             <div

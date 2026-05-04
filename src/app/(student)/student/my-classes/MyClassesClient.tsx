@@ -295,7 +295,7 @@ export default function MyClassesClient({
                   alt={nextLesson.teacher.full_name}
                   width={56}
                   height={56}
-                  style={{ borderRadius: '50%', border: '2px solid #E0DFDC' }}
+                  style={{ borderRadius: '50%', objectFit: 'cover', border: '2px solid #E0DFDC' }}
                 />
               ) : (
                 <div style={{
@@ -647,7 +647,7 @@ export default function MyClassesClient({
                                 alt={lesson.teacher.full_name}
                                 width={36}
                                 height={36}
-                                style={{ borderRadius: '50%', border: '1px solid #E0DFDC' }}
+                                style={{ borderRadius: '50%', objectFit: 'cover', border: '1px solid #E0DFDC' }}
                               />
                             ) : (
                               <div style={{

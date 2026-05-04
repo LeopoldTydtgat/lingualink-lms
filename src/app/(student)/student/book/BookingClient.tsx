@@ -226,7 +226,7 @@ function StepTeacher({
                   alt={teacher.full_name}
                   width={48}
                   height={48}
-                  style={{ borderRadius: '50%', flexShrink: 0 }}
+                  style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
                 />
               ) : (
                 <div
@@ -721,7 +721,7 @@ function StepConfirm({
                 alt={teacher.full_name}
                 width={44}
                 height={44}
-                style={{ borderRadius: '50%' }}
+                style={{ borderRadius: '50%', objectFit: 'cover' }}
               />
             ) : (
               <div
