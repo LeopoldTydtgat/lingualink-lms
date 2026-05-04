@@ -29,6 +29,7 @@ export async function POST(request: Request) {
         subject: 'Lingualink Online — New study sheets assigned',
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject: 'New study sheets assigned',
           bodyHtml: studentHomeworkAssignedEmailContent(teacherName, sheetTitles),
           contactEmail: 'support@lingualinkonline.com',

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createTeamsMeeting } from '@/lib/microsoft/graph'
 import resend from '@/lib/email/client'
 import {
@@ -300,6 +301,7 @@ export async function POST(request: NextRequest) {
         subject: `Lingualink Online — New class booked with ${studentData?.full_name ?? 'a student'}`,
         html: buildEmailTemplate({
           recipientName: teacherProfile.full_name ?? 'Teacher',
+          recipientFallback: 'Teacher',
           subject: 'New class booked',
           bodyHtml: teacherBody,
           contactEmail: 'teachers@lingualinkonline.com',
@@ -320,6 +322,7 @@ export async function POST(request: NextRequest) {
         subject: 'Lingualink Online — Your class is confirmed',
         html: buildEmailTemplate({
           recipientName: studentData.full_name ?? 'Student',
+          recipientFallback: 'Student',
           subject: 'Your class is confirmed',
           bodyHtml: studentBody,
           contactEmail: 'support@lingualinkonline.com',
@@ -330,5 +333,8 @@ export async function POST(request: NextRequest) {
     console.error('[Email] Booking confirmation emails failed — lesson still created:', emailErr)
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
 }

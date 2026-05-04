@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
 
@@ -195,6 +196,7 @@ export async function PATCH(
           subject: 'Lingualink Online — Your class has been cancelled',
           html: buildEmailTemplate({
             recipientName: studentData.full_name ?? 'Student',
+            recipientFallback: 'Student',
             subject: 'Your class has been cancelled',
             bodyHtml: emailBody,
             contactEmail: 'support@lingualinkonline.com',
@@ -205,6 +207,9 @@ export async function PATCH(
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
     }
 
+    revalidatePath('/upcoming-classes')
+    revalidatePath('/student/my-classes')
+    revalidatePath('/admin/classes')
     return NextResponse.json({ success: true })
   }
 
@@ -275,6 +280,7 @@ export async function PATCH(
           subject: 'Lingualink Online — Your class has been rescheduled',
           html: buildEmailTemplate({
             recipientName: studentData.full_name ?? 'Student',
+            recipientFallback: 'Student',
             subject: 'Your class has been rescheduled',
             bodyHtml: emailBody,
             contactEmail: 'support@lingualinkonline.com',
@@ -286,6 +292,9 @@ export async function PATCH(
     }
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ success: true })
 }
 
@@ -339,5 +348,8 @@ export async function DELETE(
     return NextResponse.json({ error: deleteError.message }, { status: 500 })
   }
 
+  revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return NextResponse.json({ success: true })
 }
