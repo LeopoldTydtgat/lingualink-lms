@@ -48,7 +48,22 @@ export async function POST(
     }
 
     const adminClient = createAdminClient()
-    const { error } = await adminClient.auth.admin.updateUserById(id, { password })
+
+    const { data: student, error: fetchError } = await adminClient
+      .from('students')
+      .select('id, auth_user_id')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (fetchError || !student) {
+      return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
+    }
+
+    if (!student.auth_user_id) {
+      return NextResponse.json({ error: 'Student has no linked auth user.' }, { status: 404 })
+    }
+
+    const { error } = await adminClient.auth.admin.updateUserById(student.auth_user_id, { password })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     return NextResponse.json({ success: true })

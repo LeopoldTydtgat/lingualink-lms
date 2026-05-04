@@ -1,23 +1,38 @@
 'use client'
 
-import { useState, useTransition, Suspense } from 'react'
+import { useState, useTransition, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { studentLoginAction } from './actions'
 
 function StudentLoginPageContent() {
   const [error, setError] = useState<string | null>(null)
+  const [email, setEmail] = useState('')
+  const [retryAfter, setRetryAfter] = useState<number>(0)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const searchParams = useSearchParams()
   const returnUrl = searchParams.get('returnUrl') ?? ''
   const idleSignOut = searchParams.get('reason') === 'idle'
 
+  useEffect(() => {
+    if (retryAfter <= 0) return
+    const id = setInterval(() => {
+      setRetryAfter((s) => (s <= 1 ? 0 : s - 1))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [retryAfter])
+
   function handleSubmit(formData: FormData) {
     setError(null)
     startTransition(async () => {
       const result = await studentLoginAction(formData)
-      if (result?.error) setError(result.error)
+      if (result?.error) {
+        setError(result.error)
+        if ('retryAfterSeconds' in result && typeof result.retryAfterSeconds === 'number') {
+          setRetryAfter(result.retryAfterSeconds)
+        }
+      }
     })
   }
 
@@ -70,7 +85,12 @@ function StudentLoginPageContent() {
 
             {error && (
               <div style={{ backgroundColor: '#fff4f4', border: '1px solid #FD5602', borderRadius: '8px', padding: '12px 16px', marginBottom: '20px', fontSize: '14px', color: '#FD5602' }}>
-                {error}
+                <p style={{ margin: 0 }}>{error}</p>
+                {retryAfter > 0 && (
+                  <p style={{ margin: '6px 0 0', fontWeight: 600 }}>
+                    Try again in {Math.floor(retryAfter / 60)}:{String(retryAfter % 60).padStart(2, '0')}
+                  </p>
+                )}
               </div>
             )}
 
@@ -88,6 +108,8 @@ function StudentLoginPageContent() {
                   required
                   autoComplete="email"
                   placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   style={{ width: '100%', padding: '11px 14px', fontSize: '14px', border: '1px solid #E0DFDC', borderRadius: '8px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', color: '#111827' }}
                 />
               </div>
@@ -120,8 +142,8 @@ function StudentLoginPageContent() {
 
               <button
                 type="submit"
-                disabled={isPending}
-                style={{ width: '100%', padding: '12px', backgroundColor: isPending ? '#ffb366' : '#FF8303', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600, cursor: isPending ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif' }}
+                disabled={isPending || retryAfter > 0}
+                style={{ width: '100%', padding: '12px', backgroundColor: (isPending || retryAfter > 0) ? '#ffb366' : '#FF8303', color: '#ffffff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 600, cursor: (isPending || retryAfter > 0) ? 'not-allowed' : 'pointer', fontFamily: 'Inter, sans-serif' }}
               >
                 {isPending ? 'Signing in...' : 'Sign in'}
               </button>

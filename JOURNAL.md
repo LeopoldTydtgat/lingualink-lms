@@ -1,3 +1,60 @@
+## Session 80 - 04 May 2026 - Welcome Email Removal, Forced Password Change Strip, UI Cleanup, 1hr Reminder Plain Link
+
+### What was built
+- src/app/api/admin/teachers/route.ts: removed Resend import, removed welcome email send block (recovery link generation plus inline HTML template), removed must_change_password write on profile upsert
+- src/app/api/admin/students/route.ts: removed welcome email send block, removed must_change_password write on student insert (kept the separate "new student assigned" notification to teachers)
+- src/app/(dashboard)/layout.tsx: removed must_change_password column from select and the redirect to /change-password
+- src/app/(student)/student/layout.tsx: removed must_change_password column from select and the redirect to /student/change-password
+- Deleted dead first-login pages and routes: src/app/(auth)/change-password/page.tsx, src/app/(student-auth)/student/change-password/page.tsx, src/app/api/teacher/change-password/route.ts, src/app/api/student/change-password/route.ts
+- src/components/UpcomingClassesClient.tsx: removed the dead admin-gated "+ Add Class" button on /upcoming-classes (no onClick handler, admin booking lives in the admin portal)
+- src/components/layout/TopHeader.tsx: standardised the avatar to inline styles, mirrored StudentTopHeader structure, fixed the oval avatar bug by adding explicit width/height to the Image style
+- Standardised avatar rounding across MyClassesClient, BookingClient, PastClassesClient, PastClassDetailClient: all profile photos now use inline style with borderRadius 50% and objectFit cover
+- src/lib/email/templates.ts: replaced the "Join Class on Teams" button in both teacher and student 1hr reminder emails with a plain-text Teams URL ("Join your class on Teams: <link>"). 24hr reminder untouched. buildButton helper retained for booking, cancellation, homework, and message emails
+
+### Break/Fix Log
+
+Issue 1: Student admin password reset returned 404 from auth.admin.updateUserById
+Symptom: Admin reset on a student account failed with "User not found".
+Cause: Route was passing students.id (table primary key) to auth.admin.updateUserById, which requires the auth.users UUID. Students have an indirection via students.auth_user_id.
+Fix: src/app/api/admin/students/[id]/password/route.ts now fetches students.auth_user_id via .maybeSingle() and passes the auth UUID to updateUserById. Returns 404 with explicit messages if the student row is missing or auth_user_id is null.
+Lesson: All auth.admin.* calls must receive the auth.users UUID. For profiles this is profiles.id by code convention. For students this is students.auth_user_id - never the students table PK.
+
+Issue 2: Profile completion banner did not render for new accounts
+Symptom: New teacher accounts did not see the profile-completion banner on /upcoming-classes despite profile_completed being false in the database.
+Cause: Two compounding faults. First, the live profiles.profile_completed column had been created with DEFAULT true instead of DEFAULT false (drift between the migration file and what was applied to production). Second, missing table-level GRANT SELECT on profiles and students for the authenticated role: PostgREST returned null for the entire row with no error, masked by a `?? true` fallback that hid the banner whenever data was null.
+Fix: Ran in Supabase SQL editor: ALTER TABLE profiles ALTER COLUMN profile_completed SET DEFAULT false; GRANT SELECT (profile_completed, must_change_password) ON profiles TO authenticated; GRANT SELECT ON public.profiles TO authenticated; GRANT SELECT ON public.students TO authenticated. Switched the banner fallback in src/app/(dashboard)/upcoming-classes/page.tsx and src/app/(student)/student/my-classes/page.tsx from `?? true` (hide if uncertain) to `?? false` (show if uncertain).
+Lesson: Table-level GRANT SELECT must exist on restricted tables, not just column-level grants - missing table grant returns null silently. Default fallbacks must fail safe: for UI that signals an action the user must take, the fallback when data is null is the state that prompts the action, not the state that hides it.
+
+Issue 3: Welcome email flow conflicted with how the client onboards users
+Symptom: System sent an automated welcome email with a "Set My Password" link on every account creation, but the client wanted to send credentials manually with a personal touch and forced password change at first login was redundant.
+Cause: Original onboarding design assumed self-service password setup. Client preference is admin-managed credential delivery.
+Fix: Removed welcome email send from both creation routes. Removed must_change_password redirect from both layouts. Deleted the four first-login change-password files (pages and API routes). Kept the forgot-password and reset-password flow, the admin password override routes, and the profile-page self-service password change.
+Lesson: Forced-change-on-first-login was theatre against most realistic risks. If admin email is compromised, an attacker reads the welcome message before the user does. The mitigation that actually matters is splitting the channel - send username and password in separate messages, not the same email.
+
+Issue 4: "+ Add Class" button rendered on /upcoming-classes for admin accounts but had no onClick handler
+Symptom: Admin saw a non-functional orange button on the teacher upcoming-classes page. The admin booking flow already lives in the admin portal.
+Cause: Button was added in the initial implementation of the page (April 2026) and never wired up or removed.
+Fix: Stripped the entire `{profile.role === 'admin' && (...)}` block from src/components/UpcomingClassesClient.tsx and simplified the wrapping flex container.
+Lesson: When a UI element has been dormant for months without an onClick or a route, the cleanest disposition is removal, not preservation.
+
+Issue 5: Avatar in teacher TopHeader rendered as an oval, not a circle
+Symptom: Computed height 22px against width 36px. Box model showed content 32x18.
+Cause: The Image element had width and height props (36, 36) and inline style with borderRadius and objectFit, but no explicit width or height in the inline style. The flex parent's vertical sizing rules let the next/image element collapse vertically. The student version worked because route-level CSS happened to mask the same gap.
+Fix: Added `width: '36px'` and `height: '36px'` to the inline style on the Image element. Also converted the wrapping header and inner div from Tailwind classes to inline styles to mirror StudentTopHeader exactly.
+Lesson: When a leaf component renders fine in one route and broken in another, the cause is upstream (parent layout, global CSS, or implicit sizing). Diagnosing in DevTools Computed tab finds the actual rendered dimensions in seconds. Iterating on the leaf without measuring wastes turns.
+
+Issue 6: 1hr reminder email needed a crash-proof Teams link
+Symptom: Client wanted teacher and student to be able to join the meeting from the email even if the portal was unreachable. The existing button worked but a copyable URL was preferred.
+Cause: Original template only included a styled "Join Class on Teams" button via buildButton, no plain URL fallback.
+Fix: Replaced the button in both 1hr templates with a plain-text paragraph: "Join your class on Teams:" followed by the raw URL as a styled anchor. 24hr reminder left untouched. buildButton retained for use by booking, cancellation, homework, and message emails.
+Lesson: For operational emails where reliability matters more than aesthetics, a copyable URL beats a button. Buttons depend on email client rendering; raw links are universal.
+
+### Session result
+
+Session shipped four commits to dev: student admin password reset fix, exact retry countdown on rate-limited logins, profile-completion banner fail-safe, and the welcome-email-plus-forced-change strip combined with avatar cleanup and the 1hr reminder plain-link change. The 1hr cron was tested end-to-end via local dev server and Supabase test row (lesson scheduled NOW + 60 minutes, reminder_1h_sent reset to false, curl Bearer call to /api/cron/class-reminders); email arrived at the expected address with the plain link rendering correctly. Test row deleted afterward. Working tree clean. Five commits ahead of main awaiting PR.
+
+---
+
 ## Session 75 - 1 May 2026 - Invoice Upload Window + Self-Assessed Level Consolidation
 
 ### What was built

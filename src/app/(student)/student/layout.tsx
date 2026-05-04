@@ -30,14 +30,12 @@ export default async function StudentDashboardLayout({
 
   const { data: student } = await admin
     .from('students')
-    .select('id, full_name, email, photo_url, status, timezone, must_change_password')
+    .select('id, full_name, email, photo_url, status, timezone')
     .eq('auth_user_id', user.id)
     .single()
 
   if (!student) redirect('/student/login')
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')
-  if (student.must_change_password) redirect('/student/change-password')
-
   const { data: nextLesson } = await supabase
     .from('lessons')
     .select('scheduled_at, teams_join_url, duration_minutes, status')

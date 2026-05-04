@@ -24,11 +24,9 @@ export default async function DashboardLayout({
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, must_change_password, timezone')
+    .select('id, full_name, email, photo_url, role, timezone')
     .eq('id', user.id)
     .single()
-
-  if (profile?.must_change_password) redirect('/change-password')
 
   const { data: lessonRow } = await supabase
     .from('lessons')
