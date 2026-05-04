@@ -24,7 +24,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, skipped: true })
   }
 
-  const monthYear = `${MONTHS[now.getUTCMonth()]} ${now.getUTCFullYear()}`
+  const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
+  const monthYear = `${MONTHS[prevMonth.getUTCMonth()]} ${prevMonth.getUTCFullYear()}`
 
   const { data: teachers, error } = await supabase
     .from('profiles')
@@ -47,6 +48,7 @@ export async function GET(request: Request) {
         subject: `Lingualink Online — Please upload your invoice for ${monthYear}`,
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
+          recipientFallback: 'Teacher',
           subject: `Please upload your invoice for ${monthYear}`,
           bodyHtml: `
             <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">

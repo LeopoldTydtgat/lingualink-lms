@@ -92,6 +92,7 @@ export async function sendAdminMessage(
         subject,
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject,
           bodyHtml: studentNewMessageEmailContent(adminProfile.full_name),
           contactEmail: 'support@lingualinkonline.com',
@@ -113,6 +114,7 @@ export async function sendAdminMessage(
         subject,
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
+          recipientFallback: 'Teacher',
           subject,
           bodyHtml: newMessageEmailContent(adminProfile.full_name),
           contactEmail: 'teachers@lingualinkonline.com',

@@ -98,6 +98,7 @@ export async function teacherRescheduleLesson(
       subject: 'Lingualink Online — Your class has been rescheduled by your teacher',
       html: buildEmailTemplate({
         recipientName: student.full_name,
+        recipientFallback: 'Student',
         subject: 'Your class has been rescheduled',
         bodyHtml: emailBody,
         contactEmail: 'support@lingualinkonline.com',
@@ -121,6 +122,7 @@ export async function teacherRescheduleLesson(
         subject: 'Lingualink Online — Class cancellation confirmed',
         html: buildEmailTemplate({
           recipientName: teacherName,
+          recipientFallback: 'Teacher',
           subject: 'Class cancellation confirmed',
           bodyHtml: teacherEmailBody,
           contactEmail: 'teachers@lingualinkonline.com',

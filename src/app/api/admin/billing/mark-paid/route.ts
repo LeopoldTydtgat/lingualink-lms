@@ -57,6 +57,7 @@ export async function PATCH(req: NextRequest) {
           subject: 'Lingualink Online — Your invoice has been paid',
           html: buildEmailTemplate({
             recipientName: teacher.full_name,
+            recipientFallback: 'Teacher',
             subject: 'Lingualink Online — Your invoice has been paid',
             bodyHtml: `
               <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">

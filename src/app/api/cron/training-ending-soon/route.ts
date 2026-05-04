@@ -75,6 +75,7 @@ export async function GET(request: Request) {
         subject: 'Lingualink Online — Your training is ending soon',
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject: 'Your training is ending soon',
           bodyHtml: studentTrainingEndingSoonEmailContent(endDateFormatted),
           contactEmail: 'support@lingualinkonline.com',

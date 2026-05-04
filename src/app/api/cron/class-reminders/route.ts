@@ -68,6 +68,7 @@ export async function GET(request: Request) {
         subject: 'Lingualink Online — Your class is in less than 24 hours',
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject: 'Your class is in less than 24 hours',
           bodyHtml: studentClassReminderEmailContent(
             teacher.full_name,
@@ -88,6 +89,7 @@ export async function GET(request: Request) {
         subject: 'Lingualink Online — Your next class is in less than 24 hours',
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
+          recipientFallback: 'Teacher',
           subject: 'Your next class is in less than 24 hours',
           bodyHtml: teacherClassReminderEmailContent(
             student.full_name,
@@ -154,6 +156,7 @@ export async function GET(request: Request) {
         subject: 'Lingualink Online — Your class is in less than one hour',
         html: buildEmailTemplate({
           recipientName: student.full_name,
+          recipientFallback: 'Student',
           subject: 'Your class is in less than one hour',
           bodyHtml: studentClassReminderEmailContent(
             teacher.full_name,
@@ -174,6 +177,7 @@ export async function GET(request: Request) {
         subject: 'Lingualink Online — Your next class is in less than one hour',
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
+          recipientFallback: 'Teacher',
           subject: 'Your next class is in less than one hour',
           bodyHtml: teacherClassReminderEmailContent(
             student.full_name,
