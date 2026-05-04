@@ -140,7 +140,12 @@ export function teacherClassReminderEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    ${teamsJoinUrl ? buildButton(teamsJoinUrl, 'Join Class on Teams') : ''}
+    ${teamsJoinUrl ? `
+      <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
+        Join your class on Teams:<br>
+        <a href="${teamsJoinUrl}" style="color:#FF8303;word-break:break-all;">${teamsJoinUrl}</a>
+      </p>
+    ` : ''}
   `
 }
 
@@ -293,7 +298,12 @@ export function studentClassReminderEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
-    ${teamsJoinUrl ? buildButton(teamsJoinUrl, 'Join Class on Teams') : ''}
+    ${teamsJoinUrl ? `
+      <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
+        Join your class on Teams:<br>
+        <a href="${teamsJoinUrl}" style="color:#FF8303;word-break:break-all;">${teamsJoinUrl}</a>
+      </p>
+    ` : ''}
   `
 }
 
