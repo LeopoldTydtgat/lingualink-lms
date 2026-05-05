@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentNewMessageEmailContent } from '@/lib/email/templates'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 export async function sendMessage(
   receiverId: string,
@@ -27,13 +28,15 @@ export async function sendMessage(
 
   const senderType = profile.role === 'admin' ? 'admin' : 'teacher'
 
+  const safeContent = sanitizeHtml(content)
+
   // Save the message to the database
   const { error } = await supabase.from('messages').insert({
     sender_id: user.id,
     sender_type: senderType,
     receiver_id: receiverId,
     receiver_type: receiverType,
-    content,
+    content: safeContent,
     attachments: attachments ?? [],
   })
 
