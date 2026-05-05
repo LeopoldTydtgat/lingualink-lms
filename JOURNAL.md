@@ -1,3 +1,11 @@
+## Pinned for next session
+
+1. **Ghost profile bug (resurfaced S82)** — leopold.tydtgat77@gmail.com is a student account but signing in at `/student/login` lands the user on the teacher portal. Cause is the orphaned `profiles` row created by an `auth.users` insert trigger; the proxy's status check finds that row first (profiles before students lookup) and treats the user as a teacher. Permanent fix is one of: (a) drop the `auth.users` insert trigger that auto-creates `profiles` rows, or (b) have the student-creation API route in `src/app/api/admin/students/route.ts` delete the orphaned `profiles` row right after the trigger fires. Option (a) is cleaner if the trigger has no other consumers.
+
+2. **Nia avatar oval on student-side teacher profile (carryover from S81)** — Session 80 fixed the oval-avatar bug on `src/components/layout/TopHeader.tsx` by adding explicit `width: '36px'` / `height: '36px'` to the `Image` inline style. The same bug still exists on the teacher-profile component rendered inside the student booking flow — that component never got the same fix. Locate it (likely under `src/app/(student)/student/book/` or a shared `src/components/student/` teacher-card) and apply the identical inline-style width/height to the `Image`.
+
+---
+
 ## Session 80 - 04 May 2026 - Welcome Email Removal, Forced Password Change Strip, UI Cleanup, 1hr Reminder Plain Link
 
 ### What was built
