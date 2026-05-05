@@ -238,9 +238,9 @@ export async function POST(req: NextRequest) {
           <table cellpadding="0" cellspacing="0" style="margin:0;">
             <tr>
               <td>
-                <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="https://teachers.lingualinkonline.com" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">View Student Profile</center></v:roundrect><![endif]-->
+                <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${process.env.NEXT_PUBLIC_TEACHER_URL}" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">View Student Profile</center></v:roundrect><![endif]-->
                 <!--[if !mso]><!-->
-                <a href="https://teachers.lingualinkonline.com" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">View Student Profile</a>
+                <a href="${process.env.NEXT_PUBLIC_TEACHER_URL}" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">View Student Profile</a>
                 <!--<![endif]-->
               </td>
             </tr>
