@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
+import {
+  SHARED_COOKIE_DOMAIN,
+  expectedPortal,
+  getPortal,
+  isProductionHost,
+  loginUrlForPath,
+  portalUrl,
+} from '@/lib/host'
 
 export async function proxy(request: NextRequest) {
+  const host = request.headers.get('host')
+  const cookieDomain = isProductionHost(host) ? SHARED_COOKIE_DOMAIN : undefined
+
   let response = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -19,7 +30,11 @@ export async function proxy(request: NextRequest) {
           )
           response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            response.cookies.set(
+              name,
+              value,
+              cookieDomain ? { ...options, domain: cookieDomain } : options
+            )
           )
         },
       },
@@ -31,17 +46,28 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
+  // ── Portal-mismatch redirect ────────────────────────────────────────────────
+  // Wrong subdomain for this path? Bounce to the canonical host, preserving
+  // path + query. Skipped on non-production hosts (localhost, vercel preview,
+  // apex) — those serve every portal so dev/preview Just Works.
+  const portal = getPortal(host)
+  const expected = expectedPortal(pathname)
+  if (portal !== 'any' && expected !== 'any' && portal !== expected) {
+    const target = portalUrl(expected)
+    if (target) {
+      return NextResponse.redirect(`${target}${pathname}${request.nextUrl.search}`)
+    }
+  }
+
   const isPublicPath =
     pathname === '/login' ||
     pathname === '/student/login' ||
     pathname.startsWith('/api/')
 
   if (!isPublicPath && !user) {
-    const url = request.nextUrl.clone()
-    url.pathname = pathname.startsWith('/student/') ? '/student/login' : '/login'
-    url.search = ''
-    url.searchParams.set('returnUrl', pathname)
-    return NextResponse.redirect(url)
+    const loginUrl = new URL(loginUrlForPath(pathname))
+    loginUrl.searchParams.set('returnUrl', pathname)
+    return NextResponse.redirect(loginUrl)
   }
 
   // ── Per-request status check with 60-second cookie cache ─────────────────────
@@ -84,19 +110,25 @@ export async function proxy(request: NextRequest) {
 
       if (blocked) {
         await supabase.auth.signOut()
-        const url = request.nextUrl.clone()
-        url.pathname = pathname.startsWith('/student/') ? '/student/login' : '/login'
-        url.search = ''
-        url.searchParams.set('error', 'account_inactive')
+        const loginUrl = new URL(loginUrlForPath(pathname))
+        loginUrl.searchParams.set('error', 'account_inactive')
 
         // Build the redirect, but preserve the cookie state Supabase wrote onto `response`
-        const redirectResponse = NextResponse.redirect(url)
+        const redirectResponse = NextResponse.redirect(loginUrl)
         // Copy all Set-Cookie headers from `response` (where Supabase wrote auth-cookie clears)
         response.cookies.getAll().forEach((cookie) => {
           redirectResponse.cookies.set(cookie.name, cookie.value, cookie)
         })
-        // Delete our own cache cookie on top of whatever Supabase set
-        redirectResponse.cookies.delete('ll_status_checked_at')
+        // Delete our own cache cookie on top of whatever Supabase set — must
+        // include `domain` so the browser clears the domain-scoped cookie, not
+        // a phantom host-only one.
+        redirectResponse.cookies.set({
+          name: 'll_status_checked_at',
+          value: '',
+          path: '/',
+          maxAge: 0,
+          ...(cookieDomain ? { domain: cookieDomain } : {}),
+        })
         return redirectResponse
       }
 
@@ -106,6 +138,7 @@ export async function proxy(request: NextRequest) {
         sameSite: 'lax',
         path: '/',
         secure: process.env.NODE_ENV === 'production',
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
       })
     }
   }
