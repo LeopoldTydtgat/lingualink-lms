@@ -57,5 +57,11 @@ export async function studentLoginAction(formData: FormData) {
 
   await clearRateLimit(ip, 'student')
   const returnUrl = (formData.get('returnUrl') as string) ?? ''
-  redirect(returnUrl.startsWith('/') ? returnUrl : '/student/my-classes')
+  // Reject protocol-relative ("//evil.com") and backslash variants — those
+  // pass a naive startsWith('/') check but redirect off-site.
+  const safeReturn =
+    returnUrl.startsWith('/') &&
+    !returnUrl.startsWith('//') &&
+    !returnUrl.startsWith('/\\')
+  redirect(safeReturn ? returnUrl : '/student/my-classes')
 }

@@ -9,8 +9,27 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { studentId, teacherName, sheetTitles } = await request.json()
-  if (!studentId || !teacherName || !Array.isArray(sheetTitles) || sheetTitles.length === 0) {
+  // Role check — only teachers/admins may dispatch this email. The teacher's
+  // display name must come from the session profile, never from the body.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name, role, account_types')
+    .eq('id', user.id)
+    .single()
+
+  const isAuthorized =
+    profile?.role === 'teacher' ||
+    profile?.role === 'admin' ||
+    (profile?.account_types ?? []).includes('school_admin')
+
+  if (!profile || !isAuthorized) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  const teacherName = profile.full_name
+
+  const { studentId, sheetTitles } = await request.json()
+  if (!studentId || !Array.isArray(sheetTitles) || sheetTitles.length === 0) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
   }
 
