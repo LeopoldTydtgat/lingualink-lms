@@ -5,6 +5,7 @@ import {
   buildEmailTemplate,
   studentTrainingEndingSoonEmailContent,
 } from '@/lib/email/templates'
+import { verifyCronAuth } from '@/lib/cron-auth'
 
 // Called by Vercel Cron once per day.
 // Finds active trainings whose end_date falls within the next 14 days
@@ -19,10 +20,8 @@ const supabase = createClient(
 )
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authFail = verifyCronAuth(request)
+  if (authFail) return authFail
 
   const today = new Date()
   const in14Days = new Date(today)

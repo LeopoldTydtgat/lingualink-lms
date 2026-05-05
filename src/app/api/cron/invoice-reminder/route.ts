@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
+import { verifyCronAuth } from '@/lib/cron-auth'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,14 +15,33 @@ const MONTHS = [
 ]
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authFail = verifyCronAuth(request)
+  if (authFail) return authFail
 
   const now = new Date()
   if (now.getUTCDate() !== 1) {
     return NextResponse.json({ ok: true, skipped: true })
+  }
+
+  // Idempotency guard — Vercel Cron retries on timeout would otherwise re-send
+  // every email to every teacher. The cron_runs table has a UNIQUE constraint
+  // on (cron_name, run_date) so the second insert is silently dropped, and the
+  // empty `data` array tells us we've already run today.
+  const runDate = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`
+  const { data: runRows, error: runErr } = await supabase
+    .from('cron_runs')
+    .upsert(
+      { cron_name: 'invoice-reminder', run_date: runDate },
+      { onConflict: 'cron_name,run_date', ignoreDuplicates: true }
+    )
+    .select()
+
+  if (runErr) {
+    console.error('cron_runs guard failed:', runErr)
+    return NextResponse.json({ error: 'Idempotency check failed' }, { status: 500 })
+  }
+  if (!runRows || runRows.length === 0) {
+    return NextResponse.json({ ok: true, alreadyRanToday: true })
   }
 
   const prevMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))
@@ -76,6 +96,12 @@ export async function GET(request: Request) {
       console.error(`Failed to send invoice reminder to ${teacher.email}:`, err)
     }
   }
+
+  await supabase
+    .from('cron_runs')
+    .update({ completed_at: new Date().toISOString() })
+    .eq('cron_name', 'invoice-reminder')
+    .eq('run_date', runDate)
 
   return NextResponse.json({ ok: true, sent })
 }

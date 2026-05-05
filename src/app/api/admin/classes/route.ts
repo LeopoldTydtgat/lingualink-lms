@@ -223,6 +223,29 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Atomic hours deduction via RPC — locks the training row, re-checks balance,
+  // and increments hours_consumed in a single transaction. Closes the TOCTOU
+  // window on the previous read-then-write pattern.
+  const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+    p_training_id: training_id,
+    p_hours_needed: hoursRequested,
+  })
+
+  if (deductError) {
+    const msg = (deductError.message || '').toLowerCase()
+    if (msg.includes('insufficient_hours')) {
+      return NextResponse.json(
+        { error: `Insufficient hours. ${hoursRemaining.toFixed(1)}h remaining, ${hoursRequested}h required.` },
+        { status: 400 }
+      )
+    }
+    if (msg.includes('training_not_active')) {
+      return NextResponse.json({ error: 'This training is no longer active.' }, { status: 400 })
+    }
+    console.error('book_class_atomic failed:', deductError)
+    return NextResponse.json({ error: 'Failed to reserve hours. Please try again.' }, { status: 500 })
+  }
+
   // Create Teams meeting before inserting the lesson so the URL is available immediately
   let teamsJoinUrl: string | null = null
   let teamsMeetingId: string | null = null
@@ -257,19 +280,15 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (lessonError) {
-    console.error('Create lesson error:', lessonError)
+    console.error('Create lesson error — refunding deducted hours:', lessonError)
+    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+      p_training_id: training_id,
+      p_hours: hoursRequested,
+    })
+    if (refundError) {
+      console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+    }
     return NextResponse.json({ error: lessonError.message }, { status: 500 })
-  }
-
-  // Deduct hours from training balance
-  const { error: hoursError } = await supabase
-    .from('trainings')
-    .update({ hours_consumed: training.hours_consumed + hoursRequested })
-    .eq('id', training_id)
-
-  if (hoursError) {
-    console.error('Hours deduction error:', hoursError)
-    // Lesson was created — don't roll back, but log the issue
   }
 
   // Send confirmation emails to teacher and student

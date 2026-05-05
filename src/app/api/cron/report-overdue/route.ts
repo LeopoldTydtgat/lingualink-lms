@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { verifyCronAuth } from '@/lib/cron-auth'
 
 // This route is called by Vercel Cron daily.
 // It finds lessons that ended more than 12 hours ago with no completed report
@@ -11,10 +12,8 @@ const supabase = createClient(
 )
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authFail = verifyCronAuth(request)
+  if (authFail) return authFail
 
   const now = new Date()
   // Conservative DB filter: lessons that started more than 12h ago.
