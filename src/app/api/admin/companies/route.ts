@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -84,10 +84,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Company name is required.' }, { status: 400 })
     }
     // --- 3. Insert ---
-    const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const adminClient = createAdminClient()
     const { data: company, error: insertError } = await adminClient
       .from('companies')
       .insert({

@@ -312,9 +312,18 @@ export default function BillingClient({
     await loadData()
   }
 
-  const handleViewInvoice = async (filePath: string) => {
-    const { data } = await supabase.storage.from('invoices').createSignedUrl(filePath, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  const handleViewInvoice = async (invoiceId: string) => {
+    // Signing happens server-side. The browser client can't read invoices
+    // outside RLS, and we want admin viewing to work without exposing private
+    // file paths to the page.
+    const res = await fetch('/api/teacher/invoice/sign-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiceId }),
+    })
+    if (!res.ok) return
+    const { signedUrl } = await res.json()
+    if (signedUrl) window.open(signedUrl, '_blank')
   }
 
   const handleMarkPaid = async (invoiceId: string) => {
@@ -511,7 +520,7 @@ export default function BillingClient({
                   {invoice.file_path ? (
                     <>
                       <button
-                        onClick={() => handleViewInvoice(invoice.file_path!)}
+                        onClick={() => handleViewInvoice(invoice.id)}
                         className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
                       >
                         View Invoice
@@ -669,7 +678,7 @@ export default function BillingClient({
                             </span>
                             {invoice.file_path && (
                               <button
-                                onClick={() => handleViewInvoice(invoice.file_path!)}
+                                onClick={() => handleViewInvoice(invoice.id)}
                                 className="text-xs underline"
                                 style={{ color: '#FF8303' }}
                               >

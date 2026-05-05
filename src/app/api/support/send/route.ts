@@ -43,7 +43,10 @@ export async function POST(request: Request) {
       .select('id, sender_role, content, created_at')
       .single()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) {
+      console.error('[support/send] insert error:', error)
+      return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, message: newMessage })
   } catch (err) {

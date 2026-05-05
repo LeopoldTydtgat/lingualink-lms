@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkEmailDispatchLimit } from '@/lib/rateLimit'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/email/templates'
 
@@ -24,6 +25,16 @@ export async function POST(request: Request) {
 
   if (!profile || !isAuthorized) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Per-user dispatch limit — 20/hour. Caps Resend abuse if a teacher/admin
+  // session is compromised and starts looping over students.
+  const limit = await checkEmailDispatchLimit(user.id)
+  if (limit.blocked) {
+    return NextResponse.json(
+      { error: 'Too many notifications sent. Please try again later.', retryAfterSeconds: limit.retryAfterSeconds },
+      { status: 429 },
+    )
   }
 
   const teacherName = profile.full_name

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { magicMatchesMime } from '@/lib/file-magic'
 
 const BUCKET = 'library-files'
 
@@ -67,13 +68,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'File exceeds the 10 MB limit' }, { status: 400 })
   }
 
+  const adminClient = createAdminClient()
+
+  // Reject upload if the sheet doesn't exist. Without this, an admin (or a
+  // compromised admin session) could write arbitrary files into the bucket
+  // under any path, including paths that don't map to a study sheet row.
+  const { data: existingSheet } = await adminClient
+    .from('study_sheets')
+    .select('id')
+    .eq('id', sheetId)
+    .maybeSingle()
+
+  if (!existingSheet) {
+    return NextResponse.json({ error: 'Study sheet not found.' }, { status: 404 })
+  }
+
   const filename = sanitizeFilename(file.name)
   const storagePath = `${sheetId}/${filename}`
 
-  const adminClient = createAdminClient()
-
   const arrayBuffer = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
+
+  // Magic-byte verification: file.type can be lied about by the client, so we
+  // confirm the leading bytes match the claimed MIME before writing to storage.
+  if (!magicMatchesMime(buffer, file.type)) {
+    return NextResponse.json({ error: 'File contents do not match the declared type.' }, { status: 400 })
+  }
 
   const { error: uploadError } = await adminClient.storage
     .from(BUCKET)

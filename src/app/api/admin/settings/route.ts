@@ -28,7 +28,7 @@ export async function GET() {
     .single()
 
   const isAdmin = Array.isArray(profile?.account_types) &&
-    (profile.account_types.includes('school_admin') || profile.account_types.includes('admin'))
+    profile.account_types.includes('school_admin')
 
   if (!isAdmin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     .single()
 
   const isAdmin = Array.isArray(profile?.account_types) &&
-    (profile.account_types.includes('school_admin') || profile.account_types.includes('admin'))
+    profile.account_types.includes('school_admin')
 
   if (!isAdmin) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

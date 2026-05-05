@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getBillability } from '@/lib/billing/billability'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
@@ -103,7 +104,10 @@ export async function GET(req: NextRequest) {
 
   // ── 2. Teacher Earnings Summary ───────────────────────────────────────────────────────
   else if (type === 'teacher_earnings') {
-    const { data: teachers } = await supabase
+    // hourly_rate has a column-level REVOKE on `authenticated` — must use the
+    // admin client. Role check above has already gated access to this branch.
+    const adminClient = createAdminClient()
+    const { data: teachers } = await adminClient
       .from('profiles')
       .select('id, full_name, email, hourly_rate, timezone, currency')
       .in('role', ['teacher', 'admin'])

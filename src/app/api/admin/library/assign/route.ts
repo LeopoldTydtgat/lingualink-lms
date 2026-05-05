@@ -26,11 +26,13 @@ export async function POST(request: Request) {
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { study_sheet_id, student_id, assigned_by } = body
+  const { study_sheet_id, student_id } = body
+  // Always derive assigned_by from the verified session — never trust the body.
+  const assigned_by = user.id
 
-  if (!study_sheet_id || !student_id || !assigned_by) {
+  if (!study_sheet_id || !student_id) {
     return NextResponse.json(
-      { error: 'study_sheet_id, student_id, and assigned_by are required' },
+      { error: 'study_sheet_id and student_id are required' },
       { status: 400 }
     )
   }
