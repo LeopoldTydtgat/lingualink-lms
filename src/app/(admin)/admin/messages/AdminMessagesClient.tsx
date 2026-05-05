@@ -184,35 +184,50 @@ export default function AdminMessagesClient({
     await fetchMessages(conv)
   }, [fetchMessages])
 
-  // Realtime: listen for new INSERTs on messages, filter to current thread
+  // Realtime: listen for new INSERTs on messages, scoped to the current thread.
+  // Three server-side filters cover both directions of the direct exchange plus
+  // any admin interjection; the client-side check below is kept as defense-in-depth.
   useEffect(() => {
     if (!selectedConv) return
+
+    const parties = new Set([selectedConv.teacherSideId, selectedConv.studentId])
+
+    const handleInsert = (payload: { new: { [key: string]: any } }) => {
+      const newMsg = payload.new as AdminMessage
+      const isDirectExchange =
+        parties.has(newMsg.sender_id) && parties.has(newMsg.receiver_id)
+      // Only the teacher-addressed copy is used in the admin thread view.
+      // The student-addressed copy is ignored here to avoid showing the
+      // message twice (sendAdminMessage now inserts one row per party).
+      const isAdminInterjection =
+        newMsg.sender_type === 'admin' &&
+        (newMsg.receiver_id === selectedConv.studentId ||
+         newMsg.receiver_id === selectedConv.teacherSideId)
+
+      if (isDirectExchange || isAdminInterjection) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === newMsg.id)) return prev
+          return [...prev, newMsg]
+        })
+      }
+    }
 
     const channel = supabase
       .channel(`admin-thread-${selectedConv.teacherSideId}-${selectedConv.studentId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
-          const newMsg = payload.new as AdminMessage
-          const parties = new Set([selectedConv.teacherSideId, selectedConv.studentId])
-          const isDirectExchange =
-            parties.has(newMsg.sender_id) && parties.has(newMsg.receiver_id)
-          // Only the teacher-addressed copy is used in the admin thread view.
-          // The student-addressed copy is ignored here to avoid showing the
-          // message twice (sendAdminMessage now inserts one row per party).
-          const isAdminInterjection =
-            newMsg.sender_type === 'admin' &&
-            (newMsg.receiver_id === selectedConv.studentId ||
-             newMsg.receiver_id === selectedConv.teacherSideId)
-
-          if (isDirectExchange || isAdminInterjection) {
-            setMessages(prev => {
-              if (prev.some(m => m.id === newMsg.id)) return prev
-              return [...prev, newMsg]
-            })
-          }
-        }
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
+        handleInsert
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
+        handleInsert
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
+        handleInsert
       )
       .on(
         'postgres_changes',
