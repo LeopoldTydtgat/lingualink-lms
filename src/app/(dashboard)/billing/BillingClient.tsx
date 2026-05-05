@@ -140,8 +140,6 @@ export default function BillingClient({
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
     { teacher: { id: string; full_name: string; email: string }; invoices: Invoice[] }[]
   >([])
-  const [uploadingTemplate, setUploadingTemplate] = useState(false)
-  const templateInputRef = useRef<HTMLInputElement>(null)
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
 
@@ -287,38 +285,28 @@ export default function BillingClient({
     e.target.value = ''
     if (!file || !targetInvoice) return
 
+    // Client-side pre-checks for UX only — the route re-validates
+    // MIME (via magic bytes), size, ownership, and the upload window.
     if (file.type !== 'application/pdf') { setUploadError('Only PDF files are accepted.'); return }
     if (file.size > 5 * 1024 * 1024) { setUploadError('File must be under 5 MB.'); return }
 
     setUploading(true)
 
-    const [year, month] = targetInvoice.billing_month.split('-')
-    const fileName = `${profile.id}/${year}-${month}.pdf`
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('invoiceId', targetInvoice.id)
 
-    const { error: storageError } = await supabase.storage
-      .from('invoices')
-      .upload(fileName, file, { upsert: true })
+    const res = await fetch('/api/teacher/invoice/upload', { method: 'POST', body: formData })
 
-    if (storageError) {
-      setUploadError('Upload failed. Please try again.')
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setUploadError(body.error || 'Upload failed. Please try again.')
       setUploading(false)
       return
     }
 
-    const { data: updatedRows, error: dbError } = await supabase
-      .from('invoices')
-      .update({ file_path: fileName, uploaded_at: new Date().toISOString() })
-      .eq('id', targetInvoice.id)
-      .select()
-
-    if (dbError) {
-      setUploadError('File uploaded but record update failed. Please contact admin.')
-    } else if (!updatedRows || updatedRows.length === 0) {
-      setUploadError('Invoice upload is only allowed between the 1st and 10th of the month following the billing period.')
-    } else {
-      setUploadSuccessId(targetInvoice.id)
-      setTimeout(() => setUploadSuccessId(null), 4000)
-    }
+    setUploadSuccessId(targetInvoice.id)
+    setTimeout(() => setUploadSuccessId(null), 4000)
 
     setUploading(false)
     await loadData()
@@ -327,26 +315,6 @@ export default function BillingClient({
   const handleViewInvoice = async (filePath: string) => {
     const { data } = await supabase.storage.from('invoices').createSignedUrl(filePath, 60)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
-  }
-
-  const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || file.type !== 'application/pdf') return
-    if (file.size > 10 * 1024 * 1024) return
-    setUploadingTemplate(true)
-    const { error } = await supabase.storage
-      .from('templates')
-      .upload('invoice-template.pdf', file, { upsert: true })
-    if (!error) {
-      await supabase.from('settings').upsert({
-        key: 'invoice_template_path',
-        value: 'invoice-template.pdf',
-        updated_at: new Date().toISOString(),
-      })
-      const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
-      setTemplateUrl(urlData.publicUrl)
-    }
-    setUploadingTemplate(false)
   }
 
   const handleMarkPaid = async (invoiceId: string) => {
@@ -666,31 +634,6 @@ export default function BillingClient({
       {/* ── ADMIN VIEW ───────────────────────────────────────────────────────── */}
       {activeView === 'admin' && isAdmin && (
         <div className="space-y-6">
-
-          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
-            <div>
-              <p className="font-medium text-gray-900">Invoice Template</p>
-              <p className="text-sm text-gray-500">Upload the Lingualink branded PDF for teachers to download and complete</p>
-            </div>
-            <div className="flex items-center gap-3">
-              {templateUrl && (
-                <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline" style={{ color: '#FF8303' }}>
-                  View Current
-                </a>
-              )}
-              <input ref={templateInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleTemplateUpload} />
-              <button
-                onClick={() => templateInputRef.current?.click()}
-                disabled={uploadingTemplate}
-                className="px-4 py-2 text-sm rounded-lg text-white disabled:opacity-50 btn-primary-hover"
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-                style={{ backgroundColor: '#FF8303' }}
-              >
-                {uploadingTemplate ? 'Uploading…' : templateUrl ? 'Replace Template' : 'Upload Template'}
-              </button>
-            </div>
-          </div>
 
           {allTeacherInvoices.length === 0 ? (
             <p className="text-sm text-gray-400">No teachers found.</p>

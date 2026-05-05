@@ -320,25 +320,39 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   }
 
   // ── Template upload ────────────────────────────────────────────────────────
+  // Posts to /api/admin/invoice-template/upload which enforces admin role,
+  // magic-byte PDF check, and size limit server-side.
   const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || file.type !== 'application/pdf') return
-    if (file.size > 10 * 1024 * 1024) return
-    setUploadingTemplate(true)
-    const { error } = await supabase.storage
-      .from('templates')
-      .upload('invoice-template.pdf', file, { upsert: true })
-    if (!error) {
-      await supabase.from('settings').upsert({
-        key: 'invoice_template_path',
-        value: 'invoice-template.pdf',
-        updated_at: new Date().toISOString(),
-      })
-      const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
-      setTemplateUrl(urlData.publicUrl)
-      setToast('Template uploaded!')
+    e.target.value = ''
+    if (!file) return
+    if (file.type !== 'application/pdf') {
+      setToast('Only PDF files are accepted.')
       setTimeout(() => setToast(null), 3000)
+      return
     }
+    if (file.size > 10 * 1024 * 1024) {
+      setToast('File must be under 10 MB.')
+      setTimeout(() => setToast(null), 3000)
+      return
+    }
+
+    setUploadingTemplate(true)
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/admin/invoice-template/upload', { method: 'POST', body: formData })
+
+    if (res.ok) {
+      const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
+      // Cache-bust so freshly replaced templates load.
+      setTemplateUrl(`${urlData.publicUrl}?v=${Date.now()}`)
+      setToast('Template uploaded!')
+    } else {
+      const body = await res.json().catch(() => ({}))
+      setToast(body.error || 'Template upload failed.')
+    }
+    setTimeout(() => setToast(null), 3000)
     setUploadingTemplate(false)
   }
 
