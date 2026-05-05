@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -315,7 +316,7 @@ function MessageThread({
                         ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
                         : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                     }
-                    dangerouslySetInnerHTML={{ __html: msg.content }}
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                   />
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="mt-1 flex flex-col gap-1">

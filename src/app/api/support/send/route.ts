@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 export async function POST(request: Request) {
   try {
@@ -28,6 +29,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    const safeContent = sanitizeHtml(content)
+
     const { data: newMessage, error } = await admin
       .from('support_messages')
       .insert({
@@ -35,7 +38,7 @@ export async function POST(request: Request) {
         participant_type: participantType,
         participant_auth_id: participantAuthId,
         sender_role: isAdmin ? 'admin' : 'user',
-        content,
+        content: safeContent,
       })
       .select('id, sender_role, content, created_at')
       .single()
