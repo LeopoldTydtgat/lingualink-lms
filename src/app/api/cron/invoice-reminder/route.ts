@@ -61,7 +61,7 @@ export async function GET(request: Request) {
               Please log in to your portal to upload your invoice.
             </p>
             <a
-              href="${process.env.NEXT_PUBLIC_SITE_URL}/billing"
+              href="${process.env.NEXT_PUBLIC_TEACHER_URL}/billing"
               style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
             >
               Upload My Invoice

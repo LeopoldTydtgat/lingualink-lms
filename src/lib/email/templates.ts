@@ -43,7 +43,7 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
           <!-- Footer -->
           <tr>
             <td style="padding:24px 40px;border-top:1px solid #E5E7EB;text-align:center;">
-              <img src="${process.env.NEXT_PUBLIC_SITE_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
+              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
                 <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
@@ -117,7 +117,7 @@ export function newMessageEmailContent(senderName: string): string {
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Log in to your portal to read and reply to the message.
     </p>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/messages`, 'Go to Messages')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/messages`, 'Go to Messages')}
   `
 }
 
@@ -166,7 +166,7 @@ export function teacherNewBookingEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes`, 'View Upcoming Classes')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View Upcoming Classes')}
   `
 }
 
@@ -184,7 +184,7 @@ export function teacherCancellationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
     </table>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/upcoming-classes`, 'View My Schedule')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}
   `
 }
 
@@ -228,7 +228,7 @@ export function studentCancellationByStudentEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
       ${refundLine}
     </table>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book Another Class')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'Book Another Class')}
   `
 }
 
@@ -255,7 +255,7 @@ export function studentCancellationByTeacherEmailContent(
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${teacherMessage}</p>
     </div>
     ` : ''}
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book a New Class')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'Book a New Class')}
   `
 }
 
@@ -322,7 +322,7 @@ export function studentHomeworkAssignedEmailContent(
     <ul style="margin:0 0 24px;padding-left:20px;">
       ${sheetList}
     </ul>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/study`, 'Go to My Study')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/study`, 'Go to My Study')}
   `
 }
 
@@ -349,7 +349,7 @@ export function studentNewMessageEmailContent(teacherName: string): string {
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Log in to your portal to read and reply.
     </p>
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/messages`, 'Go to Messages')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/messages`, 'Go to Messages')}
   `
 }
 
@@ -392,6 +392,6 @@ export function studentCancellationByAdminEmailContent(
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${cancellationReason}</p>
     </div>
     ` : ''}
-    ${buildButton(`${process.env.NEXT_PUBLIC_SITE_URL}/student/my-classes`, 'Book a New Class')}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'Book a New Class')}
   `
 }
