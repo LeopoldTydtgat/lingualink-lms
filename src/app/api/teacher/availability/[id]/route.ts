@@ -29,7 +29,7 @@ export async function DELETE(
 
   if (error) {
     console.error('[DELETE /api/teacher/availability/[id]]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 
   revalidatePath('/schedule')

@@ -314,9 +314,17 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   }
 
   // ── View invoice PDF (signed URL) ──────────────────────────────────────────
-  const handleViewInvoice = async (filePath: string) => {
-    const { data } = await supabase.storage.from('invoices').createSignedUrl(filePath, 60)
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  // Signing happens server-side via /api/teacher/invoice/sign-url. The route
+  // verifies the caller is the invoice owner or an admin before signing.
+  const handleViewInvoice = async (invoiceId: string) => {
+    const res = await fetch('/api/teacher/invoice/sign-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoiceId }),
+    })
+    if (!res.ok) return
+    const { signedUrl } = await res.json()
+    if (signedUrl) window.open(signedUrl, '_blank')
   }
 
   // ── Template upload ────────────────────────────────────────────────────────
@@ -620,7 +628,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
                             {inv.file_path && (
                               <button
-                                onClick={() => handleViewInvoice(inv.file_path!)}
+                                onClick={() => handleViewInvoice(inv.id)}
                                 className="text-xs underline flex-shrink-0"
                                 style={{ color: '#FF8303' }}
                               >

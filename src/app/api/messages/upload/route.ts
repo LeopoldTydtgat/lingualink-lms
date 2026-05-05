@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { magicMatchesMime } from '@/lib/file-magic'
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,10 +37,17 @@ export async function POST(req: NextRequest) {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
     const path = `${user.id}/${timestamp}-${safeName}`
     const arrayBuffer = await file.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
+    // Magic-byte verification — file.type is client-supplied and can be lied
+    // about. Reject if the declared MIME doesn't match the leading bytes.
+    if (!magicMatchesMime(buffer, file.type)) {
+      return NextResponse.json({ error: 'File contents do not match the declared type.' }, { status: 400 })
+    }
 
     const { error: uploadError } = await admin.storage
       .from('messages')
-      .upload(path, arrayBuffer, { contentType: file.type })
+      .upload(path, buffer, { contentType: file.type })
 
     if (uploadError) {
       console.error('[POST /api/messages/upload] Storage error:', uploadError)

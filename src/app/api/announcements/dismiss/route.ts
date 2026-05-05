@@ -28,12 +28,12 @@ export async function POST(req: NextRequest) {
     // Code 23505 = unique violation — already dismissed, that's fine
     if (error && error.code !== '23505') {
       console.error('Dismissal insert error:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (e) {
     console.error('Dismiss route error:', e)
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 // GET /api/admin/library — returns all study sheets
 export async function GET() {
@@ -75,7 +76,10 @@ export async function POST(request: Request) {
     insert.id = id
   }
 
-  const { data, error } = await supabase
+  // Insert via admin client. RLS on study_sheets blocks direct writes from
+  // session clients; the role check above already gates this branch to admins.
+  const adminClient = createAdminClient()
+  const { data, error } = await adminClient
     .from('study_sheets')
     .insert(insert)
     .select()
