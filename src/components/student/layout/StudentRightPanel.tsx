@@ -107,7 +107,7 @@ export default function StudentRightPanel({
       style={{
         width: '240px',
         minWidth: '240px',
-        backgroundColor: '#f9fafb',
+        backgroundColor: '#FFFCF8',
         borderLeft: '1px solid #E0DFDC',
         padding: '16px 12px',
         overflowY: 'auto',

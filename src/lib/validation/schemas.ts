@@ -198,7 +198,7 @@ const isoDateTime = z
 
 export const TeacherAvailabilitySchema = z.object({
   teacher_id: uuid,
-  type: z.enum(['recurring', 'override']),
+  type: z.enum(['general', 'specific', 'holiday']),
   // recurring rows have day_of_week + start_time/end_time
   day_of_week: z.number().int().min(0).max(6).optional().nullable(),
   start_time: z

@@ -22,7 +22,11 @@ export function localTimeToUtcMs(dateStr: string, timeStr: string, timezone: str
   const localMinute = Number(
     new Intl.DateTimeFormat('en-GB', { minute: '2-digit', timeZone: timezone }).format(guessUtc)
   )
-  const diffMinutes = (h - localHour) * 60 + (m - localMinute)
+  let diffMinutes = (h - localHour) * 60 + (m - localMinute)
+  // Normalise across midnight: any diff > 12h means we wrapped a day,
+  // any diff < -12h means we wrapped the other way.
+  if (diffMinutes > 12 * 60) diffMinutes -= 24 * 60
+  if (diffMinutes < -12 * 60) diffMinutes += 24 * 60
   return guessUtc.getTime() + diffMinutes * 60 * 1000
 }
 
