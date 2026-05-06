@@ -9,6 +9,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -373,7 +374,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
                             }
-                            dangerouslySetInnerHTML={{ __html: msg.content }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
                           <div className={`flex items-center gap-1 mt-0.5 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>

@@ -48,6 +48,26 @@ export async function POST(
     }
 
     const adminClient = createAdminClient()
+
+    // Confirm `id` belongs to a teacher profile before resetting the auth
+    // password. Without this, an admin could pass any user id (e.g. another
+    // admin's) and the route would reset that user's password instead.
+    const { data: targetProfile } = await adminClient
+      .from('profiles')
+      .select('id, account_types')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (!targetProfile) {
+      return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
+    }
+
+    const accountTypes = Array.isArray(targetProfile.account_types) ? targetProfile.account_types : []
+    const isTeacher = accountTypes.includes('teacher') || accountTypes.includes('teacher_exam')
+    if (!isTeacher) {
+      return NextResponse.json({ error: 'Target user is not a teacher.' }, { status: 400 })
+    }
+
     const { error } = await adminClient.auth.admin.updateUserById(id, { password })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

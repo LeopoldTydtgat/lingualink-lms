@@ -187,3 +187,34 @@ export const BookClassSchema = z.object({
 })
 
 export type BookClassInput = z.infer<typeof BookClassSchema>
+
+// ─── Teacher availability ─────────────────────────────────────────────────────
+
+const HHMM = /^\d{2}:\d{2}(:\d{2})?$/
+const isoDateTime = z
+  .string()
+  .min(1)
+  .refine((val) => !isNaN(Date.parse(val)), 'Must be a valid ISO 8601 datetime')
+
+export const TeacherAvailabilitySchema = z.object({
+  teacher_id: uuid,
+  type: z.enum(['recurring', 'override']),
+  // recurring rows have day_of_week + start_time/end_time
+  day_of_week: z.number().int().min(0).max(6).optional().nullable(),
+  start_time: z
+    .string()
+    .regex(HHMM, 'start_time must be HH:mm or HH:mm:ss')
+    .optional()
+    .nullable(),
+  end_time: z
+    .string()
+    .regex(HHMM, 'end_time must be HH:mm or HH:mm:ss')
+    .optional()
+    .nullable(),
+  // override rows have start_at + end_at as ISO timestamps
+  start_at: isoDateTime.optional().nullable(),
+  end_at: isoDateTime.optional().nullable(),
+  is_available: z.boolean(),
+})
+
+export type TeacherAvailabilityInput = z.infer<typeof TeacherAvailabilitySchema>

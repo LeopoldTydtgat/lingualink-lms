@@ -1,9 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
-import { createClient } from '@supabase/supabase-js'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { HoursAdjustmentSchema } from '@/lib/validation/schemas'
+import { checkAdminHoursMutationLimit } from '@/lib/rateLimit'
 
 export async function POST(
   req: NextRequest,
@@ -72,11 +73,18 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
+    // Per-admin mutation limit — 50/hour. Caps the blast radius of a
+    // compromised admin session that scripts mass hour changes.
+    const limit = await checkAdminHoursMutationLimit(user.id)
+    if (limit.blocked) {
+      return NextResponse.json(
+        { error: 'Too many hour adjustments. Please try again later.', retryAfterSeconds: limit.retryAfterSeconds },
+        { status: 429 },
+      )
+    }
+
     // ── 4. Fetch current training balance ─────────────────────────────────────
-    const adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
+    const adminClient = createAdminClient()
 
     const { data: training, error: trainError } = await adminClient
       .from('trainings')

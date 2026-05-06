@@ -8,8 +8,18 @@ export async function GET(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-  const { data: roleData } = await supabase.rpc('get_user_role');
-  if (roleData !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, account_types')
+    .eq('id', user.id)
+    .single();
+
+  const isAdmin =
+    profile?.role === 'admin' ||
+    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'));
+
+  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(request.url);
   const page        = parseInt(searchParams.get('page')  ?? '1');

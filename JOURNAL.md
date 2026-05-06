@@ -1,3 +1,58 @@
+## Pinned for next session
+
+1. **Ghost profile bug (resurfaced S82)** — leopold.tydtgat77@gmail.com is a student account but signing in at `/student/login` lands the user on the teacher portal. Cause is the orphaned `profiles` row created by an `auth.users` insert trigger; the proxy's status check finds that row first (profiles before students lookup) and treats the user as a teacher. Permanent fix is one of: (a) drop the `auth.users` insert trigger that auto-creates `profiles` rows, or (b) have the student-creation API route in `src/app/api/admin/students/route.ts` delete the orphaned `profiles` row right after the trigger fires. Option (a) is cleaner if the trigger has no other consumers.
+
+2. **Nia avatar oval on student-side teacher profile (carryover from S81)** — Session 80 fixed the oval-avatar bug on `src/components/layout/TopHeader.tsx` by adding explicit `width: '36px'` / `height: '36px'` to the `Image` inline style. The same bug still exists on the teacher-profile component rendered inside the student booking flow — that component never got the same fix. Locate it (likely under `src/app/(student)/student/book/` or a shared `src/components/student/` teacher-card) and apply the identical inline-style width/height to the `Image`.
+
+---
+
+## Session 83 - 5 May 2026 - Comprehensive security hardening sweep
+
+### What was built
+- Read-only audit across all routes, server actions, auth flows, storage, RLS policies, Realtime subscriptions, CSRF, cookies, env vars, error handling, rate limiting, input validation, file uploads, subdomain edge cases, and cron jobs. 57 findings catalogued (3 critical, 12 high, 25 medium, 17 low).
+- Database hardening: revoked wide table grants on profiles and students, re-granted column-level SELECT on safe columns only. Sensitive columns (hourly_rate, admin_notes, banking_details, iban, bic, tax_number, paypal_email, cancellation_policy) no longer readable by the authenticated role.
+- Batch A - auth gate and portal routing: proxy now enforces role-based portal boundaries (students cannot reach teacher pages, teachers cannot reach student pages), dashboard layout hardened with null-profile redirect, two admin message server actions gained auth and role checks (previously any authenticated user could read or modify any thread), mass-assignment vulnerability on the admin students PATCH route closed via explicit field allowlist, password reset paths added to public allowlist, reviews route now derives student_id from session, notify-homework route gained role check and session-derived teacher name, both login flows hardened against protocol-relative open redirects.
+- Batch B - stored XSS sanitisation: created shared sanitiser module using isomorphic-dompurify, applied write-side sanitisation in 4 server paths and read-side sanitisation in 7 components rendering rich text. Defense in depth covers historical poisoned rows and any future write path.
+- Batch C - cron auth, booking rate limit, atomic hours, server-side uploads, idempotency: shared cron auth helper fails closed if CRON_SECRET is missing or implausibly short, per-student booking rate limit at 10 per hour fails closed, atomic hours deduction via new Postgres RPCs (book_class_atomic and refund_hours_atomic) closes the TOCTOU window where concurrent bookings could overdraft a balance, invoice upload moved server-side with magic-byte validation, template upload restricted to admin-only via dedicated route, invoice-reminder cron made idempotent via cron_runs table.
+- Batch D - Realtime hardening: enabled Supabase Realtime publication on messages and support_messages tables (live updates were broken), added server-side filters to the admin thread subscription so it no longer receives every message event system-wide.
+- Batch E - 25 medium-severity fixes in one pass: broken admin earnings exports fixed (were silently returning null due to column REVOKE), admin reports routes now allow school_admin not just admin, library assign no longer trusts assigned_by from body, teacher password reset now verifies target is a teacher, inline service-key clients replaced with createAdminClient helper, library POST switched to admin client, dead account_types includes admin branch removed, forgot-password rate limited, browser-side invoice signed URLs moved to server route, library upload validates sheet_id exists, raw PostgREST error messages no longer leaked to non-admin users, Sentry beforeSend scrubber redacts sensitive fields and traces sample rate dropped to 10 percent in production, generic per-user action rate limiter added for email dispatch (20 per hour) and admin hours mutations (50 per hour), login rate limiter changed from fail-open to fail-closed, teacher availability route gained Zod validation, magic-byte file type verification added to all upload routes, security comments added to host.ts flagging cookie scope and unrecognised subdomain risks.
+
+### Break/Fix Log
+- Issue 1
+  Symptom: A student account signing in at the student login lands on the teacher portal account page with empty fields.
+  Cause: Initially attributed to a database trigger creating ghost profile rows. Audit proved the trigger does not exist. Real cause was the proxy passing any authenticated user through to any path, with the teacher dashboard layout silently rendering with profile=null. The wrong-portal banner then linked to /account, completing the trip.
+  Fix: Proxy now gates by role at the request level, and the dashboard layout redirects on null profile as defense in depth.
+  Lesson: Investigate before fixing. The S82 hypothesis was wrong. A read-only audit of the actual code path identified the real cause in minutes and avoided a wasted trigger-drop migration.
+
+- Issue 2
+  Symptom: Two admin server actions used the service-role admin client with no authentication or role check whatsoever. Any logged-in user could read or modify any message thread.
+  Cause: Server actions can be invoked by any authenticated client via POST. The actions were written assuming only admin code paths could reach them.
+  Fix: Added a shared assertAdmin helper at the top of both actions.
+  Lesson: Server actions are public endpoints. Treat them like API routes - every privileged action verifies caller identity and role first, every time.
+
+- Issue 3
+  Symptom: Sensitive columns (hourly_rate, banking details, admin notes) were readable by every authenticated user despite documentation claiming column-level REVOKEs were in place.
+  Cause: The column-level REVOKEs had never actually been applied. Even when applied, table-level GRANTs override column-level REVOKEs in Postgres.
+  Fix: Revoked wide table privileges, re-granted SELECT only on safe columns.
+  Lesson: Documented assumptions about database state must be verified. Postgres column-level revokes only take effect when the wider table grant is also removed.
+
+- Issue 4
+  Symptom: Realtime subscriptions in the codebase were not delivering events. Live message updates required a page refresh.
+  Cause: messages and support_messages tables were not in the supabase_realtime publication.
+  Fix: ALTER PUBLICATION ... ADD TABLE for both. The admin thread subscription was also tightened with server-side row filters at the same time.
+  Lesson: Supabase Realtime is not enabled per table by default. Adding code that subscribes to a table is not enough - the table must be added to the publication.
+
+- Issue 5
+  Symptom: Booking endpoint was unrate-limited; concurrent bookings on the same training could pass the hours check on the same snapshot and overdraft the balance.
+  Cause: Read-then-write pattern in JavaScript with no row-level lock. Single-session abuse could drain hours, exhaust the Teams API quota, and spam transactional email in seconds.
+  Fix: Per-student rate limit at 10 per hour failing closed, plus a Postgres RPC that locks the training row, re-validates balance, and decrements in one transaction. Failed lesson inserts now refund hours via a paired RPC.
+  Lesson: Any read-then-write on a balance column is a TOCTOU bug waiting to happen. Use a row lock or a conditional update. Rate-limit any endpoint that costs money or external API quota.
+
+### Session result
+A full read-only security audit catalogued 57 findings across the codebase. All 3 critical and all 12 high severity findings were fixed and pushed to the dev branch in five batches, alongside 25 medium-severity fixes in a final cleanup pass. Database privileges were tightened to remove a serious data leak where any authenticated user could read every other user's financial and admin-only fields. Realtime live updates were restored. The portal is in materially better security posture than at session start, and all fixes are awaiting one final dev to main merge once the subdomain DNS lands.
+
+---
+
 ## Session 80 - 04 May 2026 - Welcome Email Removal, Forced Password Change Strip, UI Cleanup, 1hr Reminder Plain Link
 
 ### What was built

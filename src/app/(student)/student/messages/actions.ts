@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 export async function sendMessage(
   receiverId: string,
@@ -26,12 +27,14 @@ export async function sendMessage(
 
   if (!student) return { error: 'Student not found' }
 
+  const safeContent = sanitizeHtml(content)
+
   const { error } = await supabase.from('messages').insert({
     sender_id: student.id,
     sender_type: 'student',
     receiver_id: receiverId,
     receiver_type: receiverType,
-    content,
+    content: safeContent,
     attachments: attachments ?? [],
   })
 

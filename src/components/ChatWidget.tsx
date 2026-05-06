@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
+import { sanitizeHtml } from '@/lib/sanitize'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -392,7 +393,7 @@ export default function ChatWidget({
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
                             }
-                            dangerouslySetInnerHTML={{ __html: msg.content }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
                           <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>

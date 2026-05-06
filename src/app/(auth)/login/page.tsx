@@ -42,7 +42,14 @@ function LoginPageContent() {
       }
       if (result?.success) {
         const returnUrl = searchParams.get('returnUrl')
-        router.push(returnUrl?.startsWith('/') ? returnUrl : '/dashboard')
+        // Reject protocol-relative ("//evil.com") and backslash variants — those
+        // pass a naive startsWith('/') check but redirect off-site.
+        const safeReturn =
+          returnUrl &&
+          returnUrl.startsWith('/') &&
+          !returnUrl.startsWith('//') &&
+          !returnUrl.startsWith('/\\')
+        router.push(safeReturn ? returnUrl : '/dashboard')
       }
     })
   }
