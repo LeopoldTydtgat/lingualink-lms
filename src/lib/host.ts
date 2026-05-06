@@ -47,6 +47,7 @@ export function isProductionHost(host: string | null | undefined): boolean {
 }
 
 export function expectedPortal(pathname: string): Portal {
+  if (pathname === '/login') return 'any'
   if (pathname.startsWith('/api/')) return 'any'
   if (pathname === '/') return 'any'
   if (pathname.startsWith('/student/')) return 'student'
