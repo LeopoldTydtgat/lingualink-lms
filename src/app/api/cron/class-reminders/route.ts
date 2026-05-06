@@ -6,6 +6,7 @@ import {
   studentClassReminderEmailContent,
   teacherClassReminderEmailContent,
 } from '@/lib/email/templates'
+import { verifyCronAuth } from '@/lib/cron-auth'
 
 // This route is called by Vercel Cron every 15 minutes.
 // It checks for lessons starting within the next 24 hours or 1 hour
@@ -19,11 +20,8 @@ const supabase = createClient(
 )
 
 export async function GET(request: Request) {
-  // Verify the request is coming from Vercel Cron and not a random caller
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authFail = verifyCronAuth(request)
+  if (authFail) return authFail
 
   const now = new Date()
 

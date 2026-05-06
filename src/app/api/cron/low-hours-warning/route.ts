@@ -5,6 +5,7 @@ import {
   buildEmailTemplate,
   studentLowHoursEmailContent,
 } from '@/lib/email/templates'
+import { verifyCronAuth } from '@/lib/cron-auth'
 
 // This route is called by Vercel Cron once per day.
 // It finds students whose active training has dropped below 2 hours remaining
@@ -22,11 +23,8 @@ const supabase = createClient(
 const LOW_HOURS_THRESHOLD = 2 // hours
 
 export async function GET(request: Request) {
-  // Verify the request is from Vercel Cron
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authFail = verifyCronAuth(request)
+  if (authFail) return authFail
 
   // Find active trainings where hours remaining < threshold
   // and warning hasn't been sent yet for this training

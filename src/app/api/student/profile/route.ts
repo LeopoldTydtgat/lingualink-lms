@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { magicMatchesMime } from '@/lib/file-magic'
 
 // Fields a student is allowed to update on their own record.
 // Sensitive admin-managed fields (full_name, email, admin_notes,
@@ -59,10 +60,17 @@ export async function POST(req: NextRequest) {
     const ext = photo.name.split('.').pop()
     const path = `students/${student.id}/avatar.${ext}`
     const arrayBuffer = await photo.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
+    // Magic-byte verification — reject anything whose first bytes don't match
+    // the claimed image MIME, even if the browser swore it was a real image.
+    if (!magicMatchesMime(buffer, photo.type)) {
+      return NextResponse.json({ error: 'File contents do not match the declared type.' }, { status: 400 })
+    }
 
     const { error: uploadError } = await admin.storage
       .from('avatars')
-      .upload(path, arrayBuffer, { upsert: true, contentType: photo.type })
+      .upload(path, buffer, { upsert: true, contentType: photo.type })
 
     if (uploadError) {
       console.error('[POST /api/student/profile] Storage upload error:', uploadError)

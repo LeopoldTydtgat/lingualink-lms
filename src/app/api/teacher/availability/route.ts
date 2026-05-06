@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { TeacherAvailabilitySchema } from '@/lib/validation/schemas'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -10,7 +11,13 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await request.json()
-  const { teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available } = body
+
+  const parsed = TeacherAvailabilitySchema.safeParse(body)
+  if (!parsed.success) {
+    const firstError = parsed.error.issues[0]
+    return NextResponse.json({ error: firstError.message }, { status: 400 })
+  }
+  const { teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available } = parsed.data
 
   if (teacher_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -26,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   if (error) {
     console.error('[POST /api/teacher/availability]', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 
   revalidatePath('/schedule')

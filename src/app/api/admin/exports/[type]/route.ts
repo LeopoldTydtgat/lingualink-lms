@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 
 // ─── CSV helper ───────────────────────────────────────────────────────────────
@@ -194,12 +195,15 @@ export async function GET(
         const lessonIds = (lessons ?? []).map((l: any) => l.id)
         const tIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))]
 
+        // hourly_rate has a column-level REVOKE on `authenticated` — must use
+        // the admin client. Role check above has already gated access here.
+        const adminClient = createAdminClient()
         const [reportRes, profileRes] = await Promise.all([
           lessonIds.length > 0
             ? supabase.from('reports').select('lesson_id, did_class_happen, no_show_type').in('lesson_id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? supabase.from('profiles').select('id, full_name, hourly_rate').in('id', tIds)
+            ? adminClient.from('profiles').select('id, full_name, hourly_rate').in('id', tIds)
             : { data: [] },
         ])
 

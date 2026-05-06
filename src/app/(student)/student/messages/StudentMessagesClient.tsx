@@ -9,6 +9,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
+import { sanitizeHtml } from '@/lib/sanitize'
 import { sendMessage, markMessagesAsRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -490,7 +491,7 @@ export default function StudentMessagesClient({
                                 ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
                                 : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
                             }
-                            dangerouslySetInnerHTML={{ __html: msg.content }}
+                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className="mt-1 flex flex-col gap-1">

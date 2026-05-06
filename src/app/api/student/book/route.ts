@@ -7,6 +7,7 @@ import { createTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
 import { isSlotAvailable } from '@/lib/availability'
+import { checkStudentBookingLimit } from '@/lib/rateLimit'
 
 // ── Email content builders ────────────────────────────────────────────────────
 
@@ -145,6 +146,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorised.' }, { status: 401 })
     }
 
+    // ── 2b. Rate limit per student (10 bookings / 60 min, fail closed) ───────
+    const rl = await checkStudentBookingLimit(studentRow.id)
+    if (rl.blocked) {
+      return NextResponse.json(
+        { error: 'Too many booking attempts. Please try again shortly.' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } }
+      )
+    }
+
     // ── 3. Load the training and check hours balance ───────────────────────────
     const { data: training, error: trainingError } = await supabase
       .from('trainings')
@@ -227,6 +237,38 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ── 4c. Atomic hours deduction via RPC ────────────────────────────────────
+    // The RPC takes a row-level lock (SELECT FOR UPDATE), re-validates status
+    // and balance, and increments hours_consumed in a single transaction.
+    // This eliminates the TOCTOU window between the read-and-write done in JS
+    // where two concurrent bookings on the same training could both pass the
+    // balance check and both increment, ending up below zero.
+    const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+      p_training_id: trainingId,
+      p_hours_needed: hoursNeeded,
+    })
+
+    if (deductError) {
+      const msg = (deductError.message || '').toLowerCase()
+      if (msg.includes('insufficient_hours')) {
+        return NextResponse.json(
+          { error: 'You do not have enough hours remaining for this class.' },
+          { status: 400 }
+        )
+      }
+      if (msg.includes('training_not_active')) {
+        return NextResponse.json(
+          { error: 'This training is no longer active.' },
+          { status: 400 }
+        )
+      }
+      console.error('book_class_atomic failed:', deductError)
+      return NextResponse.json(
+        { error: 'Failed to reserve hours. Please try again.' },
+        { status: 500 }
+      )
+    }
+
     // ── 5. If rescheduling – cancel the old lesson ────────────────────────────
     if (rescheduleId) {
       const { error: cancelError } = await supabase
@@ -287,22 +329,15 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (lessonError || !newLesson) {
-      console.error('Failed to create lesson:', lessonError)
-      return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
-    }
-
-    // ── 8. Deduct hours from training ─────────────────────────────────────────
-    const { error: hoursError } = await supabase
-      .from('trainings')
-      .update({
-        hours_consumed: training.hours_consumed + hoursNeeded,
+      console.error('Failed to create lesson — refunding deducted hours:', lessonError)
+      const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+        p_training_id: trainingId,
+        p_hours: hoursNeeded,
       })
-      .eq('id', trainingId)
-
-    if (hoursError) {
-      console.error('CRITICAL: Hours deduction failed after lesson insert. Deleting lesson:', newLesson.id, hoursError)
-      await supabase.from('lessons').delete().eq('id', newLesson.id)
-      return NextResponse.json({ error: 'Failed to complete booking. Please try again.' }, { status: 500 })
+      if (refundError) {
+        console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+      }
+      return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
     }
 
     // ── 9. Send confirmation emails ───────────────────────────────────────────

@@ -5,8 +5,29 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, newMessageEmailContent, studentNewMessageEmailContent } from '@/lib/email/templates'
+import { sanitizeHtml } from '@/lib/sanitize'
+
+async function assertAdmin() {
+  // RLS-bound client — role lookup must run as the user, not via service role.
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, account_types')
+    .eq('id', user.id)
+    .single()
+
+  const isAdmin =
+    profile?.role === 'admin' ||
+    (profile?.account_types ?? []).includes('school_admin')
+  if (!isAdmin) throw new Error('Unauthorized')
+}
 
 export async function getAdminThreadMessages(teacherSideId: string, studentId: string) {
+  await assertAdmin()
+
   const adminDb = createAdminClient()
 
   const { data } = await adminDb
@@ -59,18 +80,14 @@ export async function sendAdminMessage(
   const receiverId   = lastSenderType === 'student' ? teacherSideId : studentId
   const receiverType = lastSenderType === 'student' ? 'teacher' as const : 'student' as const
 
-  // Wrap plain text in paragraph tags so it renders consistently with Tiptap content
-  const htmlContent = content
-    .split('\n')
-    .map(line => `<p>${line || '<br>'}</p>`)
-    .join('')
+  const safeContent = sanitizeHtml(content)
 
   const { data: inserted, error } = await adminDb.from('messages').insert({
     sender_id:     adminProfile.id,
     sender_type:   'admin',
     receiver_id:   receiverId,
     receiver_type: receiverType,
-    content:       htmlContent,
+    content:       safeContent,
     attachments:   [],
   }).select().single()
 
@@ -128,6 +145,8 @@ export async function sendAdminMessage(
 }
 
 export async function markAdminThreadRead(teacherSideId: string, studentId: string) {
+  await assertAdmin()
+
   const adminDb = createAdminClient()
 
   await adminDb

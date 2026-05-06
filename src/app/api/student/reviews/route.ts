@@ -10,11 +10,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
   }
 
+  // Resolve the authoritative student id from the session — never trust the body
+  const { data: studentRow } = await supabase
+    .from('students')
+    .select('id')
+    .eq('auth_user_id', user.id)
+    .maybeSingle();
+
+  if (!studentRow) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  const studentId = studentRow.id;
+
   const body = await request.json();
-  const { class_id, student_id, teacher_id, rating, review_text } = body;
+  const { class_id, teacher_id, rating, review_text } = body;
 
   // Basic validation
-  if (!class_id || !student_id || !teacher_id || !rating) {
+  if (!class_id || !teacher_id || !rating) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
@@ -27,7 +39,7 @@ export async function POST(request: Request) {
     .from('lessons')
     .select('id')
     .eq('id', class_id)
-    .eq('student_id', student_id)
+    .eq('student_id', studentId)
     .single();
 
   if (!lesson) {
@@ -39,7 +51,7 @@ export async function POST(request: Request) {
     .from('student_reviews')
     .select('id')
     .eq('class_id', class_id)
-    .eq('student_id', student_id)
+    .eq('student_id', studentId)
     .maybeSingle();
 
   if (existing) {
@@ -51,7 +63,7 @@ export async function POST(request: Request) {
     .from('student_reviews')
     .insert({
       class_id,
-      student_id,
+      student_id: studentId,
       teacher_id,
       rating,
       review_text: review_text ?? null,

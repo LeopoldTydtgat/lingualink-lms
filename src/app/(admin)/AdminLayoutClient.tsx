@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import {
   LayoutDashboard,
@@ -73,7 +73,6 @@ export default function AdminLayoutClient({
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [liveUnreadMessages, setLiveUnreadMessages] = useState(unreadMessagesCount)
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
@@ -139,7 +138,9 @@ export default function AdminLayoutClient({
 
   const handleLogout = async () => {
     await supabaseRef.current.auth.signOut()
-    router.push('/login')
+    // Login route lives on the teacher portal — must be a full nav, not router.push
+    const teacherUrl = process.env.NEXT_PUBLIC_TEACHER_URL
+    window.location.href = teacherUrl ? `${teacherUrl}/login` : '/login'
   }
 
   const isActive = (href: string, exact?: boolean) => {

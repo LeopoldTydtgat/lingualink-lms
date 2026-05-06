@@ -94,12 +94,37 @@ export async function PATCH(
       package_name,
       total_hours,
       end_date,
-      ...studentFields
     } = body
+
+    // Explicit allowlist — never spread the body. Excludes id, auth_user_id,
+    // created_at, is_active, profile_completed and anything else the client
+    // is not allowed to set.
+    const studentUpdate: Record<string, unknown> = {
+      full_name:             body.full_name,
+      timezone:              body.timezone,
+      status:                body.status,
+      date_of_birth:         body.date_of_birth         ?? null,
+      phone:                 body.phone                 ?? null,
+      language_preference:   body.language_preference   ?? null,
+      customer_number:       body.customer_number       ?? null,
+      is_private:            body.is_private            ?? true,
+      company_id:            body.company_id            ?? null,
+      academic_advisor_id:   body.academic_advisor_id   ?? null,
+      native_language:       body.native_language       ?? null,
+      learning_language:     body.learning_language     ?? null,
+      current_fluency_level: body.current_fluency_level ?? null,
+      self_assessed_level:   body.self_assessed_level   ?? null,
+      learning_goals:        body.learning_goals        ?? null,
+      interests:             body.interests             ?? null,
+      cancellation_policy:   body.cancellation_policy,
+      admin_notes:           body.admin_notes           ?? null,
+      teacher_notes:         body.teacher_notes         ?? null,
+      updated_at:            new Date().toISOString(),
+    }
 
     const { error: studentError } = await adminClient
       .from('students')
-      .update({ ...studentFields, updated_at: new Date().toISOString() })
+      .update(studentUpdate)
       .eq('id', id)
 
     if (studentError) {

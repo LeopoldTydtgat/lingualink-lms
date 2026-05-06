@@ -28,6 +28,10 @@ export default async function DashboardLayout({
     .eq('id', user.id)
     .single()
 
+  // Defense-in-depth — proxy already gates by role, but if a teacher/admin
+  // user somehow has no profiles row, fail safe.
+  if (!profile) redirect('/login')
+
   const { data: lessonRow } = await supabase
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
