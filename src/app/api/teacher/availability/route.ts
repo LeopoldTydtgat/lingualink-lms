@@ -26,10 +26,10 @@ export async function POST(request: NextRequest) {
     .from('availability')
     .upsert(
       { teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available },
-      { onConflict: 'teacher_id,day_of_week,start_time,end_time', ignoreDuplicates: true }
+      { onConflict: 'teacher_id,day_of_week,start_time,end_time' }
     )
     .select()
-    .maybeSingle()
+    .single()
 
   if (error) {
     console.error('[POST /api/teacher/availability]', error)
