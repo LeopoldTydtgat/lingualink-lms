@@ -51,6 +51,12 @@ export async function proxy(request: NextRequest) {
   // path + query. Skipped on non-production hosts (localhost, vercel preview,
   // apex) — those serve every portal so dev/preview Just Works.
   const portal = getPortal(host)
+
+  // Student subdomain serves the student login form at /login
+  if (pathname === '/login' && portal === 'student') {
+    return NextResponse.rewrite(new URL('/student/login', request.url))
+  }
+
   const expected = expectedPortal(pathname)
   if (portal !== 'any' && expected !== 'any' && portal !== expected) {
     const target = portalUrl(expected)
