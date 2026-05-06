@@ -6,6 +6,48 @@
 
 ---
 
+## Session 86 - 06 May 2026 - Schedule fixes and calendar overhaul
+
+### What was built
+- General Availability drag selection rewritten end-to-end
+- Calendar visual overhaul across General Availability and Day to Day
+- Right panel background updated across teacher, student, and admin portals
+- Microsoft Teams meetings updated to bypass lobby for everyone
+
+### Break/Fix Log
+
+Issue 1 - Drag selection produced fragmented bars on General Availability
+- Symptom: dragging a continuous range left visible gaps; saved slots appeared non-contiguous in the UI
+- Cause: API route was calling upsert with ignoreDuplicates: true and maybeSingle(), returning null on every conflict. Client filtered nulls out of the response and the slots silently disappeared from local state. A separate localGeneral state synced from the availability prop also overwrote optimistic updates after each save
+- Fix: removed ignoreDuplicates from upsert, switched maybeSingle() to single() so duplicates return the canonical row. Collapsed localGeneral into a single source of truth (the availability prop). Switched onAvailabilityChange to functional setState so concurrent drags do not clobber each other
+- Lesson: silent null returns from upsert with ignoreDuplicates are a footgun. Always assert the API returns the canonical row on success, including conflicts. Two sources of truth fighting each other compound any data loss into visible UI bugs
+
+Issue 2 - Fast drags skipped slots
+- Symptom: dragging quickly left gaps because mouseenter does not fire on every cell the cursor passes over
+- Cause: applySlotLocally only handled the cell mouseenter actually fired on, no interpolation between last and current slot
+- Fix: added a lastSlotKey ref and a slotKeysBetween helper. On every mouseenter, fill in any cells skipped between the previous slot and the current one (same day only)
+
+Issue 3 - Hover painted slots without clicking
+- Symptom: moving the cursor over the calendar selected slots even though no mousedown fired
+- Cause: window mouseup listener can fail to fire if the user releases outside the window, alt-tabs, or opens devtools mid-drag, leaving isDragging.current stuck true
+- Fix: added abortDrag fallback wired to window blur and document visibilitychange events. Drops isDragging, clears draggedSlots, and clears dragPreview without committing
+
+Issue 4 - Run blocks rendered shorter than the row labels suggested
+- Symptom: a 9am-12pm block visually stopped short of 12pm; gaps appeared between contiguous slots in the rendered overlay
+- Cause: td cells had no explicit height. Browser computed height from button content plus padding, which did not match the runLength times 30 calculation in the overlay
+- Fix: forced height: 30 and boxSizing: border-box on day and gutter td cells. Padding zeroed on day cells. Button height switched to 100% so it fills the cell exactly
+
+Issue 5 - Microsoft Teams meetings sent both teacher and student to a lobby
+- Symptom: nobody could let anybody else in - both parties waited indefinitely
+- Cause: the calendar events endpoint we use does not accept lobbyBypassSettings in the request body. Lobby behaviour is controlled by the organiser's Teams meeting policy
+- Fix: updated the Global Teams meeting policy in the M365 admin centre to set "Who can bypass the lobby" to Everyone, anonymous join enabled, dial-in bypass enabled. The shared organiser account inherits this. Safe in our setup because the join URL is only ever sent to the assigned teacher and student via Resend
+- Lesson: not every Graph API path supports the same fields. The calendar events endpoint defers to tenant policy; the dedicated /onlineMeetings endpoint accepts per-meeting lobby settings but requires a higher M365 tier
+
+### Session result
+Drag selection on the General Availability calendar now works correctly under all conditions - slow drags, fast drags, drag across existing weekly availability, drag-remove, concurrent drags, and recovery from missed mouseup events. Saved slots persist contiguously and run blocks align exactly with the row labels. The colour palette across both calendar tabs was rebuilt from scratch around the brand and is now visually coherent. Teams meetings created via the portal place both teacher and student straight into the call with no lobby step.
+
+---
+
 ## Session 83 - 5 May 2026 - Comprehensive security hardening sweep
 
 ### What was built
