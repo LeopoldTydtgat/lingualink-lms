@@ -366,7 +366,7 @@ export default function AdminLayoutClient({
         </main>
 
         {/* Right panel */}
-        <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 bg-white border-l border-gray-200 p-4 overflow-y-auto thin-scroll">
+        <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 border-l border-gray-200 p-4 overflow-y-auto thin-scroll" style={{ backgroundColor: '#FFFCF8' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
             <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>At a Glance</p>
