@@ -38,6 +38,7 @@ interface MyClassesClientProps {
   lastFeedback: string | null
   studentTimezone: string
   profileCompleted: boolean
+  bannerDismissed: boolean
 }
 
 // Format a date for display — uses Intl with explicit timezone, safe on client
@@ -104,10 +105,11 @@ export default function MyClassesClient({
   lastFeedback,
   studentTimezone,
   profileCompleted,
+  bannerDismissed,
 }: MyClassesClientProps) {
   const router = useRouter()
 
-  const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted)
+  const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted && !bannerDismissed)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
@@ -187,6 +189,19 @@ export default function MyClassesClient({
 
   const scheduledCount = lessons.filter((l) => l.status === 'scheduled').length
 
+  async function handleDismissBanner() {
+    try {
+      const res = await fetch('/api/student/profile/dismiss-banner', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('Failed to persist banner dismiss:', data.error ?? res.status)
+      }
+    } catch (err) {
+      console.error('Failed to persist banner dismiss:', err)
+    }
+    setShowProfileBanner(false)
+  }
+
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
 
@@ -213,7 +228,7 @@ export default function MyClassesClient({
             </a>
           </p>
           <button
-            onClick={() => setShowProfileBanner(false)}
+            onClick={handleDismissBanner}
             aria-label="Dismiss"
             style={{
               background: 'none',

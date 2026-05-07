@@ -10,7 +10,7 @@ export default async function UpcomingClassesPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('*, profile_completed')
+    .select('id, full_name, role, photo_url, timezone, profile_completed, profile_banner_dismissed')
     .eq('id', user.id)
     .single()
 
@@ -61,6 +61,7 @@ export default async function UpcomingClassesPage() {
       classes={classes}
       profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
       profileCompleted={profile?.profile_completed ?? false}
+      bannerDismissed={profile?.profile_banner_dismissed ?? false}
       teacherTimezone={profile?.timezone ?? 'Europe/London'}
     />
   )
