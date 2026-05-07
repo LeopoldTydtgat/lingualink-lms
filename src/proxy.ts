@@ -57,6 +57,20 @@ export async function proxy(request: NextRequest) {
     return NextResponse.rewrite(new URL('/student/login', request.url))
   }
 
+  // Admin subdomain: rewrite clean URLs to /admin/* so the (admin)/admin/*
+  // route group is served transparently. Excludes /api/* (API routes are
+  // path-based, not subdomain-prefixed) and /login (admin uses teacher
+  // portal login — the unauth redirect below will route correctly).
+  if (
+    portal === 'admin' &&
+    !pathname.startsWith('/admin') &&
+    !pathname.startsWith('/api') &&
+    pathname !== '/login'
+  ) {
+    const newPath = pathname === '/' ? '/admin' : `/admin${pathname}`
+    return NextResponse.rewrite(new URL(newPath, request.url))
+  }
+
   const expected = expectedPortal(pathname)
   if (portal !== 'any' && expected !== 'any' && portal !== expected) {
     const target = portalUrl(expected)
