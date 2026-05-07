@@ -5,7 +5,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient } from '@/lib/supabase/client'
 import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
@@ -79,10 +79,7 @@ function Avatar({ name, photoUrl, size = 9 }: { name: string; photoUrl?: string 
 }
 
 export default function AdminSupportClient({ adminProfile, conversations: initialConversations, initialFaqs }: Props) {
-  const supabase = useMemo(() => createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  ), [])
+  const supabase = useMemo(() => createClient(), [])
 
   const [activeTab, setActiveTab] = useState<'conversations' | 'faqs'>('conversations')
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)

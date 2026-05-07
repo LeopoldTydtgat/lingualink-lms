@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient } from '@/lib/supabase/client'
 import { ArrowLeft, Save, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 
@@ -69,10 +69,7 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
   const [success, setSuccess] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  const supabase = createClient()
 
   // Fetch current admin user ID on mount — needed for created_by field
   useEffect(() => {

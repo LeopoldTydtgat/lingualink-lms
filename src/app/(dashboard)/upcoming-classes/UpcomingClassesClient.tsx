@@ -31,6 +31,7 @@ type Props = {
   classes: Class[]
   profile: Profile
   profileCompleted: boolean
+  bannerDismissed: boolean
   teacherTimezone: string
 }
 
@@ -275,8 +276,8 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: 
   )
 }
 
-export default function UpcomingClassesClient({ classes, profile, profileCompleted, teacherTimezone }: Props) {
-  const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted)
+export default function UpcomingClassesClient({ classes, profile, profileCompleted, bannerDismissed, teacherTimezone }: Props) {
+  const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -329,6 +330,19 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     }
   }
 
+  async function handleDismissBanner() {
+    try {
+      const res = await fetch('/api/profile/dismiss-banner', { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        console.error('Failed to persist banner dismiss:', data.error ?? res.status)
+      }
+    } catch (err) {
+      console.error('Failed to persist banner dismiss:', err)
+    }
+    setShowProfileBanner(false)
+  }
+
   return (
     <div className="max-w-3xl mx-auto space-y-8">
 
@@ -353,7 +367,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             </a>
           </p>
           <button
-            onClick={() => setShowProfileBanner(false)}
+            onClick={handleDismissBanner}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}
             aria-label="Dismiss"
           >
