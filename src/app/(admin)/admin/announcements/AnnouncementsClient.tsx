@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient } from '@/lib/supabase/client'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 
 interface Announcement {
@@ -48,10 +48,7 @@ export default function AnnouncementsClient({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  const supabase = createClient()
 
   // ── Quick activate / deactivate toggle ─────────────────────────────────────
   const handleToggle = async (id: string, current: boolean) => {

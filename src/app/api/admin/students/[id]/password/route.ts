@@ -66,6 +66,12 @@ export async function POST(
     const { error } = await adminClient.auth.admin.updateUserById(student.auth_user_id, { password })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    try {
+      await adminClient.auth.admin.signOut(student.auth_user_id, 'global')
+    } catch (signOutError) {
+      console.error('[password reset student] signOut failed:', signOutError)
+    }
+
     return NextResponse.json({ success: true })
   } catch {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
