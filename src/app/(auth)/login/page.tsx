@@ -2,6 +2,7 @@
 
 import { useState, useTransition, Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
 import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
@@ -177,9 +178,16 @@ function LoginPageContent() {
               </Button>
             </form>
 
-            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
-              Forgot your password? Contact{' '}
-              <span style={{ color: '#FF8303', fontWeight: 500 }}>teachers@lingualinkonline.com</span>
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px', marginBottom: '8px' }}>
+              <Link href="/forgot-password" prefetch={false} style={{ color: '#FF8303', fontWeight: 500, textDecoration: 'none' }}>
+                Forgot your password?
+              </Link>
+            </p>
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: 0, marginBottom: 0 }}>
+              Need help? Contact{' '}
+              <a href="mailto:teachers@lingualinkonline.com" style={{ color: '#FF8303', fontWeight: 500, textDecoration: 'none' }}>
+                teachers@lingualinkonline.com
+              </a>
             </p>
           </div>
         </div>

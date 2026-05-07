@@ -106,6 +106,8 @@ export async function proxy(request: NextRequest) {
   const isPublicPath =
     pathname === '/login' ||
     pathname === '/student/login' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
     pathname === '/student/forgot-password' ||
     pathname === '/student/reset-password' ||
     PUBLIC_API_PATHS.has(pathname)

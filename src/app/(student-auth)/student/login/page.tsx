@@ -2,6 +2,7 @@
 
 import { useState, useTransition, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
 import { studentLoginAction } from './actions'
 
@@ -149,9 +150,16 @@ function StudentLoginPageContent() {
               </button>
             </form>
 
-            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px' }}>
-              Forgot your password? Contact{' '}
-              <span style={{ color: '#FF8303', fontWeight: 500 }}>support@lingualinkonline.com</span>
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: '28px', marginBottom: '8px' }}>
+              <Link href="/student/forgot-password" prefetch={false} style={{ color: '#FF8303', fontWeight: 500, textDecoration: 'none' }}>
+                Forgot your password?
+              </Link>
+            </p>
+            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', marginTop: 0, marginBottom: 0 }}>
+              Need help? Contact{' '}
+              <a href="mailto:support@lingualinkonline.com" style={{ color: '#FF8303', fontWeight: 500, textDecoration: 'none' }}>
+                support@lingualinkonline.com
+              </a>
             </p>
           </div>
         </div>
