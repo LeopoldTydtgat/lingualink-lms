@@ -1,32 +1,46 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState, useEffect, useTransition } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
+  const [verifyFailed, setVerifyFailed] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const supabase = createClient()
 
-  // Supabase automatically exchanges the token in the URL hash for a session
-  // We wait for that to happen before showing the form
+  // Reset email links here with ?token_hash=...&type=recovery (Supabase OTP flow).
+  // Exchange the token for a recovery session before showing the password form.
+  const tokenHash = searchParams.get('token_hash')
+  const recoveryType = searchParams.get('type')
+  const tokenMissing = !tokenHash || recoveryType !== 'recovery'
+  const linkInvalid = tokenMissing || verifyFailed
+
   useEffect(() => {
-    supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
+    if (tokenMissing) return
+
+    supabase.auth
+      .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
+      .then(({ error: verifyError }) => {
+        if (verifyError) {
+          setVerifyFailed(true)
+          return
+        }
         setSessionReady(true)
-      }
-    })
-  }, [])
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokenMissing, tokenHash])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -134,11 +148,44 @@ export default function ResetPasswordPage() {
               lineHeight: '1.5',
             }}
           >
-            Your password has been updated. Redirecting you to sign inâ€¦
+            Your password has been updated. Redirecting you to sign in...
+          </div>
+
+        ) : linkInvalid ? (
+          /* Token missing or verifyOtp failed */
+          <div>
+            <div
+              style={{
+                backgroundColor: '#fff4f4',
+                border: '1px solid #FD5602',
+                borderRadius: '8px',
+                padding: '16px',
+                marginBottom: '24px',
+                fontSize: '14px',
+                color: '#FD5602',
+                textAlign: 'center',
+                lineHeight: '1.5',
+              }}
+            >
+              This reset link is invalid or has expired.
+            </div>
+            <a
+              href="/student/forgot-password"
+              style={{
+                display: 'block',
+                textAlign: 'center',
+                fontSize: '14px',
+                color: '#FF8303',
+                textDecoration: 'none',
+                fontWeight: 500,
+              }}
+            >
+              Request a new reset link
+            </a>
           </div>
 
         ) : !sessionReady ? (
-          /* Waiting for Supabase to exchange the token */
+          /* Waiting for verifyOtp to resolve */
           <div
             style={{
               textAlign: 'center',
@@ -147,7 +194,7 @@ export default function ResetPasswordPage() {
               padding: '24px 0',
             }}
           >
-            Verifying your reset linkâ€¦
+            Verifying your reset link...
           </div>
 
         ) : (
@@ -280,12 +327,20 @@ export default function ResetPasswordPage() {
                   transition: 'background-color 0.15s',
                 }}
               >
-                {isPending ? 'Savingâ€¦' : 'Set password'}
+                {isPending ? 'Saving...' : 'Set password'}
               </button>
             </form>
           </>
         )}
       </div>
     </div>
+  )
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordContent />
+    </Suspense>
   )
 }
