@@ -218,3 +218,51 @@ export const TeacherAvailabilitySchema = z.object({
 })
 
 export type TeacherAvailabilityInput = z.infer<typeof TeacherAvailabilitySchema>
+
+// ─── Submit Report ────────────────────────────────────────────────────────────
+
+export const SubmitReportSchema = z
+  .object({
+    did_class_happen: z.boolean(),
+    no_show_type: z.enum(['student', 'teacher']).nullable(),
+    feedback_text: z.string().max(1000).nullable(),
+    additional_details: z.string().max(2000).nullable(),
+    level_data: z.record(z.string(), z.string()).nullable(),
+    student_confirmed: z.boolean().nullable(),
+    impersonation_note: z.string().max(2000).nullable(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.did_class_happen) {
+      if (!val.feedback_text || val.feedback_text.trim().length < 150) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['feedback_text'],
+          message: 'Feedback must be at least 150 characters when the class took place',
+        })
+      }
+      if (val.student_confirmed === false && (!val.impersonation_note || !val.impersonation_note.trim())) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['impersonation_note'],
+          message: 'A note is required when the student did not personally attend',
+        })
+      }
+    } else {
+      if (!val.no_show_type) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['no_show_type'],
+          message: "no_show_type must be 'student' or 'teacher' when the class did not happen",
+        })
+      }
+      if (!val.additional_details || !val.additional_details.trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['additional_details'],
+          message: 'Additional details are required when the class did not happen',
+        })
+      }
+    }
+  })
+
+export type SubmitReportInput = z.infer<typeof SubmitReportSchema>
