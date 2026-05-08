@@ -1,10 +1,9 @@
 // Host / portal detection for the multi-subdomain setup.
 //   teachers.lingualinkonline.com  → 'teacher'
 //   students.lingualinkonline.com  → 'student'
-//   admin.lingualinkonline.com     → 'admin'
 // Anything else (localhost, *.vercel.app, apex) → 'any' — no portal enforcement.
 
-export type Portal = 'teacher' | 'student' | 'admin' | 'any'
+export type Portal = 'teacher' | 'student' | 'any'
 
 // SECURITY (M-14): Sharing cookies across all *.lingualinkonline.com subdomains
 // exposes session tokens to any other subdomain (e.g., www, marketing). If a
@@ -23,7 +22,6 @@ export function getPortal(host: string | null | undefined): Portal {
   const hostname = normalizeHost(host)
   if (hostname === 'teachers.lingualinkonline.com') return 'teacher'
   if (hostname === 'students.lingualinkonline.com') return 'student'
-  if (hostname === 'admin.lingualinkonline.com') return 'admin'
   return 'any'
 }
 
@@ -51,19 +49,15 @@ export function expectedPortal(pathname: string): Portal {
   if (pathname.startsWith('/api/')) return 'any'
   if (pathname === '/') return 'any'
   if (pathname.startsWith('/student/')) return 'student'
-  if (pathname === '/admin' || pathname.startsWith('/admin/')) return 'admin'
   return 'teacher'
 }
 
 export function portalUrl(portal: Portal): string {
   if (portal === 'student') return process.env.NEXT_PUBLIC_STUDENT_URL ?? ''
-  if (portal === 'admin')   return process.env.NEXT_PUBLIC_ADMIN_URL   ?? ''
   return process.env.NEXT_PUBLIC_TEACHER_URL ?? ''
 }
 
-// Sign-in for admin users lives on the teacher portal — there's no /login route
-// under the (admin) group. So student paths go to the student login, everything
-// else (teacher + admin) goes to the teacher login.
+// Student paths use the student login; everything else uses the teacher login.
 export function loginUrlForPath(pathname: string): string {
   if (pathname.startsWith('/student/')) {
     return `${process.env.NEXT_PUBLIC_STUDENT_URL ?? ''}/student/login`
