@@ -521,3 +521,42 @@ Each item cites file and line, maps to symptom, and notes ripple risk if touched
 ---
 
 End of audit.
+
+---
+
+## Backfill SQL (Stages 1 and 2)
+
+These were drafted in the Session 91 C2 work but were not persisted to this file at the time. Recorded here for audit completeness.
+
+### Stage 1 - lessons with completed reports get the report's signal
+
+```sql
+UPDATE lessons l
+SET status = CASE
+  WHEN r.did_class_happen IS TRUE THEN 'completed'
+  WHEN r.no_show_type = 'student' THEN 'student_no_show'
+  WHEN r.no_show_type = 'teacher' THEN 'teacher_no_show'
+  ELSE 'completed'
+END,
+updated_at = now()
+FROM reports r
+WHERE r.lesson_id = l.id
+  AND r.status = 'completed'
+  AND l.status = 'scheduled';
+```
+
+### Stage 2 - lessons ended >24h ago with no completed report default to 'completed'
+
+```sql
+UPDATE lessons
+SET status = 'completed', updated_at = now()
+WHERE status = 'scheduled'
+  AND scheduled_at + (duration_minutes || ' minutes')::interval
+      < now() - interval '24 hours'
+  AND id NOT IN (SELECT lesson_id FROM reports
+                 WHERE status = 'completed');
+```
+
+### Verification - 8 May 2026
+
+Both stages returned zero affected rows on dry-run preview. The auto-complete cron (after the proxy fix in commit 436cfa8) had already flipped all stale 'scheduled' lessons to 'completed' on the manual run at 18:48 UTC. Backfill recorded for audit completeness only - no execution required.
