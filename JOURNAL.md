@@ -35,6 +35,70 @@ These items must not be actioned until the client confirms the platform is ready
 
 ---
 
+## Session 91 - 8 May 2026 - Booking and scheduling architectural audit + lesson status transition (C2)
+
+### What was built
+- SESSION_91_AUDIT.md - read-only architectural audit covering booking, scheduling, classes, video calls across all three portals. 25 findings (5 Critical, 5 High, 6 Medium, 5 Low) with file:line evidence.
+- Removed stale codebase.txt snapshot from repo root (was a 36k-line flattened dump polluting ripgrep results).
+- C2 fix - lessons now transition out of 'scheduled':
+  - New RPC complete_report_atomic in Supabase (writes report fields and lesson status atomically; cancelled lessons are immutable via WHERE status <> 'cancelled')
+  - New server action submitReport in src/app/(dashboard)/reports/actions.ts (auth gates, Zod-validated payload, calls the RPC)
+  - ReportFormClient.tsx wired to the new server action - removed the previous client-side from('reports').update() write path
+  - New Zod schema SubmitReportSchema in src/lib/validation/schemas.ts with did-class-happen branching
+  - New cron route src/app/api/cron/auto-complete-lessons/route.ts at 0 9 * * * - flips ended scheduled lessons to 'completed' as a placeholder; subsequent report submission overwrites to student_no_show or teacher_no_show
+  - Rewrote src/app/api/cron/report-overdue/route.ts to iterate reports (status pending/reopened) joined to lessons, since the lesson row may already be 'completed' by the auto-complete cron before the teacher submits
+  - vercel.json updated with the new cron entry
+- Idle timeout tuning:
+  - IDLE_TIMEOUT_MS 60 -> 120 minutes
+  - WARNING_BEFORE_MS 5 -> 10 minutes
+  - MAX_HIDDEN_MS 4 -> 8 hours
+  - Verified pause-on-hide behaviour, cross-tab sync, all activity events, and unconditional mounting across all three portals.
+
+### Break/Fix Log
+
+Issue 1: Right panel shows "Class is starting now" with active Join Class button while both Upcoming Classes lists are empty
+Symptom: Confirmed live on 8 May 13:38 SAST - both teacher and student right panels showed today's 13:30 lesson, but neither portal's Upcoming Classes page nor the student's Past Classes showed it.
+Cause: Architectural - right panel queries used a `now - 2h` window while Upcoming Classes used `gte(scheduled_at, now)`. The lesson dropped out of Upcoming the moment it started. Compounded by a deeper issue: lesson status never transitioned out of 'scheduled', so Past Classes was empty for everyone forever.
+Fix: C2 implemented as above. C1 (right panel end-time check) and C3 (Upcoming filter alignment) deliberately left for separate PRs to keep blast radius bounded.
+Lesson: Two surfaces reading the same row with different filters is the architectural smell. The audit caught it by laying the queries side by side.
+
+Issue 2: Two database tables doing overlapping work
+Symptom: SQL inventory showed both `classes` (3 rows of stale April seed, columns starts_at/ends_at/teams_link) and `lessons` (9 real production rows, columns scheduled_at/duration_minutes/teams_join_url).
+Cause: Schema drift from earlier sessions. `classes` was deprecated but never dropped. The audit confirmed zero call sites in src/ - matches in codebase.txt were from the stale snapshot.
+Fix: codebase.txt deleted. `classes` table left in place for now (no FKs reference it; safe to drop in a follow-up).
+Lesson: Stale snapshot files at repo root will mislead any code search. Keep them outside the repo.
+
+Issue 3: Two TEAMS_LINK_PENDING rows in production
+Symptom: Two completed lessons with teams_join_url = 'TEAMS_LINK_PENDING' instead of a real Graph URL.
+Cause: Pre-fix artifacts from before the Graph API failure handling was added. Atomicity bug: lesson row was created even though the Graph API call failed.
+Fix: Logged as audit finding C5 for a separate PR. Existing rows already in 'completed' status, so no immediate impact.
+Lesson: Booking write paths must be atomic with the Graph API call. The lesson row should not exist if the meeting was never created.
+
+Issue 4: report-overdue cron was a no-op
+Symptom: Cron filtered `in('status', ['completed', 'no_show'])` - statuses that no code path ever wrote.
+Cause: H4 status enum drift. Read filters expected statuses that write paths never produced.
+Fix: Cron rewritten to iterate reports table (status pending/reopened), joined to lessons via inner join. The 12-hour deadline is computed per-row from scheduled_at + duration_minutes.
+Lesson: When read filters and write paths diverge, the read side is silently broken. Always verify both sides write the values you expect to read.
+
+### Pending verification (next session)
+- Wait for the 0 9 UTC cron run on 9 May 2026 to confirm the 3 stale 'scheduled' rows flip to 'completed'. Verify with: `select id, status, scheduled_at, updated_at from lessons where status != 'cancelled';`
+- After verification passes, run backfill SQL stages 1 and 2 from SESSION_91_AUDIT.md
+- Smoke test the report submit path on a real lesson once one ends naturally (cannot book in the past via the portal)
+
+### Next priority order from the audit
+1. C1 - StudentRightPanel.tsx isJoinable lacks the end-time check the teacher version has. 3-line fix.
+2. C3 - Align Upcoming Classes filters with the new status enum. Now that lessons transition, replace `gte(scheduled_at, now)` with `eq(status, 'scheduled')`.
+3. M2 - Teacher right panel "Class is starting now" persists past end. One-line gate on classEnded.
+4. C4 - Student reschedule double-deducts hours (financial bug, isolated).
+5. C5 - Reschedule rollback on insert failure (data integrity).
+6. H1 - Wire the unused updateTeamsMeeting and cancelTeamsMeeting Graph API calls into the cancel and reschedule paths.
+7. H2 - Unify hours refund through refund_hours_atomic across all four cancel paths.
+
+### Session result
+The booking, scheduling, and class lifecycle had been bleeding bugs across multiple sessions. This session finally treated the system as a system: a full read-only architectural audit produced 25 findings tied to file and line, anchored on two confirmed live symptoms (the 8 May 13:30 lesson visible to the right panel but invisible to every list view). Root cause for both symptoms was C2 - lessons never transitioned out of 'scheduled'. The fix landed atomically: new RPC, new server action, new cron, rewritten overdue cron, no breaking changes to billing or existing user flows. The remaining audit findings now have a clear priority order to ship one at a time.
+
+---
+
 ## Session 90 - 08 May 2026 - Admin subdomain consolidation
 
 ### What was built
