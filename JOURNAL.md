@@ -1,3 +1,26 @@
+## Session 92 - 8 May 2026 - C2 verification + C1/C3 fixes shipped
+
+### What was built
+- Verified the Session 91 C2 fix (auto-complete cron) was failing silently due to a proxy redirect. Root cause: `/api/cron/auto-complete-lessons` was missing from `PUBLIC_API_PATHS` in `src/proxy.ts`, so every cron run hit the proxy without a Supabase session and got redirected to /login (visible as 307s in Vercel logs).
+- Fix shipped (commit 436cfa8): added the cron path to `PUBLIC_API_PATHS`. After deploy, manual Vercel "Run" trigger flipped all 3 stale May rows to 'completed' at 18:48 UTC.
+- Smoke tested the report-submit path by inserting a past test lesson + pending report row, submitting via the teacher portal, and verifying `complete_report_atomic` wrote both rows atomically (lesson.status=completed, report.status=completed, did_class_happen=true, completed_at populated). Test data deleted after.
+- Persisted the Stage 1 + Stage 2 backfill SQL into SESSION_91_AUDIT.md (commit 79ba226). Both stages dry-run returned zero rows because the cron had already done the work.
+- C1 fix (commit 2bdbe87): `src/components/student/layout/StudentRightPanel.tsx` - added end-time check to `isJoinable`, taking `durationMinutes` parameter and gating on `now > endMs`. Updated all 6 call sites to pass `nextLesson.duration_minutes`.
+- C3 fix narrow (commit aae3b04): `src/app/(dashboard)/upcoming-classes/page.tsx` - removed redundant `.gte('scheduled_at', ...)` filter. C2 now transitions past 'scheduled' rows out of that status, so the eq filter does the work alone. Student `my-classes/page.tsx` was deliberately left untouched - its gte filter is doing real work for cancelled rows per the brief (Section 5.2: cancelled greyed out on upcoming until original time passes, then drops off).
+- Branch hygiene: deleted duplicate `origin/Dev` (capital D) branch on the remote. Only `origin/dev` (lowercase) remains.
+
+### Break/Fix Log
+Issue 1: C2 auto-complete cron returning 307 every run / Cause: `/api/cron/auto-complete-lessons` was registered in vercel.json but not in `PUBLIC_API_PATHS` in src/proxy.ts, so the proxy redirected the unauthenticated cron request to /login before it could reach the route handler / Fix: added the path to the proxy's public API set / Lesson: every new cron route registered in vercel.json must be added to `PUBLIC_API_PATHS` in src/proxy.ts at the same time. The two files are coupled and the failure mode (silent 307 redirect) is invisible without checking Vercel logs.
+
+Issue 2: Backfill SQL referenced in handover brief but not in audit file / Cause: SQL was drafted in the prior session's chat but never persisted to SESSION_91_AUDIT.md / Fix: appended both stages to the audit doc with a verification note / Lesson: any SQL or instruction the next session is told to run must be written into the repo, not left in chat history.
+
+Issue 3: Duplicate remote branches `origin/dev` and `origin/Dev` / Cause: a push at some point created the capital-D branch on the case-sensitive remote, and Windows' case-insensitive filesystem hid it locally / Fix: `git push origin --delete Dev` then `git fetch --prune` / Lesson: watch for duplicate-case branches whenever git fetch reports a "new branch" with a name that already exists in a different case.
+
+### Session result
+C2 fully closed. C1 and C3 (narrow scope) shipped to dev branch. Two new audit items logged for future work: cancelled lesson attribution + Past Classes visibility (schema add for `cancelled_by`, write paths, Past Classes UI), and the "Hide cancelled" persistence bug. M2 is next in the queue (one-line gate on classEnded in `src/components/layout/RightPanel.tsx`). Dev branch is 4 commits ahead of main; PR pending.
+
+---
+
 ### Closed since S82
 
 - **S83** - Comprehensive security hardening: 57-finding audit completed across all routes, server actions, auth flows, storage, RLS, Realtime, CSRF, cookies, env vars, error handling, rate limiting, input validation, file uploads, and cron jobs. All 3 critical, 12 high, and 25 medium severity findings fixed and pushed in five batches.
