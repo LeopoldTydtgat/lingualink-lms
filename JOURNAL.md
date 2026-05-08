@@ -1,3 +1,43 @@
+## Session 93 - 8 May 2026 - M2 + C4 + C5 shipped, atomic RPC pattern established
+
+### What was built
+- `src/components/layout/RightPanel.tsx` - teacher countdown text now respects lesson end time
+- `src/app/api/student/book/route.ts` - reschedule branch refactored to use atomic RPCs
+- Supabase RPC `reschedule_class_atomic` - cancels old lesson, refunds old hours, deducts new hours in one transaction
+- Supabase RPC `unwind_reschedule_atomic` - restores old lesson and reverses hours delta on lesson-insert failure
+- First production wiring of `cancelTeamsMeeting` for orphan Teams meeting cleanup
+
+### Break/Fix Log
+
+Issue 1 (M2): Teacher RightPanel countdown showed "Class is starting now" past lesson end.
+Symptom: Text persisted for 2 hours after class start until layout query dropped the row.
+Cause: `secondsUntil` was clamped to 0 by `Math.max(0, ...)`. The countdown text branch had no end-time check, only a `secondsUntil <= 0` check. `classEnded` already existed at line 117 and was already gating `isJoinable` correctly - only the countdown text was missing the gate.
+Fix: Added a `classEnded` branch returning "Class has ended" before the `secondsUntil <= 0` check. Four-line addition. Mirror of C1 fix from S92.
+Lesson: When fixing a state-display bug, audit every consumer of the underlying state, not just the obvious one. The join button was correctly gated; the text was not. Same root cause, two surfaces.
+
+Issue 2 (C4): Student reschedule double-deducted hours.
+Symptom: A 60-minute to 60-minute reschedule consumed 2 hours of training balance instead of 0 net.
+Cause: The reschedule branch called `book_class_atomic` to deduct new hours, then a direct UPDATE to cancel the old lesson, with no refund of old hours. Five hours_consumed write sites exist across the codebase; this was the only non-refunding one.
+Fix: Created `reschedule_class_atomic` RPC in Supabase. Single transaction: locks training row, cancels old lesson with full ownership guard (`id = ? AND student_id = ? AND status = 'scheduled'`), validates balance against net delta, applies `(new - old)` hours delta. Route now skips `book_class_atomic` for reschedule and calls the new RPC. Fresh-booking path untouched.
+Lesson: Financial atomicity beats minimum diff. Initial recommendation was a post-cancel refund using existing RPC (Option A) for smaller change surface. Pushed to atomic RPC (Option B) because the transient imbalance window in Option A is real, even if small. The DDL cost is one-time.
+
+Issue 3 (C4 audit catch): Atomic RPC initially missed three columns the original UPDATE wrote.
+Symptom: Pre-commit audit revealed that the original cancel UPDATE wrote `cancelled_at`, `cancellation_reason`, and `updated_at`. The new RPC only set `status='cancelled'`. Eight read sites exist for these fields across billing logic and UI.
+Cause: Drafted RPC focused on hours math without auditing field coverage of the path it replaced.
+Fix: Updated RPC to set all three fields (`cancelled_at = now()`, `cancellation_reason = 'Rescheduled by student'`, `updated_at = now()`). Verified via `pg_get_functiondef`.
+Lesson: Mandatory pre-fix audit must cover every field the existing code writes, not just the bug surface. `getBillability` in `src/lib/billing/billability.ts:54` early-returns notBillable on cancelled rows when `cancelledAt` is falsy. Without the fix, every late-reschedule (under 24h) would have under-billed both teacher pay and B2B company billing. A financial bug fix would have shipped a different financial bug.
+
+Issue 4 (C5): Reschedule plus Graph success plus lesson-insert failure left student with no replacement and a lost original slot.
+Symptom: If the new lesson INSERT failed after `reschedule_class_atomic` succeeded and Graph created a Teams meeting, the old lesson stayed cancelled, the new lesson never existed, and a Teams calendar event was orphaned in the organiser mailbox.
+Cause: Recovery tail only refunded the positive net delta. No mechanism existed to restore the cancelled old lesson.
+Fix: Created `unwind_reschedule_atomic` RPC. Single transaction: locks training row, restores old lesson to `status = 'scheduled'` with `cancelled_at` and `cancellation_reason` cleared, reverses hours delta. Route now calls unwind on lesson-insert failure during reschedule, then calls `cancelTeamsMeeting` non-blocking if `teamsMeetingId` is non-null. This is the first production call site of `cancelTeamsMeeting`. Logs CRITICAL on any failure but does not return early until the cleanup attempts have run.
+Lesson: Atomic operations need atomic compensating actions. Pairing every "do" RPC with an "unwind" RPC at design time is the right pattern. Also: orphaned Teams meetings are a separate failure mode from DB-level inconsistency, and the cleanup must be non-blocking because the DB is the source of truth.
+
+### Session result
+Three bugs closed: one teacher-side display issue (M2) and two financial integrity issues in the student reschedule path (C4, C5). Two new atomic RPCs in Supabase establish the pattern for H2 (refund unification) which converts four remaining direct-UPDATE refund paths to atomic RPCs. C5 also opened the first production wiring of `cancelTeamsMeeting`, which feeds directly into H1 next session - five more cancel paths still leak Teams meetings into the organiser mailbox. Audit-first discipline caught a financial regression mid-fix that would have under-billed late-reschedules; this is the third time in recent sessions that audit-first prevented shipping a fix that would have introduced a new bug.
+
+---
+
 ## Session 92 - 8 May 2026 - C2 verification + C1/C3 fixes shipped
 
 ### What was built
