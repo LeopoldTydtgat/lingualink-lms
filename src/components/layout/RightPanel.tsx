@@ -136,9 +136,11 @@ export default function RightPanel({
               {/* Countdown — "Next class in 28m 45s" style */}
               <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
                 {mounted && secondsUntil !== null
-                  ? secondsUntil <= 0
-                    ? 'Class is starting now'
-                    : `Next class in ${formatCountdown(secondsUntil)}`
+                  ? classEnded
+                    ? 'Class has ended'
+                    : secondsUntil <= 0
+                      ? 'Class is starting now'
+                      : `Next class in ${formatCountdown(secondsUntil)}`
                   : 'Next class in –'}
               </p>
 
