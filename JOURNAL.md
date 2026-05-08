@@ -4,6 +4,35 @@
 
 2. **Nia avatar oval on student-side teacher profile (carryover from S81)** — Session 80 fixed the oval-avatar bug on `src/components/layout/TopHeader.tsx` by adding explicit `width: '36px'` / `height: '36px'` to the `Image` inline style. The same bug still exists on the teacher-profile component rendered inside the student booking flow — that component never got the same fix. Locate it (likely under `src/app/(student)/student/book/` or a shared `src/components/student/` teacher-card) and apply the identical inline-style width/height to the `Image`.
 
+### Closed since S82
+
+- **S83** - Comprehensive security hardening: 57-finding audit completed across all routes, server actions, auth flows, storage, RLS, Realtime, CSRF, cookies, env vars, error handling, rate limiting, input validation, file uploads, and cron jobs. All 3 critical, 12 high, and 25 medium severity findings fixed and pushed in five batches.
+- **S86** - Calendar overhaul: General Availability drag selection rewritten end-to-end, calendar visual palette rebuilt across all three portals, Teams lobby bypass configured via M365 meeting policy.
+- **S88** - Password reset switched to OTP token-hash flow (commit 53f8c43).
+- **S89** - Password reset diagnostic and accidental fix via getUser() forcing cookie re-read (commits d680a34, ae954dd), cross-portal smart router for student reset on teacher subdomain (ed9b016), defensive host-only cookie cleanup in proxy (d1bf82c).
+- **S90** - Admin subdomain consolidation: admin.lingualinkonline.com removed, admin portal now at teachers.lingualinkonline.com/admin, Vercel 308 redirect configured, NEXT_PUBLIC_ADMIN_URL env var removed (commits 5eea478, c1a2b75).
+
+### Verified open as of S90
+
+See pinned items 1 and 2 above for the two highest-priority open items. Additional open items:
+
+- Pre-S70 unavailability blocks may contain wrong UTC timestamps - the S70 fix corrected forward-going saves but did not migrate existing data. Client action required: delete and recreate any unavailability blocks set before S70. No confirmation received.
+- Billing test data cleanup script - noted as a lesson in S74 after a stale paid test invoice caused false debugging. No owner assigned and no ticket created.
+- Email button logo audit on transactional emails - deferred to dedicated email audit chat.
+- Teams attendance pull via Graph API - blocked on Azure permission grant.
+- Welcome email and invoice reminder cron pair - parked pending client input on three issues: "Dear ," null full_name rendering, current vs previous month logic bug in invoice reminder, and overall send strategy.
+
+### Pre-go-live (do not touch until ready)
+
+These items must not be actioned until the client confirms the platform is ready for production traffic.
+
+- Restore vercel.json cron /api/cron/class-reminders from "0 8 * * *" back to "*/15 * * * *" - requires Vercel Pro plan.
+- Re-enable GitHub main branch protection (require PR approval before merging).
+- pg_dump weekly backup script via GitHub Actions to S3 or local storage.
+- Admin "System Health" page - DB size, storage bucket sizes, orphaned files, cleanup button, quarterly review cadence.
+- Supabase Pro upgrade for managed backups.
+- NEXT_PUBLIC_SITE_URL update to production domain in Vercel env vars.
+
 ---
 
 ## Session 90 - 08 May 2026 - Admin subdomain consolidation
