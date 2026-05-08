@@ -57,30 +57,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.rewrite(new URL('/student/login', request.url))
   }
 
-  // Admin subdomain has no login page of its own — redirect to teacher login.
-  // Single source of truth for auth. Once logged in, shared cookie domain
-  // means user can navigate to admin.* and be recognised.
-  if (pathname === '/login' && portal === 'admin') {
-    const teacherUrl = portalUrl('teacher')
-    if (teacherUrl) {
-      return NextResponse.redirect(`${teacherUrl}/login${request.nextUrl.search}`)
-    }
-  }
-
-  // Admin subdomain: rewrite clean URLs to /admin/* so the (admin)/admin/*
-  // route group is served transparently. Excludes /api/* (API routes are
-  // path-based, not subdomain-prefixed) and /login (admin uses teacher
-  // portal login — the unauth redirect below will route correctly).
-  if (
-    portal === 'admin' &&
-    !pathname.startsWith('/admin') &&
-    !pathname.startsWith('/api') &&
-    pathname !== '/login'
-  ) {
-    const newPath = pathname === '/' ? '/admin' : `/admin${pathname}`
-    return NextResponse.rewrite(new URL(newPath, request.url))
-  }
-
   const expected = expectedPortal(pathname)
   if (portal !== 'any' && expected !== 'any' && portal !== expected) {
     const target = portalUrl(expected)
