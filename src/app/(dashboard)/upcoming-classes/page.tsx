@@ -34,7 +34,6 @@ export default async function UpcomingClassesPage() {
     `)
     .eq('teacher_id', user.id)
     .eq('status', 'scheduled')
-    .gte('scheduled_at', new Date().toISOString())
     .order('scheduled_at', { ascending: true })
 
   if (error) {
