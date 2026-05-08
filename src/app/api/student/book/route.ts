@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
-import { createTeamsMeeting } from '@/lib/microsoft/graph'
+import { createTeamsMeeting, cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
 import { isSlotAvailable } from '@/lib/availability'
@@ -366,20 +366,30 @@ export async function POST(req: NextRequest) {
       if (rescheduleId) {
         // Reschedule recovery: reschedule_class_atomic has already cancelled
         // the old lesson and applied net delta (new - old) to hours_consumed.
-        // We refund the positive delta so the student is not overcharged. The
-        // old lesson stays cancelled and the student loses their original
-        // slot. C5 will revisit this tail with a proper unwind.
-        const netDelta = hoursNeeded - oldDurationHours
-        console.error('Failed to create lesson during reschedule. Old lesson stays cancelled.', {
-          rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, netDelta, error: lessonError,
+        // unwind_reschedule_atomic restores the old lesson to scheduled and
+        // reverses the hours delta in a single transaction. Any orphaned
+        // Teams meeting created earlier is cancelled non-blockingly.
+        console.error('Failed to create lesson during reschedule. Attempting unwind.', {
+          rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, error: lessonError,
         })
-        if (netDelta > 0) {
-          const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-            p_training_id: trainingId,
-            p_hours: netDelta,
+        const { error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
+          p_old_lesson_id: rescheduleId,
+          p_training_id: trainingId,
+          p_old_duration_hours: oldDurationHours,
+          p_new_duration_hours: hoursNeeded,
+        })
+        if (unwindError) {
+          console.error('CRITICAL: unwind_reschedule_atomic failed. Manual reconciliation required.', {
+            rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, error: unwindError,
           })
-          if (refundError) {
-            console.error('CRITICAL: refund_hours_atomic failed during reschedule recovery:', refundError)
+        }
+        if (teamsMeetingId) {
+          try {
+            await cancelTeamsMeeting(teamsMeetingId)
+          } catch (cancelError) {
+            console.error('CRITICAL: orphan Teams meeting after reschedule unwind:', {
+              teamsMeetingId, rescheduleId, error: cancelError,
+            })
           }
         }
       } else {
