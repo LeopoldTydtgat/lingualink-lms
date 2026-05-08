@@ -14,7 +14,9 @@
       "PowerShell(git push *)",
       "PowerShell(claude doctor *)",
       "Bash(rg --files src/components)",
-      "Bash(rg -rn \"admin\" src/components)"
+      "Bash(rg -rn \"admin\" src/components)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
