@@ -32,8 +32,20 @@ function ResetPasswordContent() {
 
     supabase.auth
       .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
-      .then(({ error: verifyError }) => {
+      .then(({ data, error: verifyError }) => {
+        console.log('[reset-password] verifyOtp result:', {
+          hasError: !!verifyError,
+          errorName: verifyError?.name,
+          errorMessage: verifyError?.message,
+          errorStatus: (verifyError as any)?.status,
+          hasSession: !!data?.session,
+          hasUser: !!data?.user,
+          userId: data?.user?.id,
+        })
         if (verifyError) {
+          if (typeof window !== 'undefined' && (window as any).Sentry) {
+            (window as any).Sentry.captureException(verifyError, { tags: { flow: 'password-reset', step: 'verifyOtp' } })
+          }
           setVerifyFailed(true)
           return
         }
@@ -57,10 +69,18 @@ function ResetPasswordContent() {
     }
 
     startTransition(async () => {
+      const { data: userData } = await supabase.auth.getUser()
+      console.log('[reset-password] pre-updateUser session check:', {
+        hasUser: !!userData?.user,
+        userId: userData?.user?.id,
+      })
       const { error: updateError } = await supabase.auth.updateUser({ password })
-
       if (updateError) {
-        setError('Something went wrong. Your reset link may have expired. Please request a new one.')
+        console.error('[reset-password] updateUser failed:', updateError)
+        if (typeof window !== 'undefined' && (window as any).Sentry) {
+          (window as any).Sentry.captureException(updateError, { tags: { flow: 'password-reset', step: 'updateUser' } })
+        }
+        setError(`DEBUG: ${updateError.name || 'Error'} — ${updateError.message || 'no message'} (status: ${(updateError as any).status ?? 'n/a'})`)
         return
       }
 
