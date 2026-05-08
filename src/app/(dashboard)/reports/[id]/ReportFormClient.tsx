@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react'
 import { format } from 'date-fns'
-import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
+import { submitReport } from '../actions'
 
 // --- Types ---
 
@@ -76,7 +76,6 @@ const CEFR_DESCRIPTIONS: Record<string, string> = {
 
 export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets }: Props) {
   const router = useRouter()
-  const supabase = createClient()
 
   const lesson = report.lesson
   const student = lesson?.student
@@ -130,27 +129,21 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
     setSaving(true)
     setError(null)
 
-    const { error: saveError } = await supabase
-      .from('reports')
-      .update({
-        did_class_happen: didClassHappen,
-        no_show_type: didClassHappen ? null : noShowType,
-        feedback_text: didClassHappen ? feedbackText : null,
-        additional_details: additionalDetails || null,
-        level_data: didClassHappen ? levelData : null,
-        student_confirmed: didClassHappen ? studentConfirmed : null,
-        impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', report.id)
+    const result = await submitReport(report.id, {
+      did_class_happen: didClassHappen,
+      no_show_type: didClassHappen ? null : (noShowType as 'student' | 'teacher'),
+      feedback_text: didClassHappen ? feedbackText : null,
+      additional_details: additionalDetails || null,
+      level_data: didClassHappen ? levelData : null,
+      student_confirmed: didClassHappen ? studentConfirmed : null,
+      impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
+    })
 
     setSaving(false)
 
-    if (saveError) {
-      setError('Failed to save report. Please try again.')
-      console.error(saveError)
+    if (result.error) {
+      setError(result.error)
+      console.error('submitReport failed:', result.error)
       return
     }
 
