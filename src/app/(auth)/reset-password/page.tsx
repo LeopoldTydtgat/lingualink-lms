@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
+import * as Sentry from '@sentry/nextjs'
 import { createClient } from '@/lib/supabase/client'
 
 function ResetPasswordContent() {
@@ -32,12 +33,45 @@ function ResetPasswordContent() {
 
     supabase.auth
       .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
-      .then(({ error: verifyError }) => {
+      .then(async ({ error: verifyError }) => {
         if (verifyError) {
           setVerifyFailed(true)
           return
         }
-        setSessionReady(true)
+
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          setVerifyFailed(true)
+          return
+        }
+
+        const studentUrl = process.env.NEXT_PUBLIC_STUDENT_URL
+        if (!studentUrl) {
+          Sentry.captureMessage(
+            'NEXT_PUBLIC_STUDENT_URL is undefined on teacher reset-password redirect',
+            'error'
+          )
+          setVerifyFailed(true)
+          return
+        }
+
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle()
+
+          if (!profile) {
+            // No profiles row → user is a student. Cookies are domain-scoped to
+            // .lingualinkonline.com, so the recovery session carries over.
+            window.location.href = `${studentUrl}/student/reset-password`
+            return
+          }
+          setSessionReady(true)
+        } catch {
+          window.location.href = `${studentUrl}/student/reset-password`
+        }
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenMissing, tokenHash])
