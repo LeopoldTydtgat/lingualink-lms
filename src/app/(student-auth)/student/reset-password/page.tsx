@@ -32,20 +32,8 @@ function ResetPasswordContent() {
 
     supabase.auth
       .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
-      .then(({ data, error: verifyError }) => {
-        console.log('[reset-password] verifyOtp result:', {
-          hasError: !!verifyError,
-          errorName: verifyError?.name,
-          errorMessage: verifyError?.message,
-          errorStatus: (verifyError as any)?.status,
-          hasSession: !!data?.session,
-          hasUser: !!data?.user,
-          userId: data?.user?.id,
-        })
+      .then(({ error: verifyError }) => {
         if (verifyError) {
-          if (typeof window !== 'undefined' && (window as any).Sentry) {
-            (window as any).Sentry.captureException(verifyError, { tags: { flow: 'password-reset', step: 'verifyOtp' } })
-          }
           setVerifyFailed(true)
           return
         }
@@ -69,18 +57,13 @@ function ResetPasswordContent() {
     }
 
     startTransition(async () => {
-      const { data: userData } = await supabase.auth.getUser()
-      console.log('[reset-password] pre-updateUser session check:', {
-        hasUser: !!userData?.user,
-        userId: userData?.user?.id,
-      })
+      // Force session refresh from cookies. Without this, auth-js uses stale
+      // in-memory state from before verifyOtp wrote the recovery session,
+      // causing updateUser to 401. Found via diagnostic logging in session 89.
+      await supabase.auth.getUser() // refreshes session state from cookies before updateUser
       const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) {
-        console.error('[reset-password] updateUser failed:', updateError)
-        if (typeof window !== 'undefined' && (window as any).Sentry) {
-          (window as any).Sentry.captureException(updateError, { tags: { flow: 'password-reset', step: 'updateUser' } })
-        }
-        setError(`DEBUG: ${updateError.name || 'Error'} — ${updateError.message || 'no message'} (status: ${(updateError as any).status ?? 'n/a'})`)
+        setError('Something went wrong. Your reset link may have expired. Please request a new one.')
         return
       }
 
