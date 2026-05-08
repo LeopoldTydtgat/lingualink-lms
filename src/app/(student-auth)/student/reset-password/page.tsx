@@ -1,13 +1,12 @@
 'use client'
 
 import { Suspense, useState, useEffect, useTransition } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 function ResetPasswordContent() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,27 +19,21 @@ function ResetPasswordContent() {
 
   const supabase = createClient()
 
-  // Reset email links here with ?token_hash=...&type=recovery (Supabase OTP flow).
-  // Exchange the token for a recovery session before showing the password form.
-  const tokenHash = searchParams.get('token_hash')
-  const recoveryType = searchParams.get('type')
-  const tokenMissing = !tokenHash || recoveryType !== 'recovery'
-  const linkInvalid = tokenMissing || verifyFailed
+  // Recovery session is established by the teacher reset-password page's
+  // verifyOtp call. Cookies are .lingualinkonline.com domain-scoped, so the
+  // session carries over to this subdomain — we just confirm it exists.
+  const linkInvalid = verifyFailed
 
   useEffect(() => {
-    if (tokenMissing) return
-
-    supabase.auth
-      .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
-      .then(({ error: verifyError }) => {
-        if (verifyError) {
-          setVerifyFailed(true)
-          return
-        }
-        setSessionReady(true)
-      })
+    supabase.auth.getUser().then(({ data: { user }, error }) => {
+      if (error || !user) {
+        setVerifyFailed(true)
+        return
+      }
+      setSessionReady(true)
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenMissing, tokenHash])
+  }, [])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
