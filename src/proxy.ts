@@ -16,6 +16,51 @@ export async function proxy(request: NextRequest) {
 
   let response = NextResponse.next({ request })
 
+  // ── Legacy host-only sb-cookie cleanup ──────────────────────────────────────
+  // Pre-7b7ffba code wrote sb-* auth cookies host-only on production subdomains.
+  // Those legacy cookies coexist with the current domain-scoped writes and
+  // shadow them per RFC 6265 §5.3 (cookies keyed by name, domain, path), which
+  // breaks cross-subdomain auth — most visibly the cross-portal password reset
+  // (recovery session on .lingualinkonline.com is masked by a stale host-only
+  // refresh token, producing a 400 spam loop on getUser).
+  //
+  // We can't run this fix-up inline with the Supabase setAll callback because
+  // setAll reassigns `response` on every refresh, wiping any cookies we wrote
+  // before it. Instead: short-circuit with a redirect-to-self, write host-only
+  // clearing cookies on the redirect (no Domain attribute → matches only the
+  // (name, <request host>, /) tuple, leaves the domain-scoped legitimate
+  // cookies alone), then mark the session as cleaned via a domain-scoped flag.
+  //
+  // GET-only so we never drop a POST body. Production-only because non-prod
+  // hosts have no shared-domain cookie to shadow. Flag-gated so each browser
+  // pays the redirect cost at most once.
+  if (
+    request.method === 'GET' &&
+    cookieDomain &&
+    !request.cookies.has('ll_legacy_cleared') &&
+    request.cookies.getAll().some((c) => c.name.startsWith('sb-'))
+  ) {
+    const cleanResponse = NextResponse.redirect(request.nextUrl)
+    for (const cookie of request.cookies.getAll()) {
+      if (!cookie.name.startsWith('sb-')) continue
+      cleanResponse.cookies.set({
+        name: cookie.name,
+        value: '',
+        path: '/',
+        maxAge: 0,
+      })
+    }
+    cleanResponse.cookies.set('ll_legacy_cleared', '1', {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 365,
+      domain: cookieDomain,
+    })
+    return cleanResponse
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
