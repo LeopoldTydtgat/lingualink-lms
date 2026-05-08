@@ -237,58 +237,92 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── 4c. Atomic hours deduction via RPC ────────────────────────────────────
-    // The RPC takes a row-level lock (SELECT FOR UPDATE), re-validates status
-    // and balance, and increments hours_consumed in a single transaction.
-    // This eliminates the TOCTOU window between the read-and-write done in JS
-    // where two concurrent bookings on the same training could both pass the
-    // balance check and both increment, ending up below zero.
-    const { error: deductError } = await adminClient.rpc('book_class_atomic', {
-      p_training_id: trainingId,
-      p_hours_needed: hoursNeeded,
-    })
+    // ── 4c. Atomic hours reservation ──────────────────────────────────────────
+    // Reschedule path uses reschedule_class_atomic, which cancels the old
+    // lesson, refunds its hours, and deducts the new hours in a single
+    // transaction. Fresh-booking path uses book_class_atomic, which only
+    // deducts. Both take row-level locks and re-validate state inside the
+    // transaction, closing the read-then-write TOCTOU window.
+    let oldDurationHours = 0
 
-    if (deductError) {
-      const msg = (deductError.message || '').toLowerCase()
-      if (msg.includes('insufficient_hours')) {
-        return NextResponse.json(
-          { error: 'You do not have enough hours remaining for this class.' },
-          { status: 400 }
-        )
-      }
-      if (msg.includes('training_not_active')) {
-        return NextResponse.json(
-          { error: 'This training is no longer active.' },
-          { status: 400 }
-        )
-      }
-      console.error('book_class_atomic failed:', deductError)
-      return NextResponse.json(
-        { error: 'Failed to reserve hours. Please try again.' },
-        { status: 500 }
-      )
-    }
-
-    // ── 5. If rescheduling – cancel the old lesson ────────────────────────────
     if (rescheduleId) {
-      const { error: cancelError } = await supabase
+      const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancellation_reason: 'Rescheduled by student',
-          updated_at: new Date().toISOString(),
-        })
+        .select('duration_minutes')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
+        .eq('status', 'scheduled')
+        .maybeSingle()
 
-      if (cancelError) {
-        console.error('Failed to cancel old lesson during reschedule:', cancelError)
-        return NextResponse.json({ error: 'Failed to reschedule. Please try again.' }, { status: 500 })
+      if (oldLessonError || !oldLesson) {
+        return NextResponse.json(
+          { error: 'Original lesson not found or no longer reschedulable.' },
+          { status: 404 }
+        )
+      }
+
+      oldDurationHours = oldLesson.duration_minutes / 60
+
+      const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
+        p_old_lesson_id: rescheduleId,
+        p_student_id: studentId,
+        p_training_id: trainingId,
+        p_old_duration_hours: oldDurationHours,
+        p_new_duration_hours: hoursNeeded,
+      })
+
+      if (rescheduleError) {
+        const msg = (rescheduleError.message || '').toLowerCase()
+        if (msg.includes('insufficient_hours')) {
+          return NextResponse.json(
+            { error: 'You do not have enough hours remaining for this class.' },
+            { status: 400 }
+          )
+        }
+        if (msg.includes('old_lesson_not_reschedulable')) {
+          return NextResponse.json(
+            { error: 'Original lesson not found or no longer reschedulable.' },
+            { status: 404 }
+          )
+        }
+        if (msg.includes('training_not_found')) {
+          return NextResponse.json({ error: 'Training not found.' }, { status: 404 })
+        }
+        console.error('reschedule_class_atomic failed:', rescheduleError)
+        return NextResponse.json(
+          { error: 'Failed to reschedule. Please try again.' },
+          { status: 500 }
+        )
+      }
+    } else {
+      const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+        p_training_id: trainingId,
+        p_hours_needed: hoursNeeded,
+      })
+
+      if (deductError) {
+        const msg = (deductError.message || '').toLowerCase()
+        if (msg.includes('insufficient_hours')) {
+          return NextResponse.json(
+            { error: 'You do not have enough hours remaining for this class.' },
+            { status: 400 }
+          )
+        }
+        if (msg.includes('training_not_active')) {
+          return NextResponse.json(
+            { error: 'This training is no longer active.' },
+            { status: 400 }
+          )
+        }
+        console.error('book_class_atomic failed:', deductError)
+        return NextResponse.json(
+          { error: 'Failed to reserve hours. Please try again.' },
+          { status: 500 }
+        )
       }
     }
 
-    // ── 6. MS Graph API – create Teams meeting ────────────────────────────────
+    // ── 5. MS Graph API – create Teams meeting ────────────────────────────────
     // Meeting is created under the shared organiser account.
     // The join URL is tied to the lesson slot – not the teacher –
     // so teacher swaps never break the student's link.
@@ -310,7 +344,7 @@ export async function POST(req: NextRequest) {
       console.error('MS Graph API failed – booking will proceed without Teams link:', graphError)
     }
 
-    // ── 7. Create the new lesson record ───────────────────────────────────────
+    // ── 6. Create the new lesson record ───────────────────────────────────────
     const startTime = new Date(scheduledAt)
 
     const { data: newLesson, error: lessonError } = await supabase
@@ -329,18 +363,39 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (lessonError || !newLesson) {
-      console.error('Failed to create lesson — refunding deducted hours:', lessonError)
-      const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-        p_training_id: trainingId,
-        p_hours: hoursNeeded,
-      })
-      if (refundError) {
-        console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+      if (rescheduleId) {
+        // Reschedule recovery: reschedule_class_atomic has already cancelled
+        // the old lesson and applied net delta (new - old) to hours_consumed.
+        // We refund the positive delta so the student is not overcharged. The
+        // old lesson stays cancelled and the student loses their original
+        // slot. C5 will revisit this tail with a proper unwind.
+        const netDelta = hoursNeeded - oldDurationHours
+        console.error('Failed to create lesson during reschedule. Old lesson stays cancelled.', {
+          rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, netDelta, error: lessonError,
+        })
+        if (netDelta > 0) {
+          const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+            p_training_id: trainingId,
+            p_hours: netDelta,
+          })
+          if (refundError) {
+            console.error('CRITICAL: refund_hours_atomic failed during reschedule recovery:', refundError)
+          }
+        }
+      } else {
+        console.error('Failed to create lesson — refunding deducted hours:', lessonError)
+        const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+          p_training_id: trainingId,
+          p_hours: hoursNeeded,
+        })
+        if (refundError) {
+          console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+        }
       }
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
     }
 
-    // ── 9. Send confirmation emails ───────────────────────────────────────────
+    // ── 7. Send confirmation emails ───────────────────────────────────────────
     const isReschedule = !!rescheduleId
     const studentTimezone = studentRow.timezone ?? 'Europe/London'
     const teacherTimezone = teacher.timezone ?? 'Africa/Johannesburg'
@@ -394,7 +449,7 @@ export async function POST(req: NextRequest) {
     revalidatePath('/upcoming-classes')
     revalidatePath('/student/my-classes')
     revalidatePath('/admin/classes')
-    // ── 10. Return success ────────────────────────────────────────────────────
+    // ── 8. Return success ─────────────────────────────────────────────────────
     return NextResponse.json({ success: true, lessonId: newLesson.id })
 
   } catch (err) {
