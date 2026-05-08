@@ -6,6 +6,23 @@
 
 ---
 
+## Session 90 - 08 May 2026 - Admin subdomain consolidation
+
+### What was built
+- Removed admin.lingualinkonline.com as a separate portal subdomain
+- Admin portal now accessed at teachers.lingualinkonline.com/admin
+- Vercel 308 redirect configured: admin.* → teachers.* (path-preserving)
+- Removed admin-specific proxy logic, host detection, and env var references
+
+### Break/Fix Log
+
+Issue 1: Symptom: Shannon visiting admin.lingualinkonline.com routed to teacher upcoming-classes instead of admin portal / Cause: layout's bare redirect('/login') with no returnUrl, combined with proxy admin rewrite block bypassing the auth-check that would have set returnUrl / Fix: dropped the subdomain entirely per Admin Portal Brief Section 6.1 ("/admin route within the Teacher Portal"). Replaced with Vercel 308 redirect for legacy URLs / Lesson: original brief specified single-host architecture; subdomain split was unnecessary added complexity that produced cross-subdomain routing class of bugs
+
+### Session result
+Net -32 LoC across src/proxy.ts, src/lib/host.ts, src/app/page.tsx, CLAUDE.md. Cross-portal routing surface reduced from 3 subdomains to 2. Vercel domain redirect verified live with curl returning HTTP 308.
+
+---
+
 ## Session 86 - 06 May 2026 - Schedule fixes and calendar overhaul
 
 ### What was built
