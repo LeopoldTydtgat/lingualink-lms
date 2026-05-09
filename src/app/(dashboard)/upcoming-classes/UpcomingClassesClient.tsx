@@ -155,8 +155,9 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   const now = Date.now()
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
-  const showJoinButton = minutesUntilStart <= 10 && !classEnded
-  const showReschedule = minutesUntilStart > 24 * 60
+  const isCancelled = cls.status === 'cancelled'
+  const showJoinButton = minutesUntilStart <= 10 && !classEnded && !isCancelled
+  const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
   function handleJoinClass() {
     if (cls.teams_link) {
@@ -167,7 +168,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   return (
     <div
       className="rounded-xl bg-white shadow-md overflow-hidden"
-      style={{ border: '2px solid #d1d5db' }}
+      style={{ border: '2px solid #d1d5db', opacity: isCancelled ? 0.6 : undefined }}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -206,7 +207,9 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
-          <Countdown startsAt={cls.starts_at} />
+          {isCancelled
+            ? <span style={{ color: '#FD5602', fontWeight: 600 }}>Cancelled</span>
+            : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </button>
@@ -279,12 +282,21 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: 
 export default function UpcomingClassesClient({ classes, profile, profileCompleted, bannerDismissed, teacherTimezone }: Props) {
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [mounted, setMounted] = useState(false)
+  const [hideCancelled, setHideCancelled] = useState(false)
 
   useEffect(() => {
     setMounted(true)
+    try {
+      const stored = localStorage.getItem('lingualink_teacher_hide_cancelled')
+      if (stored === 'true') setHideCancelled(true)
+    } catch {}
   }, [])
 
-  const grouped = groupByDay(classes, teacherTimezone)
+  const scheduledCount = classes.filter(c => c.status === 'scheduled').length
+  const visibleClasses = hideCancelled
+    ? classes.filter(c => c.status !== 'cancelled')
+    : classes
+  const grouped = groupByDay(visibleClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -328,6 +340,13 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     } finally {
       setRescheduleLoading(false)
     }
+  }
+
+  function handleHideCancelledChange(checked: boolean) {
+    setHideCancelled(checked)
+    try {
+      localStorage.setItem('lingualink_teacher_hide_cancelled', String(checked))
+    } catch {}
   }
 
   async function handleDismissBanner() {
@@ -379,7 +398,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {classes.length} {classes.length === 1 ? 'class' : 'classes'} scheduled
+          {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
         </p>
       </div>
 
@@ -390,6 +409,17 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       ) : (
         <div className="space-y-8">
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={hideCancelled}
+                onChange={(e) => handleHideCancelledChange(e.target.checked)}
+                style={{ accentColor: '#FF8303' }}
+              />
+              Hide cancelled
+            </label>
+          </div>
           {days.map(day => (
             <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
           ))}

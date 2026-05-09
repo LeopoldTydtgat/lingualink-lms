@@ -124,6 +124,11 @@ export default function MyClassesClient({
     setNow(currentNow)
     setMounted(true)
 
+    try {
+      const stored = localStorage.getItem('lingualink_student_hide_cancelled')
+      if (stored === 'true') setHideCancelled(true)
+    } catch {}
+
     // Expand all day groups by default
     const keys = new Set<string>()
     lessons.forEach((l) => keys.add(getLocalDateKey(l.scheduled_at, studentTimezone)))
@@ -584,7 +589,13 @@ export default function MyClassesClient({
               <input
                 type="checkbox"
                 checked={hideCancelled}
-                onChange={(e) => setHideCancelled(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  setHideCancelled(checked)
+                  try {
+                    localStorage.setItem('lingualink_student_hide_cancelled', String(checked))
+                  } catch {}
+                }}
                 style={{ accentColor: '#FF8303' }}
               />
               Hide cancelled
