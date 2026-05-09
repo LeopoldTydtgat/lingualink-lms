@@ -9,6 +9,7 @@ import {
   studentCancellationByStudentEmailContent,
   teacherCancellationEmailContent,
 } from '@/lib/email/templates'
+import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 
 export async function cancelLessonAction(lessonId: string) {
   const supabase = await createClient()
@@ -28,7 +29,7 @@ export async function cancelLessonAction(lessonId: string) {
   // Get the lesson — confirm it belongs to this student and is not already cancelled
   const { data: lesson } = await supabase
     .from('lessons')
-    .select('id, student_id, training_id, teacher_id, scheduled_at, duration_minutes, status')
+    .select('id, student_id, training_id, teacher_id, scheduled_at, duration_minutes, status, teams_meeting_id')
     .eq('id', lessonId)
     .eq('student_id', student.id)
     .single()
@@ -58,10 +59,23 @@ export async function cancelLessonAction(lessonId: string) {
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancellation_reason: 'Cancelled by student',
+      teams_join_url: null,
     })
     .eq('id', lessonId)
 
   if (cancelError) return { error: 'Failed to cancel lesson' }
+
+  if (lesson.teams_meeting_id) {
+    try {
+      await cancelTeamsMeeting(lesson.teams_meeting_id)
+    } catch (teamsError) {
+      console.error('CRITICAL: orphan Teams meeting after student cancel:', {
+        teams_meeting_id: lesson.teams_meeting_id,
+        lesson_id: lessonId,
+        error: teamsError,
+      })
+    }
+  }
 
   // Refund hours if cancelled more than 24 hours before class
   if (isRefundable) {
