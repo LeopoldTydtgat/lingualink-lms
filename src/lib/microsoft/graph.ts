@@ -6,10 +6,10 @@ import { ClientSecretCredential } from '@azure/identity'
 // Meeting links are tied to the lesson slot, not the teacher —
 // so if a teacher swap occurs, the student's join link never changes.
 // To switch to a shared mailbox later, change this one value only.
-const ORGANISER_UPN = 'Admin@LingualinkOnline.onmicrosoft.com'
+export const ORGANISER_UPN = 'Admin@LingualinkOnline.onmicrosoft.com'
 
 // ── Build an authenticated Graph client ──────────────────────────────────────
-function getGraphClient(): Client {
+export function getGraphClient(): Client {
   const credential = new ClientSecretCredential(
     process.env.AZURE_TENANT_ID!,
     process.env.AZURE_CLIENT_ID!,
