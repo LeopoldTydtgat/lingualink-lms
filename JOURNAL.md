@@ -1,3 +1,38 @@
+## Session 95 - 09 May 2026 - H1f link-stable Teams update on admin reschedule
+
+### What was built
+- H1f shipped via `17f2988`. Admin PATCH on `src/app/api/admin/classes/[id]/route.ts` now syncs the Teams meeting via Graph PATCH on time or duration change. `updateTeamsMeeting` (already implemented in `src/lib/microsoft/graph.ts:84` but never called) preserves the Teams join URL across the update, satisfying the link-stability business requirement. Teacher-only swaps skip Graph entirely. Orphan fallback creates a fresh meeting via `createTeamsMeeting` when `teams_meeting_id` is null.
+- H1f-correction layered three fixes on top after a paranoia review: orphan-fallback subject was rendering a raw student UUID instead of names, email block fired only on `scheduled_at` change so duration-only edits silently skipped notifying the student, and two definitions of "duration changed" coexisted in the same handler.
+- Hoisted student and teacher name fetch above both the Graph block and the email block. One `Promise.all` SELECT pair via `createAdminClient`, wrapped in try/catch with safe fallbacks (`'Student'` / `'Teacher'`) so a name-fetch failure never kills the reschedule. Removed the duplicate SELECTs that previously sat inside the email block.
+- Updated `studentRescheduledEmailContent` in `src/lib/email/templates.ts:262` to accept `oldScheduledAt: string | null`. When null (duration-only change) the template renders a single "Class time" row plus "Duration"; when non-null it renders the existing two-row "Previous time / New time" plus "Duration" layout.
+- Subject string for the orphan fallback now matches `src/app/api/student/book/route.ts:336` byte-for-byte: `Lingualink class – ${studentName} with ${teacherName}` with the en-dash (U+2013), not a hyphen.
+- Master prompt finalised. A copy-paste-at-the-top-of-every-chat ruleset codifies tier ladder (Trivial / Standard / High Risk), mandatory audit-plan-execute-verify-test workflow, paranoia audit checklist, deferred-issue policy, rollback protocol, and an evidence standard requiring file plus line range citations on every behavioural claim. The S95 H1f-correction work was the first run under it.
+
+### Break/Fix Log
+
+Issue 1: Shipped-but-bad H1f first pass
+Symptom: H1f's first execute pass typechecked clean and met its own checklist but contained three user-visible problems that would have shipped to production: meeting titles in the orphan path read `Lingualink class - <uuid> reschedule`, duration-only edits sent no student email at all, and two predicates for "duration changed" sat side by side in the same handler.
+Cause: The execute prompt was written in a "minimum viable, defer the rest" mindset and explicitly told Claude Code to leave the email block alone and to use the UUID subject as a placeholder. The plan was honest about the gaps but the gaps were shippable-bad, not safe-to-defer.
+Fix: Stopped the commit, ran a fresh audit, wrote a corrected plan addressing all three issues plus one pre-existing duplicate-predicate bug, ran the corrected execute prompt under the master-prompt workflow, verified via typecheck plus lint diff plus subject byte-match plus rendered HTML email screenshots before commit.
+Lesson: A clean checklist and a clean typecheck do not equal a clean ship. The bar is "would I demo this to the client tomorrow without flinching." If the answer is no, it is not done. The master prompt now bakes this in via the paranoia audit and a "demo embarrassment" question that must be answered in writing before any execute prompt runs.
+
+Issue 2: Stale lint baseline carried forward in handover
+Symptom: Master prompt verification step compared current lint output against a baseline of "3 errors, 3 warnings as of S94". Actual current count returned 130 errors and 85 warnings.
+Cause: The S94 figure was a verification of the H1+NEW2 diff against the prior commit, not a snapshot of the whole codebase. Carrying it as a baseline figure was a category error.
+Fix: Confirmed via ripgrep that none of the 130/85 problems sit in the two files H1f-correction touched. Future verification compares the diff against itself, not the codebase total. Logged "refresh lint baseline doc" as a tidy task.
+Lesson: Baselines need their measurement scope written next to the number. "3/3 in the diff" and "3/3 in the codebase" are very different claims and conflating them silently broke the verification.
+
+Issue 3: ORGANISER_UPN mismatch surfaced during audit
+Symptom: `src/lib/microsoft/graph.ts:9` defines `ORGANISER_UPN = 'Admin@LingualinkOnline.onmicrosoft.com'`. The project rules in userMemories say the organiser is `classes@lingualinkonline.com`.
+Cause: Discrepancy predates this session - flagged in S94 backlog notes. Not introduced by H1f.
+Fix: Logged for a separate session before go-live. No code change in S95. The email tests passed because both subdomains resolve to the same M365 tenant for now, but the production organiser account name needs aligning with the project rule.
+Lesson: Audit-first surfaces pre-existing issues that would otherwise stay invisible. Worth keeping a "found during audit, not in scope" log alongside JOURNAL fixes.
+
+### Session result
+H1f shipped link-stable Teams meeting updates on the admin reschedule path, closing the Graph-sync gap that has been open since the admin edit flow was first built. The first pass would have shipped three user-visible issues; a corrected pass under the new master-prompt workflow caught and fixed all three before commit. Two commits sit on dev awaiting PR to main. The master prompt is now the standing operating procedure for every code-touching session: tier the work, audit, plan, get approval, execute, verify with evidence, local-test, then commit. H1g (retroactive Teams cleanup script), H2 (refund_hours_atomic unification), NEW1 (cancelled-by attribution), and the ORGANISER_UPN alignment remain queued.
+
+---
+
 ## Session 94 - 09 May 2026 - H1 Teams meeting lifecycle cleanup and hide cancelled persistence
 
 ### What was built
