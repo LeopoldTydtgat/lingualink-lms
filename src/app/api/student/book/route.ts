@@ -244,11 +244,12 @@ export async function POST(req: NextRequest) {
     // deducts. Both take row-level locks and re-validate state inside the
     // transaction, closing the read-then-write TOCTOU window.
     let oldDurationHours = 0
+    let oldTeamsMeetingId: string | null = null
 
     if (rescheduleId) {
       const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .select('duration_minutes')
+        .select('duration_minutes, teams_meeting_id')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
         .eq('status', 'scheduled')
@@ -262,6 +263,7 @@ export async function POST(req: NextRequest) {
       }
 
       oldDurationHours = oldLesson.duration_minutes / 60
+      oldTeamsMeetingId = oldLesson.teams_meeting_id ?? null
 
       const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
         p_old_lesson_id: rescheduleId,
@@ -403,6 +405,18 @@ export async function POST(req: NextRequest) {
         }
       }
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+    }
+
+    if (oldTeamsMeetingId) {
+      try {
+        await cancelTeamsMeeting(oldTeamsMeetingId)
+      } catch (teamsError) {
+        console.error('CRITICAL: orphan Teams meeting after student reschedule:', {
+          teams_meeting_id: oldTeamsMeetingId,
+          lesson_id: rescheduleId,
+          error: teamsError,
+        })
+      }
     }
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────
