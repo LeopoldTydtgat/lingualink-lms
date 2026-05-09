@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
+import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 
 export async function teacherRescheduleLesson(
   lessonId: string,
@@ -20,7 +21,7 @@ export async function teacherRescheduleLesson(
   // Fetch the lesson — verify it belongs to this teacher
   const { data: lesson, error: lessonError } = await adminClient
     .from('lessons')
-    .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status')
+    .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status, teams_meeting_id')
     .eq('id', lessonId)
     .single()
 
@@ -60,10 +61,23 @@ export async function teacherRescheduleLesson(
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancellation_reason: messageToStudent,
+      teams_join_url: null,
     })
     .eq('id', lessonId)
 
   if (cancelError) return { error: 'Failed to cancel lesson' }
+
+  if (lesson.teams_meeting_id) {
+    try {
+      await cancelTeamsMeeting(lesson.teams_meeting_id)
+    } catch (teamsError) {
+      console.error('CRITICAL: orphan Teams meeting after teacher cancel:', {
+        teams_meeting_id: lesson.teams_meeting_id,
+        lesson_id: lessonId,
+        error: teamsError,
+      })
+    }
+  }
 
   // Refund hours to training
   if (lesson.training_id) {

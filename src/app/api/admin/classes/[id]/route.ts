@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
+import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -125,7 +126,7 @@ export async function PATCH(
   // Fetch the current lesson so we can handle hours adjustments correctly
   const { data: existing, error: fetchError } = await supabase
     .from('lessons')
-    .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status')
+    .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status, teams_meeting_id')
     .eq('id', id)
     .single()
 
@@ -143,6 +144,7 @@ export async function PATCH(
         status: 'cancelled',
         cancelled_at: new Date().toISOString(),
         cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
+        teams_join_url: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -205,6 +207,18 @@ export async function PATCH(
       }
     } catch (emailErr) {
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
+    }
+
+    if (existing.teams_meeting_id) {
+      try {
+        await cancelTeamsMeeting(existing.teams_meeting_id)
+      } catch (teamsError) {
+        console.error('CRITICAL: orphan Teams meeting after admin cancel:', {
+          teams_meeting_id: existing.teams_meeting_id,
+          lesson_id: id,
+          error: teamsError,
+        })
+      }
     }
 
     revalidatePath('/upcoming-classes')

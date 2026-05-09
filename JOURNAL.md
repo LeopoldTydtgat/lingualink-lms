@@ -1,3 +1,78 @@
+## Session 94 - 09 May 2026 - H1 Teams meeting lifecycle cleanup and hide cancelled persistence
+
+### What was built
+- H1a (`ee651c9`): made `cancelTeamsMeeting` in `src/lib/microsoft/graph.ts` idempotent on 404. Wrapped the DELETE in try/catch, imported `GraphError` from the SDK alongside `Client`, returned silently when `statusCode === 404`, rethrew everything else. Confirmed the SDK property name via `node_modules/@microsoft/microsoft-graph-client/lib/src/GraphError.d.ts` rather than guessing.
+- H1b (`25d231e`): admin cancel path in `src/app/api/admin/classes/[id]/route.ts` now enriches the SELECT with `teams_meeting_id`, sets `teams_join_url: null` on UPDATE, and calls `cancelTeamsMeeting` in a non-blocking try/catch after the email block. CRITICAL log shape `{teams_meeting_id, lesson_id, error}` for Sentry grouping.
+- H1c (`be8fbc4`): teacher cancel path in `src/app/(dashboard)/upcoming-classes/actions.ts` patched with the same SELECT/UPDATE/non-blocking-cancel pattern. Function name is `teacherRescheduleLesson` but functionally cancel-only - left alone.
+- H1d (`ea515b4`): student cancel path in `src/app/(student)/student/my-classes/actions.ts` patched with the same pattern. Cancel call placed between the cancel-error guard and the hours-refund block. The 24hr refund branch was untouched per the S93 plan.
+- H1e (`78feae1`): student reschedule orphan in `src/app/api/student/book/route.ts`. Audit caught a scope gap: `oldLesson` is block-scoped to the `if (rescheduleId)` branch and out of scope at the success-path insertion point. Hoisted `let oldTeamsMeetingId: string | null = null` alongside the existing `let oldDurationHours = 0` precedent, enriched the oldLesson SELECT with `teams_meeting_id`, assigned the value at the same point as `oldDurationHours`, then called `cancelTeamsMeeting(oldTeamsMeetingId)` in a non-blocking try/catch after the new-lesson failure block. The C5 unwind path's existing cancel call on the new meeting was untouched.
+- NEW2 (`946814f`): persisted the "Hide cancelled" toggle on both the teacher upcoming-classes view and the student my-classes view. localStorage keys `lingualink_teacher_hide_cancelled` and `lingualink_student_hide_cancelled` (lingualink_<scope>_<purpose> convention from `src/lib/config/idle-timeout.ts`). Reads inside the existing mount useEffect, never as a lazy initialiser, with try/catch on both reads and writes for SSR and quota safety. Header copy now uses a derived `scheduledCount` rather than `classes.length` so cancelled rows do not over-count. Cancelled lesson cards render at 0.6 opacity with a static "Cancelled" pill instead of a Countdown, and both the Join Class and Reschedule buttons are gated on `!isCancelled`.
+
+### Break/Fix Log
+
+Issue 1: H1e scope error - SELECT-then-use across branches
+Symptom: First draft of H1e tried to read `oldLesson.teams_meeting_id` outside the `if (rescheduleId)` block where `oldLesson` was declared.
+Cause: `oldLesson` is block-scoped to the reschedule branch, so the variable is unreachable from the success path further down.
+Fix: Followed the existing precedent of `let oldDurationHours = 0` declared at function scope. Hoisted `let oldTeamsMeetingId: string | null = null` and assigned it at the same point as `oldDurationHours`.
+Lesson: When adding behaviour at a different point in a function, walk the variable's scope before assuming it is reachable. Look for similar variables already hoisted - they are usually a hint that the original author hit the same problem.
+
+Issue 2: NEW2 paranoia audit caught four MUST FIX regressions in the original scope
+Symptom: The naive "add a checkbox and filter the array" approach would have shipped four production regressions: an unbounded teacher query (every cancelled lesson ever, each spinning a setInterval Countdown), a Join Class button still rendering on cancelled lessons because the gate was only `showJoinButton && cls.teams_link`, a fake live countdown on cancelled rows because Countdown had no override, and a header label `{classes.length} classes scheduled` over-counting visible rows.
+Cause: The teacher upcoming-classes query had no date bound - the auto-complete-lessons cron was the only thing keeping it pruned. Once cancelled rows were included, the historical tail came with them.
+Fix: Query changed from `.eq('status', 'scheduled')` to `.in('status', ['scheduled', 'cancelled']).gte('scheduled_at', new Date().toISOString())`, matching the existing student-side bound. Derived `isCancelled` at the top of ClassCard, gated the Join button and Reschedule button on `&& !isCancelled`, replaced the Countdown with a static "Cancelled" pill when cancelled, applied `opacity: 0.6`, and switched the header to a derived `scheduledCount`.
+Lesson: A read-only audit before the fix is non-negotiable, and the audit needs to follow the data path end to end - query, render, side effects. The cheap version of this feature would have shipped real bugs. The paranoia pass paid for itself in one session.
+
+Issue 3: ESLint blocked a stash mid-flight via `&&` chain
+Symptom: A `git stash && pnpm lint` chain stopped at the lint error and left the working tree stashed.
+Cause: PowerShell behaviour with `&&` exit-code propagation combined with a pre-existing lint baseline that was being verified.
+Fix: Ran the steps separately, confirmed the pre-existing 3 errors and 3 warnings baseline, then unstashed.
+Lesson: Standing rule reaffirmed - do not chain shell commands with `&&` for verification flows. Run them separately so a failure in one step does not leave repo state half-done.
+
+### Session result
+H1 chain shipped end to end across all four cancellation paths plus the student reschedule orphan, closing the long-standing leak of orphan Teams meetings on the shared `classes@lingualinkonline.com` mailbox. NEW2 layered cleanly on top with a paranoia audit that caught four regressions before they shipped. Pre-existing lint baseline verified unchanged. Six commits sit on dev awaiting a smoke test on the Vercel preview before the PR opens to main. H1f (admin reschedule with Graph PATCH) and NEW1 (cancelled-by attribution + Past Classes visibility) remain queued for S95.
+
+---
+
+## Session 93 - 8 May 2026 - M2 + C4 + C5 shipped, atomic RPC pattern established
+
+### What was built
+- `src/components/layout/RightPanel.tsx` - teacher countdown text now respects lesson end time
+- `src/app/api/student/book/route.ts` - reschedule branch refactored to use atomic RPCs
+- Supabase RPC `reschedule_class_atomic` - cancels old lesson, refunds old hours, deducts new hours in one transaction
+- Supabase RPC `unwind_reschedule_atomic` - restores old lesson and reverses hours delta on lesson-insert failure
+- First production wiring of `cancelTeamsMeeting` for orphan Teams meeting cleanup
+
+### Break/Fix Log
+
+Issue 1 (M2): Teacher RightPanel countdown showed "Class is starting now" past lesson end.
+Symptom: Text persisted for 2 hours after class start until layout query dropped the row.
+Cause: `secondsUntil` was clamped to 0 by `Math.max(0, ...)`. The countdown text branch had no end-time check, only a `secondsUntil <= 0` check. `classEnded` already existed at line 117 and was already gating `isJoinable` correctly - only the countdown text was missing the gate.
+Fix: Added a `classEnded` branch returning "Class has ended" before the `secondsUntil <= 0` check. Four-line addition. Mirror of C1 fix from S92.
+Lesson: When fixing a state-display bug, audit every consumer of the underlying state, not just the obvious one. The join button was correctly gated; the text was not. Same root cause, two surfaces.
+
+Issue 2 (C4): Student reschedule double-deducted hours.
+Symptom: A 60-minute to 60-minute reschedule consumed 2 hours of training balance instead of 0 net.
+Cause: The reschedule branch called `book_class_atomic` to deduct new hours, then a direct UPDATE to cancel the old lesson, with no refund of old hours. Five hours_consumed write sites exist across the codebase; this was the only non-refunding one.
+Fix: Created `reschedule_class_atomic` RPC in Supabase. Single transaction: locks training row, cancels old lesson with full ownership guard (`id = ? AND student_id = ? AND status = 'scheduled'`), validates balance against net delta, applies `(new - old)` hours delta. Route now skips `book_class_atomic` for reschedule and calls the new RPC. Fresh-booking path untouched.
+Lesson: Financial atomicity beats minimum diff. Initial recommendation was a post-cancel refund using existing RPC (Option A) for smaller change surface. Pushed to atomic RPC (Option B) because the transient imbalance window in Option A is real, even if small. The DDL cost is one-time.
+
+Issue 3 (C4 audit catch): Atomic RPC initially missed three columns the original UPDATE wrote.
+Symptom: Pre-commit audit revealed that the original cancel UPDATE wrote `cancelled_at`, `cancellation_reason`, and `updated_at`. The new RPC only set `status='cancelled'`. Eight read sites exist for these fields across billing logic and UI.
+Cause: Drafted RPC focused on hours math without auditing field coverage of the path it replaced.
+Fix: Updated RPC to set all three fields (`cancelled_at = now()`, `cancellation_reason = 'Rescheduled by student'`, `updated_at = now()`). Verified via `pg_get_functiondef`.
+Lesson: Mandatory pre-fix audit must cover every field the existing code writes, not just the bug surface. `getBillability` in `src/lib/billing/billability.ts:54` early-returns notBillable on cancelled rows when `cancelledAt` is falsy. Without the fix, every late-reschedule (under 24h) would have under-billed both teacher pay and B2B company billing. A financial bug fix would have shipped a different financial bug.
+
+Issue 4 (C5): Reschedule plus Graph success plus lesson-insert failure left student with no replacement and a lost original slot.
+Symptom: If the new lesson INSERT failed after `reschedule_class_atomic` succeeded and Graph created a Teams meeting, the old lesson stayed cancelled, the new lesson never existed, and a Teams calendar event was orphaned in the organiser mailbox.
+Cause: Recovery tail only refunded the positive net delta. No mechanism existed to restore the cancelled old lesson.
+Fix: Created `unwind_reschedule_atomic` RPC. Single transaction: locks training row, restores old lesson to `status = 'scheduled'` with `cancelled_at` and `cancellation_reason` cleared, reverses hours delta. Route now calls unwind on lesson-insert failure during reschedule, then calls `cancelTeamsMeeting` non-blocking if `teamsMeetingId` is non-null. This is the first production call site of `cancelTeamsMeeting`. Logs CRITICAL on any failure but does not return early until the cleanup attempts have run.
+Lesson: Atomic operations need atomic compensating actions. Pairing every "do" RPC with an "unwind" RPC at design time is the right pattern. Also: orphaned Teams meetings are a separate failure mode from DB-level inconsistency, and the cleanup must be non-blocking because the DB is the source of truth.
+
+### Session result
+Three bugs closed: one teacher-side display issue (M2) and two financial integrity issues in the student reschedule path (C4, C5). Two new atomic RPCs in Supabase establish the pattern for H2 (refund unification) which converts four remaining direct-UPDATE refund paths to atomic RPCs. C5 also opened the first production wiring of `cancelTeamsMeeting`, which feeds directly into H1 next session - five more cancel paths still leak Teams meetings into the organiser mailbox. Audit-first discipline caught a financial regression mid-fix that would have under-billed late-reschedules; this is the third time in recent sessions that audit-first prevented shipping a fix that would have introduced a new bug.
+
+---
+
 ## Session 92 - 8 May 2026 - C2 verification + C1/C3 fixes shipped
 
 ### What was built
