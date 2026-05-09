@@ -1,4 +1,4 @@
-import { Client } from '@microsoft/microsoft-graph-client'
+import { Client, GraphError } from '@microsoft/microsoft-graph-client'
 import { ClientSecretCredential } from '@azure/identity'
 
 // ── Organiser account ────────────────────────────────────────────────────────
@@ -115,7 +115,13 @@ export async function updateTeamsMeeting({
 export async function cancelTeamsMeeting(meetingId: string): Promise<void> {
   const client = getGraphClient()
 
-  await client
-    .api(`/users/${ORGANISER_UPN}/events/${meetingId}`)
-    .delete()
+  try {
+    await client
+      .api(`/users/${ORGANISER_UPN}/events/${meetingId}`)
+      .delete()
+  } catch (error) {
+    // Idempotent: 404 means already deleted, treat as success
+    if ((error as GraphError).statusCode === 404) return
+    throw error
+  }
 }
