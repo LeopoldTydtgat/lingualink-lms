@@ -1,3 +1,38 @@
+## Session 96 - 09 May 2026 - H1g retroactive Teams cleanup script
+
+### What was built
+- One-time cleanup script at `scripts/cleanup-orphan-teams-meetings.ts` plus `scripts/README.md`. Closes the H1 epic by clearing pre-H1a orphan Teams meetings from the organiser mailbox and nulling stale references in the database.
+- Script defaults to dry-run, requires `--execute` flag to act. GET-probes each Graph event before DELETE to self-verify the organiser UPN, distinguishing "wrong account" from "already deleted". Per-row try/catch, errors logged not thrown, batch continues on individual failures.
+- Covers all four cancel-family statuses: `cancelled`, `cancelled_by_student`, `cancelled_by_teacher`, `teacher_cancelled`.
+- `tsx` and `dotenv` added as devDependencies. New npm script `script:cleanup-teams`. `ORGANISER_UPN` and `getGraphClient` exported from `src/lib/microsoft/graph.ts` so the script reuses them rather than duplicating.
+- Production run: 1 row found, 1 GET 200, 1 DELETE, 1 DB update. Both `teams_meeting_id` and `teams_join_url` nulled on the affected row. Re-run confirmed idempotent ("No orphan meetings found").
+
+### Break/Fix Log
+
+**Issue 1: CI failed on first push**
+- Symptom: GitHub Actions `npm ci` exited with code 1 on commit `816f06b`.
+- Cause: `package.json` updated with new devDependencies but `package-lock.json` was not staged in the same commit. `npm ci` requires the lock file to be in sync with `package.json`.
+- Fix: Separate commit `d6ba99d` syncing the lock file. CI green on retry.
+- Lesson: When adding dependencies, `git add -A` catches the lock file. The git status check before commit showed `package-lock.json` unstaged but it was missed in the commit.
+
+**Issue 2: libuv assertion on script exit (Windows)**
+- Symptom: Re-run dry-run printed "No orphan meetings found." then `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 76`.
+- Cause: Known Node/tsx shutdown noise on Windows after `process.exit(0)` when no rows matched. Fires after the script's logic completes successfully.
+- Fix: None applied. Cosmetic, not a bug, exit code is still 0.
+- Lesson: Treat libuv handle-closing assertions on Windows tsx exits as noise unless they precede the SUMMARY block.
+
+### Deferred (with reason, all logged for future sessions)
+- Live cancel paths (`upcoming-classes/actions.ts:64`, `my-classes/actions.ts:62`, `admin/classes/[id]/route.ts:147`) null `teams_join_url` but never null `teams_meeting_id` after a successful Graph DELETE. New candidate H1h. Safe to defer because `cancelTeamsMeeting` is 404-tolerant - any future re-run of this cleanup script catches the orphans.
+- `ORGANISER_UPN` mismatch with project rules (`Admin@LingualinkOnline.onmicrosoft.com` in code vs `classes@lingualinkonline.com` in project rules). Separate session before go-live. The GET probe self-verifies, so this script is unaffected.
+- `getGraphClient` constructs a fresh `ClientSecretCredential` on every call. Perf debt only, separate session.
+- Admin cancel route uses anon supabase client for the lessons UPDATE (RLS-gated via `is_admin()`) instead of `createAdminClient`. Grey area, separate session.
+- `NEXT_PUBLIC_ADMIN_URL` missing from CLAUDE.md env vars table. Docs debt.
+
+### Session result
+H1g shipped on dev `d6ba99d`. The single production orphan from pre-H1a code is cleaned. The H1 epic (Teams meeting lifecycle correctness) is now closed: H1a made cancellation actually call Graph DELETE, H1f made admin reschedule preserve the join URL via Graph PATCH, H1g cleaned up the historical orphan that the old code left behind. Script is documented, idempotent, and remains in the repo as the recovery tool if any future Graph CRITICAL log failure leaves a fresh orphan in the DB.
+
+---
+
 ## Session 95 - 09 May 2026 - H1f link-stable Teams update on admin reschedule
 
 ### What was built
