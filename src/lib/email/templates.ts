@@ -261,20 +261,23 @@ export function studentCancellationByTeacherEmailContent(
 
 export function studentRescheduledEmailContent(
   teacherName: string,
-  oldScheduledAt: string,
+  oldScheduledAt: string | null,
   newScheduledAt: string,
   durationMinutes: number,
   studentTimezone: string
 ): string {
-  const oldTime = formatClassTime(oldScheduledAt, studentTimezone)
   const newTime = formatClassTime(newScheduledAt, studentTimezone)
+  const timeRowsHtml = oldScheduledAt
+    ? `
+      <tr><td style="font-size:14px;color:#6B7280;padding:4px 0;"><strong>Previous time:</strong> ${formatClassTime(oldScheduledAt, studentTimezone)}</td></tr>
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>New time:</strong> ${newTime}</td></tr>`
+    : `
+      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Class time:</strong> ${newTime}</td></tr>`
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#6B7280;padding:4px 0;"><strong>Previous time:</strong> ${oldTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>New time:</strong> ${newTime}</td></tr>
+    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">${timeRowsHtml}
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
   `

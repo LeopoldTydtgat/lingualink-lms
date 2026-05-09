@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
-import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
+import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -230,13 +230,14 @@ export async function PATCH(
   // --- RESCHEDULE / EDIT action ---
   // Build update payload from whichever fields were sent
   const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  const durationChanged = typeof fields.duration_minutes === 'number' && fields.duration_minutes !== existing.duration_minutes
 
   if (fields.scheduled_at) updatePayload.scheduled_at = fields.scheduled_at
   if (fields.teacher_id) updatePayload.teacher_id = fields.teacher_id
   if (fields.cancellation_reason !== undefined) updatePayload.cancellation_reason = fields.cancellation_reason
 
   // If duration changed, adjust hours on the training
-  if (fields.duration_minutes && fields.duration_minutes !== existing.duration_minutes) {
+  if (durationChanged) {
     updatePayload.duration_minutes = fields.duration_minutes
 
     const { data: training } = await supabase
@@ -265,44 +266,95 @@ export async function PATCH(
     return NextResponse.json({ error: updateError.message }, { status: 500 })
   }
 
-  if (fields.scheduled_at) {
-    const adminClient = createAdminClient()
-    try {
-      const { data: teacherProfile } = await adminClient
-        .from('profiles')
-        .select('full_name')
-        .eq('id', existing.teacher_id)
-        .single()
+  // Fetch student/teacher names once for both the Graph subject and the email body.
+  // A failure here only degrades labels; reschedule remains durable.
+  const adminClient = createAdminClient()
+  let studentName = 'Student'
+  let teacherName = 'Teacher'
+  let studentEmail: string | null = null
+  let studentTimezone = 'UTC'
+  try {
+    const [studentRes, teacherRes] = await Promise.all([
+      adminClient.from('students').select('full_name, email, timezone').eq('id', existing.student_id).maybeSingle(),
+      adminClient.from('profiles').select('full_name').eq('id', existing.teacher_id).maybeSingle(),
+    ])
+    if (studentRes.data) {
+      studentName = studentRes.data.full_name ?? 'Student'
+      studentEmail = studentRes.data.email ?? null
+      studentTimezone = studentRes.data.timezone ?? 'UTC'
+    }
+    if (teacherRes.data) {
+      teacherName = teacherRes.data.full_name ?? 'Teacher'
+    }
+  } catch (nameFetchError) {
+    console.warn('Reschedule name fetch failed, using fallbacks', { lesson_id: id, error: nameFetchError })
+  }
 
-      const { data: studentData } = await adminClient
-        .from('students')
-        .select('full_name, email, timezone')
-        .eq('id', existing.student_id)
-        .single()
+  // Sync the Teams meeting when time or duration changes.
+  // updateTeamsMeeting preserves the join URL; teacher-only swaps skip Graph entirely.
+  const newScheduledAt = (fields.scheduled_at as string | undefined) ?? existing.scheduled_at
+  const newDuration = (fields.duration_minutes as number | undefined) ?? existing.duration_minutes
+  const timeChanged = fields.scheduled_at && fields.scheduled_at !== existing.scheduled_at
+  const needsGraphUpdate = timeChanged || durationChanged
 
-      if (studentData?.email) {
+  if (needsGraphUpdate) {
+    if (existing.teams_meeting_id) {
+      try {
+        await updateTeamsMeeting({
+          meetingId: existing.teams_meeting_id,
+          startTime: newScheduledAt,
+          durationMinutes: newDuration,
+        })
+      } catch (graphError) {
+        console.error('CRITICAL: Teams meeting update failed', { teams_meeting_id: existing.teams_meeting_id, lesson_id: id, error: graphError })
+      }
+    } else {
+      try {
+        const meeting = await createTeamsMeeting({
+          subject: `Lingualink class – ${studentName} with ${teacherName}`,
+          startTime: newScheduledAt,
+          durationMinutes: newDuration,
+        })
+        const { error: graphUpdateError } = await supabase
+          .from('lessons')
+          .update({ teams_meeting_id: meeting.meetingId, teams_join_url: meeting.joinUrl })
+          .eq('id', id)
+        if (graphUpdateError) {
+          console.error('CRITICAL: Teams meeting created but DB write failed', { lesson_id: id, meetingId: meeting.meetingId, error: graphUpdateError })
+        }
+      } catch (graphError) {
+        console.error('CRITICAL: Teams meeting orphan fallback creation failed', { lesson_id: id, error: graphError })
+      }
+    }
+  }
+
+  if (needsGraphUpdate) {
+    if (!studentEmail) {
+      console.warn('Reschedule email skipped: student has no email', { lesson_id: id })
+    } else {
+      try {
         const emailBody = studentRescheduledEmailContent(
-          teacherProfile?.full_name ?? 'Your teacher',
-          existing.scheduled_at,
-          fields.scheduled_at,
-          fields.duration_minutes ?? existing.duration_minutes,
-          studentData.timezone ?? 'UTC'
+          teacherName,
+          timeChanged ? existing.scheduled_at : null,
+          newScheduledAt,
+          newDuration,
+          studentTimezone
         )
         await resend.emails.send({
           from: 'no-reply@lingualinkonline.com',
-          to: studentData.email,
+          to: studentEmail,
           subject: 'Lingualink Online — Your class has been rescheduled',
           html: buildEmailTemplate({
-            recipientName: studentData.full_name ?? 'Student',
+            recipientName: studentName,
             recipientFallback: 'Student',
             subject: 'Your class has been rescheduled',
             bodyHtml: emailBody,
             contactEmail: 'support@lingualinkonline.com',
           }),
         })
+      } catch (emailErr) {
+        console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
       }
-    } catch (emailErr) {
-      console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
     }
   }
 
