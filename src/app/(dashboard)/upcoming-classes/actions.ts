@@ -54,29 +54,43 @@ export async function teacherRescheduleLesson(
     return { error: 'Student account is not linked to a login. Please contact admin.' }
   }
 
-  // Cancel the lesson
-  const { error: cancelError } = await adminClient
-    .from('lessons')
-    .update({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancellation_reason: messageToStudent,
-      teams_join_url: null,
-    })
-    .eq('id', lessonId)
-
-  if (cancelError) return { error: 'Failed to cancel lesson' }
-
+  // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
+  let graphSucceeded = true
   if (lesson.teams_meeting_id) {
     try {
       await cancelTeamsMeeting(lesson.teams_meeting_id)
     } catch (teamsError) {
+      graphSucceeded = false
       console.error('CRITICAL: orphan Teams meeting after teacher cancel:', {
         teams_meeting_id: lesson.teams_meeting_id,
         lesson_id: lessonId,
         error: teamsError,
       })
     }
+  }
+
+  // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
+  const updatePayload: Record<string, unknown> = {
+    status: 'cancelled',
+    cancelled_at: new Date().toISOString(),
+    cancellation_reason: messageToStudent,
+    teams_join_url: null,
+    updated_at: new Date().toISOString(),
+  }
+  if (graphSucceeded) {
+    updatePayload.teams_meeting_id = null
+  }
+
+  const { data: updated, error: cancelError } = await adminClient
+    .from('lessons')
+    .update(updatePayload)
+    .eq('id', lessonId)
+    .select('id')
+
+  if (cancelError) return { error: 'Failed to cancel lesson' }
+  if (!updated || updated.length === 0) {
+    console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: lessonId })
+    return { error: 'Failed to cancel lesson' }
   }
 
   // Refund hours to training
