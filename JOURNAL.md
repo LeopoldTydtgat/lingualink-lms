@@ -1,3 +1,38 @@
+## Session 94 - 09 May 2026 - H1 Teams meeting lifecycle cleanup and hide cancelled persistence
+
+### What was built
+- H1a (`ee651c9`): made `cancelTeamsMeeting` in `src/lib/microsoft/graph.ts` idempotent on 404. Wrapped the DELETE in try/catch, imported `GraphError` from the SDK alongside `Client`, returned silently when `statusCode === 404`, rethrew everything else. Confirmed the SDK property name via `node_modules/@microsoft/microsoft-graph-client/lib/src/GraphError.d.ts` rather than guessing.
+- H1b (`25d231e`): admin cancel path in `src/app/api/admin/classes/[id]/route.ts` now enriches the SELECT with `teams_meeting_id`, sets `teams_join_url: null` on UPDATE, and calls `cancelTeamsMeeting` in a non-blocking try/catch after the email block. CRITICAL log shape `{teams_meeting_id, lesson_id, error}` for Sentry grouping.
+- H1c (`be8fbc4`): teacher cancel path in `src/app/(dashboard)/upcoming-classes/actions.ts` patched with the same SELECT/UPDATE/non-blocking-cancel pattern. Function name is `teacherRescheduleLesson` but functionally cancel-only - left alone.
+- H1d (`ea515b4`): student cancel path in `src/app/(student)/student/my-classes/actions.ts` patched with the same pattern. Cancel call placed between the cancel-error guard and the hours-refund block. The 24hr refund branch was untouched per the S93 plan.
+- H1e (`78feae1`): student reschedule orphan in `src/app/api/student/book/route.ts`. Audit caught a scope gap: `oldLesson` is block-scoped to the `if (rescheduleId)` branch and out of scope at the success-path insertion point. Hoisted `let oldTeamsMeetingId: string | null = null` alongside the existing `let oldDurationHours = 0` precedent, enriched the oldLesson SELECT with `teams_meeting_id`, assigned the value at the same point as `oldDurationHours`, then called `cancelTeamsMeeting(oldTeamsMeetingId)` in a non-blocking try/catch after the new-lesson failure block. The C5 unwind path's existing cancel call on the new meeting was untouched.
+- NEW2 (`946814f`): persisted the "Hide cancelled" toggle on both the teacher upcoming-classes view and the student my-classes view. localStorage keys `lingualink_teacher_hide_cancelled` and `lingualink_student_hide_cancelled` (lingualink_<scope>_<purpose> convention from `src/lib/config/idle-timeout.ts`). Reads inside the existing mount useEffect, never as a lazy initialiser, with try/catch on both reads and writes for SSR and quota safety. Header copy now uses a derived `scheduledCount` rather than `classes.length` so cancelled rows do not over-count. Cancelled lesson cards render at 0.6 opacity with a static "Cancelled" pill instead of a Countdown, and both the Join Class and Reschedule buttons are gated on `!isCancelled`.
+
+### Break/Fix Log
+
+Issue 1: H1e scope error - SELECT-then-use across branches
+Symptom: First draft of H1e tried to read `oldLesson.teams_meeting_id` outside the `if (rescheduleId)` block where `oldLesson` was declared.
+Cause: `oldLesson` is block-scoped to the reschedule branch, so the variable is unreachable from the success path further down.
+Fix: Followed the existing precedent of `let oldDurationHours = 0` declared at function scope. Hoisted `let oldTeamsMeetingId: string | null = null` and assigned it at the same point as `oldDurationHours`.
+Lesson: When adding behaviour at a different point in a function, walk the variable's scope before assuming it is reachable. Look for similar variables already hoisted - they are usually a hint that the original author hit the same problem.
+
+Issue 2: NEW2 paranoia audit caught four MUST FIX regressions in the original scope
+Symptom: The naive "add a checkbox and filter the array" approach would have shipped four production regressions: an unbounded teacher query (every cancelled lesson ever, each spinning a setInterval Countdown), a Join Class button still rendering on cancelled lessons because the gate was only `showJoinButton && cls.teams_link`, a fake live countdown on cancelled rows because Countdown had no override, and a header label `{classes.length} classes scheduled` over-counting visible rows.
+Cause: The teacher upcoming-classes query had no date bound - the auto-complete-lessons cron was the only thing keeping it pruned. Once cancelled rows were included, the historical tail came with them.
+Fix: Query changed from `.eq('status', 'scheduled')` to `.in('status', ['scheduled', 'cancelled']).gte('scheduled_at', new Date().toISOString())`, matching the existing student-side bound. Derived `isCancelled` at the top of ClassCard, gated the Join button and Reschedule button on `&& !isCancelled`, replaced the Countdown with a static "Cancelled" pill when cancelled, applied `opacity: 0.6`, and switched the header to a derived `scheduledCount`.
+Lesson: A read-only audit before the fix is non-negotiable, and the audit needs to follow the data path end to end - query, render, side effects. The cheap version of this feature would have shipped real bugs. The paranoia pass paid for itself in one session.
+
+Issue 3: ESLint blocked a stash mid-flight via `&&` chain
+Symptom: A `git stash && pnpm lint` chain stopped at the lint error and left the working tree stashed.
+Cause: PowerShell behaviour with `&&` exit-code propagation combined with a pre-existing lint baseline that was being verified.
+Fix: Ran the steps separately, confirmed the pre-existing 3 errors and 3 warnings baseline, then unstashed.
+Lesson: Standing rule reaffirmed - do not chain shell commands with `&&` for verification flows. Run them separately so a failure in one step does not leave repo state half-done.
+
+### Session result
+H1 chain shipped end to end across all four cancellation paths plus the student reschedule orphan, closing the long-standing leak of orphan Teams meetings on the shared `classes@lingualinkonline.com` mailbox. NEW2 layered cleanly on top with a paranoia audit that caught four regressions before they shipped. Pre-existing lint baseline verified unchanged. Six commits sit on dev awaiting a smoke test on the Vercel preview before the PR opens to main. H1f (admin reschedule with Graph PATCH) and NEW1 (cancelled-by attribution + Past Classes visibility) remain queued for S95.
+
+---
+
 ## Session 93 - 8 May 2026 - M2 + C4 + C5 shipped, atomic RPC pattern established
 
 ### What was built
