@@ -137,24 +137,51 @@ export async function PATCH(
   // --- CANCEL action ---
   if (action === 'cancel') {
     const { cancellation_reason } = fields
+    const adminClient = createAdminClient()
 
-    const { error: cancelError } = await supabase
+    // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
+    let graphSucceeded = true
+    if (existing.teams_meeting_id) {
+      try {
+        await cancelTeamsMeeting(existing.teams_meeting_id)
+      } catch (teamsError) {
+        graphSucceeded = false
+        console.error('CRITICAL: orphan Teams meeting after admin cancel:', {
+          teams_meeting_id: existing.teams_meeting_id,
+          lesson_id: id,
+          error: teamsError,
+        })
+      }
+    }
+
+    // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
+    const updatePayload: Record<string, unknown> = {
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
+      teams_join_url: null,
+      updated_at: new Date().toISOString(),
+    }
+    if (graphSucceeded) {
+      updatePayload.teams_meeting_id = null
+    }
+
+    const { data: updated, error: cancelError } = await adminClient
       .from('lessons')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
-        teams_join_url: null,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', id)
+      .select('id')
 
     if (cancelError) {
       return NextResponse.json({ error: cancelError.message }, { status: 500 })
     }
+    if (!updated || updated.length === 0) {
+      console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: id })
+      return NextResponse.json({ error: 'Cancel affected no rows' }, { status: 500 })
+    }
 
     // Refund hours to training — admin cancellations always refund
-    const { data: training } = await supabase
+    const { data: training } = await adminClient
       .from('trainings')
       .select('hours_consumed')
       .eq('id', existing.training_id)
@@ -162,13 +189,12 @@ export async function PATCH(
 
     if (training) {
       const hoursToRefund = existing.duration_minutes / 60
-      await supabase
+      await adminClient
         .from('trainings')
         .update({ hours_consumed: Math.max(0, training.hours_consumed - hoursToRefund) })
         .eq('id', existing.training_id)
     }
 
-    const adminClient = createAdminClient()
     // Send cancellation email to student
     try {
       const { data: teacherProfile } = await adminClient
@@ -207,18 +233,6 @@ export async function PATCH(
       }
     } catch (emailErr) {
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
-    }
-
-    if (existing.teams_meeting_id) {
-      try {
-        await cancelTeamsMeeting(existing.teams_meeting_id)
-      } catch (teamsError) {
-        console.error('CRITICAL: orphan Teams meeting after admin cancel:', {
-          teams_meeting_id: existing.teams_meeting_id,
-          lesson_id: id,
-          error: teamsError,
-        })
-      }
     }
 
     revalidatePath('/upcoming-classes')
