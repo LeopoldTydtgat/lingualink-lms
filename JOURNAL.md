@@ -1,3 +1,27 @@
+## Session 100 - 10 May 2026 - 23P01 slot conflicts surfaced as 409 SLOT_NOT_AVAILABLE
+
+### What was built
+
+- Translated Postgres exclusion-constraint violations (SQLSTATE 23P01) from the no_teacher_overlap GiST index into clean 409 SLOT_NOT_AVAILABLE responses across all four booking paths: student fresh-book, student reschedule, admin create, admin reschedule PATCH.
+- Added orphan Microsoft Teams meeting cleanup to the fresh-booking and admin-create failure tails. Both paths previously created a Teams meeting before the lessons INSERT, and neither cancelled the meeting if the INSERT failed. The reschedule path already had this cleanup; now all four paths are symmetric.
+- Removed a raw Postgres error string leak from the admin POST handler. The route now returns a generic 500 fallback for non-23P01 errors instead of echoing lessonError.message verbatim to the admin UI.
+- Standardised the 409 error shape across all four paths: { error: 'SLOT_NOT_AVAILABLE', message: '...' }.
+- All new CRITICAL logs use the locked shape { teams_meeting_id, lesson_id, error }.
+
+### Break/Fix Log
+
+Issue 1: Concurrent-booking race condition (NEW18)
+- Symptom: Two students clicking Book on the same teacher slot within seconds could both pass the application-side clash check and both attempt the lessons INSERT. The DB exclusion constraint was already in place and would reject the second INSERT, but no application code handled SQLSTATE 23P01. The losing student saw a generic 500 with hours refunded but a Teams meeting orphaned in the organiser mailbox. Cross-student lessons are also hidden from each student's clash check by RLS, meaning the manual TOCTOU window collapses to a no-op for cross-student races and the DB constraint becomes the only real guard.
+- Cause: Application code was written as if no DB-side slot constraint existed. Zero handlers for SQLSTATE 23P01 anywhere in the booking surface. The fresh-booking and admin-create failure tails also did not cancel the orphan Teams meeting created seconds earlier, leaking meetings into the organiser calendar on every race-loss.
+- Fix: Detect lessonError.code === '23P01' (and equivalent on the admin PATCH UPDATE path) before the generic error branch. On detection: cancel the orphan Teams meeting, refund hours via the existing refund_hours_atomic RPC (or unwind via unwind_reschedule_atomic on the reschedule path), and return a 409 with a clear "slot just booked" message. Replaced the admin POST raw-error leak with a generic 500 in the same pass since it sat directly in the new error-handling block.
+- Lesson: Production race conditions can sit invisible behind a working DB constraint until you read every error-handling block. The fix surface here was tiny but the audit had to walk the entire booking lifecycle (RPC bodies, RLS policies, table constraints, both portals' insert paths, the admin reschedule UPDATE) before the right fix could even be drafted. Authoritative DB queries via pg_get_functiondef and information_schema were necessary because the schema and RPCs are not in the repo - inferring from call sites would have left the constraint shape and the RLS visibility gap unknown.
+
+### Session result
+
+NEW18 shipped as commit b4caa54 on dev. Four files touched: src/app/api/student/book/route.ts, src/app/api/admin/classes/route.ts, src/app/api/admin/classes/[id]/route.ts, plus settings. Typecheck clean. Lint baseline unchanged at 130 errors / 85 warnings. Local testing confirmed happy paths regress cleanly for student fresh-book, admin create, and admin reschedule (Edit). Race-loss paths not directly tested in two simultaneous sessions; the DB constraint is the actual guarantor and the application-side change ships the clean error surface around it. Two admin Class Detail bugs surfaced during local testing and were logged as NEW19 (Join Meeting button always visible, time display offset by +2h on reschedule). A local working bug log was established at C:\Projects\lingualink-lms-meta\BUG_LOG.md, outside the repo, seeded with all open backlog items from the S99 brief plus newly surfaced concerns from the NEW18 audit.
+
+---
+
 ## Session 97 - 09 May 2026 - H1h cancel-path hygiene
 
 ### What was built
