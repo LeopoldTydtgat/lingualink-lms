@@ -181,19 +181,18 @@ export async function PATCH(
       return NextResponse.json({ error: 'Cancel affected no rows' }, { status: 500 })
     }
 
-    // Refund hours to training — admin cancellations always refund
-    const { data: training } = await adminClient
-      .from('trainings')
-      .select('hours_consumed')
-      .eq('id', existing.training_id)
-      .single()
-
-    if (training) {
-      const hoursToRefund = existing.duration_minutes / 60
-      await adminClient
-        .from('trainings')
-        .update({ hours_consumed: Math.max(0, training.hours_consumed - hoursToRefund) })
-        .eq('id', existing.training_id)
+    // Refund hours to training — admin cancellations always refund.
+    // Atomic RPC locks the training row, clamps at zero, and writes in one txn.
+    const hoursToRefund = existing.duration_minutes / 60
+    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+      p_training_id: existing.training_id,
+      p_hours: hoursToRefund,
+    })
+    if (refundError) {
+      return NextResponse.json(
+        { error: 'Failed to refund hours', details: refundError.message },
+        { status: 500 }
+      )
     }
 
     // Send cancellation email to student
@@ -211,11 +210,10 @@ export async function PATCH(
         .single()
 
       if (studentData?.email) {
-        const hoursRefunded = existing.duration_minutes / 60
         const emailBody = studentCancellationByAdminEmailContent(
           teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
-          hoursRefunded,
+          hoursToRefund,
           studentData.timezone ?? 'UTC',
           cancellation_reason ?? undefined
         )
