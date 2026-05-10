@@ -7,7 +7,7 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 
-export async function teacherRescheduleLesson(
+export async function teacherCancelLesson(
   lessonId: string,
   messageToStudent: string
 ): Promise<{ error?: string }> {
@@ -124,11 +124,11 @@ export async function teacherRescheduleLesson(
     await resend.emails.send({
       from: 'no-reply@lingualinkonline.com',
       to: student.email,
-      subject: 'Lingualink Online — Your class has been rescheduled by your teacher',
+      subject: 'Lingualink Online - Your class has been cancelled by your teacher',
       html: buildEmailTemplate({
         recipientName: student.full_name,
         recipientFallback: 'Student',
-        subject: 'Your class has been rescheduled',
+        subject: 'Your class has been cancelled',
         bodyHtml: emailBody,
         contactEmail: 'support@lingualinkonline.com',
       }),
