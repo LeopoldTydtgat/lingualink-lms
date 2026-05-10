@@ -272,13 +272,24 @@ export async function PATCH(
     }
   }
 
-  const { error: updateError } = await supabase
-    .from('lessons')
-    .update(updatePayload)
-    .eq('id', id)
+  try {
+    const { error: updateError } = await supabase
+      .from('lessons')
+      .update(updatePayload)
+      .eq('id', id)
 
-  if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 500 })
+    if (updateError) {
+      if (updateError.code === '23P01') {
+        return NextResponse.json(
+          { error: 'SLOT_NOT_AVAILABLE', message: 'This slot is no longer available.' },
+          { status: 409 }
+        )
+      }
+      return NextResponse.json({ error: updateError.message }, { status: 500 })
+    }
+  } catch (err) {
+    console.error('Lesson reschedule UPDATE threw unexpectedly:', { lesson_id: id, error: err })
+    return NextResponse.json({ error: 'Failed to update lesson.' }, { status: 500 })
   }
 
   // Fetch student/teacher names once for both the Graph subject and the email body.
