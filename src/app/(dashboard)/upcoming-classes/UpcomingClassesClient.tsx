@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { isToday, isTomorrow } from 'date-fns'
-import { teacherRescheduleLesson } from './actions'
+import { teacherCancelLesson } from './actions'
 
 type Student = {
   id: string
@@ -345,7 +345,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     setRescheduleLoading(true)
     setRescheduleError(null)
     try {
-      const result = await teacherRescheduleLesson(rescheduleTarget.id, rescheduleMessage.trim())
+      const result = await teacherCancelLesson(rescheduleTarget.id, rescheduleMessage.trim())
       if (result.error) {
         setRescheduleError(result.error)
       } else {

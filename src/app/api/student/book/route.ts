@@ -249,7 +249,7 @@ export async function POST(req: NextRequest) {
     if (rescheduleId) {
       const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .select('duration_minutes, teams_meeting_id')
+        .select('duration_minutes, teams_meeting_id, teams_join_url')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
         .eq('status', 'scheduled')
@@ -371,6 +371,13 @@ export async function POST(req: NextRequest) {
         // unwind_reschedule_atomic restores the old lesson to scheduled and
         // reverses the hours delta in a single transaction. Any orphaned
         // Teams meeting created earlier is cancelled non-blockingly.
+        //
+        // Note: Teams cols on the old row are intentionally untouched here.
+        // reschedule_class_atomic does not modify them, and the original
+        // Microsoft meeting is not deleted on the unwind path (only the NEW
+        // meeting created at L334-347 is cancelled below). Old row restores
+        // to 'scheduled' with its original Teams link intact - the student's
+        // working URL survives.
         console.error('Failed to create lesson during reschedule. Attempting unwind.', {
           rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, error: lessonError,
         })
@@ -407,14 +414,58 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
     }
 
+    // H1i: After successful reschedule, the OLD lesson row (cancelled by
+    // reschedule_class_atomic) still holds the deleted meeting's Teams
+    // columns. NULL them inline so the row matches its 'cancelled' status.
+    //
+    // Placement is load-bearing. Do NOT move this UPDATE into the unwind
+    // branch above. On the unwind path the original Teams meeting is never
+    // deleted (the route only cancels the NEW meeting on unwind), so
+    // nulling the old row's Teams cols there would orphan a live meeting
+    // in Microsoft with no DB pointer for the sweeper to find.
     if (oldTeamsMeetingId) {
+      let graphSucceeded = true
       try {
         await cancelTeamsMeeting(oldTeamsMeetingId)
       } catch (teamsError) {
+        graphSucceeded = false
         console.error('CRITICAL: orphan Teams meeting after student reschedule:', {
           teams_meeting_id: oldTeamsMeetingId,
           lesson_id: rescheduleId,
           error: teamsError,
+        })
+      }
+
+      // Null Teams cols on the old (now cancelled) row.
+      // teams_join_url: unconditional. The URL is dead either way (Graph
+      //   DELETE succeeded) or unreachable to the user (cancelled status
+      //   hides it from all UI gates). Mirrors H1h.
+      // teams_meeting_id: only if graphSucceeded. If Graph DELETE failed,
+      //   we leave the id set so scripts/cleanup-orphan-teams-meetings.ts
+      //   can recover (sweeper predicate: teams_meeting_id IS NOT NULL
+      //   AND status IN cancel-family).
+      const updatePayload: Record<string, unknown> = {
+        teams_join_url: null,
+        updated_at: new Date().toISOString(),
+      }
+      if (graphSucceeded) {
+        updatePayload.teams_meeting_id = null
+      }
+
+      const { data: nulled, error: nullError } = await adminClient
+        .from('lessons')
+        .update(updatePayload)
+        .eq('id', rescheduleId)
+        .select('id')
+
+      if (nullError) {
+        console.error('CRITICAL: failed to null Teams cols on rescheduled-from lesson:', {
+          lesson_id: rescheduleId,
+          error: nullError,
+        })
+      } else if (!nulled || nulled.length === 0) {
+        console.error('CRITICAL: Teams col null UPDATE affected 0 rows:', {
+          lesson_id: rescheduleId,
         })
       }
     }
