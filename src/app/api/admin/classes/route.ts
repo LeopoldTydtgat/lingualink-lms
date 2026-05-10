@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createTeamsMeeting } from '@/lib/microsoft/graph'
+import { createTeamsMeeting, cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import resend from '@/lib/email/client'
 import {
   buildEmailTemplate,
@@ -280,6 +280,20 @@ export async function POST(request: NextRequest) {
     .single()
 
   if (lessonError) {
+    const isSlotConflict = lessonError.code === '23P01'
+
+    if (isSlotConflict && teamsMeetingId) {
+      try {
+        await cancelTeamsMeeting(teamsMeetingId)
+      } catch (cancelError) {
+        console.error('CRITICAL: orphan Teams meeting after admin-create slot conflict:', {
+          teams_meeting_id: teamsMeetingId,
+          lesson_id: null,
+          error: cancelError,
+        })
+      }
+    }
+
     console.error('Create lesson error — refunding deducted hours:', lessonError)
     const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
       p_training_id: training_id,
@@ -288,7 +302,15 @@ export async function POST(request: NextRequest) {
     if (refundError) {
       console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
     }
-    return NextResponse.json({ error: lessonError.message }, { status: 500 })
+
+    if (isSlotConflict) {
+      return NextResponse.json(
+        { error: 'SLOT_NOT_AVAILABLE', message: 'This slot is no longer available - it was just booked by another student.' },
+        { status: 409 }
+      )
+    }
+
+    return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
   }
 
   // Send confirmation emails to teacher and student
