@@ -72,6 +72,7 @@ export async function cancelLessonAction(lessonId: string) {
     status: 'cancelled',
     cancelled_at: new Date().toISOString(),
     cancellation_reason: 'Cancelled by student',
+    cancelled_by: 'student',
     teams_join_url: null,
     updated_at: new Date().toISOString(),
   }

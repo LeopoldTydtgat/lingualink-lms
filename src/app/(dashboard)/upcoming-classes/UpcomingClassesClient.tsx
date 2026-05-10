@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { isToday, isTomorrow } from 'date-fns'
 import { teacherRescheduleLesson } from './actions'
 
@@ -17,6 +18,9 @@ type Class = {
   status: string
   teams_link: string | null
   lesson_notes: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  cancelled_by: string | null
   student: Student
 }
 
@@ -204,6 +208,11 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
           <p className="text-sm text-gray-500">
             {mounted ? `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}` : ''}
           </p>
+          {isCancelled && cls.cancelled_by && (
+            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
+              Cancelled by {cls.cancelled_by}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -280,9 +289,12 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: 
 }
 
 export default function UpcomingClassesClient({ classes, profile, profileCompleted, bannerDismissed, teacherTimezone }: Props) {
+  const router = useRouter()
+
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
+  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(true)
 
   useEffect(() => {
     setMounted(true)
@@ -290,13 +302,16 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       const stored = localStorage.getItem('lingualink_teacher_hide_cancelled')
       if (stored === 'true') setHideCancelled(true)
     } catch {}
+    try {
+      const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
+      if (stored === 'false') setCancelledSectionExpanded(false)
+    } catch {}
   }, [])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
-  const visibleClasses = hideCancelled
-    ? classes.filter(c => c.status !== 'cancelled')
-    : classes
-  const grouped = groupByDay(visibleClasses, teacherTimezone)
+  const upcomingClasses = classes.filter(c => c.status !== 'cancelled')
+  const cancelledClasses = classes.filter(c => c.status === 'cancelled')
+  const grouped = groupByDay(upcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -314,6 +329,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
 
   function handleCloseReschedule() {
     if (rescheduleLoading) return
+    router.refresh()
     setRescheduleTarget(null)
     setRescheduleMessage('')
     setRescheduleError(null)
@@ -347,6 +363,12 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     try {
       localStorage.setItem('lingualink_teacher_hide_cancelled', String(checked))
     } catch {}
+  }
+
+  function handleCancelledSectionToggle() {
+    const next = !cancelledSectionExpanded
+    setCancelledSectionExpanded(next)
+    try { localStorage.setItem('lingualink_teacher_cancelled_section_expanded', String(next)) } catch {}
   }
 
   async function handleDismissBanner() {
@@ -402,6 +424,20 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </p>
       </div>
 
+      {classes.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={hideCancelled}
+              onChange={(e) => handleHideCancelledChange(e.target.checked)}
+              style={{ accentColor: '#FF8303' }}
+            />
+            Hide cancelled
+          </label>
+        </div>
+      )}
+
       {days.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-lg">No upcoming classes.</p>
@@ -409,20 +445,31 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       ) : (
         <div className="space-y-8">
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={hideCancelled}
-                onChange={(e) => handleHideCancelledChange(e.target.checked)}
-                style={{ accentColor: '#FF8303' }}
-              />
-              Hide cancelled
-            </label>
-          </div>
           {days.map(day => (
             <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
           ))}
+        </div>
+      )}
+
+      {!hideCancelled && cancelledClasses.length > 0 && (
+        <div className="space-y-3">
+          <button
+            onClick={handleCancelledSectionToggle}
+            className="flex items-center gap-2 text-left w-full"
+          >
+            <span className="font-semibold text-gray-800">Cancelled ({cancelledClasses.length})</span>
+            <div className="ml-auto">
+              <ChevronIcon rotated={cancelledSectionExpanded} />
+            </div>
+          </button>
+
+          {cancelledSectionExpanded && (
+            <div className="space-y-2">
+              {cancelledClasses.map(cls => (
+                <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -464,7 +511,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   Cancel class & request reschedule
                 </h2>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
-                  Class with {rescheduleTarget.student.full_name} — {mounted ? `${formatDate(rescheduleTarget.starts_at, teacherTimezone)}, ${formatTime(rescheduleTarget.starts_at, teacherTimezone)}` : ''}
+                  Class with {rescheduleTarget.student.full_name} - {mounted ? `${formatDate(rescheduleTarget.starts_at, teacherTimezone)}, ${formatTime(rescheduleTarget.starts_at, teacherTimezone)}` : ''}
                 </p>
                 <p style={{ fontSize: '14px', color: '#111827', marginBottom: '8px', fontWeight: 500 }}>
                   Message to student <span style={{ color: '#ef4444' }}>*</span>

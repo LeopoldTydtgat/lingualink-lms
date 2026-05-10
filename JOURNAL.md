@@ -1,3 +1,38 @@
+## Session 97 - 09 May 2026 - H1h cancel-path hygiene
+
+### What was built
+- Flipped the order of operations in all three live cancel paths so Graph DELETE runs before the DB UPDATE, with the UPDATE conditionally nulling teams_meeting_id only on Graph success
+- Switched the student cancel UPDATE and admin cancel UPDATE from the anon Supabase client to createAdminClient(), making client choice consistent with the teacher cancel path
+- Added .select('id') zero-row guards to all three cancel UPDATEs, mirroring the H1g cleanup script pattern, with CRITICAL logging if zero rows are affected
+- Added updated_at timestamps to teacher and student cancel UPDATEs (admin cancel already set this)
+- Hoisted createAdminClient() declaration in the admin cancel branch so the same client handles the lessons UPDATE, the trainings hours refund SELECT and UPDATE, and the email lookups
+- Files touched: src/app/(dashboard)/upcoming-classes/actions.ts, src/app/(student)/student/my-classes/actions.ts, src/app/api/admin/classes/[id]/route.ts
+
+### Break/Fix Log
+
+Issue 1
+- Symptom: After a successful Graph DELETE on cancel, the lesson row retained its teams_meeting_id while teams_join_url was nulled. The H1g cleanup script identifies orphans by teams_meeting_id IS NOT NULL, so live cancels were creating false-positive candidates the script then had to no-op against.
+- Cause: The cancel UPDATE payload only nulled teams_join_url. teams_meeting_id was never cleared on the live paths, only by the cleanup script.
+- Fix: New shape across all three cancel paths. Graph DELETE runs first inside a try/catch with a graphSucceeded flag. If Graph succeeds (or no meeting existed), the subsequent UPDATE nulls both teams_meeting_id and teams_join_url. If Graph throws a non-404 error, graphSucceeded stays false, teams_meeting_id is left set, and the cleanup script can still recover the orphan on its next run.
+- Lesson: When two recovery mechanisms exist, they need to agree on what state means recoverable. Nulling the field unconditionally would have made the cleanup script useless on Graph failures - the worst possible regression on work just shipped in S96.
+
+Issue 2
+- Symptom: The student cancel UPDATE and admin cancel UPDATE used the anon supabase client, while the teacher cancel UPDATE used createAdminClient(). Inconsistent enough that an RLS regression on lessons UPDATE would silently fail on two of the three paths and succeed on the third.
+- Cause: Earlier sessions added createAdminClient() to the teacher path but not the others. The admin route declared adminClient only at the bottom of the cancel branch, after the UPDATE had already run through the anon client.
+- Fix: Switched both UPDATEs to createAdminClient(). Hoisted the admin route declaration to the top of the cancel branch so the lessons UPDATE, the trainings refund pair, and the email lookups all use the same client.
+- Lesson: Inconsistent client choice is a silent failure mode. Standardise within a logical operation, especially when row-level security is the safety net.
+
+Issue 3
+- Symptom: None of the three cancel UPDATEs detected silent zero-row outcomes. An RLS block, a race-deleted row, or a wrong WHERE clause would return success with no error.
+- Cause: The UPDATEs ended at .eq('id', lessonId) with no .select() chain, matching pre-S96 codebase convention.
+- Fix: Added .select('id') and an explicit zero-row check that logs CRITICAL and returns an error response. Pattern matches the H1g cleanup script which already used this guard.
+- Lesson: For any UPDATE on a restricted table, .select('id') is the cheapest correctness guard available. Add it by default, not as a follow-up.
+
+### Session result
+H1h shipped on dev as commit c1a243f and merged to main as 35ba6e7. Local verification: scheduled lessons cancelled via the student portal showed status='cancelled', teams_meeting_id=NULL, teams_join_url=NULL, and updated_at set, confirming the new order of operations writes the expected end state on Graph success. Three pre-existing concerns logged as candidates for future sessions: NEW2 (teacher cancel function misnamed teacherRescheduleLesson with a "rescheduled" email subject for cancellations), NEW3 (cancelled lessons disappear from the student My Classes page after the Hide toggle, which the client wants visible), and NEW4 (Hide cancelled UX needs a rethink so cancelled rows stay visible by default with a clear cancelled state). H1i was added to backlog covering the student book reschedule path which leaves stale teams_meeting_id on the old lesson row, and L3 covers a future admin alert for orphaned teams_meeting_id values on cancelled lessons. The cancel-path hygiene story is now complete: client choice consistent, zero-row failures detectable, Graph and DB stay in sync on success, and the H1g cleanup script remains the recovery path for Graph non-404 failures.
+
+---
+
 ## Session 96 - 09 May 2026 - H1g retroactive Teams cleanup script
 
 ### What was built

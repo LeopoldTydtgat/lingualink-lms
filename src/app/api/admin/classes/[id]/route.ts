@@ -159,6 +159,7 @@ export async function PATCH(
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
+      cancelled_by: 'admin',
       teams_join_url: null,
       updated_at: new Date().toISOString(),
     }

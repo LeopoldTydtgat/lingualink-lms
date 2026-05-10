@@ -26,6 +26,9 @@ export default async function UpcomingClassesPage() {
       duration_minutes,
       status,
       teams_join_url,
+      cancelled_at,
+      cancellation_reason,
+      cancelled_by,
       students (
         id,
         full_name,
@@ -52,6 +55,9 @@ export default async function UpcomingClassesPage() {
       status: l.status,
       teams_link: l.teams_join_url,
       lesson_notes: null,
+      cancelled_at: l.cancelled_at ?? null,
+      cancellation_reason: l.cancellation_reason ?? null,
+      cancelled_by: l.cancelled_by ?? null,
       student,
     }
   })

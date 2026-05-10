@@ -74,6 +74,7 @@ export async function teacherRescheduleLesson(
     status: 'cancelled',
     cancelled_at: new Date().toISOString(),
     cancellation_reason: messageToStudent,
+    cancelled_by: 'teacher',
     teams_join_url: null,
     updated_at: new Date().toISOString(),
   }
