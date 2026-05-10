@@ -365,6 +365,8 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (lessonError || !newLesson) {
+      const isSlotConflict = lessonError?.code === '23P01'
+
       if (rescheduleId) {
         // Reschedule recovery: reschedule_class_atomic has already cancelled
         // the old lesson and applied net delta (new - old) to hours_consumed.
@@ -401,7 +403,26 @@ export async function POST(req: NextRequest) {
             })
           }
         }
+
+        if (isSlotConflict && !unwindError) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'This slot was just booked by another student. Please choose a different time.' },
+            { status: 409 }
+          )
+        }
       } else {
+        if (isSlotConflict && teamsMeetingId) {
+          try {
+            await cancelTeamsMeeting(teamsMeetingId)
+          } catch (cancelError) {
+            console.error('CRITICAL: orphan Teams meeting after fresh-booking slot conflict:', {
+              teams_meeting_id: teamsMeetingId,
+              lesson_id: null,
+              error: cancelError,
+            })
+          }
+        }
+
         console.error('Failed to create lesson — refunding deducted hours:', lessonError)
         const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
           p_training_id: trainingId,
@@ -409,6 +430,13 @@ export async function POST(req: NextRequest) {
         })
         if (refundError) {
           console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+        }
+
+        if (isSlotConflict) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'This slot was just booked by another student. Please choose a different time.' },
+            { status: 409 }
+          )
         }
       }
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
