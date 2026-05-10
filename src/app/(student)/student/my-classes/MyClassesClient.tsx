@@ -28,6 +28,7 @@ interface Lesson {
   status: string
   cancelled_at: string | null
   cancellation_reason: string | null
+  cancelled_by: string | null
   teacher_id: string
   training_id: string
   teacher: Teacher | null
@@ -113,6 +114,7 @@ export default function MyClassesClient({
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
+  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(true)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
@@ -127,6 +129,11 @@ export default function MyClassesClient({
     try {
       const stored = localStorage.getItem('lingualink_student_hide_cancelled')
       if (stored === 'true') setHideCancelled(true)
+    } catch {}
+
+    try {
+      const stored = localStorage.getItem('lingualink_student_cancelled_section_expanded')
+      if (stored === 'false') setCancelledSectionExpanded(false)
     } catch {}
 
     // Expand all day groups by default
@@ -147,16 +154,18 @@ export default function MyClassesClient({
   // First scheduled lesson gets the prominent next class card
   const nextLesson = lessons.find((l) => l.status === 'scheduled') ?? null
 
-  // All other lessons go in the list below
-  const listLessons = lessons.filter((l) => {
+  // Upcoming list: all scheduled lessons except the next one
+  const upcomingLessons = lessons.filter((l) => {
     if (nextLesson && l.id === nextLesson.id) return false
-    if (hideCancelled && l.status === 'cancelled') return false
-    return true
+    return l.status === 'scheduled'
   })
 
-  // Group list lessons by local date
+  // Cancelled lessons for the separate collapsed section
+  const cancelledLessons = lessons.filter((l) => l.status === 'cancelled')
+
+  // Group upcoming lessons by local date
   const groupedByDate: Record<string, Lesson[]> = {}
-  listLessons.forEach((lesson) => {
+  upcomingLessons.forEach((lesson) => {
     const key = getLocalDateKey(lesson.scheduled_at, studentTimezone)
     if (!groupedByDate[key]) groupedByDate[key] = []
     groupedByDate[key].push(lesson)
@@ -190,6 +199,12 @@ export default function MyClassesClient({
       console.error('Cancel failed:', result.error)
     }
     router.refresh()
+  }
+
+  function handleCancelledSectionToggle() {
+    const next = !cancelledSectionExpanded
+    setCancelledSectionExpanded(next)
+    try { localStorage.setItem('lingualink_student_cancelled_section_expanded', String(next)) } catch {}
   }
 
   const scheduledCount = lessons.filter((l) => l.status === 'scheduled').length
@@ -566,8 +581,8 @@ export default function MyClassesClient({
         </div>
       )}
 
-      {/* ── Upcoming classes list ── */}
-      {sortedDays.length > 0 && (
+      {/* ── Upcoming and cancelled classes list ── */}
+      {(upcomingLessons.length > 0 || cancelledLessons.length > 0) && (
         <div>
           <div style={{
             display: 'flex',
@@ -819,10 +834,9 @@ export default function MyClassesClient({
                           </div>
                         )}
 
-                        {/* Cancellation reason if present */}
-                        {isCancelled && lesson.cancellation_reason && (
+                        {isCancelled && lesson.cancelled_by && (
                           <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                            Reason: {lesson.cancellation_reason}
+                            Cancelled by {lesson.cancelled_by}
                           </p>
                         )}
                       </div>
@@ -832,6 +846,172 @@ export default function MyClassesClient({
               </div>
             )
           })}
+
+          {/* ── Cancelled section ── */}
+          {!hideCancelled && cancelledLessons.length > 0 && (
+            <div style={{ marginBottom: '8px' }}>
+              <button
+                onClick={handleCancelledSectionToggle}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '10px 16px',
+                  backgroundColor: '#f3f4f6',
+                  border: 'none',
+                  borderRadius: cancelledSectionExpanded ? '8px 8px 0 0' : '8px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <span>Cancelled ({cancelledLessons.length})</span>
+                {cancelledSectionExpanded
+                  ? <ChevronUp size={16} color="#9ca3af" />
+                  : <ChevronDown size={16} color="#9ca3af" />
+                }
+              </button>
+
+              {cancelledSectionExpanded && cancelledLessons.map((lesson, i) => {
+                const isCancelled = lesson.status === 'cancelled'
+                const within24 = false
+                const secondsUntil = 0
+                const isLast = i === cancelledLessons.length - 1
+
+                return (
+                  <div key={lesson.id}>
+                    <div
+                      style={{
+                        backgroundColor: '#ffffff',
+                        border: '1px solid #E0DFDC',
+                        borderTop: 'none',
+                        borderRadius: isLast ? '0 0 8px 8px' : '0',
+                        padding: '14px 16px',
+                        opacity: isCancelled ? 0.6 : 1,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+
+                        {/* Teacher photo */}
+                        <div style={{ flexShrink: 0 }}>
+                          {lesson.teacher?.photo_url ? (
+                            <Image
+                              src={lesson.teacher.photo_url}
+                              alt={lesson.teacher.full_name}
+                              width={36}
+                              height={36}
+                              style={{ borderRadius: '50%', objectFit: 'cover', border: '1px solid #E0DFDC' }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '50%',
+                              backgroundColor: '#f3f4f6',
+                              border: '1px solid #E0DFDC',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}>
+                              <User size={16} color="#9ca3af" />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Teacher name and time */}
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                            <span style={{
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              color: isCancelled ? '#9ca3af' : '#111827',
+                            }}>
+                              {lesson.teacher?.full_name ?? 'Teacher'}
+                            </span>
+                            {isCancelled && (
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                padding: '2px 8px',
+                                backgroundColor: '#fef2f2',
+                                color: '#dc2626',
+                                borderRadius: '4px',
+                              }}>
+                                Cancelled
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '13px', color: '#6b7280' }}>
+                            {mounted ? formatTime(lesson.scheduled_at, studentTimezone) : ''} · {lesson.duration_minutes} min
+                          </span>
+                        </div>
+
+                        {/* Countdown — not shown for cancelled */}
+                        {!isCancelled && mounted && (
+                          <span style={{
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            color: '#FF8303',
+                            fontVariantNumeric: 'tabular-nums',
+                            flexShrink: 0,
+                          }}>
+                            {formatCountdown(secondsUntil)}
+                          </span>
+                        )}
+
+                        {/* Reschedule / Cancel buttons — not shown for cancelled */}
+                        {!isCancelled && (
+                          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                            <button
+                              onClick={() => router.push(`/student/book?reschedule=${lesson.id}`)}
+                              disabled={!!within24}
+                              style={{
+                                padding: '5px 10px',
+                                backgroundColor: 'transparent',
+                                border: '1px solid #E0DFDC',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '500',
+                                color: within24 ? '#9ca3af' : '#4b5563',
+                                cursor: within24 ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Reschedule
+                            </button>
+                            <button
+                              onClick={() => handleCancel(lesson.id, !!within24)}
+                              disabled={cancellingId === lesson.id}
+                              style={{
+                                padding: '5px 10px',
+                                backgroundColor: 'transparent',
+                                border: '1px solid #E0DFDC',
+                                borderRadius: '6px',
+                                fontSize: '12px',
+                                fontWeight: '500',
+                                color: '#4b5563',
+                                cursor: cancellingId === lesson.id ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              {cancellingId === lesson.id ? '...' : 'Cancel'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {isCancelled && lesson.cancelled_by && (
+                        <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
+                          Cancelled by {lesson.cancelled_by}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
