@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 interface NextLesson {
   scheduled_at: string
@@ -48,8 +49,6 @@ function formatEndDate(isoDate: string): string {
     year: 'numeric',
   }).format(new Date(isoDate))
 }
-
-const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 function isJoinable(isoString: string, status: string, durationMinutes: number, now: number): boolean {
   if (BLOCKED_STATUSES.includes(status)) return false

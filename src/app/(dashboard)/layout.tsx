@@ -83,7 +83,7 @@ export default async function DashboardLayout({
     .eq('teacher_id', profile?.id)
     .gte('scheduled_at', startUtc)
     .lt('scheduled_at', endUtc)
-    .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'scheduled'])
+    .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
 
   const { data: rateRow } = await admin
     .from('profiles')

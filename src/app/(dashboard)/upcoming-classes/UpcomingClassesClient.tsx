@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { isToday, isTomorrow } from 'date-fns'
 import { teacherCancelLesson } from './actions'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 type Student = {
   id: string
@@ -159,7 +160,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   const now = Date.now()
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
-  const isCancelled = cls.status === 'cancelled'
+  const isCancelled = isCancelledStatus(cls.status)
   const showJoinButton = minutesUntilStart <= 10 && !classEnded && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
@@ -309,8 +310,8 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   }, [])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
-  const upcomingClasses = classes.filter(c => c.status !== 'cancelled')
-  const cancelledClasses = classes.filter(c => c.status === 'cancelled')
+  const upcomingClasses = classes.filter(c => !isCancelledStatus(c.status))
+  const cancelledClasses = classes.filter(c => isCancelledStatus(c.status))
   const grouped = groupByDay(upcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 

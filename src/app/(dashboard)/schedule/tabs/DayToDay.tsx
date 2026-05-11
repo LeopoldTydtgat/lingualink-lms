@@ -267,7 +267,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startStr)
       .lte('scheduled_at', endStr)
-      .neq('status', 'cancelled')
+      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")')
 
     if (data) {
       setClasses(
