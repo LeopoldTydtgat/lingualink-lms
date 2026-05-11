@@ -13,6 +13,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
+import { isCancelledStatus, BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 interface Teacher {
   id: string
@@ -89,8 +90,6 @@ function getSecondsUntil(isoString: string, now: number): number {
   return Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
 }
 
-const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
-
 function isJoinable(isoString: string, durationMinutes: number, now: number): boolean {
   const endTime = new Date(isoString).getTime() + durationMinutes * 60 * 1000
   if (endTime <= now) return false
@@ -161,7 +160,7 @@ export default function MyClassesClient({
   })
 
   // Cancelled lessons for the separate collapsed section
-  const cancelledLessons = lessons.filter((l) => l.status === 'cancelled')
+  const cancelledLessons = lessons.filter((l) => isCancelledStatus(l.status))
 
   // Group upcoming lessons by local date
   const groupedByDate: Record<string, Lesson[]> = {}
@@ -661,7 +660,7 @@ export default function MyClassesClient({
 
                 {/* Lessons within this day */}
                 {isExpanded && dayLessons.map((lesson, i) => {
-                  const isCancelled = lesson.status === 'cancelled'
+                  const isCancelled = isCancelledStatus(lesson.status)
                   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
                   const secondsUntil = mounted ? getSecondsUntil(lesson.scheduled_at, now) : 0
                   const isLast = i === dayLessons.length - 1
@@ -876,7 +875,7 @@ export default function MyClassesClient({
               </button>
 
               {cancelledSectionExpanded && cancelledLessons.map((lesson, i) => {
-                const isCancelled = lesson.status === 'cancelled'
+                const isCancelled = isCancelledStatus(lesson.status)
                 const within24 = false
                 const secondsUntil = 0
                 const isLast = i === cancelledLessons.length - 1

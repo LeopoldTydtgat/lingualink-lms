@@ -10,6 +10,7 @@ import {
   teacherCancellationEmailContent,
 } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 export async function cancelLessonAction(lessonId: string) {
   const supabase = await createClient()
@@ -35,7 +36,7 @@ export async function cancelLessonAction(lessonId: string) {
     .single()
 
   if (!lesson) return { error: 'Lesson not found' }
-  if (lesson.status === 'cancelled') return { error: 'Lesson is already cancelled' }
+  if (isCancelledStatus(lesson.status)) return { error: 'Lesson is already cancelled' }
 
   // Fetch teacher profile for email
   const adminClient = createAdminClient()

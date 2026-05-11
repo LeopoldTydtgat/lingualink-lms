@@ -18,6 +18,7 @@ import type {
   PendingReportItem,
   AlertLesson,
 } from './page'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 interface Props {
   stats: DashboardStats
@@ -58,7 +59,7 @@ function fmtDate(isoStr: string): string {
 // ── lesson status helpers ─────────────────────────────────────────────────────
 
 function getEffectiveStatus(lesson: LiveLesson): string {
-  if (lesson.status === 'cancelled') return 'Cancelled'
+  if (isCancelledStatus(lesson.status)) return 'Cancelled'
   if (lesson.status === 'completed') return 'Completed'
   if (lesson.status === 'student_no_show' || lesson.status === 'teacher_no_show') return 'No-Show'
   const start = new Date(lesson.scheduled_at).getTime()

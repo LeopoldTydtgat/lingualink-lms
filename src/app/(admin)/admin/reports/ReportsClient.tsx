@@ -83,6 +83,8 @@ function LessonStatusBadge({ status }: { status: string }) {
     upcoming:  { bg: '#EFF6FF', text: '#1D4ED8', label: 'Upcoming' },
     completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
     cancelled: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled' },
+    cancelled_by_student: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by student' },
+    cancelled_by_teacher: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by teacher' },
     no_show:   { bg: '#FEF3C7', text: '#92400E', label: 'No-Show' },
     flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
   };
