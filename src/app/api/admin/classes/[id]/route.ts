@@ -136,7 +136,9 @@ export async function PATCH(
 
   // --- CANCEL action ---
   if (action === 'cancel') {
-    const { cancellation_reason } = fields
+    const { cancellation_reason, refund_hours = true } = fields
+    const shouldRefund = refund_hours !== false
+    const hoursToRefund = existing.duration_minutes / 60
     const adminClient = createAdminClient()
 
     // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
@@ -161,6 +163,7 @@ export async function PATCH(
       cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
       cancelled_by: 'admin',
       teams_join_url: null,
+      hours_refunded: shouldRefund,
       updated_at: new Date().toISOString(),
     }
     if (graphSucceeded) {
@@ -181,18 +184,19 @@ export async function PATCH(
       return NextResponse.json({ error: 'Cancel affected no rows' }, { status: 500 })
     }
 
-    // Refund hours to training — admin cancellations always refund.
+    // Refund hours to training — gated on admin's toggle choice.
     // Atomic RPC locks the training row, clamps at zero, and writes in one txn.
-    const hoursToRefund = existing.duration_minutes / 60
-    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-      p_training_id: existing.training_id,
-      p_hours: hoursToRefund,
-    })
-    if (refundError) {
-      return NextResponse.json(
-        { error: 'Failed to refund hours', details: refundError.message },
-        { status: 500 }
-      )
+    if (shouldRefund) {
+      const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+        p_training_id: existing.training_id,
+        p_hours: hoursToRefund,
+      })
+      if (refundError) {
+        return NextResponse.json(
+          { error: 'Failed to refund hours', details: refundError.message },
+          { status: 500 }
+        )
+      }
     }
 
     // Send cancellation email to student
@@ -210,10 +214,11 @@ export async function PATCH(
         .single()
 
       if (studentData?.email) {
+        const emailHoursValue = shouldRefund ? hoursToRefund : 0
         const emailBody = studentCancellationByAdminEmailContent(
           teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
-          hoursToRefund,
+          emailHoursValue,
           studentData.timezone ?? 'UTC',
           cancellation_reason ?? undefined
         )
