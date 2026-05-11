@@ -49,7 +49,7 @@ function isTeacherBillable(
   if (lessonStatus === 'completed') return true
   if (lessonStatus === 'no_show' && noShowType === 'student_no_show') return true
   if (lessonStatus === 'cancelled_by_teacher') return false
-  if (lessonStatus === 'cancelled' && cancelledAt) {
+  if ((lessonStatus === 'cancelled' || lessonStatus === 'cancelled_by_student') && cancelledAt) {
     const scheduled = new Date(scheduledAt).getTime()
     const cancelled = new Date(cancelledAt).getTime()
     const hoursNotice = (scheduled - cancelled) / (1000 * 60 * 60)
@@ -377,7 +377,7 @@ export async function GET(
 
           if (l.status === 'completed') {
             billable24 = true
-          } else if (l.status === 'cancelled' && l.cancelled_at) {
+          } else if ((l.status === 'cancelled' || l.status === 'cancelled_by_student') && l.cancelled_at) {
             const scheduled = new Date(l.scheduled_at).getTime()
             const cancelled = new Date(l.cancelled_at).getTime()
             const hours = (scheduled - cancelled) / (1000 * 60 * 60)

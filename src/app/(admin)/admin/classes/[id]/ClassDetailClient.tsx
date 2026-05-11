@@ -31,10 +31,11 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
   switch (status) {
     case 'scheduled':     return { label: 'Upcoming',          bg: '#EFF6FF', color: '#1D4ED8' }
     case 'completed':     return { label: 'Completed',         bg: '#F0FDF4', color: '#15803D' }
-    case 'cancelled':
+    case 'cancelled':     return { label: 'Cancelled',          bg: '#FEF2F2', color: '#B91C1C' }
     case 'cancelled_by_student':
+                          return { label: 'Cancelled by student', bg: '#FEF2F2', color: '#B91C1C' }
     case 'cancelled_by_teacher':
-                          return { label: 'Cancelled',         bg: '#FEF2F2', color: '#B91C1C' }
+                          return { label: 'Cancelled by teacher', bg: '#FEF2F2', color: '#B91C1C' }
     case 'student_no_show': return { label: 'Student No-Show', bg: '#FFF7ED', color: '#C2410C' }
     case 'teacher_no_show': return { label: 'Teacher No-Show', bg: '#FEF2F2', color: '#B91C1C' }
     case 'flagged':       return { label: 'Flagged',           bg: '#FEF9C3', color: '#A16207' }

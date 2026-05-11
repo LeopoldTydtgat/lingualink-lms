@@ -40,7 +40,7 @@ export default async function MyClassesPage() {
     `)
     .eq('student_id', student.id)
     .gte('scheduled_at', new Date().toISOString())
-    .in('status', ['scheduled', 'cancelled'])
+    .in('status', ['scheduled', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
     .order('scheduled_at', { ascending: true })
 
   // Supabase returns joins as arrays — flatten to single objects
