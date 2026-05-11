@@ -11,6 +11,7 @@ interface LessonDetail {
   status: string
   cancelled_at: string | null
   cancellation_reason: string | null
+  hours_refunded: boolean | null
   teams_join_url: string | null
   teams_meeting_id: string | null
   teacher_id: string
@@ -56,6 +57,7 @@ export default function ClassDetailClient({ lesson }: Props) {
   const [cancelReasonError, setCancelReasonError] = useState('')
   const [cancelling, setCancelling] = useState(false)
   const [cancelError, setCancelError] = useState('')
+  const [refundHours, setRefundHours] = useState(true)
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -84,7 +86,7 @@ export default function ClassDetailClient({ lesson }: Props) {
     const res = await fetch(`/api/admin/classes/${lesson.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason }),
+      body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason, refund_hours: refundHours }),
     })
     const data = await res.json()
     if (!res.ok) {
@@ -99,6 +101,7 @@ export default function ClassDetailClient({ lesson }: Props) {
     setCancelReason('')
     setCancelReasonError('')
     setCancelError('')
+    setRefundHours(true)
     setShowCancelModal(true)
   }
 
@@ -185,6 +188,12 @@ export default function ClassDetailClient({ lesson }: Props) {
         )}
         {lesson.cancelled_at && (
           <DetailRow label="Cancelled At" value={formatDateTime(lesson.cancelled_at)} />
+        )}
+        {isCancelled && lesson.hours_refunded === true && (
+          <DetailRow label="Hours refunded" value="Yes" />
+        )}
+        {isCancelled && lesson.hours_refunded === false && (
+          <DetailRow label="Hours refunded" value="No" />
         )}
       </div>
 
@@ -362,8 +371,26 @@ export default function ClassDetailClient({ lesson }: Props) {
               Cancel This Class?
             </h3>
             <p style={{ fontSize: '14px', color: '#6B7280' }}>
-              The student&apos;s hours will be refunded. This action cannot be undone.
+              {refundHours
+                ? "The student's hours will be refunded. This action cannot be undone."
+                : "The student's hours will NOT be refunded. This action cannot be undone."}
             </p>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '14px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={refundHours}
+                onChange={(e) => setRefundHours(e.target.checked)}
+                style={{ marginTop: '3px', cursor: 'pointer' }}
+              />
+              <span>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block' }}>
+                  Refund hours to student
+                </span>
+                <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                  Default: hours are returned. Untick to forfeit hours (e.g. last-minute cancel by student request).
+                </span>
+              </span>
+            </label>
             <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
               Reason
             </label>

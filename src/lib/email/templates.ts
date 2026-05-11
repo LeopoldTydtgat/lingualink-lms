@@ -380,14 +380,18 @@ export function studentCancellationByAdminEmailContent(
   cancellationReason?: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const refunded = hoursRefunded > 0
+  const openingSentence = refunded
+    ? "We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience."
+    : "We're sorry to let you know that your upcoming class has been cancelled. Please reach out to us if you have any questions."
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience.
+      ${openingSentence}
     </p>
     <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
+      ${refunded ? `<tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>` : ''}
     </table>
     ${cancellationReason ? `
     <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
