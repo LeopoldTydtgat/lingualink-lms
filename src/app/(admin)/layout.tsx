@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import AdminLayoutClient from './AdminLayoutClient'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 // Never use toISOString() for local date construction.
@@ -123,7 +124,7 @@ export default async function AdminLayout({
   ])
 
   const classesTodayCount = (todayRes.data ?? []).filter(
-    (l) => l.status !== 'cancelled'
+    (l) => !isCancelledStatus(l.status)
   ).length
 
   const lowHoursCount = (trainingsRes.data ?? []).filter(

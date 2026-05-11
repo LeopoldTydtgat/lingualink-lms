@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import DashboardClient from './DashboardClient'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 // Never use toISOString() for local date construction.
@@ -175,7 +176,7 @@ export default async function AdminDashboardPage() {
       .gt('scheduled_at', nowStr)
       .lte('scheduled_at', in24hStr)
       .is('teams_join_url', null)
-      .neq('status', 'cancelled'),
+      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")'),
   ])
 
   // ── compute low-hours and zero-balance counts ─────────────────────────────
@@ -198,7 +199,7 @@ export default async function AdminDashboardPage() {
       .select('id', { count: 'exact', head: true })
       .in('student_id', zeroIds)
       .gt('scheduled_at', nowStr)
-      .neq('status', 'cancelled')
+      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")')
     zeroBalanceWithClassesCount = count ?? 0
   }
 
@@ -243,7 +244,7 @@ export default async function AdminDashboardPage() {
 
   // Classes Today stat excludes cancelled lessons
   const stats: DashboardStats = {
-    classesTodayCount: todayLessons.filter((l) => l.status !== 'cancelled').length,
+    classesTodayCount: todayLessons.filter((l) => !isCancelledStatus(l.status)).length,
     pendingCount: pendingRes.data?.length ?? 0,
     flaggedCount: flaggedCountRes.count ?? 0,
     lowHoursCount,

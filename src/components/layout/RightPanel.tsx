@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
+import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,6 @@ function formatClassTime(isoString: string, durationMinutes: number): string {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
-const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 export default function RightPanel({
   teacherId,

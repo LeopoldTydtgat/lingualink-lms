@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Video, X } from 'lucide-react'
+import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 interface UpcomingLesson {
   id: string
@@ -12,8 +13,6 @@ interface UpcomingLesson {
   status: string
   teacher_name: string
 }
-
-const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 interface ClassReminderModalProps {
   studentId: string

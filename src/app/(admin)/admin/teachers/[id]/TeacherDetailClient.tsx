@@ -100,22 +100,23 @@ function StatusBadge({ status }: { status: string | null }) {
 }
 
 function LessonStatusBadge({ status }: { status: string }) {
-  const colour =
-    status === 'completed'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : status === 'scheduled'
-      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
-      : status === 'cancelled'
-      ? { backgroundColor: '#f3f4f6', color: '#6b7280' }
-      : status === 'student_no_show'
-      ? { backgroundColor: '#fef3c7', color: '#92400e' }
-      : status === 'teacher_no_show'
-      ? { backgroundColor: '#fee2e2', color: '#dc2626' }
-      : { backgroundColor: '#f3f4f6', color: '#6b7280' }
+  const meta: Record<string, { bg: string; color: string; label: string }> = {
+    completed: { bg: '#dcfce7', color: '#166534', label: 'Completed' },
+    scheduled: { bg: '#dbeafe', color: '#1e40af', label: 'Scheduled' },
+    cancelled: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled' },
+    cancelled_by_student: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by student' },
+    cancelled_by_teacher: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by teacher' },
+    student_no_show: { bg: '#fef3c7', color: '#92400e', label: 'Student no show' },
+    teacher_no_show: { bg: '#fee2e2', color: '#dc2626', label: 'Teacher no show' },
+  }
+  const entry = meta[status] ?? { bg: '#f3f4f6', color: '#6b7280', label: status.replace(/_/g, ' ') }
 
   return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={colour}>
-      {status.replace(/_/g, ' ')}
+    <span
+      className="px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: entry.bg, color: entry.color }}
+    >
+      {entry.label}
     </span>
   )
 }

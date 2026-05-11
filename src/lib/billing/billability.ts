@@ -80,3 +80,22 @@ export function getProjectedAmount(input: BillabilityInput): number {
   }
   return getBillability(input).amount
 }
+
+export const CANCELLED_STATUSES: readonly string[] = [
+  'cancelled',
+  'cancelled_by_student',
+  'cancelled_by_teacher',
+]
+
+export function isCancelledStatus(status: string | null | undefined): boolean {
+  return status != null && CANCELLED_STATUSES.includes(status)
+}
+
+export const BLOCKED_STATUSES: readonly string[] = [
+  'cancelled',
+  'cancelled_by_student',
+  'cancelled_by_teacher',
+  'completed',
+  'student_no_show',
+  'teacher_no_show',
+]
