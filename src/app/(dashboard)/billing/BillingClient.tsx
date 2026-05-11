@@ -70,6 +70,7 @@ function getStatusLabel(status: string): string {
     case 'teacher_no_show': return 'Teacher absent'
     case 'cancelled': return 'Cancelled'
     case 'cancelled_by_student': return 'Cancelled by student'
+    case 'cancelled_by_teacher': return 'Cancelled by you'
     default: return status
   }
 }
@@ -80,7 +81,8 @@ function getLessonStatusColor(status: string): string {
     case 'student_no_show': return '#FF8303'
     case 'teacher_no_show': return '#FD5602'
     case 'cancelled':
-    case 'cancelled_by_student': return '#6b7280'
+    case 'cancelled_by_student':
+    case 'cancelled_by_teacher': return '#6b7280'
     default: return '#6b7280'
   }
 }
@@ -179,7 +181,7 @@ export default function BillingClient({
       .from('lessons')
       .select('id, scheduled_at, duration_minutes, status, cancelled_at, students(full_name)')
       .eq('teacher_id', profile.id)
-      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student'])
+      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
       .order('scheduled_at', { ascending: true })
 
     const grouped: Record<string, Lesson[]> = {}
