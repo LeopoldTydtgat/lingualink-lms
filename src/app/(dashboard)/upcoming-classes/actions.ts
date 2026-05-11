@@ -27,11 +27,11 @@ export async function teacherCancelLesson(
 
   if (lessonError || !lesson) return { error: 'Lesson not found' }
   if (lesson.teacher_id !== user.id) return { error: 'Not authorised' }
-  if (lesson.status !== 'scheduled') return { error: 'This class cannot be rescheduled' }
+  if (lesson.status !== 'scheduled') return { error: 'This class cannot be cancelled' }
 
   // Enforce 24-hour rule server-side
   const hoursUntil = (new Date(lesson.scheduled_at).getTime() - Date.now()) / 1000 / 60 / 60
-  if (hoursUntil < 24) return { error: 'You cannot reschedule within 24 hours of the class' }
+  if (hoursUntil < 24) return { error: 'You cannot cancel within 24 hours of the class. Please contact admin.' }
 
   // Get teacher name
   const { data: teacherProfile } = await adminClient
@@ -71,7 +71,7 @@ export async function teacherCancelLesson(
 
   // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
   const updatePayload: Record<string, unknown> = {
-    status: 'cancelled',
+    status: 'cancelled_by_teacher',
     cancelled_at: new Date().toISOString(),
     cancellation_reason: messageToStudent,
     cancelled_by: 'teacher',
@@ -94,20 +94,14 @@ export async function teacherCancelLesson(
     return { error: 'Failed to cancel lesson' }
   }
 
-  // Refund hours to training
+  // Refund hours to training — atomic RPC locks the training row, clamps at zero, and writes in one txn.
   if (lesson.training_id) {
-    const { data: training } = await adminClient
-      .from('trainings')
-      .select('hours_consumed')
-      .eq('id', lesson.training_id)
-      .single()
-
-    if (training) {
-      const hoursToRefund = lesson.duration_minutes / 60
-      await adminClient
-        .from('trainings')
-        .update({ hours_consumed: Math.max(0, training.hours_consumed - hoursToRefund) })
-        .eq('id', lesson.training_id)
+    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+      p_training_id: lesson.training_id,
+      p_hours: lesson.duration_minutes / 60,
+    })
+    if (refundError) {
+      return { error: 'Failed to refund hours' }
     }
   }
 
@@ -134,7 +128,7 @@ export async function teacherCancelLesson(
       }),
     })
   } catch (emailErr) {
-    console.error('Reschedule email failed — lesson still cancelled:', emailErr)
+    console.error('Cancellation email to student failed — lesson still cancelled:', emailErr)
   }
 
   // Send confirmation email to the teacher
@@ -163,5 +157,7 @@ export async function teacherCancelLesson(
   }
 
   revalidatePath('/upcoming-classes')
+  revalidatePath('/student/my-classes')
+  revalidatePath('/admin/classes')
   return {}
 }

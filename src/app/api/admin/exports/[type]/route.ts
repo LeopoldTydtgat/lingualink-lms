@@ -48,6 +48,7 @@ function isTeacherBillable(
 ): boolean {
   if (lessonStatus === 'completed') return true
   if (lessonStatus === 'no_show' && noShowType === 'student_no_show') return true
+  if (lessonStatus === 'cancelled_by_teacher') return false
   if (lessonStatus === 'cancelled' && cancelledAt) {
     const scheduled = new Date(scheduledAt).getTime()
     const cancelled = new Date(cancelledAt).getTime()
