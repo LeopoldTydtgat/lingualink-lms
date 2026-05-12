@@ -52,10 +52,15 @@ type Lesson = {
 
 type Invoice = {
   id: string
-  month: string
-  total_amount: number | null
+  billing_month: string
+  amount_eur: number | null
   status: string | null
   created_at: string
+}
+
+function formatMonth(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
 }
 
 type HistoryEntry = {
@@ -691,9 +696,9 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               ) : (
                 invoices.map((inv) => (
                   <tr key={inv.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-800">{inv.month}</td>
+                    <td className="px-4 py-3 text-gray-800">{formatMonth(inv.billing_month)}</td>
                     <td className="px-4 py-3 text-gray-600">
-                      {inv.total_amount != null ? `€${inv.total_amount}` : '—'}
+                      {inv.amount_eur != null ? `${currencySymbol}${Number(inv.amount_eur).toFixed(2)}` : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">

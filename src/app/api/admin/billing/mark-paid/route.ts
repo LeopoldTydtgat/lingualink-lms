@@ -4,6 +4,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
 
+function formatMonthName(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+}
+
 export async function PATCH(req: NextRequest) {
   const supabase = await createClient()
 
@@ -39,7 +44,7 @@ export async function PATCH(req: NextRequest) {
 
     const { data: invoice } = await adminClient
       .from('invoices')
-      .select('teacher_id, month, amount')
+      .select('teacher_id, billing_month, amount_eur')
       .eq('id', invoiceId)
       .single()
 
@@ -61,8 +66,8 @@ export async function PATCH(req: NextRequest) {
             subject: 'Lingualink Online — Your invoice has been paid',
             bodyHtml: `
               <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-                Your invoice for <strong>${invoice.month}</strong> has been processed and payment of
-                <strong>€${invoice.amount}</strong> will be transferred to your account within the agreed timeframe.
+                Your invoice for <strong>${formatMonthName(invoice.billing_month)}</strong> has been processed and payment of
+                <strong>€${Number(invoice.amount_eur ?? 0).toFixed(2)}</strong> will be transferred to your account within the agreed timeframe.
               </p>
             `,
             contactEmail: 'teachers@lingualinkonline.com',

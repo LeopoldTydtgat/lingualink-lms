@@ -39,7 +39,7 @@ export default async function TeacherDetailPage({
   // Fetch teacher's invoices
   const { data: invoices } = await supabase
     .from('invoices')
-    .select('id, month, total_amount, status, created_at')
+    .select('id, billing_month, amount_eur, status, created_at')
     .eq('teacher_id', id)
     .order('created_at', { ascending: false })
 
