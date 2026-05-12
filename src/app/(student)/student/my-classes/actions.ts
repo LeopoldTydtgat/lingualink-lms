@@ -70,7 +70,7 @@ export async function cancelLessonAction(lessonId: string) {
 
   // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
   const updatePayload: Record<string, unknown> = {
-    status: 'cancelled',
+    status: 'cancelled_by_student',
     cancelled_at: new Date().toISOString(),
     cancellation_reason: 'Cancelled by student',
     cancelled_by: 'student',
@@ -93,20 +93,19 @@ export async function cancelLessonAction(lessonId: string) {
     return { error: 'Failed to cancel lesson' }
   }
 
-  // Refund hours if cancelled more than 24 hours before class
-  if (isRefundable) {
-    const { data: training } = await supabase
-      .from('trainings')
-      .select('hours_consumed')
-      .eq('id', lesson.training_id)
-      .single()
-
-    if (training) {
-      const newHoursConsumed = Math.max(0, training.hours_consumed - hoursToRefund)
-      await supabase
-        .from('trainings')
-        .update({ hours_consumed: newHoursConsumed })
-        .eq('id', lesson.training_id)
+  // Refund hours to training — atomic RPC locks the training row, clamps at zero, and writes in one txn.
+  if (isRefundable && lesson.training_id) {
+    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+      p_training_id: lesson.training_id,
+      p_hours: hoursToRefund,
+    })
+    if (refundError) {
+      console.error('CRITICAL: refund_hours_atomic RPC failed after student cancel:', {
+        lesson_id: lessonId,
+        training_id: lesson.training_id,
+        error: refundError,
+      })
+      return { error: 'Failed to refund hours' }
     }
   }
 
