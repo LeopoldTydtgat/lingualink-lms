@@ -207,7 +207,11 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
             <p className="font-semibold">{cls.student.full_name}</p>
           </a>
           <p className="text-sm text-gray-500">
-            {mounted ? `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}` : ''}
+            {mounted
+              ? isCancelled
+                ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}`
+                : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}`
+              : ''}
           </p>
           {isCancelled && cls.cancelled_by && (
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
@@ -311,7 +315,13 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
   const upcomingClasses = classes.filter(c => !isCancelledStatus(c.status))
-  const cancelledClasses = classes.filter(c => isCancelledStatus(c.status))
+  const cancelledClasses = classes
+    .filter(c => isCancelledStatus(c.status))
+    .sort((a, b) => {
+      const ta = a.cancelled_at ?? a.starts_at
+      const tb = b.cancelled_at ?? b.starts_at
+      return new Date(tb).getTime() - new Date(ta).getTime()
+    })
   const grouped = groupByDay(upcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
