@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
+import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 
 function formatMonthName(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00Z')
@@ -31,6 +32,20 @@ export async function PATCH(req: NextRequest) {
 
   const { invoiceId } = await req.json()
   if (!invoiceId) return NextResponse.json({ error: 'invoiceId required' }, { status: 400 })
+
+  // Recompute amount_eur BEFORE flipping status to 'paid'. The recompute helper
+  // skips paid invoices to preserve historical figures, so once status='paid' is
+  // set the amount is frozen. We need the latest billable-lesson total locked
+  // in for both the historical record and the email body below.
+  const lookupClient = createAdminClient()
+  const { data: invoiceForTeacherLookup } = await lookupClient
+    .from('invoices')
+    .select('teacher_id')
+    .eq('id', invoiceId)
+    .single()
+  if (invoiceForTeacherLookup?.teacher_id) {
+    await recomputeInvoiceAmountsForTeacher(invoiceForTeacherLookup.teacher_id)
+  }
 
   const { error } = await supabase
     .from('invoices')
