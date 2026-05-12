@@ -67,8 +67,6 @@ export async function GET(request: NextRequest) {
         photo_url
       )
     `, { count: 'exact' })
-    .order('scheduled_at', { ascending: false })
-    .range((page - 1) * pageSize, page * pageSize - 1)
 
   if (teacherId) query = query.eq('teacher_id', teacherId)
   if (studentId) query = query.eq('student_id', studentId)
@@ -87,6 +85,16 @@ export async function GET(request: NextRequest) {
   } else if (status === 'flagged') {
     query = query.eq('status', 'flagged')
   }
+
+  // Cancelled lessons sort by most recently cancelled first; legacy rows with null cancelled_at fall back to scheduled_at
+  if (status === 'cancelled') {
+    query = query
+      .order('cancelled_at', { ascending: false, nullsFirst: false })
+      .order('scheduled_at', { ascending: false })
+  } else {
+    query = query.order('scheduled_at', { ascending: false })
+  }
+  query = query.range((page - 1) * pageSize, page * pageSize - 1)
 
   const { data: lessons, error, count } = await query
 
