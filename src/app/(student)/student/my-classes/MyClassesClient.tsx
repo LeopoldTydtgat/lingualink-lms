@@ -160,7 +160,13 @@ export default function MyClassesClient({
   })
 
   // Cancelled lessons for the separate collapsed section
-  const cancelledLessons = lessons.filter((l) => isCancelledStatus(l.status))
+  const cancelledLessons = lessons
+    .filter((l) => isCancelledStatus(l.status))
+    .sort((a, b) => {
+      const ta = a.cancelled_at ?? a.scheduled_at
+      const tb = b.cancelled_at ?? b.scheduled_at
+      return new Date(tb).getTime() - new Date(ta).getTime()
+    })
 
   // Group upcoming lessons by local date
   const groupedByDate: Record<string, Lesson[]> = {}
@@ -944,7 +950,7 @@ export default function MyClassesClient({
                             )}
                           </div>
                           <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                            {mounted ? formatTime(lesson.scheduled_at, studentTimezone) : ''} · {lesson.duration_minutes} min
+                            {mounted ? `${formatDate(lesson.scheduled_at, studentTimezone)} · ${formatTime(lesson.scheduled_at, studentTimezone)}` : ''} · {lesson.duration_minutes} min
                           </span>
                         </div>
 
