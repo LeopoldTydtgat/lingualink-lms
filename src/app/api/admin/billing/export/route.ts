@@ -3,6 +3,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { getBillability } from '@/lib/billing/billability'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import {
+  recomputeInvoiceAmountsForTeacher,
+  recomputeInvoiceAmountsForAllTeachers,
+} from '@/lib/billing/recomputeAmounts'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
@@ -72,6 +76,14 @@ export async function GET(req: NextRequest) {
 
   // ── 1. Teacher Invoice Summary ────────────────────────────────────────────────────────
   if (type === 'teacher_invoices') {
+    // Refresh amount_eur before export so the CSV matches the admin Billing
+    // page header. Scope to one teacher when filtered, else recompute everyone.
+    if (teacherId) {
+      await recomputeInvoiceAmountsForTeacher(teacherId)
+    } else {
+      await recomputeInvoiceAmountsForAllTeachers()
+    }
+
     let query = supabase
       .from('invoices')
       .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency)')

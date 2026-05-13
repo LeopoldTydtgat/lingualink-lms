@@ -257,9 +257,12 @@ export async function GET(
         }
 
         // Fetch invoice upload status per teacher/month
-        const invoiceRes = await supabase.from('invoices').select('teacher_id, month, status')
+        const invoiceRes = await supabase.from('invoices').select('teacher_id, billing_month, status')
         const invoiceMap: Record<string, string> = {}
-        invoiceRes.data?.forEach((inv: any) => { invoiceMap[`${inv.teacher_id}__${inv.month}`] = inv.status })
+        invoiceRes.data?.forEach((inv: any) => {
+          const ym = (inv.billing_month as string).slice(0, 7)
+          invoiceMap[`${inv.teacher_id}__${ym}`] = inv.status
+        })
 
         const rows = Object.entries(summary).map(([key, s]) => ({
           'Teacher': s.teacher,

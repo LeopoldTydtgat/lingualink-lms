@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import TeacherDetailClient from './TeacherDetailClient'
 import type { AdminConversation } from './TeacherDetailClient'
+import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 
 export default async function TeacherDetailPage({
   params,
@@ -36,10 +37,14 @@ export default async function TeacherDetailPage({
     .order('scheduled_at', { ascending: false })
     .limit(50)
 
+  // Sync amount_eur for this teacher so the Invoices tab matches the latest
+  // billable-lesson total.
+  await recomputeInvoiceAmountsForTeacher(id)
+
   // Fetch teacher's invoices
   const { data: invoices } = await supabase
     .from('invoices')
-    .select('id, month, total_amount, status, created_at')
+    .select('id, billing_month, amount_eur, status, created_at')
     .eq('teacher_id', id)
     .order('created_at', { ascending: false })
 
