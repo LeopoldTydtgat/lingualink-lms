@@ -1,3 +1,52 @@
+## Session 104 - 13 May 2026 - H2 student cancel, NEW64 chronological cancelled sections, NEW65 invoice header recompute, schema legacy column cleanup
+
+### What was built
+
+- Student cancel action now writes `cancelled_by_student` and uses the `refund_hours_atomic` RPC instead of a non-atomic read-then-write. Mirrors the teacher cancel pattern from commit 666293a. Single file change to src/app/(student)/student/my-classes/actions.ts. Commit 9ab2515.
+- Cancelled sections across teacher Upcoming Classes, student My Classes, and admin Classes list now show date headers and sort by `cancelled_at` DESC (most recently cancelled first), with `scheduled_at` fallback for legacy rows. UX gap surfaced when the cancelled section became unreadable after stacking four cancellations with no dates. Commit dbeb16c.
+- Replaced four legacy column references (`invoices.month`, `total_amount`, `amount`) with the modern columns (`billing_month`, `amount_eur`) across admin teacher detail page, TeacherDetailClient, mark-paid email route, and exports route. The mark-paid email had been sending "Your invoice for undefined has been processed and payment of undefined" to teachers. Schema audit via information_schema.columns confirmed only modern columns exist. Commit 3825fde.
+- NEW65 fixed across three commits. New server-side helper at src/lib/billing/recomputeAmounts.ts (commit 01885d1) is the single source of truth for invoice amount recomputation, reusing `getBillability` and `getMonthKeyInTz`. Wired into four admin read paths: admin Billing page, admin teacher detail page, billing export route (scoped to teacher when filtered), mark-paid route (called BEFORE the status flip to lock in the historical figure). Commit a5c1fb5. Teacher /billing converted to server-fetched amounts via the same helper, deleting 103 lines of client-side recompute logic and the duplicate `ensureCurrentInvoice` block. Commit 8cd6c25.
+- Added a Supabase DDL workflow section to CLAUDE.md documenting the GRANT requirement for every new table created after Oct 30, 2026 (when Supabase enforces the Data API GRANT change on existing projects).
+- BUG_LOG.md fully reconciled. NEW21 through NEW57 from S101+S102 backlogs written for the first time (43 OPEN entries restored). NEW58 through NEW65 from S103 added. NEW66 (BillingClient.handleMarkPaid bypasses API route), NEW67 (currency symbol fallback on collapsed admin Billing rows), NEW68 (Supabase Data API GRANT deadline), and NEW69 (CLAUDE.md GRANT rule, since closed) added. Five entries marked CLOSED with commit hashes: H2-admin-cancel (a61bfe8 S101), H2-teacher-cancel (666293a S102), NEW56 (666293a S102), filter-contraction (37aa070 S103), H2-student-cancel (9ab2515 S104), NEW64 (dbeb16c S104), Schema-legacy-columns (3825fde S104), NEW65 (01885d1+a5c1fb5+8cd6c25 S104), and NEW36 (resolved as audit confirmed no duplicate exists).
+
+### Break/Fix Log
+
+Issue 1: Student cancel wrote legacy `cancelled` status and used non-atomic refund (H2 third)
+- Symptom: student cancellations did not distinguish actor in status filters or downstream billability, and the refund used a read-then-write on `trainings.hours_consumed` that races with concurrent operations.
+- Cause: pre-dated the introduction of `refund_hours_atomic` and the `cancelled_by_*` status split. Last untouched cancel path after S101 fixed admin and S102 fixed teacher.
+- Fix: status flipped to `cancelled_by_student`, refund now goes through the atomic RPC via the admin client. Console.error before the error return to surface RPC failures.
+- Lesson: same shape resolved in three places now (admin, teacher, student). Admin reschedule is the only remaining non-atomic hours write site.
+
+Issue 2: Cancelled sections unreadable after multiple cancellations (NEW64)
+- Symptom: four cancelled lessons stacked under "Cancelled (4)" with times only and no date, in unpredictable order. Useless for accounting and record keeping.
+- Cause: the cancelled group rendered the same template as the upcoming group (which had its own date headers via day grouping) but skipped the date because cancellations were rendered as a flat list rather than grouped. Sort was on `scheduled_at` ASC.
+- Fix: sorted by `cancelled_at` DESC with `scheduled_at` fallback for legacy rows, added inline date prefix to the time line on cancelled cards across all three portals. Admin classes route added a conditional .order() chain that only applies the cancelled sort when the status filter is active.
+- Lesson: every new lesson status that changes how a row is grouped is a UX trap waiting to surface. Date headers should be the default on any list that can contain multi-day rows, not the exception.
+
+Issue 3: Legacy invoice column references silently broken (Schema audit follow-up)
+- Symptom: four code paths referenced `invoices.month`, `total_amount`, and `amount` columns that do not exist in the DB. Most visibly, the mark-paid email sent "Your invoice for undefined has been processed and payment of undefined".
+- Cause: schema migrated to `billing_month` and `amount_eur` at some point but four call sites were never updated. The admin teacher detail invoices tab returned blank, the CSV export joined invoices to teacher monthly billing on a non-existent column key, and the mark-paid email body interpolated undefined into the customer-facing copy.
+- Fix: select lists updated, email body now uses a local `formatMonthName` helper (matching the `T12:00:00Z + toLocaleDateString('en-GB', ...)` convention used elsewhere), currency display in TeacherDetail uses the page's already-computed `currencySymbol`, exports route slices `billing_month` to YYYY-MM to match the existing dict key shape.
+- Lesson: the schema check via `information_schema.columns` should run before any audit involving a table with multiple historical names. Five minutes of SQL saves a multi-file repair.
+
+Issue 4: NEW65 admin Billing header shows zero while detail sums correctly
+- Symptom: admin Billing, Teacher Invoices header showed £0.00 for a teacher whose detail page correctly summed £220.00 of billable lessons.
+- Cause: `invoices.amount_eur` was only written by a client-side recompute inside the teacher /billing page, triggered when the teacher loaded that page with `hourlyRate > 0`. Every lesson status change (cancel, report submission, auto-complete cron) left `amount_eur` untouched. The admin Billing page read the stale column directly. A second issue compounded it: a separate billability function in the exports route was suspected of drifting from `billability.ts` (NEW36) but the audit confirmed the export route actually calls `getBillability` directly, so the drift bug was stale.
+- Fix: three-phase server-side recompute pattern. Phase A introduces a single helper `recomputeInvoiceAmountsForTeacher(teacherId)` that reuses `getBillability` and `getMonthKeyInTz`, skips paid invoices, skips no-op writes, and no-ops when `hourly_rate` is zero. Phase B wires it into every admin read path (Billing page calls the all-teachers variant batched at 5 concurrent, teacher detail page calls the per-teacher variant, exports route calls per-teacher when filtered else all, mark-paid route calls per-teacher BEFORE flipping status to paid since the helper skips paid rows by design). Phase C converts the teacher /billing route to a server component that calls the helper and passes invoices and lessons as props, deleting 103 lines of duplicate client-side recompute logic.
+- Lesson: denormalised cache columns need a clear owner. The cache stays correct only if every read path refreshes it or every write path updates it, and mixing the two strategies guarantees drift. Picking read-path refresh kept billability logic in one file at the cost of a small per-page query overhead, which is the right trade-off at this scale. Also: lint actually improved from 215 to 211 after Phase C because the removed code carried unused warnings.
+
+Issue 5: BUG_LOG had two sessions of bugs (NEW21 through NEW57) that were never written down
+- Symptom: the BUG_LOG jumped from NEW20 to NEW55. Thirty-four IDs missing. S101 and S102 brought up over twenty bugs each during atomic-refund work but the writes were deferred and then forgotten across session boundaries.
+- Cause: BUG_LOG updates kept getting pushed to "next session" while the next session always had something more urgent.
+- Fix: recovered the full lists from S101 and S102 handover briefs via conversation search, drafted a single Claude Code prompt that appended 43 OPEN entries and 4 CLOSED entries with the existing format preserved, then patched two format inconsistencies (em-dash on "Leopold-flagged" anonymised to "client-flagged", blank lines added between newly-appended CLOSED entries).
+- Lesson: defer BUG_LOG once and the loss compounds. Append-on-discovery is the only workable policy.
+
+### Session result
+
+Six commits shipped on dev (9ab2515 student cancel atomic refund, dbeb16c cancelled section dates and sort, 3825fde legacy invoice column references, 01885d1 server-side recompute helper, a5c1fb5 admin read path wiring, 8cd6c25 teacher /billing server-fetched conversion) plus a CLAUDE.md documentation commit for the Supabase Oct 2026 GRANT change. All three portals' cancelled sections now group by date in correct chronological order. The £0.00 vs £220.00 admin Billing header bug is closed. The mark-paid email no longer interpolates the word "undefined" into the customer-facing copy. BUG_LOG is fully reconciled with three sessions of previously unwritten backlog plus the new entries from this session. Trust-the-lint shipped this session since the test browser was not available, and live verification of the NEW65 fix across all four scenarios is deferred to S105.
+
+---
+
 ## Session 100 - 10 May 2026 - 23P01 slot conflicts surfaced as 409 SLOT_NOT_AVAILABLE
 
 ### What was built
