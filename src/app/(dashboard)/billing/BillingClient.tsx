@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
-import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 
 interface Profile {
   id: string
@@ -112,21 +112,35 @@ function getStudentName(lesson: Lesson): string {
 export default function BillingClient({
   profile,
   billingInfo: initialBillingInfo,
+  initialInvoices,
+  initialLessonsByMonth,
+  initialTemplateUrl,
+  currentMonthDate,
 }: {
   profile: Profile
   billingInfo: BillingInfoDisplay | null
+  initialInvoices: Invoice[]
+  initialLessonsByMonth: Record<string, Lesson[]>
+  initialTemplateUrl: string | null
+  currentMonthDate: string
 }) {
   const supabase = createClient()
+  const router = useRouter()
   const isAdmin = profile.role === 'admin'
 
   const now = new Date()
-  const currentMonthDate = getMonthKeyInTz(now, initialBillingInfo?.timezone || 'UTC')
   const isUploadWindow = now.getDate() >= 1 && now.getDate() <= 10
 
   const [activeView, setActiveView] = useState<'billing' | 'billingInfo' | 'admin'>('billing')
-  const [allInvoices, setAllInvoices] = useState<Invoice[]>([])
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null)
-  const [lessonsByMonth, setLessonsByMonth] = useState<Record<string, Lesson[]>>({})
+
+  // Server-fetched on every load. page.tsx ensures the current invoice row,
+  // recomputes amount_eur, then fetches invoices + lessons + templateUrl.
+  // Mutations (upload, mark-paid) call router.refresh() to rerun the server
+  // component and get fresh props.
+  const allInvoices = initialInvoices
+  const lessonsByMonth = initialLessonsByMonth
+  const templateUrl = initialTemplateUrl
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [targetInvoice, setTargetInvoice] = useState<{ id: string; billing_month: string } | null>(null)
@@ -137,116 +151,12 @@ export default function BillingClient({
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
   const sym = currencySymbol(billingInfo?.currency)
-  const [templateUrl, setTemplateUrl] = useState<string | null>(null)
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
     { teacher: { id: string; full_name: string; email: string }; invoices: Invoice[] }[]
   >([])
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
-
-  const ensureCurrentInvoice = useCallback(async () => {
-    const { data: existing } = await supabase
-      .from('invoices')
-      .select('id')
-      .eq('teacher_id', profile.id)
-      .eq('billing_month', currentMonthDate)
-      .maybeSingle()
-
-    if (!existing) {
-      const refNumber = `INV-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
-      await supabase.from('invoices').insert({
-        teacher_id: profile.id,
-        billing_month: currentMonthDate,
-        status: 'pending',
-        reference_number: refNumber,
-      })
-    }
-  }, [profile.id, currentMonthDate])
-
-  const loadData = useCallback(async () => {
-    await ensureCurrentInvoice()
-
-    // FIX: removed profiles fetch from here — billingInfo now comes from server as prop
-    const { data: invoicesData } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('teacher_id', profile.id)
-      .order('billing_month', { ascending: false })
-
-    const hourlyRate = billingInfo?.hourly_rate ?? 0
-    const tz = billingInfo?.timezone || 'UTC'
-
-    const { data: allLessons } = await supabase
-      .from('lessons')
-      .select('id, scheduled_at, duration_minutes, status, cancelled_at, students(full_name)')
-      .eq('teacher_id', profile.id)
-      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
-      .order('scheduled_at', { ascending: true })
-
-    const grouped: Record<string, Lesson[]> = {}
-    for (const lesson of (allLessons as Lesson[]) || []) {
-      const key = getMonthKeyInTz(new Date(lesson.scheduled_at), tz)
-      if (!grouped[key]) grouped[key] = []
-      grouped[key].push(lesson)
-    }
-    setLessonsByMonth(grouped)
-
-    if (hourlyRate > 0 && invoicesData) {
-      const updates = invoicesData
-        .map(invoice => {
-          // Never rewrite the amount on a paid invoice
-          if (invoice.status === 'paid') return null
-          const lessons = grouped[invoice.billing_month] || []
-          const sumRaw = lessons.reduce((sum, lesson) => {
-            const bill = getBillability({
-              status: lesson.status,
-              scheduledAt: lesson.scheduled_at,
-              cancelledAt: lesson.cancelled_at,
-              // cancellation_policy has a column-level REVOKE and cannot be read
-              // by the browser client. Teachers are never paid under the 48hr branch
-              // (billableToTeacher is false there), so null gives correct amounts.
-              cancellationPolicy: null,
-              hourlyRate,
-              durationMinutes: lesson.duration_minutes,
-            })
-            return bill.billableToTeacher ? sum + bill.amount : sum
-          }, 0)
-          const calculated = Math.round(sumRaw * 100) / 100
-          if (invoice.amount_eur === calculated) return null
-          return supabase
-            .from('invoices')
-            .update({ amount_eur: calculated })
-            .eq('id', invoice.id)
-        })
-        .filter(Boolean)
-
-      if (updates.length > 0) {
-        await Promise.all(updates)
-        const { data: refreshed } = await supabase
-          .from('invoices')
-          .select('*')
-          .eq('teacher_id', profile.id)
-          .order('billing_month', { ascending: false })
-        setAllInvoices(refreshed || [])
-      } else {
-        setAllInvoices(invoicesData || [])
-      }
-    } else {
-      setAllInvoices(invoicesData || [])
-    }
-
-    const { data: settingsData } = await supabase
-      .from('settings')
-      .select('value')
-      .eq('key', 'invoice_template_path')
-      .maybeSingle()
-
-    if (settingsData?.value) {
-      const { data: urlData } = supabase.storage.from('templates').getPublicUrl(settingsData.value)
-      setTemplateUrl(urlData.publicUrl)
-    }
-  }, [profile.id, currentMonthDate, billingInfo])
 
   const loadAdminData = useCallback(async () => {
     if (!isAdmin) return
@@ -273,7 +183,6 @@ export default function BillingClient({
     )
   }, [isAdmin])
 
-  useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (activeView === 'admin') loadAdminData() }, [activeView, loadAdminData])
 
   const triggerUpload = (invoiceId: string, billingMonth: string) => {
@@ -311,7 +220,7 @@ export default function BillingClient({
     setTimeout(() => setUploadSuccessId(null), 4000)
 
     setUploading(false)
-    await loadData()
+    router.refresh()
   }
 
   const handleViewInvoice = async (invoiceId: string) => {
