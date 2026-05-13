@@ -56,6 +56,18 @@ Zod 4 schemas live in `src/lib/validation/schemas.ts`. All API routes that mutat
 - In-memory rate limiter at `src/lib/rate-limit.ts` — 5 failed attempts per IP within 15 minutes triggers a 15-minute lockout
 - CSP headers configured in `next.config.ts`; Supabase hostname is derived dynamically from `NEXT_PUBLIC_SUPABASE_URL`
 
+### Supabase DDL workflow
+
+Every `CREATE TABLE` in the Supabase SQL editor **must** be followed by explicit GRANT statements:
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.<table> TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.<table> TO service_role;
+-- anon only if public read is intended
+```
+
+Without explicit GRANTs, PostgREST returns `42501` permission-denied errors. Existing tables keep their current grants; this applies to every new table created after Oct 30, 2026 on existing projects.
+
 ### Cron jobs
 
 Two Vercel cron jobs run daily at 08:00 UTC (configured in `vercel.json`):
