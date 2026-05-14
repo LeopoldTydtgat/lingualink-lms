@@ -7,6 +7,7 @@ import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentResc
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
+import { localToUtc } from '@/lib/utils/timezone'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -260,6 +261,27 @@ export async function PATCH(
   const durationChanged = typeof fields.duration_minutes === 'number' && fields.duration_minutes !== existing.duration_minutes
   const teacherChanged = typeof fields.teacher_id === 'string' && fields.teacher_id !== existing.teacher_id
 
+  // Convert naive local scheduled_at to canonical UTC using the target teacher's
+  // timezone. The "target" is the new teacher if reassigned, else the current.
+  let scheduledAtUtc: string | undefined
+  if (fields.scheduled_at !== undefined) {
+    const targetTeacherId = fields.teacher_id ?? existing.teacher_id
+    const { data: targetTeacherProfile } = await adminClient
+      .from('profiles')
+      .select('timezone')
+      .eq('id', targetTeacherId)
+      .single()
+    const targetTimezone = targetTeacherProfile?.timezone || 'UTC'
+    scheduledAtUtc = localToUtc(fields.scheduled_at, targetTimezone)
+
+    if (new Date(scheduledAtUtc).getTime() < Date.now()) {
+      return NextResponse.json(
+        { error: 'Cannot schedule a lesson in the past', code: 'LESSON_IN_PAST' },
+        { status: 400 }
+      )
+    }
+  }
+
   // Duration change is owned by the change_duration_atomic RPC — it locks the
   // training row, re-checks balance, writes hours_consumed and lessons.duration_minutes
   // in a single transaction.
@@ -308,9 +330,17 @@ export async function PATCH(
 
   // Apply remaining lesson changes (scheduled_at, teacher_id) via adminClient.
   // duration_minutes is owned by the RPC above.
+  const timeChanged =
+    scheduledAtUtc !== undefined &&
+    new Date(scheduledAtUtc).getTime() !== new Date(existing.scheduled_at).getTime()
+
   const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (fields.scheduled_at) updatePayload.scheduled_at = fields.scheduled_at
+  if (scheduledAtUtc !== undefined) updatePayload.scheduled_at = scheduledAtUtc
   if (fields.teacher_id) updatePayload.teacher_id = fields.teacher_id
+  if (timeChanged) {
+    updatePayload.reminder_24_sent = false
+    updatePayload.reminder_1h_sent = false
+  }
 
   if (Object.keys(updatePayload).length > 1) {
     const { data: updatedRows, error: updateError } = await adminClient
@@ -384,9 +414,9 @@ export async function PATCH(
 
   // Sync the Teams meeting when time or duration changes.
   // updateTeamsMeeting preserves the join URL; teacher-only swaps skip Graph entirely.
-  const newScheduledAt = (fields.scheduled_at as string | undefined) ?? existing.scheduled_at
+  // Graph + email templates require canonical UTC; existing.scheduled_at already is.
+  const newScheduledAt = scheduledAtUtc ?? existing.scheduled_at
   const newDuration = (fields.duration_minutes as number | undefined) ?? existing.duration_minutes
-  const timeChanged = fields.scheduled_at && fields.scheduled_at !== existing.scheduled_at
   const needsGraphUpdate = timeChanged || durationChanged || teacherChanged
 
   if (needsGraphUpdate) {
