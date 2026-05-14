@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
+import { adminClassesPatchSchema } from '@/lib/validation/schemas'
+import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -121,7 +123,11 @@ export async function PATCH(
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
-  const { action, ...fields } = body
+  const parsed = adminClassesPatchSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request body', details: parsed.error.flatten() }, { status: 400 })
+  }
+  const fields = parsed.data
 
   // Fetch the current lesson so we can handle hours adjustments correctly
   const { data: existing, error: fetchError } = await supabase
@@ -135,9 +141,9 @@ export async function PATCH(
   }
 
   // --- CANCEL action ---
-  if (action === 'cancel') {
-    const { cancellation_reason, refund_hours = true } = fields
-    const shouldRefund = refund_hours !== false
+  if (fields.action === 'cancel') {
+    const { cancellation_reason, refund_hours } = fields
+    const shouldRefund = refund_hours
     const hoursToRefund = existing.duration_minutes / 60
     const adminClient = createAdminClient()
 
@@ -246,40 +252,72 @@ export async function PATCH(
   }
 
   // --- RESCHEDULE / EDIT action ---
-  // Build update payload from whichever fields were sent
-  const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (existing.status !== 'scheduled') {
+    return NextResponse.json({ error: 'LESSON_NOT_EDITABLE' }, { status: 400 })
+  }
+
+  const adminClient = createAdminClient()
   const durationChanged = typeof fields.duration_minutes === 'number' && fields.duration_minutes !== existing.duration_minutes
+  const teacherChanged = typeof fields.teacher_id === 'string' && fields.teacher_id !== existing.teacher_id
 
-  if (fields.scheduled_at) updatePayload.scheduled_at = fields.scheduled_at
-  if (fields.teacher_id) updatePayload.teacher_id = fields.teacher_id
-  if (fields.cancellation_reason !== undefined) updatePayload.cancellation_reason = fields.cancellation_reason
-
-  // If duration changed, adjust hours on the training
+  // Duration change is owned by the change_duration_atomic RPC — it locks the
+  // training row, re-checks balance, writes hours_consumed and lessons.duration_minutes
+  // in a single transaction.
   if (durationChanged) {
-    updatePayload.duration_minutes = fields.duration_minutes
+    const newDurationMinutes = fields.duration_minutes as number
+    const { error: rpcError } = await adminClient.rpc('change_duration_atomic', {
+      p_lesson_id: id,
+      p_old_duration_minutes: existing.duration_minutes,
+      p_new_duration_minutes: newDurationMinutes,
+    })
 
-    const { data: training } = await supabase
-      .from('trainings')
-      .select('hours_consumed')
-      .eq('id', existing.training_id)
-      .single()
-
-    if (training) {
-      const oldHours = existing.duration_minutes / 60
-      const newHours = fields.duration_minutes / 60
-      const adjusted = training.hours_consumed - oldHours + newHours
-      await supabase
-        .from('trainings')
-        .update({ hours_consumed: Math.max(0, adjusted) })
-        .eq('id', existing.training_id)
+    if (rpcError) {
+      const msg = (rpcError.message || '').toLowerCase()
+      if (msg.includes('insufficient_hours')) {
+        const { data: trainingData } = await adminClient
+          .from('trainings')
+          .select('total_hours, hours_consumed')
+          .eq('id', existing.training_id)
+          .single()
+        const remaining = trainingData
+          ? Number(trainingData.total_hours) - Number(trainingData.hours_consumed)
+          : 0
+        const required = (newDurationMinutes - existing.duration_minutes) / 60
+        const deficit = required - remaining
+        return NextResponse.json({ error: 'Insufficient hours', deficit_hours: deficit }, { status: 400 })
+      }
+      if (msg.includes('lesson_not_editable')) {
+        return NextResponse.json({ error: 'Lesson can no longer be edited' }, { status: 400 })
+      }
+      if (msg.includes('lesson_already_modified')) {
+        return NextResponse.json({ error: 'Lesson was modified by another action. Refresh and try again.' }, { status: 409 })
+      }
+      if (msg.includes('invalid_duration')) {
+        return NextResponse.json({ error: 'Invalid duration' }, { status: 400 })
+      }
+      if (msg.includes('lesson_not_found')) {
+        return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
+      }
+      if (rpcError.code === '23P01') {
+        return NextResponse.json({ error: 'SLOT_NOT_AVAILABLE' }, { status: 409 })
+      }
+      console.error('change_duration_atomic failed:', rpcError)
+      return NextResponse.json({ error: 'Failed to change duration' }, { status: 500 })
     }
   }
 
-  try {
-    const { error: updateError } = await supabase
+  // Apply remaining lesson changes (scheduled_at, teacher_id) via adminClient.
+  // duration_minutes is owned by the RPC above.
+  const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (fields.scheduled_at) updatePayload.scheduled_at = fields.scheduled_at
+  if (fields.teacher_id) updatePayload.teacher_id = fields.teacher_id
+
+  if (Object.keys(updatePayload).length > 1) {
+    const { data: updatedRows, error: updateError } = await adminClient
       .from('lessons')
       .update(updatePayload)
       .eq('id', id)
+      .select('id')
 
     if (updateError) {
       if (updateError.code === '23P01') {
@@ -290,22 +328,24 @@ export async function PATCH(
       }
       return NextResponse.json({ error: updateError.message }, { status: 500 })
     }
-  } catch (err) {
-    console.error('Lesson reschedule UPDATE threw unexpectedly:', { lesson_id: id, error: err })
-    return NextResponse.json({ error: 'Failed to update lesson.' }, { status: 500 })
+    if (!updatedRows || updatedRows.length === 0) {
+      console.error('CRITICAL: lesson UPDATE affected 0 rows:', { lesson_id: id })
+      return NextResponse.json({ error: 'Lesson update failed' }, { status: 500 })
+    }
   }
 
   // Fetch student/teacher names once for both the Graph subject and the email body.
   // A failure here only degrades labels; reschedule remains durable.
-  const adminClient = createAdminClient()
   let studentName = 'Student'
   let teacherName = 'Teacher'
   let studentEmail: string | null = null
   let studentTimezone = 'UTC'
+  let teacherEmail: string | null = null
+  let teacherTimezone = 'UTC'
   try {
     const [studentRes, teacherRes] = await Promise.all([
       adminClient.from('students').select('full_name, email, timezone').eq('id', existing.student_id).maybeSingle(),
-      adminClient.from('profiles').select('full_name').eq('id', existing.teacher_id).maybeSingle(),
+      adminClient.from('profiles').select('full_name, email, timezone').eq('id', existing.teacher_id).maybeSingle(),
     ])
     if (studentRes.data) {
       studentName = studentRes.data.full_name ?? 'Student'
@@ -314,9 +354,32 @@ export async function PATCH(
     }
     if (teacherRes.data) {
       teacherName = teacherRes.data.full_name ?? 'Teacher'
+      teacherEmail = teacherRes.data.email ?? null
+      teacherTimezone = teacherRes.data.timezone ?? 'UTC'
     }
   } catch (nameFetchError) {
     console.warn('Reschedule name fetch failed, using fallbacks', { lesson_id: id, error: nameFetchError })
+  }
+
+  // If the teacher was reassigned, swap the teacher-side context to the NEW
+  // teacher so the Graph subject, student email teacherName, and teacher
+  // email recipient all reference the new teacher. The old teacher is no
+  // longer involved with this lesson and receives no notification.
+  if (teacherChanged && fields.teacher_id) {
+    try {
+      const { data: newTeacherRes } = await adminClient
+        .from('profiles')
+        .select('full_name, email, timezone')
+        .eq('id', fields.teacher_id)
+        .maybeSingle()
+      if (newTeacherRes) {
+        teacherName = newTeacherRes.full_name ?? 'Teacher'
+        teacherEmail = newTeacherRes.email ?? null
+        teacherTimezone = newTeacherRes.timezone ?? 'UTC'
+      }
+    } catch (newTeacherFetchError) {
+      console.warn('New teacher fetch failed after reassign, using fallbacks', { lesson_id: id, new_teacher_id: fields.teacher_id, error: newTeacherFetchError })
+    }
   }
 
   // Sync the Teams meeting when time or duration changes.
@@ -324,7 +387,7 @@ export async function PATCH(
   const newScheduledAt = (fields.scheduled_at as string | undefined) ?? existing.scheduled_at
   const newDuration = (fields.duration_minutes as number | undefined) ?? existing.duration_minutes
   const timeChanged = fields.scheduled_at && fields.scheduled_at !== existing.scheduled_at
-  const needsGraphUpdate = timeChanged || durationChanged
+  const needsGraphUpdate = timeChanged || durationChanged || teacherChanged
 
   if (needsGraphUpdate) {
     if (existing.teams_meeting_id) {
@@ -344,7 +407,7 @@ export async function PATCH(
           startTime: newScheduledAt,
           durationMinutes: newDuration,
         })
-        const { error: graphUpdateError } = await supabase
+        const { error: graphUpdateError } = await adminClient
           .from('lessons')
           .update({ teams_meeting_id: meeting.meetingId, teams_join_url: meeting.joinUrl })
           .eq('id', id)
@@ -385,6 +448,51 @@ export async function PATCH(
         console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
       }
     }
+  }
+
+  if (needsGraphUpdate) {
+    if (!teacherEmail) {
+      console.warn('Reschedule email skipped: teacher has no email', { lesson_id: id })
+    } else {
+      try {
+        const emailBody = studentRescheduledEmailContent(
+          studentName,
+          timeChanged ? existing.scheduled_at : null,
+          newScheduledAt,
+          newDuration,
+          teacherTimezone
+        )
+        await resend.emails.send({
+          from: 'no-reply@lingualinkonline.com',
+          to: teacherEmail,
+          subject: 'Lingualink Online — Your class has been rescheduled',
+          html: buildEmailTemplate({
+            recipientName: teacherName,
+            recipientFallback: 'Teacher',
+            subject: 'Your class has been rescheduled',
+            bodyHtml: emailBody,
+            contactEmail: 'teachers@lingualinkonline.com',
+          }),
+        })
+      } catch (emailErr) {
+        console.error('CRITICAL: [Email] Teacher reschedule email failed — lesson still updated:', emailErr)
+      }
+    }
+  }
+
+  if (durationChanged || teacherChanged) {
+    const teachersToRecompute: string[] = [existing.teacher_id]
+    if (teacherChanged && fields.teacher_id) {
+      teachersToRecompute.push(fields.teacher_id)
+    }
+    const recomputeResults = await Promise.allSettled(
+      teachersToRecompute.map(tid => recomputeInvoiceAmountsForTeacher(tid))
+    )
+    recomputeResults.forEach((r, idx) => {
+      if (r.status === 'rejected') {
+        console.error('CRITICAL: recomputeInvoiceAmountsForTeacher failed:', { lesson_id: id, teacher_id: teachersToRecompute[idx], error: r.reason })
+      }
+    })
   }
 
   revalidatePath('/upcoming-classes')
