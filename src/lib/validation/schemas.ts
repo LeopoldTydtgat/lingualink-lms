@@ -266,3 +266,23 @@ export const SubmitReportSchema = z
   })
 
 export type SubmitReportInput = z.infer<typeof SubmitReportSchema>
+
+// ─── Admin classes PATCH ──────────────────────────────────────────────────────
+
+export const adminClassesPatchEditSchema = z.object({
+  action: z.literal('edit'),
+  scheduled_at: z.string().min(1).refine(val => !isNaN(Date.parse(val)), { message: 'Invalid date string' }).optional(),
+  teacher_id: z.string().uuid().optional(),
+  duration_minutes: z.union([z.literal(30), z.literal(60), z.literal(90)]).optional(),
+});
+
+export const adminClassesPatchCancelSchema = z.object({
+  action: z.literal('cancel'),
+  cancellation_reason: z.string().min(1).max(500),
+  refund_hours: z.boolean(),
+});
+
+export const adminClassesPatchSchema = z.discriminatedUnion('action', [
+  adminClassesPatchEditSchema,
+  adminClassesPatchCancelSchema,
+]);
