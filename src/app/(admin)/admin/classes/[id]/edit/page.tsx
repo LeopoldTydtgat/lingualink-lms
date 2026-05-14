@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import EditClassClient from './EditClassClient'
 
@@ -67,10 +68,21 @@ export default async function AdminEditClassPage({
     .eq('is_active', true)
     .order('full_name')
 
+  // Fetch the parent training's hours balance so the client can disable
+  // duration upgrades that would overdraw the remaining hours.
+  const adminClient = createAdminClient()
+  const { data: training } = await adminClient
+    .from('trainings')
+    .select('total_hours, hours_consumed')
+    .eq('id', lesson.training_id)
+    .single()
+
   return (
     <EditClassClient
       lesson={lesson}
       teachers={teachers ?? []}
+      totalHours={Number(training?.total_hours ?? 0)}
+      hoursConsumed={Number(training?.hours_consumed ?? 0)}
     />
   )
 }

@@ -24,6 +24,8 @@ interface LessonDetail {
 interface Props {
   lesson: LessonDetail
   teachers: Teacher[]
+  totalHours: number
+  hoursConsumed: number
 }
 
 // Build YYYY-MM-DD and HH:MM from a scheduled_at ISO string
@@ -58,7 +60,7 @@ function generateTimeSlots(): string[] {
 
 const DURATIONS = [30, 60, 90]
 
-export default function EditClassClient({ lesson, teachers }: Props) {
+export default function EditClassClient({ lesson, teachers, totalHours, hoursConsumed }: Props) {
   const router = useRouter()
 
   const original = parseScheduledAt(lesson.scheduled_at)
@@ -142,11 +144,6 @@ export default function EditClassClient({ lesson, teachers }: Props) {
               <option key={t.id} value={t.id}>{t.full_name}</option>
             ))}
           </select>
-          {teacherId !== lesson.teacher_id && (
-            <p style={{ fontSize: '12px', color: '#92400E', marginTop: '6px' }}>
-              ⚠️ Changing the teacher will reassign the class. The Teams meeting link will need to be updated manually once MS Graph API is connected.
-            </p>
-          )}
         </div>
 
         {/* Date */}
@@ -192,25 +189,35 @@ export default function EditClassClient({ lesson, teachers }: Props) {
             Duration
           </label>
           <div style={{ display: 'flex', gap: '10px' }}>
-            {DURATIONS.map((mins) => (
-              <button
-                key={mins}
-                onClick={() => setDuration(mins)}
-                style={{
-                  flex: 1, padding: '12px', borderRadius: '8px',
-                  border: duration === mins ? '2px solid #FF8303' : '1px solid #E5E7EB',
-                  backgroundColor: duration === mins ? '#FFF7ED' : 'white',
-                  cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-                  color: duration === mins ? '#FF8303' : '#374151',
-                }}
-              >
-                {mins} min
-              </button>
-            ))}
+            {DURATIONS.map((mins) => {
+              const delta = mins - lesson.duration_minutes
+              const remainingHours = totalHours - hoursConsumed
+              const isOriginal = mins === lesson.duration_minutes
+              const insufficient = !isOriginal && delta > 0 && remainingHours < delta / 60
+              return (
+                <button
+                  key={mins}
+                  onClick={() => setDuration(mins)}
+                  disabled={insufficient}
+                  title={insufficient ? 'Insufficient hours - top up first' : undefined}
+                  style={{
+                    flex: 1, padding: '12px', borderRadius: '8px',
+                    border: duration === mins ? '2px solid #FF8303' : '1px solid #E5E7EB',
+                    backgroundColor: insufficient ? '#F3F4F6' : (duration === mins ? '#FFF7ED' : 'white'),
+                    cursor: insufficient ? 'not-allowed' : 'pointer',
+                    fontSize: '14px', fontWeight: 600,
+                    color: insufficient ? '#9CA3AF' : (duration === mins ? '#FF8303' : '#374151'),
+                    opacity: insufficient ? 0.6 : 1,
+                  }}
+                >
+                  {mins} min
+                </button>
+              )
+            })}
           </div>
           {duration !== lesson.duration_minutes && (
             <p style={{ fontSize: '12px', color: '#92400E', marginTop: '6px' }}>
-              ⚠️ Changing duration will adjust the student&apos;s hours balance accordingly.
+              ⚠️ Lengthening deducts from the student&apos;s hours balance; shortening refunds. Buttons that exceed the remaining balance are disabled.
             </p>
           )}
         </div>
