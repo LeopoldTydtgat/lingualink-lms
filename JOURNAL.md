@@ -1,3 +1,41 @@
+## Session 105 - 14 May 2026 - Atomic admin duration change
+
+### What was built
+- New Postgres RPC change_duration_atomic. Locks the training row, validates status is scheduled, validates the old duration matches via optimistic concurrency guard, validates balance against the delta, writes lessons.duration_minutes and trainings.hours_consumed in one transaction.
+- Admin PATCH /api/admin/classes/[id] refactored to call the RPC for duration changes. Five named-error branches mapped to HTTP responses: insufficient_hours (400 with deficit_hours), lesson_not_editable (400), lesson_already_modified (409), invalid_duration (400), lesson_not_found (404). 23P01 overlap maps to 409 SLOT_NOT_AVAILABLE.
+- Zod discriminated union on the PATCH body. Edit and cancel branches now strictly typed. Closes the implicit-discriminator and cancellation_reason-leak holes.
+- Status guard added on edit branch. Non-scheduled lessons cannot be edited.
+- Teacher swap ripples handled. New teacher receives the reschedule email instead of the old teacher. Student email shows the new teacher's name. Graph update fires on teacher swap. Both old and new teacher invoices recompute via Promise.allSettled.
+- recomputeInvoiceAmountsForTeacher wired into the success path. Triggered on duration change or teacher change.
+- EditClassClient pre-flight balance check. Duration buttons that would lengthen past remaining hours are disabled with a tooltip. The currently-selected duration is never disabled.
+- Stale Teams Graph warning deleted. Graph is wired now; the comment was a holdover.
+- Graph fallback DB write switched from RLS client to adminClient for consistency.
+
+### Break/Fix Log
+
+Issue 1: Admin reschedule duration change wrote lessons and trainings in two non-atomic UPDATEs.
+- Symptom: Lengthen past balance succeeded silently. Two-admin race could drift hours_consumed without bound.
+- Cause: Pre-RPC pattern. The only hours-mutating path in the codebase still doing manual two-write logic.
+- Fix: New change_duration_atomic RPC plus route refactor. RPC verified via six SQL tests in the Supabase editor: lengthen within balance, shorten, invalid duration, wrong old duration (concurrency miss), completed status, restore.
+- Lesson: Atomic RPC pattern is now universal across every hours-mutating path. The optimistic concurrency guard via WHERE clause is free and prevents the two-admin race without needing application-level locking.
+
+Issue 2: Initial implementation called change_duration_atomic with only two parameters.
+- Symptom: Would have called the wrong overload or failed at runtime. Caught in diff review before commit.
+- Cause: Spec drift between plan and execution.
+- Fix: Added p_old_duration_minutes to the call. All three parameter names verified spelled identically.
+- Lesson: Always diff against the plan spec line by line before commit. Compile passing is not contract passing.
+
+Issue 3: scheduled_at schema with strict offset rejected every payload the form sends.
+- Symptom: Would have returned 400 on every time or teacher change.
+- Cause: EditClassClient builds local ISO strings without offset. The Zod schema demanded offset.
+- Fix: Relaxed to z.string().min(1).refine(val => !isNaN(Date.parse(val))). The broader scheduled_at timezone bug is logged as NEW70 for a follow-up pass.
+- Lesson: Test the schema against real form payloads, not against the spec writer's mental model.
+
+### Session result
+T2 closes the last open H2 third. Five atomic RPCs now cover every hours mutation in the system. Eight follow-up bugs surfaced during the audit are logged in BUG_LOG.md as NEW70 through NEW77, with explicit scope justifications for why each was deferred. The build is one PR away from the next dev-to-main merge. The Holistic Audit Mandate produced more in-scope ripples than expected (teacher email, recompute on both teachers, Graph fallback client) but each was a one-line fix once seen, and each closed a latent inconsistency that would have shipped silently.
+
+---
+
 ## Session 104 - 13 May 2026 - H2 student cancel, NEW64 chronological cancelled sections, NEW65 invoice header recompute, schema legacy column cleanup
 
 ### What was built
