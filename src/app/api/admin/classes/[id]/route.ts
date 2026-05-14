@@ -143,6 +143,13 @@ export async function PATCH(
 
   // --- CANCEL action ---
   if (fields.action === 'cancel') {
+    if (existing.status !== 'scheduled') {
+      return NextResponse.json(
+        { error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' },
+        { status: 400 }
+      )
+    }
+
     const { cancellation_reason, refund_hours } = fields
     const shouldRefund = refund_hours
     const hoursToRefund = existing.duration_minutes / 60
@@ -163,14 +170,14 @@ export async function PATCH(
       }
     }
 
-    // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
+    // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed).
+    // hours_refunded is owned by the refund_hours_atomic RPC and set only on a successful refund.
     const updatePayload: Record<string, unknown> = {
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
       cancelled_by: 'admin',
       teams_join_url: null,
-      hours_refunded: shouldRefund,
       updated_at: new Date().toISOString(),
     }
     if (graphSucceeded) {
@@ -181,6 +188,7 @@ export async function PATCH(
       .from('lessons')
       .update(updatePayload)
       .eq('id', id)
+      .eq('status', 'scheduled')
       .select('id')
 
     if (cancelError) {
@@ -192,16 +200,30 @@ export async function PATCH(
     }
 
     // Refund hours to training — gated on admin's toggle choice.
-    // Atomic RPC locks the training row, clamps at zero, and writes in one txn.
+    // Atomic RPC locks the training and the lesson row, checks hours_refunded for
+    // idempotency, sets the flag on success, and clamps at zero, all in one txn.
     if (shouldRefund) {
-      const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+      const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
         p_training_id: existing.training_id,
         p_hours: hoursToRefund,
+        p_lesson_id: existing.id,
       })
       if (refundError) {
         return NextResponse.json(
           { error: 'Failed to refund hours', details: refundError.message },
           { status: 500 }
+        )
+      }
+      if (
+        refundResult &&
+        typeof refundResult === 'object' &&
+        'success' in refundResult &&
+        (refundResult as { success: boolean }).success === false
+      ) {
+        const code = (refundResult as { code?: string }).code
+        return NextResponse.json(
+          { error: 'Refund could not be processed', code },
+          { status: 400 }
         )
       }
     }
