@@ -271,10 +271,25 @@ export type SubmitReportInput = z.infer<typeof SubmitReportSchema>
 
 export const adminClassesPatchEditSchema = z.object({
   action: z.literal('edit'),
-  scheduled_at: z.string().min(1).refine(val => !isNaN(Date.parse(val)), { message: 'Invalid date string' }).optional(),
+  scheduled_at: z.string()
+    .regex(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/,
+      'scheduled_at must be naive local ISO format YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS, no timezone suffix'
+    )
+    .refine(
+      val => !isNaN(Date.parse(val + 'Z')),
+      { message: 'scheduled_at has invalid date components' }
+    )
+    .optional(),
   teacher_id: z.string().uuid().optional(),
   duration_minutes: z.union([z.literal(30), z.literal(60), z.literal(90)]).optional(),
-});
+}).refine(
+  data =>
+    data.scheduled_at !== undefined ||
+    data.teacher_id !== undefined ||
+    data.duration_minutes !== undefined,
+  { message: 'At least one of scheduled_at, teacher_id, or duration_minutes must be provided for an edit action' }
+);
 
 export const adminClassesPatchCancelSchema = z.object({
   action: z.literal('cancel'),

@@ -28,16 +28,25 @@ interface Props {
   hoursConsumed: number
 }
 
-// Build YYYY-MM-DD and HH:MM from a scheduled_at ISO string
-// without relying on toISOString() which shifts to UTC
-function parseScheduledAt(isoString: string): { date: string; time: string } {
+// Render the stored UTC instant as wall-clock parts in the teacher's timezone,
+// so the form opens showing the time the teacher sees, not the admin browser's.
+function parseScheduledAt(isoString: string, teacherTz: string): { date: string; time: string } {
   const d = new Date(isoString)
-  const year = d.getFullYear()
-  const month = (d.getMonth() + 1).toString().padStart(2, '0')
-  const day = d.getDate().toString().padStart(2, '0')
-  const hours = d.getHours().toString().padStart(2, '0')
-  const mins = d.getMinutes().toString().padStart(2, '0')
-  return { date: `${year}-${month}-${day}`, time: `${hours}:${mins}` }
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: teacherTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '00'
+  let hour = get('hour')
+  if (hour === '24') hour = '00'
+  const date = `${get('year')}-${get('month')}-${get('day')}`
+  const time = `${hour}:${get('minute')}`
+  return { date, time }
 }
 
 function buildLocalISOString(year: number, month: number, day: number, hour: number, minute: number): string {
@@ -63,7 +72,7 @@ const DURATIONS = [30, 60, 90]
 export default function EditClassClient({ lesson, teachers, totalHours, hoursConsumed }: Props) {
   const router = useRouter()
 
-  const original = parseScheduledAt(lesson.scheduled_at)
+  const original = parseScheduledAt(lesson.scheduled_at, lesson.teacher?.timezone ?? 'UTC')
 
   const [teacherId, setTeacherId] = useState(lesson.teacher_id)
   const [date, setDate] = useState(original.date)

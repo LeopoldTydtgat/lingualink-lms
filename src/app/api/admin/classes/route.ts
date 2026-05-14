@@ -9,6 +9,7 @@ import {
   teacherNewBookingEmailContent,
   studentBookingConfirmationEmailContent,
 } from '@/lib/email/templates'
+import { localToUtc } from '@/lib/utils/timezone'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -162,21 +163,6 @@ export async function POST(request: NextRequest) {
     .eq('id', teacher_id)
     .single()
   const teacherTimezone = teacherProfile?.timezone || 'UTC'
-
-  // Convert a naive local datetime string (YYYY-MM-DDTHH:MM) to a UTC ISO string
-  // using the given IANA timezone. Works correctly across DST boundaries.
-  function localToUtc(localIso: string, tz: string): string {
-    const [y, mo, d, h, min] = localIso.split(/[-T:]/).map(Number)
-    const probe = new Date(Date.UTC(y, mo - 1, d, h, min, 0))
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hour12: false,
-    }).formatToParts(probe)
-    const get = (t: string) => parseInt(parts.find(p => p.type === t)!.value)
-    const diffMs = Date.UTC(y, mo - 1, d, h, min, 0)
-                 - Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
-    return new Date(probe.getTime() + diffMs).toISOString()
-  }
 
   const scheduledAtUtc = localToUtc(scheduled_at, teacherTimezone)
 
