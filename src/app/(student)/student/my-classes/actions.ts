@@ -93,11 +93,13 @@ export async function cancelLessonAction(lessonId: string) {
     return { error: 'Failed to cancel lesson' }
   }
 
-  // Refund hours to training — atomic RPC locks the training row, clamps at zero, and writes in one txn.
+  // Refund hours to training — atomic RPC locks the training and the lesson row, checks
+  // hours_refunded for idempotency, sets the flag on success, and clamps at zero, all in one txn.
   if (isRefundable && lesson.training_id) {
-    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+    const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
       p_training_id: lesson.training_id,
       p_hours: hoursToRefund,
+      p_lesson_id: lesson.id,
     })
     if (refundError) {
       console.error('CRITICAL: refund_hours_atomic RPC failed after student cancel:', {
@@ -105,6 +107,23 @@ export async function cancelLessonAction(lessonId: string) {
         training_id: lesson.training_id,
         error: refundError,
       })
+      return { error: 'Failed to refund hours' }
+    }
+    if (
+      refundResult &&
+      typeof refundResult === 'object' &&
+      'success' in refundResult &&
+      (refundResult as { success: boolean }).success === false
+    ) {
+      const code = (refundResult as { code?: string }).code
+      console.error('refund_hours_atomic returned failure after student cancel:', {
+        lesson_id: lessonId,
+        training_id: lesson.training_id,
+        code,
+      })
+      if (code === 'ALREADY_REFUNDED') {
+        return { error: 'This lesson has already been refunded' }
+      }
       return { error: 'Failed to refund hours' }
     }
   }
