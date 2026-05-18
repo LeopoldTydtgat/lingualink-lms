@@ -6,17 +6,18 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
+import type { CancelResult } from '@/lib/types/cancel'
 
 export async function teacherCancelLesson(
   lessonId: string,
   messageToStudent: string
-): Promise<{ error?: string }> {
+): Promise<CancelResult> {
   const supabase = await createClient()
   const adminClient = createAdminClient()
 
   // Verify caller is an authenticated teacher
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
+  if (!user) return { success: false, error: 'Not authenticated' }
 
   // Fetch the lesson — verify it belongs to this teacher
   const { data: lesson, error: lessonError } = await adminClient
@@ -25,13 +26,15 @@ export async function teacherCancelLesson(
     .eq('id', lessonId)
     .single()
 
-  if (lessonError || !lesson) return { error: 'Lesson not found' }
-  if (lesson.teacher_id !== user.id) return { error: 'Not authorised' }
-  if (lesson.status !== 'scheduled') return { error: 'This class cannot be cancelled' }
+  if (lessonError || !lesson) return { success: false, error: 'Lesson not found' }
+  if (lesson.teacher_id !== user.id) return { success: false, error: 'Not authorised' }
+  if (lesson.status !== 'scheduled') {
+    return { success: false, error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' }
+  }
 
   // Enforce 24-hour rule server-side
   const hoursUntil = (new Date(lesson.scheduled_at).getTime() - Date.now()) / 1000 / 60 / 60
-  if (hoursUntil < 24) return { error: 'You cannot cancel within 24 hours of the class. Please contact admin.' }
+  if (hoursUntil < 24) return { success: false, error: 'You cannot cancel within 24 hours of the class. Please contact admin.' }
 
   // Get teacher name
   const { data: teacherProfile } = await adminClient
@@ -48,10 +51,10 @@ export async function teacherCancelLesson(
     .eq('id', lesson.student_id)
     .single()
 
-  if (!student) return { error: 'Student not found' }
+  if (!student) return { success: false, error: 'Student not found' }
   if (!student.auth_user_id) {
     console.error('Student has no auth_user_id — cannot send message:', lesson.student_id)
-    return { error: 'Student account is not linked to a login. Please contact admin.' }
+    return { success: false, error: 'Student account is not linked to a login. Please contact admin.' }
   }
 
   // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
@@ -86,16 +89,18 @@ export async function teacherCancelLesson(
     .from('lessons')
     .update(updatePayload)
     .eq('id', lessonId)
+    .eq('status', 'scheduled')
     .select('id')
 
-  if (cancelError) return { error: 'Failed to cancel lesson' }
+  if (cancelError) return { success: false, error: 'Failed to cancel lesson' }
   if (!updated || updated.length === 0) {
     console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: lessonId })
-    return { error: 'Failed to cancel lesson' }
+    return { success: false, error: 'Failed to cancel lesson' }
   }
 
   // Refund hours to training — atomic RPC locks the training and the lesson row, checks
   // hours_refunded for idempotency, sets the flag on success, and clamps at zero, all in one txn.
+  let refunded = false
   if (lesson.training_id) {
     const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
       p_training_id: lesson.training_id,
@@ -103,7 +108,7 @@ export async function teacherCancelLesson(
       p_lesson_id: lesson.id,
     })
     if (refundError) {
-      return { error: 'Failed to refund hours' }
+      return { success: false, error: 'Failed to refund hours' }
     }
     if (
       refundResult &&
@@ -113,9 +118,17 @@ export async function teacherCancelLesson(
     ) {
       const code = (refundResult as { code?: string }).code
       if (code === 'ALREADY_REFUNDED') {
-        return { error: 'This lesson has already been refunded' }
+        return { success: false, error: 'This lesson has already been refunded' }
       }
-      return { error: 'Failed to refund hours' }
+      return { success: false, error: 'Failed to refund hours' }
+    }
+    if (
+      refundResult &&
+      typeof refundResult === 'object' &&
+      'success' in refundResult &&
+      (refundResult as { success: boolean }).success === true
+    ) {
+      refunded = true
     }
   }
 
@@ -173,5 +186,5 @@ export async function teacherCancelLesson(
   revalidatePath('/upcoming-classes')
   revalidatePath('/student/my-classes')
   revalidatePath('/admin/classes')
-  return {}
+  return { success: true, refunded }
 }

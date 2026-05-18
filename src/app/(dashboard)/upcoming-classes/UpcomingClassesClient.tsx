@@ -357,7 +357,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     setRescheduleError(null)
     try {
       const result = await teacherCancelLesson(rescheduleTarget.id, rescheduleMessage.trim())
-      if (result.error) {
+      if (!result.success) {
         setRescheduleError(result.error)
       } else {
         setRescheduleSuccess(true)

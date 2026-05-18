@@ -10,14 +10,14 @@ import {
   teacherCancellationEmailContent,
 } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
-import { isCancelledStatus } from '@/lib/billing/billability'
+import type { CancelResult } from '@/lib/types/cancel'
 
-export async function cancelLessonAction(lessonId: string) {
+export async function cancelLessonAction(lessonId: string): Promise<CancelResult> {
   const supabase = await createClient()
 
   // Get the authenticated student
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
+  if (!user) return { success: false, error: 'Not authenticated' }
 
   // Get the student record
   const { data: student } = await supabase
@@ -25,7 +25,7 @@ export async function cancelLessonAction(lessonId: string) {
     .select('id, full_name, email, timezone')
     .eq('auth_user_id', user.id)
     .single()
-  if (!student) return { error: 'Student not found' }
+  if (!student) return { success: false, error: 'Student not found' }
 
   // Get the lesson — confirm it belongs to this student and is not already cancelled
   const { data: lesson } = await supabase
@@ -35,8 +35,10 @@ export async function cancelLessonAction(lessonId: string) {
     .eq('student_id', student.id)
     .single()
 
-  if (!lesson) return { error: 'Lesson not found' }
-  if (isCancelledStatus(lesson.status)) return { error: 'Lesson is already cancelled' }
+  if (!lesson) return { success: false, error: 'Lesson not found' }
+  if (lesson.status !== 'scheduled') {
+    return { success: false, error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' }
+  }
 
   // Fetch teacher profile for email
   const adminClient = createAdminClient()
@@ -85,12 +87,13 @@ export async function cancelLessonAction(lessonId: string) {
     .from('lessons')
     .update(updatePayload)
     .eq('id', lessonId)
+    .eq('status', 'scheduled')
     .select('id')
 
-  if (cancelError) return { error: 'Failed to cancel lesson' }
+  if (cancelError) return { success: false, error: 'Failed to cancel lesson' }
   if (!updated || updated.length === 0) {
     console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: lessonId })
-    return { error: 'Failed to cancel lesson' }
+    return { success: false, error: 'Failed to cancel lesson' }
   }
 
   // Refund hours to training — atomic RPC locks the training and the lesson row, checks
@@ -107,7 +110,7 @@ export async function cancelLessonAction(lessonId: string) {
         training_id: lesson.training_id,
         error: refundError,
       })
-      return { error: 'Failed to refund hours' }
+      return { success: false, error: 'Failed to refund hours' }
     }
     if (
       refundResult &&
@@ -122,9 +125,9 @@ export async function cancelLessonAction(lessonId: string) {
         code,
       })
       if (code === 'ALREADY_REFUNDED') {
-        return { error: 'This lesson has already been refunded' }
+        return { success: false, error: 'This lesson has already been refunded' }
       }
-      return { error: 'Failed to refund hours' }
+      return { success: false, error: 'Failed to refund hours' }
     }
   }
 
