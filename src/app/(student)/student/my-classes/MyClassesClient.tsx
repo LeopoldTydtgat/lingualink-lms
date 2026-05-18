@@ -117,6 +117,7 @@ export default function MyClassesClient({
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const [bookHovered, setBookHovered] = useState(false)
   const [noClassBookHovered, setNoClassBookHovered] = useState(false)
 
@@ -189,20 +190,24 @@ export default function MyClassesClient({
     // Show warning first if within 24 hours — user must confirm
     if (within24 && showCancelWarning !== lessonId) {
       setShowCancelWarning(lessonId)
+      setCancelError(null)
       return
     }
     setCancellingId(lessonId)
-    setShowCancelWarning(null)
+    setCancelError(null)
 
     // Server action handles cancellation + hours refund logic atomically.
     // If >24hrs before class: hours_consumed is decremented (refund).
     // If <24hrs before class: hours_consumed is unchanged (no refund).
     const result = await cancelLessonAction(lessonId)
 
-    setCancellingId(null)
-    if (result.error) {
-      console.error('Cancel failed:', result.error)
+    if (!result.success) {
+      setCancelError(result.error)
+      setCancellingId(null)
+      return
     }
+    setShowCancelWarning(null)
+    setCancellingId(null)
     router.refresh()
   }
 
@@ -304,6 +309,27 @@ export default function MyClassesClient({
           Book a Class
         </button>
       </div>
+
+      {/* Cancel error banner */}
+      {cancelError && (
+        <div style={{
+          marginBottom: '12px',
+          padding: '10px 14px',
+          backgroundColor: '#fef2f2',
+          border: '1px solid #fecaca',
+          borderRadius: '8px',
+          fontSize: '13px',
+          color: '#dc2626',
+        }}>
+          {cancelError}
+          <button
+            onClick={() => setCancelError(null)}
+            style={{ marginLeft: '12px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* ── Next class card ── */}
       {nextLesson ? (
