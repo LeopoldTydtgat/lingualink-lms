@@ -90,7 +90,8 @@ function getSecondsUntil(isoString: string, now: number): number {
   return Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
 }
 
-function isJoinable(isoString: string, durationMinutes: number, now: number): boolean {
+function isJoinable(isoString: string, durationMinutes: number, now: number, status: string): boolean {
+  if (BLOCKED_STATUSES.includes(status)) return false
   const endTime = new Date(isoString).getTime() + durationMinutes * 60 * 1000
   if (endTime <= now) return false
   return getSecondsUntil(isoString, now) <= 600
@@ -153,6 +154,7 @@ export default function MyClassesClient({
 
   // First scheduled lesson gets the prominent next class card
   const nextLesson = lessons.find((l) => l.status === 'scheduled') ?? null
+  const nextLessonJoinable = mounted && nextLesson != null && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now, nextLesson.status)
 
   // Upcoming list: all scheduled lessons except the next one
   const upcomingLessons = lessons.filter((l) => {
@@ -421,7 +423,7 @@ export default function MyClassesClient({
               <div style={{ marginBottom: '16px' }}>
                 {nextLesson.teams_join_url && !BLOCKED_STATUSES.includes(nextLesson.status) ? (
                   <a
-                    href={mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now) ? nextLesson.teams_join_url : undefined}
+                    href={nextLessonJoinable ? nextLesson.teams_join_url : undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
@@ -429,20 +431,18 @@ export default function MyClassesClient({
                       alignItems: 'center',
                       gap: '8px',
                       padding: '10px 20px',
-                      backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now) ? '#111827' : '#E0DFDC',
-                      color: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now) ? '#ffffff' : '#9ca3af',
+                      backgroundColor: nextLessonJoinable ? '#111827' : '#E0DFDC',
+                      color: nextLessonJoinable ? '#ffffff' : '#9ca3af',
                       borderRadius: '8px',
                       fontSize: '14px',
                       fontWeight: '600',
                       textDecoration: 'none',
-                      cursor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now) ? 'pointer' : 'default',
-                      pointerEvents: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now) ? 'auto' : 'none',
+                      cursor: nextLessonJoinable ? 'pointer' : 'default',
+                      pointerEvents: nextLessonJoinable ? 'auto' : 'none',
                     }}
                   >
                     <Video size={16} />
-                    {mounted && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now)
-                      ? 'Join Class'
-                      : 'Join Class (available 10 min before)'}
+                    {nextLessonJoinable ? 'Join Class' : 'Join Class (available 10 min before)'}
                   </a>
                 ) : (
                   <span style={{ fontSize: '13px', color: '#9ca3af' }}>

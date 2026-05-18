@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 interface LessonDetail {
   id: string
@@ -63,6 +64,16 @@ export default function ClassDetailClient({ lesson }: Props) {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+
+  const [mounted, setMounted] = useState(false)
+  const [now, setNow] = useState(0)
+
+  useEffect(() => {
+    setMounted(true)
+    setNow(Date.now())
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   const statusMeta = getStatusMeta(lesson.status)
   const isCancellable = ['scheduled'].includes(lesson.status)
@@ -179,10 +190,26 @@ export default function ClassDetailClient({ lesson }: Props) {
         <DetailRow label="Duration" value={`${lesson.duration_minutes} minutes`} />
         <DetailRow
           label="Teams Link"
-          value={lesson.teams_join_url
-            ? <a href={lesson.teams_join_url} target="_blank" rel="noreferrer" style={{ color: '#FF8303' }}>Join Meeting</a>
-            : <span style={{ color: '#9CA3AF' }}>Not yet generated</span>
-          }
+          value={(() => {
+            if (!lesson.teams_join_url) {
+              return <span style={{ color: '#9CA3AF' }}>Not yet generated</span>
+            }
+            if (!mounted) {
+              return <span style={{ color: '#9CA3AF' }}>Available 10 minutes before class</span>
+            }
+            if (BLOCKED_STATUSES.includes(lesson.status)) {
+              return <span style={{ color: '#9CA3AF' }}>Not joinable</span>
+            }
+            const classEndMs = new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
+            if (now > classEndMs) {
+              return <span style={{ color: '#9CA3AF' }}>Class ended</span>
+            }
+            const secondsUntil = Math.max(0, Math.floor((new Date(lesson.scheduled_at).getTime() - now) / 1000))
+            if (secondsUntil > 600) {
+              return <span style={{ color: '#9CA3AF' }}>Available 10 minutes before class</span>
+            }
+            return <a href={lesson.teams_join_url} target="_blank" rel="noreferrer" style={{ color: '#FF8303' }}>Join Meeting</a>
+          })()}
         />
         {lesson.cancellation_reason && (
           <DetailRow label="Cancellation Reason" value={lesson.cancellation_reason} />

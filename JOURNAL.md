@@ -1,3 +1,100 @@
+## Session 107 - 18 May 2026 - Cancel guard symmetry across all three portals
+
+### What was built
+
+Started the session expecting to finish verifying last session's NEW76 cancel idempotency fix on the admin portal, then move on to a billing consolidation task. The verification surfaced something I had not expected, which reshaped the whole session.
+
+Once admin cancel was verified end to end through the browser (cancel succeeds, hours_consumed drops by one, retry returns 400 with LESSON_NOT_CANCELLABLE), I ran a cross-portal audit on the teacher and student cancel paths to confirm NEW76's guard had been mirrored where it mattered.
+
+It had not been. The student path was using an outdated helper that only checked for three cancelled-state values. A student could open a lesson that had already been marked completed and click cancel. The status would flip to cancelled_by_student, the original completed-state would be lost, and cancellation emails would fire for a class that had actually happened. The refund would not trigger because past lessons fail the refundability check separately, but the audit trail destruction was enough on its own.
+
+The audit also found the teacher and student UPDATE statements had no optimistic concurrency lock. Both portals checked status before the mutation but did not constrain the UPDATE on status. A race between admin and teacher, or teacher and student, would let the second writer overwrite the first. And the student error path was logging to console.error then calling router.refresh() unconditionally, so the user got no feedback on failure and could not tell whether their cancel had worked.
+
+The minimum coherent fix was four parts shipped together:
+
+- Replace the student status guard with `lesson.status !== 'scheduled'` to match admin
+- Add `.eq('status', 'scheduled')` optimistic concurrency to both teacher and student UPDATE chains
+- Standardise the error return shape across all three portals with a shared `CancelResult` discriminated union and a `LESSON_NOT_CANCELLABLE` code
+- Add a top-level error banner to the student MyClassesClient, gate `router.refresh()` on success, and stop the warning block from auto-dismissing before the error arrived
+
+Five files changed. Created `src/lib/types/cancel.ts` for the shared type. Modified both portal action files and the two corresponding client components. TypeScript clean, lint matched baseline.
+
+### Break/Fix Log
+
+Issue 1: Student could cancel a completed lesson and destroy the audit trail.
+- Symptom: Hitting cancel on a completed-status lesson succeeded silently and overwrote the row to cancelled_by_student. Cancellation emails fired for a class that had already taken place.
+- Cause: The student cancel action used `isCancelledStatus()` as its precondition guard. That helper only covers three values: cancelled, cancelled_by_student, cancelled_by_teacher. It does not cover completed, student_no_show, or teacher_no_show. The correct helper sitting right next to it in billability.ts is `BLOCKED_STATUSES`, which is the full complement. The student path was checking the wrong set.
+- Fix: Replaced the guard with `lesson.status !== 'scheduled'`, which is exactly what admin has used since NEW76 shipped. Logged as NEW112, marked CLOSED in commit 08361e8.
+- Lesson: Two helpers with similar names cover different sets. Reading the constant definition matters before reusing it. The audit-first workflow caught this on the cross-portal sweep, not on a focused single-file read.
+
+Issue 2: Teacher and student cancel UPDATEs raced.
+- Symptom: Two cancels firing within milliseconds of each other could both report success. The second UPDATE would overwrite the first because neither carried an optimistic concurrency constraint.
+- Cause: Only the admin path's UPDATE had `.eq('status', 'scheduled')` as a guard. Teacher and student paths checked status before mutating but did not include the same constraint on the UPDATE itself.
+- Fix: Added the same optimistic concurrency to both UPDATE chains. The zero-row failure branch was already in place. Logged as NEW113, marked CLOSED.
+- Lesson: A status check before a mutation is not the same as a status guard on the mutation. The race window between SELECT and UPDATE is real and the right tool for it is `.eq()` on the WHERE.
+
+Issue 3: Student cancel errors never reached the user.
+- Symptom: When a cancel failed, the row stayed unchanged with no feedback. The error was in `console.error` and `router.refresh()` ran regardless.
+- Cause: `MyClassesClient` only read `result.error` to log it. There was no error state in the component, no DOM placement to render an error, and `router.refresh()` was unconditional.
+- Fix: Added a `cancelError` state, rendered a top-level banner with a Dismiss button, and gated `router.refresh()` on `result.success === true`. Reordered `handleCancel` so `setShowCancelWarning(null)` only runs after a successful result, otherwise the warning's lesson-id gate would evaluate false before the error arrived. Logged as NEW120, marked CLOSED.
+- Lesson: Silent failure plus logging is worse than no logging at all. Render the error or do not catch it.
+
+Issue 4: Error contract was inconsistent across the three portals.
+- Symptom: Admin returned `{ error, code: 'LESSON_NOT_CANCELLABLE' }`. Teacher and student returned plain prose strings. Any caller that wanted to branch on error category was stuck with string matching.
+- Cause: NEW76 last session only added the `code` field to admin. The cross-portal symmetry was not part of that scope.
+- Fix: Introduced `CancelResult` as a shared discriminated union at `src/lib/types/cancel.ts`. Both teacher and student action signatures now return the same shape. Logged as NEW114, marked CLOSED.
+- Lesson: Shipping a contract change on one portal without sweeping the others is the same incident pattern logged as NEW100 last session. The cross-portal sweep needs to be the default audit shape, not the exception.
+
+Issue 5: Browser test for the student paths was skipped this session.
+- Symptom: After commit, the four-part change was TypeScript-clean and lint-clean but had no runtime verification on the student portal.
+- Cause: The test student account had no known password and the recovery email goes to a non-existent inbox. The Supabase dashboard route to set a password directly was not accessible from where I was working at the time.
+- Fix: Documented the skip as a workflow override for this session. Admin path was verified end to end. Teacher and student paths share the same RPC and the same return shape as admin, so the risk surface is the route handler glue and the banner rendering specifically. Both will be exercised on the next session that touches cancel paths. NEW111 added to the backlog to build a proper fixture pair so this access friction does not happen again.
+- Lesson: Test data is a dependency. Skipping browser tests because of access friction is the same workflow smell I logged at the close of S106. Fix it properly next time it comes up rather than overriding the workflow.
+
+### Session result
+
+Five files changed, 75 insertions, 30 deletions. Four bugs closed (NEW112, NEW113, NEW114, NEW120). Eighteen bugs added to the backlog from the cross-portal audit. TypeScript clean, lint baseline matched, Vercel green on dev. Commit 08361e8 on dev awaiting PR to main. NEW66 BillingClient consolidation, originally planned for this session, deferred to S108.
+
+---
+
+## Session 106 - 17 May 2026 - Cancel idempotency and scheduled_at timezone
+
+### What was built
+
+Two distinct fixes shipped this session. They were unrelated in scope but the audit-first workflow connected them in priority.
+
+The first was NEW70, a timezone bug in the admin classes PATCH route. Editing a class would save a UTC timestamp that did not match the local time the user had entered, because the route was not normalising through the teacher's timezone. Extracted a `localToUtc` helper to `src/lib/utils/timezone.ts`, tightened the Zod schema to reject any inbound string carrying a Z or offset suffix, and rewrote the EditClassClient's parse function to use Intl rather than naive Date arithmetic. Five other items got bundled into the same change because they sat on the same lines: a past-time guard, a reminder flag reset on time change, a refine for at-least-one-field, and a Date-instant comparison for change detection. The time slot list is still DST-naive, logged separately as NEW91.
+
+The second was NEW76, idempotency on `refund_hours_atomic`. The RPC previously took `(training_id, hours)` and had no per-lesson state. Calling it twice for the same lesson refunded twice. Added an optional `p_lesson_id` parameter, made the RPC lock the lesson row `FOR UPDATE`, check `hours_refunded`, set the flag on success, and return a jsonb result. Updated all four call sites to pass the new parameter and parse the return shape with narrow runtime type checks. Added a route-level status guard on the admin cancel branch returning HTTP 400 with code LESSON_NOT_CANCELLABLE on a non-scheduled state, plus `.eq('status', 'scheduled')` optimistic concurrency on the UPDATE itself. Three layers of defence: route guard, UPDATE constraint, RPC idempotency.
+
+The RPC signature change hit a Postgres detail I had not run into before. `CREATE OR REPLACE FUNCTION` does not replace an overloaded signature, it adds a new one. After the migration the old `(uuid, numeric)` and new `(uuid, numeric, uuid DEFAULT NULL)` signatures both existed and Postgres could not pick. Explicit `DROP FUNCTION public.refund_hours_atomic(uuid, numeric)` resolved it. Added a working rule to check pg_proc for duplicates after any RPC signature change.
+
+### Break/Fix Log
+
+Issue 1: Admin PATCH stored UTC values that did not match the user's local intent.
+- Symptom: Editing a class to a new time saved a value that displayed back as a different time on the calendar.
+- Cause: The PATCH route accepted a local timestamp string from the form and stored it without normalising through the target teacher's timezone.
+- Fix: Fetch the target teacher's timezone first, normalise the local time through `localToUtc`, and reject any inbound string with Z or offset suffix at the Zod layer so the contract is enforced at the boundary. Logged as NEW70, shipped in commit 9869992.
+- Lesson: Timezone normalisation belongs at the API boundary, exactly once, with the correct timezone for the row being written.
+
+Issue 2: `refund_hours_atomic` was not safe under retries.
+- Symptom: A cancel that failed partway through and was retried would refund the same lesson twice.
+- Cause: The RPC had no per-lesson state. `trainings.hours_consumed` is a running total, not a deduplication key.
+- Fix: Added `p_lesson_id` as an optional argument. RPC now locks the lesson row, checks `hours_refunded`, sets the flag on success, returns jsonb. SQL editor required an explicit DROP of the old signature because `CREATE OR REPLACE` does not replace overloaded function signatures. Logged as NEW76, shipped in commit f5d693e.
+- Lesson: Atomic RPCs that mutate shared totals need a deduplication key on the operation. The running total alone is not enough state.
+
+Issue 3: Admin cancel could race with itself.
+- Symptom: Concurrent cancels on the same lesson could both succeed and both call the refund RPC.
+- Cause: Status guard at the application layer read from a SELECT that became stale before the UPDATE.
+- Fix: Layered three defences: route-level guard returns 400 with code LESSON_NOT_CANCELLABLE if status is not scheduled, UPDATE carries `.eq('status', 'scheduled')`, RPC is idempotent on the lesson key. Any race attempt that slips past the first two is caught by the third.
+- Lesson: Race conditions on state-mutating endpoints get defence in depth. One layer is not enough. Three is right for hours-affecting paths.
+
+### Session result
+
+Two commits on dev. NEW70 merged to main as 9869992. NEW76 sat on dev as f5d693e at session close, merged in S107 prep. Thirteen follow-up bugs logged from the audits (NEW86 through NEW103). Both RPC changes SQL-verified through the Supabase editor. Browser walk skipped due to test data shortage in dev DB, flagged as a workflow smell to fix in a future session. Master prompt working as designed: the audit-first workflow caught three pre-execute issues on NEW76 before code was written. No mid-execute scope creep.
+
+---
+
 ## Session 105 - 14 May 2026 - Atomic admin duration change
 
 ### What was built
