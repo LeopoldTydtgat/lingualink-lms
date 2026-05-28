@@ -113,8 +113,25 @@ SENTRY_DSN
 - **All `<Link>` components must use `prefetch={false}`.**
 - **Always use `createAdminClient()` from `src/lib/supabase/admin.ts`** in admin server components.
 - **Full file replacements only — never partial edits.**
+- **Never guess schema, columns, or existing code.** Read the actual file or query the actual Supabase schema. "Should work" is forbidden.
+- **One fix must never cause another problem.** Before editing, list downstream consumers. No ripple bugs.
+- **Audit before fix.** When fixing a bug, first grep for the same pattern elsewhere in the codebase.
+- **A clean build/diff is NOT proof of correctness.** Read changed files in full, top to bottom.
+- **DDL and RLS policies via the Supabase SQL editor only** — never executed from Claude Code. Draft SQL for Leopold to run.
+- **`select('*')` is banned on any table with column-level REVOKEs** — use explicit column lists.
+- **`students.admin_notes`, `teachers.admin_notes`, `students.cancellation_policy`, follow-up fields: NEVER returned under teacher/student roles.**
+- **All hours/billing mutations go through the atomic RPC** — never a raw UPDATE.
+- **`auth.admin.*` calls receive the `auth.users` UUID:** `students.auth_user_id` (indirection) for students, `profiles.id` for profiles. Never a table PK.
+- **Pair `auth.admin.updateUserById` with `auth.admin.signOut(id, 'global')`.** `status` ('current'/'former'/'on_hold') is the canonical active-account gate.
+- **`.single()` throws on no-row; use `.maybeSingle()`** where zero rows are possible.
+- **Fail-safe fallbacks: action-prompting UI defaults to the prompting state on null** (`?? false` to show a banner, not `?? true`).
 
 ## Known issues (as of April 2026)
 
 - Admin portal pages may timeout on Vercel Hobby plan (10 s limit) — a Pro upgrade is planned.
 - Several pages (`billing`, `messages`, `reports`, `schedule`) still have a false `if (!profile) redirect('/login')` guard that should be removed — profile null does not mean the user is unauthenticated.
+
+## Verification subagents
+
+- After schema/RLS/auth changes: invoke `supabase-rls-auditor`.
+- Before committing substantive logic: invoke `code-reviewer`.

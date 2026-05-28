@@ -1,23 +1,63 @@
 name: CI
+
+# Runs on every push to dev and every PR targeting dev or main.
+# When you re-enable main branch protection at go-live, set this workflow as a
+# required status check — that is what makes branch protection meaningful
+# rather than ceremonial. This is your regression net: it catches a change in
+# session 130 that silently breaks something that worked in session 80.
+
 on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
+
+# Cancel an in-progress run if you push again to the same branch/PR.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  quality:
+    name: Typecheck, Lint, Build, Test
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: 'npm'
-      - run: npm ci
-      - run: npm run build
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 1. Typecheck — the single highest-value gate. Catches the type-drift
+      #    class of bug at PR time instead of on Vercel days later.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # 2. Lint. Uses your existing lint script if present; no-ops cleanly if not.
+      - name: Lint (non-blocking, warnings only)
+        run: npm run lint --if-present || true
+        continue-on-error: true
+
+      # 3. Production build. Catches Next.js build-time failures (bad imports,
+      #    server/client boundary errors) before they reach deploy.
+      - name: Build
+        run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      # 4. Tests. No-ops until you add a "test" script (Vitest). Once the
+      #    money-path tests exist (booking race, hours RPC, billability,
+      #    timezone), this line is what stops a regression from merging.
+      - name: Test
+        run: npm run test --if-present
