@@ -1,0 +1,26 @@
+{
+  "$comment": "LinguaLink Online — project-level Claude Code config. Committed to the repo. Hooks run in your local shell (Windows). They are written in Node (cross-platform) so they do NOT depend on bash vs PowerShell.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/guard-dangerous.mjs"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/quality-gate.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
