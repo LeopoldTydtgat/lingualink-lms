@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   snapshot:
@@ -42,14 +43,19 @@ jobs:
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
 
-      - name: Commit if changed
+      - name: Commit and PR if changed
         run: |
           git config user.name "schema-bot"
           git config user.email "schema-bot@users.noreply.github.com"
           git add supabase/schema.sql supabase/roles.sql
           if git diff --staged --quiet; then
             echo "No schema changes."
-          else
-            git commit -m "chore: schema snapshot $(date -u +%Y-%m-%d)"
-            git push
+            exit 0
           fi
+          BRANCH="schema-snapshot-$(date -u +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH"
+          git commit -m "chore: schema snapshot $(date -u +%Y-%m-%d)"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "Schema snapshot $(date -u +%Y-%m-%d)" --body "Automated schema dump."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
