@@ -25,10 +25,11 @@
  */
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 
 function readStdin() {
   try {
-    return require("node:fs").readFileSync(0, "utf8");
+    return fs.readFileSync(0, "utf8");
   } catch {
     return "";
   }
