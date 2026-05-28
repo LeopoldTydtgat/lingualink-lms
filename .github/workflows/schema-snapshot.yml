@@ -1,0 +1,52 @@
+name: Schema Snapshot
+
+# Versions your database schema into git. Because your rule is "DDL via the
+# Supabase SQL editor only", the schema otherwise lives nowhere in the repo.
+# This dumps it so every schema change has a diff in git history — essential
+# for the AWS/RDS migration and for the portfolio story.
+#
+# Triggers:
+#   - manually (workflow_dispatch), run it after you apply DDL in the editor
+#   - weekly, as a safety net
+#
+# Requires repo secret: SUPABASE_DB_URL  (the Postgres connection string —
+# Project Settings > Database > Connection string > URI, with your password).
+# Treat it as sensitive; it is never printed.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Dump schema
+        run: |
+          mkdir -p supabase
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f supabase/schema.sql
+          # Roles/policies/grants too — this is the part your RLS rules live in:
+          supabase db dump --db-url "$SUPABASE_DB_URL" --role-only -f supabase/roles.sql || true
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+      - name: Commit if changed
+        run: |
+          git config user.name "schema-bot"
+          git config user.email "schema-bot@users.noreply.github.com"
+          git add supabase/schema.sql supabase/roles.sql
+          if git diff --staged --quiet; then
+            echo "No schema changes."
+          else
+            git commit -m "chore: schema snapshot $(date -u +%Y-%m-%d)"
+            git push
+          fi
