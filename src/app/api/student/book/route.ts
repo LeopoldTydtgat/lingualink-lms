@@ -424,11 +424,11 @@ export async function POST(req: NextRequest) {
           )
         }
       } else {
-        if (isSlotConflict && teamsMeetingId) {
+        if (teamsMeetingId) {
           try {
             await cancelTeamsMeeting(teamsMeetingId)
           } catch (cancelError) {
-            console.error('CRITICAL: orphan Teams meeting after fresh-booking slot conflict:', {
+            console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
               teams_meeting_id: teamsMeetingId,
               lesson_id: null,
               error: cancelError,

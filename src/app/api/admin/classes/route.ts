@@ -283,11 +283,11 @@ export async function POST(request: NextRequest) {
   if (lessonError) {
     const isSlotConflict = lessonError.code === '23P01'
 
-    if (isSlotConflict && teamsMeetingId) {
+    if (teamsMeetingId) {
       try {
         await cancelTeamsMeeting(teamsMeetingId)
       } catch (cancelError) {
-        console.error('CRITICAL: orphan Teams meeting after admin-create slot conflict:', {
+        console.error('CRITICAL: orphan Teams meeting after admin-create insert failure:', {
           teams_meeting_id: teamsMeetingId,
           lesson_id: null,
           error: cancelError,

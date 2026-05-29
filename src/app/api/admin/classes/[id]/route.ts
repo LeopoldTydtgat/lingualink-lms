@@ -422,7 +422,7 @@ export async function PATCH(
           durationMinutes: newDuration,
         })
       } catch (graphError) {
-        console.error('CRITICAL: Teams meeting update failed', { teams_meeting_id: existing.teams_meeting_id, lesson_id: id, error: graphError })
+        console.warn('Teams calendar time desync — meeting update failed; join URL unaffected, emails carry correct time', { teams_meeting_id: existing.teams_meeting_id, lesson_id: id, error: graphError })
       }
     } else {
       try {
