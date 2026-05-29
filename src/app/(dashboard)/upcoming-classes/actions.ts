@@ -19,13 +19,17 @@ export async function teacherCancelLesson(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Not authenticated' }
 
-  // Fetch the lesson — verify it belongs to this teacher. Cancellability is now decided
-  // by the RPC (the single authority), so no status pre-check here.
-  const { data: lesson, error: lessonError } = await adminClient
+  // Fetch the lesson — verify it belongs to this teacher. Read via the RLS-scoped client
+  // (not admin) and scope to teacher_id for defense-in-depth, mirroring the student path's
+  // .eq('student_id', ...). RLS policy "Teachers see own lessons" (teacher_id = auth.uid())
+  // has NO status predicate, so the row returns regardless of status; cancellability is
+  // still decided solely by the RPC (the single authority), so no status pre-check here.
+  const { data: lesson, error: lessonError } = await supabase
     .from('lessons')
     .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status, teams_meeting_id')
     .eq('id', lessonId)
-    .single()
+    .eq('teacher_id', user.id)
+    .maybeSingle()
 
   if (lessonError || !lesson) return { success: false, error: 'Lesson not found' }
   if (lesson.teacher_id !== user.id) return { success: false, error: 'Not authorised' }
