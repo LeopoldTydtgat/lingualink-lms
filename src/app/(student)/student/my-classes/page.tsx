@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import MyClassesClient from './MyClassesClient'
+import { requireTz } from '@/lib/time/requireTz'
 
 export default async function MyClassesPage() {
   const supabase = await createClient()
@@ -77,7 +78,7 @@ export default async function MyClassesPage() {
     <MyClassesClient
       lessons={lessons}
       lastFeedback={lastFeedback}
-      studentTimezone={student.timezone ?? 'Europe/London'}
+      studentTimezone={requireTz(student.timezone, 'my-classes:student')}
       profileCompleted={student.profile_completed ?? false}
       bannerDismissed={student.profile_banner_dismissed ?? false}
     />

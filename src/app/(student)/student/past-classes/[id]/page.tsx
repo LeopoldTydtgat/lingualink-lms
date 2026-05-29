@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect, notFound } from 'next/navigation';
 import PastClassDetailClient from './PastClassDetailClient';
+import { requireTz } from '@/lib/time/requireTz';
 
 export default async function PastClassDetailPage({
   params,
@@ -90,7 +91,7 @@ export default async function PastClassDetailPage({
       assignments={flatAssignments}
       existingReview={existingReview ?? null}
       studentId={student.id}
-      studentTimezone={student.timezone ?? 'UTC'}
+      studentTimezone={requireTz(student.timezone, 'past-class-detail:student')}
     />
   );
 }

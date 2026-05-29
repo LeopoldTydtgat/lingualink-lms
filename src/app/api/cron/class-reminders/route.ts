@@ -7,6 +7,7 @@ import {
   teacherClassReminderEmailContent,
 } from '@/lib/email/templates'
 import { verifyCronAuth } from '@/lib/cron-auth'
+import { requireTz } from '@/lib/time/requireTz'
 
 // This route is called by Vercel Cron every 15 minutes.
 // It checks for lessons starting within the next 24 hours or 1 hour
@@ -59,6 +60,13 @@ export async function GET(request: Request) {
     if (!teacher || !student) continue
 
     try {
+      // Resolve both timezones BEFORE sending anything. If either is null, skip the
+      // whole lesson (no email sent, reminder flag NOT set) so the next run retries
+      // cleanly. Prevents the student email firing then the teacher email throwing,
+      // which would re-send the student reminder every run.
+      const studentTz = requireTz(student.timezone, 'cron:student')
+      const teacherTz = requireTz(teacher.timezone, 'cron:teacher')
+
       // Email to student
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
@@ -73,7 +81,7 @@ export async function GET(request: Request) {
             lesson.scheduled_at,
             lesson.duration_minutes,
             null,
-            student.timezone ?? 'Europe/London',
+            studentTz,
             24
           ),
           contactEmail: 'support@lingualinkonline.com',
@@ -94,7 +102,7 @@ export async function GET(request: Request) {
             lesson.scheduled_at,
             lesson.duration_minutes,
             null,
-            teacher.timezone ?? 'Africa/Johannesburg',
+            teacherTz,
             24
           ),
           contactEmail: 'teachers@lingualinkonline.com',
@@ -147,6 +155,13 @@ export async function GET(request: Request) {
     if (!teacher || !student) continue
 
     try {
+      // Resolve both timezones BEFORE sending anything. If either is null, skip the
+      // whole lesson (no email sent, reminder flag NOT set) so the next run retries
+      // cleanly. Prevents the student email firing then the teacher email throwing,
+      // which would re-send the student reminder every run.
+      const studentTz = requireTz(student.timezone, 'cron:student')
+      const teacherTz = requireTz(teacher.timezone, 'cron:teacher')
+
       // Email to student
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
@@ -161,7 +176,7 @@ export async function GET(request: Request) {
             lesson.scheduled_at,
             lesson.duration_minutes,
             lesson.teams_join_url,
-            student.timezone ?? 'Europe/London',
+            studentTz,
             1
           ),
           contactEmail: 'support@lingualinkonline.com',
@@ -182,7 +197,7 @@ export async function GET(request: Request) {
             lesson.scheduled_at,
             lesson.duration_minutes,
             lesson.teams_join_url,
-            teacher.timezone ?? 'Africa/Johannesburg',
+            teacherTz,
             1
           ),
           contactEmail: 'teachers@lingualinkonline.com',

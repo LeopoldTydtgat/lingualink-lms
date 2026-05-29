@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import PastClassesClient from './PastClassesClient';
+import { requireTz } from '@/lib/time/requireTz';
 
 export default async function PastClassesPage() {
   const supabase = await createClient();
@@ -59,7 +60,7 @@ export default async function PastClassesPage() {
   return (
     <PastClassesClient
       lessons={flattenedLessons}
-      studentTimezone={student.timezone ?? 'UTC'}
+      studentTimezone={requireTz(student.timezone, 'past-classes:student')}
       reviewedClassIds={[...reviewedClassIds]}
       studentId={student.id}
     />

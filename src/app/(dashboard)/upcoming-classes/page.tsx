@@ -62,13 +62,22 @@ export default async function UpcomingClassesPage() {
     }
   })
 
+  // Fail-SAFE (not fail-closed): teacher's default landing page. A null timezone must
+  // NOT throw - that bubbles to app/error.tsx (no (dashboard) boundary) and error-screens
+  // the teacher on login. Degrade by logging loudly; class times are not money, and
+  // post-S111 a null tz is a near-impossible schema violation.
+  const teacherTimezone = profile?.timezone ?? null
+  if (!teacherTimezone) {
+    console.error('CRITICAL: teacher timezone is null on upcoming-classes landing - class times may display incorrectly', { teacher_id: user.id })
+  }
+
   return (
     <UpcomingClassesClient
       classes={classes}
       profile={profile ?? { id: user.id, full_name: 'Teacher', role: 'teacher', photo_url: null }}
       profileCompleted={profile?.profile_completed ?? false}
       bannerDismissed={profile?.profile_banner_dismissed ?? false}
-      teacherTimezone={profile?.timezone ?? 'Europe/London'}
+      teacherTimezone={teacherTimezone ?? 'Europe/London'}
     />
   )
 }

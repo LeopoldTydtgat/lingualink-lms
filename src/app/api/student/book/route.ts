@@ -8,6 +8,7 @@ import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
 import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit } from '@/lib/rateLimit'
+import { requireTz } from '@/lib/time/requireTz'
 
 // ── Email content builders ────────────────────────────────────────────────────
 
@@ -517,8 +518,9 @@ export async function POST(req: NextRequest) {
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────
     const isReschedule = !!rescheduleId
-    const studentTimezone = studentRow.timezone ?? 'Europe/London'
-    const teacherTimezone = teacher.timezone ?? 'Africa/Johannesburg'
+    try {
+    const studentTimezone = requireTz(studentRow.timezone, 'book:student')
+    const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
 
     const studentDateTime = formatDateTime(startTime.toISOString(), studentTimezone)
     const teacherDateTime = formatDateTime(startTime.toISOString(), teacherTimezone)
@@ -565,6 +567,9 @@ export async function POST(req: NextRequest) {
         }),
       }),
     ])
+    } catch (emailErr) {
+      console.error('[Email] Booking/reschedule confirmation emails failed - lesson still created:', emailErr)
+    }
 
     revalidatePath('/upcoming-classes')
     revalidatePath('/student/my-classes')
