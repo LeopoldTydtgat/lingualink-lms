@@ -253,12 +253,18 @@ export async function PATCH(
   let scheduledAtUtc: string | undefined
   if (fields.scheduled_at !== undefined) {
     const targetTeacherId = fields.teacher_id ?? existing.teacher_id
-    const { data: targetTeacherProfile } = await adminClient
+    const { data: targetTeacherProfile, error: tzError } = await adminClient
       .from('profiles')
       .select('timezone')
       .eq('id', targetTeacherId)
-      .single()
-    const targetTimezone = targetTeacherProfile?.timezone || 'UTC'
+      .maybeSingle()
+    if (tzError) {
+      return NextResponse.json({ error: 'Failed to load teacher timezone', code: 'TIMEZONE_LOOKUP_FAILED' }, { status: 500 })
+    }
+    if (!targetTeacherProfile?.timezone) {
+      return NextResponse.json({ error: 'Target teacher has no timezone set', code: 'TIMEZONE_MISSING' }, { status: 422 })
+    }
+    const targetTimezone = targetTeacherProfile.timezone
     scheduledAtUtc = localToUtc(fields.scheduled_at, targetTimezone)
 
     if (new Date(scheduledAtUtc).getTime() < Date.now()) {

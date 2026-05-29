@@ -38,10 +38,22 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const teacherId = searchParams.get('teacherId')
   const weekStart = searchParams.get('weekStart') // YYYY-MM-DD (Monday)
-  const studentTimezone = searchParams.get('timezone') ?? 'UTC'
+  const studentTimezone = searchParams.get('timezone')
 
   if (!teacherId || !weekStart) {
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 })
+  }
+
+  // Fail closed on the caller-supplied timezone: it is request input, not a DB
+  // row, so a missing or invalid IANA value is a client bug we surface as a 400
+  // rather than papering over with a guessed default.
+  if (!studentTimezone) {
+    return NextResponse.json({ error: 'Missing timezone parameter' }, { status: 400 })
+  }
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: studentTimezone })
+  } catch {
+    return NextResponse.json({ error: 'Invalid timezone parameter' }, { status: 400 })
   }
 
   // Build the 7 YYYY-MM-DD strings for this week
@@ -59,14 +71,19 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  const { data: teacherProfile } = await admin
+  const { data: teacherProfile, error: tzError } = await admin
     .from('profiles')
     .select('timezone')
     .eq('id', teacherId)
-    .single()
+    .maybeSingle()
 
-  // Fall back to UTC if teacher has no timezone set
-  const teacherTimezone = teacherProfile?.timezone ?? 'UTC'
+  if (tzError) {
+    return NextResponse.json({ error: 'Failed to load teacher timezone' }, { status: 500 })
+  }
+  if (!teacherProfile?.timezone) {
+    return NextResponse.json({ error: 'Teacher not found or has no timezone set' }, { status: 404 })
+  }
+  const teacherTimezone = teacherProfile.timezone
 
   // ── Fetch availability records ──────────────────────────────────────────────
 

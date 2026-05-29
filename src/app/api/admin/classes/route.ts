@@ -157,12 +157,18 @@ export async function POST(request: NextRequest) {
 
   // Fetch teacher timezone
   const adminClient = createAdminClient()
-  const { data: teacherProfile } = await adminClient
+  const { data: teacherProfile, error: tzError } = await adminClient
     .from('profiles')
     .select('timezone')
     .eq('id', teacher_id)
-    .single()
-  const teacherTimezone = teacherProfile?.timezone || 'UTC'
+    .maybeSingle()
+  if (tzError) {
+    return NextResponse.json({ error: 'Failed to load teacher timezone' }, { status: 500 })
+  }
+  if (!teacherProfile?.timezone) {
+    return NextResponse.json({ error: 'Teacher not found or has no timezone set' }, { status: 404 })
+  }
+  const teacherTimezone = teacherProfile.timezone
 
   const scheduledAtUtc = localToUtc(scheduled_at, teacherTimezone)
 
