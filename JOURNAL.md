@@ -1,3 +1,18 @@
+## Session 115 - 29 May 2026 - Teams orphan cleanup and timezone reconciliation
+
+### What was built
+- Widened the orphaned-Teams-meeting cleanup gate in two booking routes so any failed lesson insert tears down the already-created meeting, not only slot-conflict failures
+- Downgraded a misleading CRITICAL log on the admin reschedule path to a warning, reflecting that the failure mode is a recoverable calendar-time desync rather than a resource leak
+
+### Break/Fix Log
+Issue 1 (NEW131): Symptom - on a non-conflict lesson insert failure, a Teams meeting created moments earlier was never cancelled, leaving a live meeting in Microsoft with no database row pointing to it and invisible to the cleanup sweeper. Cause - the cleanup branch was gated on the slot-conflict error code in addition to the meeting id, so any other insert failure skipped teardown. Fix - widened the gate to fire on the meeting id alone in both the student booking route and the admin manual-booking route; on insert failure no lesson row exists, so cancelling the meeting is always correct. Lesson - cleanup conditions should key on whether a resource was created that now has no owner, not on one specific failure code.
+Issue 2 (NEW130): Symptom - a failed Teams calendar update during admin reschedule logged at CRITICAL severity, implying a leak. Cause - over-broad severity on a best-effort path. Fix - downgraded to a warning; verified the join URL stays stable and both confirmation emails carry the correct new time, so only the Teams calendar entry is briefly stale. Lesson - log severity should match real impact or it erodes trust in alerts.
+
+### Session result
+A read-only audit of the three admin and student class routes confirmed the prior session's create-then-persist orphan fix was already committed, resolved an open timezone item as superseded by earlier work, and narrowed the remaining orphan risk to a single under-gated branch duplicated across two routes. I fixed both instances and corrected one log severity in a single commit. The bug log was reconciled to reflect four closures. Two availability-check items on the admin reschedule path remain open pending a product decision on whether admin edits should bypass availability rules.
+
+---
+
 ## Session 114 - 29 May 2026 - Booking schema UTC datetime enforcement
 
 ### What was built
