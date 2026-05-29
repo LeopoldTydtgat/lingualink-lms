@@ -459,12 +459,32 @@ export async function PATCH(
           startTime: newScheduledAt,
           durationMinutes: newDuration,
         })
-        const { error: graphUpdateError } = await adminClient
+        const { data: persisted, error: graphUpdateError } = await adminClient
           .from('lessons')
           .update({ teams_meeting_id: meeting.meetingId, teams_join_url: meeting.joinUrl })
           .eq('id', id)
-        if (graphUpdateError) {
-          console.error('CRITICAL: Teams meeting created but DB write failed', { teams_meeting_id: meeting.meetingId, lesson_id: id, error: graphUpdateError })
+          .select('id')
+        // Treat a DB error OR a 0-row match as a persist failure. Either way the
+        // lesson row keeps teams_meeting_id NULL + status 'scheduled', which the
+        // orphan sweeper can never see (its predicate needs a non-null id on a
+        // cancel-family row). The just-created Microsoft meeting would then leak
+        // with no DB pointer. Delete it now: the lesson is already link-less in
+        // this failure (same as the pre-fix state), so this only removes the leak.
+        if (graphUpdateError || !persisted || persisted.length === 0) {
+          try {
+            await cancelTeamsMeeting(meeting.meetingId)
+            console.error('CRITICAL: Teams meeting created but DB persist failed — orphan cleaned', {
+              teams_meeting_id: meeting.meetingId,
+              lesson_id: id,
+              error: graphUpdateError ?? null,
+            })
+          } catch (cleanupError) {
+            console.error('CRITICAL: Teams meeting created, DB persist failed, and cleanup delete failed — true orphan remains', {
+              teams_meeting_id: meeting.meetingId,
+              lesson_id: id,
+              error: cleanupError,
+            })
+          }
         }
       } catch (graphError) {
         console.error('CRITICAL: Teams meeting orphan fallback creation failed', { lesson_id: id, error: graphError })
