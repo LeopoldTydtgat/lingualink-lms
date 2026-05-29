@@ -1,3 +1,16 @@
+## Session 114 - 29 May 2026 - Booking schema UTC datetime enforcement
+
+### What was built
+- Tightened the scheduledAt field on BookClassSchema in src/lib/validation/schemas.ts. I replaced a permissive Date.parse refinement with z.iso.datetime(), which requires a UTC ISO 8601 string ending in Z and rejects both bare-local and offset-bearing input.
+
+### Break/Fix Log
+Issue 3 (scheduledAt offset enforcement): The booking schema previously accepted any Date.parse-able string, including zoneless local values such as 2026-07-15T14:00, which left the only timezone-sensitive write path without a guard at its validation boundary. I ran a read-only caller audit first and confirmed BookClassSchema has a single parse site, the student book route, and that route always sends toISOString() output, so the live payload is already UTC with a Z suffix. I tightened the field to z.iso.datetime() in the zod 4 form, Z-only, rather than allowing offsets, because accepting only the shape already in use gives zero behaviour change for real bookings while closing the door on zoneless input. I verified the change with a live student booking through the dev UI and the class was created with no error. Lesson: tighten validation to exactly the shape callers already produce and never wider, and prove the live payload passes with a real end to end booking rather than reasoning about the parser on its own.
+
+### Session result
+I closed Issue 3 by hardening the booking validation boundary. The change is scoped to a single field on one schema, the typecheck is clean, and a real booking confirmed no regression. I also noted that zod is currently a transitive dependency rather than a direct entry in package.json, which works today through hoisting but should be pinned with a direct install before the repository is made public.
+
+---
+
 ## Session 113 - 29 May 2026 - NEW17 timezone display tier (fail-closed and fail-safe)
 ### What was built
 - Added src/lib/time/requireTz.ts, a shared timezone accessor that throws TIMEZONE_MISSING instead of silently defaulting to a wrong zone. This completes the fail-closed timezone work started in the billing and computation tiers.
