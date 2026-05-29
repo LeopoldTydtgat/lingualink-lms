@@ -1,3 +1,49 @@
+## Session 108 - 29 May 2026 - Admin Join button gating + log shape conformance
+
+### What was built
+- Five-state gate on admin Class Detail Join Meeting button (no URL / blocked status / class ended / before 10-min window / in window).
+- Status guard added to student MyClasses isJoinable, matching sibling StudentRightPanel implementation.
+- nextLessonJoinable memoised to a single component-level const, removing six redundant computes per second tick.
+- snake_case envelope conformance across five CRITICAL log sites: Graph orphan-cancel, Graph DB-write-failed, refund-after-insert-failure (x2), unwind-failure (x2 in same file).
+- Refund-failure logs now carry student_id alongside training_id for on-call correlation when no lesson row exists.
+
+### Break/Fix Log
+
+**Issue 1 - NEW19: Admin Join Meeting button ungated**
+- Symptom: Admin Class Detail showed the Join Meeting link with no time or status check. Four sibling implementations (teacher RightPanel, teacher UpcomingClasses, student RightPanel, student MyClasses) all gate on a 10-minute window plus BLOCKED_STATUSES.
+- Cause: The admin detail page was never wired to the join-gating pattern when the other portals were standardised. Sibling code converged on 10 min; admin was forgotten.
+- Fix: Added mounted/now ticker state to ClassDetailClient, imported canonical BLOCKED_STATUSES from billability.ts, and replaced the single ternary with a five-state gate. Pre-mount renders the "Available 10 minutes before class" grey state as the SSR-safe default to avoid hydration mismatch.
+- Lesson: Five separate isJoinable implementations is the real problem; the bug was a symptom. Logged the consolidation as a candidate refactor but kept it out of scope per the project rule that ripple-prone refactors are their own session.
+
+**Issue 2 - Sibling bug folded in: student isJoinable missing status guard**
+- Symptom: Student MyClasses isJoinable did not check BLOCKED_STATUSES. A cancelled lesson within 10 minutes of its original time would show an active Join Class button.
+- Cause: Drift between MyClasses local isJoinable and StudentRightPanel's isJoinable, which already had the guard.
+- Fix: Added status parameter and early-return BLOCKED_STATUSES check. Updated six call sites. Folded into the NEW19 commit because it is the same bug class in a sibling file already in scope.
+- Lesson: When fixing a class of bug in one place, sweep for the sibling pattern before commit. Shipping NEW19 with the MyClasses bug still live would have been embarrassing.
+
+**Issue 3 - L3: orphan-Teams sentinel mismatch (not-a-bug)**
+- Symptom: Bug log flagged the admin dashboard count and the sweeper script as using inconsistent definitions of orphan Teams meeting.
+- Cause: Audit revealed the two are orthogonal. Dashboard counts upcoming lessons with no join URL (user-facing booking-failure signal). Sweeper finds cancelled lessons with a live Graph event id (backend resource leak). Different problems, both correct.
+- Fix: Closed as not-a-bug. NEW104 scope expanded to include the sweeper's dead 'teacher_cancelled' predicate, alongside the existing billability.ts reference.
+- Lesson: A bug log entry written quickly can mislead future sessions. Audit before assuming the bug exists.
+
+**Issue 4 - CRITICAL log shape conformance across five sites**
+- Symptom: Graph orphan-cancel log at book/route.ts:401 used camelCase {teamsMeetingId, rescheduleId, error}. Locked rule shape is snake_case {teams_meeting_id, lesson_id, error}. Sweep found three more violations: admin/classes/[id]:467 used meetingId, two refund logs emitted raw error with no envelope, two unwind logs were structured but camelCase.
+- Cause: Copy-paste divergence over time. No single typed wrapper around CRITICAL log emission, no test asserting shape conformance.
+- Fix: All Graph CRITICAL logs now use {teams_meeting_id, lesson_id, error}. Refund logs now use {training_id, student_id, lesson_id, error}. Unwind logs preserved all context fields, just converted to snake_case. Sentry scrub config does not key on these names, so the rename was safe.
+- Lesson: When a locked-rule envelope exists, conformance is portal-wide, not per-site. The sweep added four ripples to the single reported violation; fixing only the reported one would have left the bug class alive.
+
+**Issue 5 - Refund logs lacked correlation context**
+- Symptom: After the snake_case fix, the refund-failure logs carried only training_id and lesson_id:null. An on-call engineer reconciling a refund failure would have only training_id to work from.
+- Cause: The lesson insert had already failed at the point of the refund attempt, so there is no lesson row to log. But student_id was in scope and not used.
+- Fix: Added student_id to both refund-failure log envelopes. Verified RPC body in Supabase confirms p_lesson_id is optional with DEFAULT NULL and idempotency check is gated on IS NOT NULL, so calling without it is safe.
+- Lesson: Read the RPC body, do not guess. NEW129 was almost logged as a separate bug before the RPC body confirmed it was already designed for this case.
+
+### Session result
+Two bugs shipped (commit b529076 for NEW19, commit f82c0d8 for the log shape sweep). One bug closed as not-a-bug (L3). NEW104 scope expanded. Two new low-priority entries logged (NEW127 ClassReminderModal time gate, NEW128 admin detail RLS-vs-admin-client inconsistency). NEW17 timezone consolidation gated behind cancel-path cluster closure, decision recorded. NEW19 Bug 2 (+2h reschedule display) deferred until NEW17/NEW70/NEW86 tz resolution provides a canonical fallback strategy. Next session opens with the cancel-path cluster: NEW97, NEW98, NEW101, NEW117, NEW118, NEW124, NEW125.
+
+---
+
 ## Session 107 - 18 May 2026 - Cancel guard symmetry across all three portals
 
 ### What was built
