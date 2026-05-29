@@ -10,6 +10,7 @@ import {
   studentBookingConfirmationEmailContent,
 } from '@/lib/email/templates'
 import { localToUtc } from '@/lib/utils/timezone'
+import { requireTz } from '@/lib/time/requireTz'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -282,11 +283,11 @@ export async function POST(request: NextRequest) {
   if (lessonError) {
     const isSlotConflict = lessonError.code === '23P01'
 
-    if (isSlotConflict && teamsMeetingId) {
+    if (teamsMeetingId) {
       try {
         await cancelTeamsMeeting(teamsMeetingId)
       } catch (cancelError) {
-        console.error('CRITICAL: orphan Teams meeting after admin-create slot conflict:', {
+        console.error('CRITICAL: orphan Teams meeting after admin-create insert failure:', {
           teams_meeting_id: teamsMeetingId,
           lesson_id: null,
           error: cancelError,
@@ -339,7 +340,7 @@ export async function POST(request: NextRequest) {
         studentData?.full_name ?? 'Your student',
         scheduledAtUtc,
         duration_minutes,
-        teacherProfile.timezone ?? 'UTC'
+        requireTz(teacherProfile.timezone, 'admin-book:teacher')
       )
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',
@@ -360,7 +361,7 @@ export async function POST(request: NextRequest) {
         teacherProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
-        studentData.timezone ?? 'UTC'
+        requireTz(studentData.timezone, 'admin-book:student')
       )
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',

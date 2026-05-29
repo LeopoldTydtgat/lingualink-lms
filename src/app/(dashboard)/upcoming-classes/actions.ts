@@ -7,6 +7,7 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import type { CancelResult } from '@/lib/types/cancel'
+import { requireTz } from '@/lib/time/requireTz'
 
 export async function teacherCancelLesson(
   lessonId: string,
@@ -105,7 +106,7 @@ export async function teacherCancelLesson(
       teacherName,
       lesson.scheduled_at,
       hoursRefunded,
-      student.timezone ?? 'UTC',
+      requireTz(student.timezone, 'cancel-by-teacher:student'),
       messageToStudent
     )
     await resend.emails.send({
@@ -130,7 +131,7 @@ export async function teacherCancelLesson(
       const teacherEmailBody = teacherCancellationEmailContent(
         student.full_name,
         lesson.scheduled_at,
-        teacherProfile.timezone ?? 'UTC'
+        requireTz(teacherProfile.timezone, 'cancel-by-teacher:teacher')
       )
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',

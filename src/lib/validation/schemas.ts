@@ -175,14 +175,10 @@ export const BookClassSchema = z.object({
     [z.literal(30), z.literal(60), z.literal(90)],
     { error: 'Duration must be 30, 60, or 90 minutes' }
   ),
-  // Must be a parseable ISO 8601 datetime
-  scheduledAt: z
-    .string()
-    .min(1, 'scheduledAt is required')
-    .refine(
-      (val) => !isNaN(Date.parse(val)),
-      'scheduledAt must be a valid ISO 8601 datetime'
-    ),
+  // UTC ISO 8601 with Z suffix — no bare-local, no offset. Only caller sends toISOString() output.
+  scheduledAt: z.iso.datetime({
+    error: 'scheduledAt must be a UTC ISO 8601 datetime (e.g. 2026-07-15T14:00:00.000Z)',
+  }),
   rescheduleId: z.string().uuid('Must be a valid ID').optional().nullable(),
 })
 

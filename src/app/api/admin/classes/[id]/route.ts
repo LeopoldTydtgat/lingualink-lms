@@ -8,6 +8,7 @@ import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/li
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { localToUtc } from '@/lib/utils/timezone'
+import { requireTz } from '@/lib/time/requireTz'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -213,7 +214,7 @@ export async function PATCH(
           teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
           emailHoursValue,
-          studentData.timezone ?? 'UTC',
+          requireTz(studentData.timezone, 'admin-cancel:student'),
           cancellation_reason ?? undefined
         )
         await resend.emails.send({
@@ -421,7 +422,7 @@ export async function PATCH(
           durationMinutes: newDuration,
         })
       } catch (graphError) {
-        console.error('CRITICAL: Teams meeting update failed', { teams_meeting_id: existing.teams_meeting_id, lesson_id: id, error: graphError })
+        console.warn('Teams calendar time desync — meeting update failed; join URL unaffected, emails carry correct time', { teams_meeting_id: existing.teams_meeting_id, lesson_id: id, error: graphError })
       }
     } else {
       try {

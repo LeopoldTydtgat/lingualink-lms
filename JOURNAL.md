@@ -1,3 +1,45 @@
+## Session 115 - 29 May 2026 - Teams orphan cleanup and timezone reconciliation
+
+### What was built
+- Widened the orphaned-Teams-meeting cleanup gate in two booking routes so any failed lesson insert tears down the already-created meeting, not only slot-conflict failures
+- Downgraded a misleading CRITICAL log on the admin reschedule path to a warning, reflecting that the failure mode is a recoverable calendar-time desync rather than a resource leak
+
+### Break/Fix Log
+Issue 1 (NEW131): Symptom - on a non-conflict lesson insert failure, a Teams meeting created moments earlier was never cancelled, leaving a live meeting in Microsoft with no database row pointing to it and invisible to the cleanup sweeper. Cause - the cleanup branch was gated on the slot-conflict error code in addition to the meeting id, so any other insert failure skipped teardown. Fix - widened the gate to fire on the meeting id alone in both the student booking route and the admin manual-booking route; on insert failure no lesson row exists, so cancelling the meeting is always correct. Lesson - cleanup conditions should key on whether a resource was created that now has no owner, not on one specific failure code.
+Issue 2 (NEW130): Symptom - a failed Teams calendar update during admin reschedule logged at CRITICAL severity, implying a leak. Cause - over-broad severity on a best-effort path. Fix - downgraded to a warning; verified the join URL stays stable and both confirmation emails carry the correct new time, so only the Teams calendar entry is briefly stale. Lesson - log severity should match real impact or it erodes trust in alerts.
+
+### Session result
+A read-only audit of the three admin and student class routes confirmed the prior session's create-then-persist orphan fix was already committed, resolved an open timezone item as superseded by earlier work, and narrowed the remaining orphan risk to a single under-gated branch duplicated across two routes. I fixed both instances and corrected one log severity in a single commit. The bug log was reconciled to reflect four closures. Two availability-check items on the admin reschedule path remain open pending a product decision on whether admin edits should bypass availability rules.
+
+---
+
+## Session 114 - 29 May 2026 - Booking schema UTC datetime enforcement
+
+### What was built
+- Tightened the scheduledAt field on BookClassSchema in src/lib/validation/schemas.ts. I replaced a permissive Date.parse refinement with z.iso.datetime(), which requires a UTC ISO 8601 string ending in Z and rejects both bare-local and offset-bearing input.
+
+### Break/Fix Log
+Issue 3 (scheduledAt offset enforcement): The booking schema previously accepted any Date.parse-able string, including zoneless local values such as 2026-07-15T14:00, which left the only timezone-sensitive write path without a guard at its validation boundary. I ran a read-only caller audit first and confirmed BookClassSchema has a single parse site, the student book route, and that route always sends toISOString() output, so the live payload is already UTC with a Z suffix. I tightened the field to z.iso.datetime() in the zod 4 form, Z-only, rather than allowing offsets, because accepting only the shape already in use gives zero behaviour change for real bookings while closing the door on zoneless input. I verified the change with a live student booking through the dev UI and the class was created with no error. Lesson: tighten validation to exactly the shape callers already produce and never wider, and prove the live payload passes with a real end to end booking rather than reasoning about the parser on its own.
+
+### Session result
+I closed Issue 3 by hardening the booking validation boundary. The change is scoped to a single field on one schema, the typecheck is clean, and a real booking confirmed no regression. I also noted that zod is currently a transitive dependency rather than a direct entry in package.json, which works today through hoisting but should be pinned with a direct install before the repository is made public.
+
+---
+
+## Session 113 - 29 May 2026 - NEW17 timezone display tier (fail-closed and fail-safe)
+### What was built
+- Added src/lib/time/requireTz.ts, a shared timezone accessor that throws TIMEZONE_MISSING instead of silently defaulting to a wrong zone. This completes the fail-closed timezone work started in the billing and computation tiers.
+- Removed the silent timezone fallbacks across all 24 remaining display-tier sites, covering page render, transactional email bodies, the reminder cron, and the booking confirmation path.
+- Split the treatment by risk rather than applying one rule everywhere. Sites that render a page or send an email under an existing try/catch fail closed through requireTz. Two shell-level sites fail safe instead, so a missing timezone degrades a widget rather than locking a user out of the portal.
+### Break/Fix Log
+Issue 1: Shell layout lockout. Symptom: a hard throw in the dashboard layout would error-screen every teacher page, not just the billing widget. Cause: a throw in a route-group layout bubbles to the single root error boundary because no nested boundary exists. Fix: gated the billing computation behind a timezone check, degrading the right-panel widget to zero and logging a CRITICAL line when the timezone is null, while the rest of the portal renders normally. Lesson: in a layout, fail safe, not closed. The canonical money figure is computed and guarded on the billing page, so the shell only needs to avoid a portal-wide outage.
+Issue 2: Duplicated reminder emails. Symptom: a null teacher timezone in the reminder cron would let the student email send, then throw on the teacher email, leaving the sent flag unset so the lesson re-sent the student email on every run. Cause: the timezone was read inline at each email rather than resolved up front. Fix: resolved both timezones at the top of each per-lesson try block before any send, so a null timezone skips the whole lesson cleanly and the next run retries. Lesson: when a loop iteration fires more than one side effect, validate all preconditions before the first one runs.
+Issue 3: False 500 on a committed booking. Symptom: the booking confirmation emails read the timezone after the lesson was already created and hours deducted, so a null timezone throw would hit the outer catch and return a 500 on a booking that actually succeeded. Cause: the email section sat inside the outer request try with no inner boundary. Fix: wrapped the confirmation email section in its own try/catch so a timezone throw is logged and the request still returns success with the lesson id. Lesson: post-commit side effects need their own boundary so they cannot reverse a success the user already completed.
+### Session result
+Completed the NEW17 timezone display tier across 24 sites in two reviewed tranches, closing the timezone fallback work that ran through the billing and computation tiers in earlier sessions. The principle held throughout: a null timezone is a real schema violation and must surface rather than silently resolve to a wrong zone, but the way it surfaces depends on the site. Money and time displays inside guarded paths fail closed, while the shell layout and the default landing page fail safe to protect portal availability. The code reviewer caught three blast-radius traps in the first-pass approach, all corrected before commit. Logged three out-of-scope items found during the audit: an impure invoice reference generator, hardcoded timezone literals on the admin teacher-detail page, and the deliberate fail-open label fallbacks on the admin reschedule path. The separate booking schema offset enforcement task was deferred to a fresh session for its own caller audit.
+
+---
+
 ## Session 111 - 29 May 2026 - Timezone fallback consolidation (computation tier)
 
 ### What was built
