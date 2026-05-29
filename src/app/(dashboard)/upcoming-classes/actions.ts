@@ -19,7 +19,8 @@ export async function teacherCancelLesson(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Not authenticated' }
 
-  // Fetch the lesson — verify it belongs to this teacher
+  // Fetch the lesson — verify it belongs to this teacher. Cancellability is now decided
+  // by the RPC (the single authority), so no status pre-check here.
   const { data: lesson, error: lessonError } = await adminClient
     .from('lessons')
     .select('id, teacher_id, student_id, training_id, scheduled_at, duration_minutes, status, teams_meeting_id')
@@ -28,9 +29,6 @@ export async function teacherCancelLesson(
 
   if (lessonError || !lesson) return { success: false, error: 'Lesson not found' }
   if (lesson.teacher_id !== user.id) return { success: false, error: 'Not authorised' }
-  if (lesson.status !== 'scheduled') {
-    return { success: false, error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' }
-  }
 
   // Enforce 24-hour rule server-side
   const hoursUntil = (new Date(lesson.scheduled_at).getTime() - Date.now()) / 1000 / 60 / 60
@@ -57,14 +55,38 @@ export async function teacherCancelLesson(
     return { success: false, error: 'Student account is not linked to a login. Please contact admin.' }
   }
 
-  // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
-  let graphSucceeded = true
+  // Cancel atomically — the RPC flips status, nulls teams_join_url, and refunds hours
+  // (teacher cancel always refunds) in ONE transaction. It deliberately does NOT touch
+  // teams_meeting_id; Graph teardown happens here AFTER the commit.
+  const { data: result, error: rpcError } = await adminClient.rpc('cancel_lesson_atomic', {
+    p_lesson_id: lessonId,
+    p_cancelled_by: 'teacher',
+    p_cancellation_reason: messageToStudent,
+    p_should_refund: true,
+  })
+  if (rpcError) {
+    console.error('CRITICAL: cancel_lesson_atomic RPC failed:', { lesson_id: lessonId, error: rpcError })
+    return { success: false, error: 'Failed to cancel lesson' }
+  }
+  const r = result as { success: boolean; code?: string; refunded?: boolean; remaining_hours?: number }
+  if (!r.success) {
+    if (r.code === 'LESSON_NOT_FOUND') return { success: false, error: 'Lesson not found' }
+    if (r.code === 'LESSON_NOT_CANCELLABLE') {
+      return { success: false, error: 'This lesson can no longer be cancelled. Please refresh and try again.', code: 'LESSON_NOT_CANCELLABLE' }
+    }
+    console.error('cancel_lesson_atomic unexpected failure:', { lesson_id: lessonId, code: r.code })
+    return { success: false, error: 'Failed to cancel lesson' }
+  }
+  const refunded = r.refunded === true
+
+  // DB cancellation is durably committed. Teams teardown is now best-effort and AFTER commit
+  // so a Graph failure can never destroy a meeting for a still-scheduled lesson (NEW97).
   if (lesson.teams_meeting_id) {
     try {
       await cancelTeamsMeeting(lesson.teams_meeting_id)
+      await adminClient.from('lessons').update({ teams_meeting_id: null }).eq('id', lessonId)
     } catch (teamsError) {
-      graphSucceeded = false
-      console.error('CRITICAL: orphan Teams meeting after teacher cancel:', {
+      console.error('Orphan Teams meeting after cancel — sweeper will recover:', {
         teams_meeting_id: lesson.teams_meeting_id,
         lesson_id: lessonId,
         error: teamsError,
@@ -72,69 +94,9 @@ export async function teacherCancelLesson(
     }
   }
 
-  // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
-  const updatePayload: Record<string, unknown> = {
-    status: 'cancelled_by_teacher',
-    cancelled_at: new Date().toISOString(),
-    cancellation_reason: messageToStudent,
-    cancelled_by: 'teacher',
-    teams_join_url: null,
-    updated_at: new Date().toISOString(),
-  }
-  if (graphSucceeded) {
-    updatePayload.teams_meeting_id = null
-  }
-
-  const { data: updated, error: cancelError } = await adminClient
-    .from('lessons')
-    .update(updatePayload)
-    .eq('id', lessonId)
-    .eq('status', 'scheduled')
-    .select('id')
-
-  if (cancelError) return { success: false, error: 'Failed to cancel lesson' }
-  if (!updated || updated.length === 0) {
-    console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: lessonId })
-    return { success: false, error: 'Failed to cancel lesson' }
-  }
-
-  // Refund hours to training — atomic RPC locks the training and the lesson row, checks
-  // hours_refunded for idempotency, sets the flag on success, and clamps at zero, all in one txn.
-  let refunded = false
-  if (lesson.training_id) {
-    const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-      p_training_id: lesson.training_id,
-      p_hours: lesson.duration_minutes / 60,
-      p_lesson_id: lesson.id,
-    })
-    if (refundError) {
-      return { success: false, error: 'Failed to refund hours' }
-    }
-    if (
-      refundResult &&
-      typeof refundResult === 'object' &&
-      'success' in refundResult &&
-      (refundResult as { success: boolean }).success === false
-    ) {
-      const code = (refundResult as { code?: string }).code
-      if (code === 'ALREADY_REFUNDED') {
-        return { success: false, error: 'This lesson has already been refunded' }
-      }
-      return { success: false, error: 'Failed to refund hours' }
-    }
-    if (
-      refundResult &&
-      typeof refundResult === 'object' &&
-      'success' in refundResult &&
-      (refundResult as { success: boolean }).success === true
-    ) {
-      refunded = true
-    }
-  }
-
   // Send email to student
   try {
-    const hoursRefunded = lesson.duration_minutes / 60
+    const hoursRefunded = refunded ? (lesson.duration_minutes / 60) : 0
     const emailBody = studentCancellationByTeacherEmailContent(
       teacherName,
       lesson.scheduled_at,
