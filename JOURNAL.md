@@ -1,3 +1,27 @@
+## Session 109 - 29 May 2026 - Teams meeting orphan cleanup and workflow hardening
+
+### What was built
+- Fixed an orphaned Teams meeting leak in the admin class reschedule route. When an admin reschedules a class that had no existing Teams link, the system creates a new meeting then saves its ID to the lesson row. If that save failed, the meeting was left live on the organiser calendar with no database pointer, and no background cleanup could ever find it. The route now detects both a database error and a zero-row match on the save, deletes the just-created meeting when the save fails, and logs the meeting ID on every failure path so any residual orphan stays recoverable. The success response is unchanged because the reschedule itself has already committed by that point.
+- Strengthened the root project guidance file. Added a session-start procedure that verifies git ground truth before trusting any handover note, a rule requiring every claim about code or schema to cite its source, a rule requiring the list of downstream consumers to be output before any edit, automatic invocation triggers for the review and data-access subagents, and a correction to an outdated note that claimed the project had no automated tests.
+
+### Break/Fix Log
+Issue 1: Admin reschedule could leak a live Teams meeting with no database reference.
+Symptom: A rescheduled class showed no join link, and a meeting remained on the organiser calendar that nothing tracked or cleaned up.
+Cause: The meeting was created before its ID was saved. A failed save left the lesson row with a null meeting ID and a scheduled status, which the orphan sweeper cannot match on either condition.
+Fix: Added zero-row detection to the save, deleted the new meeting on any save failure, and logged the meeting ID on all failure branches including the case where the cleanup delete also fails.
+Lesson: When a resource is created in one system and its reference saved in another, a save failure must retry, clean up the created resource, or record enough detail for later recovery. Logging without the reference ID leaves an unrecoverable leak.
+
+Issue 2: A suspected partial-failure bug in the student booking reschedule path turned out to be safe.
+Symptom: A reschedule where a background cleanup step failed still returned success to the student.
+Cause: By the time the cleanup runs, the new class and the hours move have already committed, so the success response is accurate. The failed cleanup is recovered automatically by the orphan sweeper.
+Fix: None required. Closed after confirming the recovery path holds. Returning an error here would falsely tell the student the reschedule failed and risk a double booking.
+Lesson: A success response after a logged failure is only a bug if the user-facing state is actually wrong. Verify commit ordering before assuming a partial failure misleads the user.
+
+### Session result
+This session closed one confirmed Teams meeting leak in the admin reschedule route and logged two related issues for later work: a time desync between the database and the Microsoft calendar, and a lower-severity under-logged orphan on the booking insert paths. A separately suspected booking bug was investigated and correctly closed as safe by design. Alongside the code work, the project guidance file was hardened to reduce the chance of future regressions, with a mandatory git ground-truth check at session start, a source-citation requirement for all technical claims, and automatic code-review triggers on sensitive changes. All tests pass and the type check is clean.
+
+---
+
 ## Session 108 - 29 May 2026 - Admin Join button gating + log shape conformance
 
 ### What was built
