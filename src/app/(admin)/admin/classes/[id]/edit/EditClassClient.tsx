@@ -72,7 +72,13 @@ const DURATIONS = [30, 60, 90]
 export default function EditClassClient({ lesson, teachers, totalHours, hoursConsumed }: Props) {
   const router = useRouter()
 
-  const original = parseScheduledAt(lesson.scheduled_at, lesson.teacher?.timezone ?? 'UTC')
+  // Fail closed on a missing teacher timezone: never compute against a guessed
+  // zone. The ternary keeps parseScheduledAt from ever running with a bad tz,
+  // and the early return below (after all hooks) surfaces the data problem.
+  const teacherTz = lesson.teacher?.timezone ?? null
+  const original = teacherTz
+    ? parseScheduledAt(lesson.scheduled_at, teacherTz)
+    : { date: '', time: '' }
 
   const [teacherId, setTeacherId] = useState(lesson.teacher_id)
   const [date, setDate] = useState(original.date)
@@ -81,6 +87,23 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  if (!teacherTz) {
+    return (
+      <div style={{ padding: '32px', maxWidth: '600px' }}>
+        <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
+          ← Back to Class Detail
+        </Link>
+        <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: '20px 0 4px' }}>
+          Edit Class
+        </h1>
+        <p style={{ fontSize: '14px', color: '#B91C1C', marginTop: '20px' }}>
+          This class&apos;s teacher has no timezone set, so it cannot be safely edited.
+          Set the teacher&apos;s timezone first, then return here.
+        </p>
+      </div>
+    )
+  }
 
   const timeSlots = generateTimeSlots()
   const today = new Date()

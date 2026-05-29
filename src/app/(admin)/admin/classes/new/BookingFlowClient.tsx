@@ -99,17 +99,23 @@ export default function BookingFlowClient({ teachers, students }: Props) {
 
   async function handleContinue() {
     if (!selectedDate || !selectedTime || !selectedTeacher) return
+    // Fail closed on a missing teacher timezone before any slot computation —
+    // it gates both the availability request and the wall-clock comparison.
+    const teacherTz = selectedTeacher.timezone
+    if (!teacherTz) {
+      setError('This teacher has no timezone set. Please fix the teacher profile before booking.')
+      return
+    }
     setCheckingAvailability(true)
     setAvailabilityWarning(false)
 
     try {
       const res = await fetch(
-        `/api/student/availability?teacherId=${selectedTeacher.id}&weekStart=${selectedDate}`
+        `/api/student/availability?teacherId=${selectedTeacher.id}&weekStart=${selectedDate}&timezone=${encodeURIComponent(teacherTz)}`
       )
       if (res.ok) {
         const data = await res.json()
         const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[selectedDate] ?? []
-        const teacherTz = selectedTeacher.timezone ?? 'UTC'
         const isAvailable = slotsForDate.some(
           (slot) => slot.available && slotLocalTime(slot.startIso, teacherTz) === selectedTime
         )
