@@ -8,6 +8,7 @@ import { CheckCircle } from 'lucide-react'
 interface Teacher {
   id: string
   full_name: string
+  timezone: string | null
 }
 
 interface LessonDetail {
@@ -104,7 +105,12 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const [checkingAvailability, setCheckingAvailability] = useState(false)
   const [availabilityWarning, setAvailabilityWarning] = useState(false)
 
-  if (!teacherTz) {
+  const selectedTeacherTz =
+    teachers.find((t) => t.id === teacherId)?.timezone
+    ?? (teacherId === lesson.teacher_id ? lesson.teacher?.timezone : null)
+    ?? null
+
+  if (!selectedTeacherTz) {
     return (
       <div style={{ padding: '32px', maxWidth: '600px' }}>
         <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
@@ -166,8 +172,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   // missing, warn by default so the admin consciously overrides rather than
   // silently bypassing.
   async function handleSave() {
-    const tz = lesson.teacher?.timezone
-    if (teacherId !== lesson.teacher_id || !tz) {
+    if (!selectedTeacherTz) {
       setAvailabilityWarning(true)
       return
     }
@@ -175,13 +180,13 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     setAvailabilityWarning(false)
     try {
       const res = await fetch(
-        `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(tz)}`
+        `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(selectedTeacherTz)}`
       )
       if (res.ok) {
         const data = await res.json()
         const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[date] ?? []
         const match = slotsForDate.some(
-          (slot) => slot.available && slotLocalTime(slot.startIso, tz) === time
+          (slot) => slot.available && slotLocalTime(slot.startIso, selectedTeacherTz) === time
         )
         if (match) {
           await executeSave()
@@ -257,7 +262,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
         {/* Time */}
         <div>
           <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '6px' }}>
-            Time ({lesson.teacher?.timezone ?? '—'})
+            Time ({selectedTeacherTz ?? '—'})
           </label>
           <select
             value={time}
