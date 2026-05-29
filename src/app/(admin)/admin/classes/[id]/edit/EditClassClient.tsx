@@ -67,6 +67,20 @@ function generateTimeSlots(): string[] {
   return slots
 }
 
+// Convert a UTC ISO slot start to "HH:MM" in the given IANA timezone
+function slotLocalTime(startIso: string, timezone: string): string {
+  const date = new Date(startIso)
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: timezone,
+  }).formatToParts(date)
+  const hh = parts.find((p) => p.type === 'hour')?.value ?? '00'
+  const mm = parts.find((p) => p.type === 'minute')?.value ?? '00'
+  return `${hh.padStart(2, '0')}:${mm.padStart(2, '0')}`
+}
+
 const DURATIONS = [30, 60, 90]
 
 export default function EditClassClient({ lesson, teachers, totalHours, hoursConsumed }: Props) {
@@ -87,6 +101,8 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [checkingAvailability, setCheckingAvailability] = useState(false)
+  const [availabilityWarning, setAvailabilityWarning] = useState(false)
 
   if (!teacherTz) {
     return (
@@ -109,7 +125,9 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const today = new Date()
   const todayString = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
 
-  async function handleSave() {
+  // The existing PATCH logic, unchanged. Called either directly (slot matched)
+  // or from "Proceed anyway" (admin override).
+  async function executeSave() {
     setSaving(true)
     setError('')
 
@@ -139,8 +157,49 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     }
 
     setSuccess(true)
+    setAvailabilityWarning(false)
     setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 1500)
   }
+
+  // Pre-flight: check teacher availability before saving. Fail-safe fallbacks:
+  // if teacher was swapped (timezone unknown to the Teacher interface) or tz is
+  // missing, warn by default so the admin consciously overrides rather than
+  // silently bypassing.
+  async function handleSave() {
+    const tz = lesson.teacher?.timezone
+    if (teacherId !== lesson.teacher_id || !tz) {
+      setAvailabilityWarning(true)
+      return
+    }
+    setCheckingAvailability(true)
+    setAvailabilityWarning(false)
+    try {
+      const res = await fetch(
+        `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(tz)}`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[date] ?? []
+        const match = slotsForDate.some(
+          (slot) => slot.available && slotLocalTime(slot.startIso, tz) === time
+        )
+        if (match) {
+          await executeSave()
+          return
+        }
+      }
+      setAvailabilityWarning(true)
+    } catch {
+      setAvailabilityWarning(true)
+    } finally {
+      setCheckingAvailability(false)
+    }
+  }
+
+  // Resolve selected teacher name for the warning text; falls back to the
+  // original teacher in case the teachers list doesn't include the current id.
+  const selectedTeacherName =
+    teachers.find((t) => t.id === teacherId)?.full_name ?? lesson.teacher?.full_name ?? 'the teacher'
 
   return (
     <div style={{ padding: '32px', maxWidth: '600px' }}>
@@ -165,7 +224,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
           </label>
           <select
             value={teacherId}
-            onChange={(e) => setTeacherId(e.target.value)}
+            onChange={(e) => { setTeacherId(e.target.value); setAvailabilityWarning(false) }}
             style={{
               width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
               padding: '10px 12px', fontSize: '14px', outline: 'none',
@@ -187,7 +246,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
             type="date"
             min={todayString}
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => { setDate(e.target.value); setAvailabilityWarning(false) }}
             style={{
               width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
               padding: '10px 12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
@@ -202,7 +261,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
           </label>
           <select
             value={time}
-            onChange={(e) => setTime(e.target.value)}
+            onChange={(e) => { setTime(e.target.value); setAvailabilityWarning(false) }}
             style={{
               width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
               padding: '10px 12px', fontSize: '14px', outline: 'none',
@@ -272,6 +331,42 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
         </div>
       )}
 
+      {/* Availability warning — shown when selected slot is outside teacher's set availability */}
+      {availabilityWarning && (
+        <div style={{
+          backgroundColor: '#FFFBEB', border: '1px solid #FCD34D',
+          borderRadius: '8px', padding: '14px 16px', marginTop: '16px',
+        }}>
+          <p style={{ fontSize: '13px', color: '#92400E', margin: '0 0 12px' }}>
+            This time slot is outside <strong>{selectedTeacherName}&apos;s</strong> set availability.
+            They have not indicated they are free at this time. Do you want to proceed anyway?
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => executeSave()}
+              disabled={saving}
+              style={{
+                padding: '8px 16px', borderRadius: '6px', border: 'none',
+                backgroundColor: '#F59E0B', color: 'white',
+                fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Proceed anyway
+            </button>
+            <button
+              onClick={() => setAvailabilityWarning(false)}
+              style={{
+                padding: '8px 16px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                backgroundColor: 'white', color: '#374151',
+                fontSize: '13px', cursor: 'pointer',
+              }}
+            >
+              Go back
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
         <Link href={`/admin/classes/${lesson.id}`} prefetch={false}>
           <button style={{
@@ -281,19 +376,21 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
             Cancel
           </button>
         </Link>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{
-            padding: '12px 28px', borderRadius: '8px', border: 'none',
-            backgroundColor: saving ? '#E5E7EB' : '#FF8303',
-            color: saving ? '#9CA3AF' : 'white',
-            fontSize: '14px', fontWeight: 600,
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
+        {!availabilityWarning && (
+          <button
+            onClick={handleSave}
+            disabled={saving || checkingAvailability}
+            style={{
+              padding: '12px 28px', borderRadius: '8px', border: 'none',
+              backgroundColor: saving || checkingAvailability ? '#E5E7EB' : '#FF8303',
+              color: saving || checkingAvailability ? '#9CA3AF' : 'white',
+              fontSize: '14px', fontWeight: 600,
+              cursor: saving || checkingAvailability ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {checkingAvailability ? 'Checking...' : saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        )}
       </div>
     </div>
   )
