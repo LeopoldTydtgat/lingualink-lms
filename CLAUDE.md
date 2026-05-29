@@ -2,15 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Session start (do this first, every session)
+
+1. Read this file, the nested CLAUDE.md for any path you'll touch, and the project KB.
+2. Verify repo ground truth before trusting any handover/brief claim about state:
+   `git fetch origin && git log origin/main..origin/dev --oneline`
+3. If the brief and git disagree about what's merged/committed, STOP and reconcile
+   with Leopold before doing any work. Handover claims about repo state are unverified
+   until git confirms them.
+
 ## Commands
 
 ```bash
 npm run dev       # Start development server (4GB Node memory allocated)
 npm run build     # Production build
 npm run lint      # Run ESLint
+npm test          # Run tests (vitest run)
 ```
 
-There are no automated tests. Verification is done manually via the browser.
+The Claude Code Stop hook runs `tsc --noEmit` and blocks turn-end on type errors; tests live at `src/**/*.test.ts` (Vitest).
 
 ## Architecture
 
@@ -125,13 +135,16 @@ SENTRY_DSN
 - **Pair `auth.admin.updateUserById` with `auth.admin.signOut(id, 'global')`.** `status` ('current'/'former'/'on_hold') is the canonical active-account gate.
 - **`.single()` throws on no-row; use `.maybeSingle()`** where zero rows are possible.
 - **Fail-safe fallbacks: action-prompting UI defaults to the prompting state on null** (`?? false` to show a banner, not `?? true`).
+- **Every factual claim about code, schema, or state must cite its source: file:line read this session, or actual tool/command output. Uncited claims must be prefixed `UNVERIFIED:`. 'I have not read X — paste it' is a correct, acceptable answer. Never fabricate to fill a gap.**
+- **Before editing any file, OUTPUT the grep'd list of downstream consumers and, for each, state why it is unaffected. Do not merely assert consumers were considered — show the list.**
 
 ## Known issues (as of April 2026)
 
 - Admin portal pages may timeout on Vercel Hobby plan (10 s limit) — a Pro upgrade is planned.
 - Several pages (`billing`, `messages`, `reports`, `schedule`) still have a false `if (!profile) redirect('/login')` guard that should be removed — profile null does not mean the user is unauthenticated.
 
-## Verification subagents
+## Verification subagents (auto-invoke — do not wait to be asked)
 
-- After schema/RLS/auth changes: invoke `supabase-rls-auditor`.
-- Before committing substantive logic: invoke `code-reviewer`.
+- code-reviewer: on ANY diff touching auth, hours/billing, Microsoft Graph, `src/proxy.ts`,
+  or any API write path. Also before committing any substantive logic change.
+- supabase-rls-auditor: on ANY schema, RLS, or data-access change.
