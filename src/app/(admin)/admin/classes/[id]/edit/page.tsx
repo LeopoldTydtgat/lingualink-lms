@@ -63,7 +63,7 @@ export default async function AdminEditClassPage({
   // Fetch all active teachers for the reassign dropdown
   const { data: teachers } = await supabase
     .from('profiles')
-    .select('id, full_name')
+    .select('id, full_name, timezone')
     .contains('account_types', ['teacher'])
     .eq('is_active', true)
     .order('full_name')

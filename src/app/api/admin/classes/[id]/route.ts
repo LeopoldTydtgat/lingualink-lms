@@ -249,6 +249,30 @@ export async function PATCH(
   const durationChanged = typeof fields.duration_minutes === 'number' && fields.duration_minutes !== existing.duration_minutes
   const teacherChanged = typeof fields.teacher_id === 'string' && fields.teacher_id !== existing.teacher_id
 
+  // Eligibility gate: when the assignment is actually changing, the new teacher must
+  // be an active teacher. status='current' is the canonical active-account gate;
+  // is_active is deprecated (CLAUDE.md L135 / JOURNAL Bug 8). Keyed on teacherChanged
+  // and placed independently of the scheduled_at block below, so a teacher-only
+  // reassignment (no time change) is still validated — and always before the update.
+  if (teacherChanged && fields.teacher_id) {
+    const { data: candidateTeacher, error: candidateError } = await adminClient
+      .from('profiles')
+      .select('status, account_types')
+      .eq('id', fields.teacher_id)
+      .maybeSingle()
+    if (candidateError) {
+      return NextResponse.json({ error: 'Failed to load teacher', code: 'TEACHER_LOOKUP_FAILED' }, { status: 500 })
+    }
+    const isEligibleTeacher =
+      !!candidateTeacher &&
+      candidateTeacher.status === 'current' &&
+      Array.isArray(candidateTeacher.account_types) &&
+      candidateTeacher.account_types.includes('teacher')
+    if (!isEligibleTeacher) {
+      return NextResponse.json({ error: 'Target teacher is not an active teacher', code: 'INVALID_TEACHER' }, { status: 400 })
+    }
+  }
+
   // Convert naive local scheduled_at to canonical UTC using the target teacher's
   // timezone. The "target" is the new teacher if reassigned, else the current.
   let scheduledAtUtc: string | undefined
