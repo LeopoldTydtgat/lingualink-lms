@@ -44,7 +44,17 @@ export async function PATCH(req: NextRequest) {
     .eq('id', invoiceId)
     .single()
   if (invoiceForTeacherLookup?.teacher_id) {
-    await recomputeInvoiceAmountsForTeacher(invoiceForTeacherLookup.teacher_id)
+    try {
+      await recomputeInvoiceAmountsForTeacher(invoiceForTeacherLookup.teacher_id)
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('TIMEZONE_MISSING:')) {
+        return NextResponse.json(
+          { error: 'TIMEZONE_MISSING', message: 'Cannot mark paid: the teacher has no timezone set. Set their timezone first.' },
+          { status: 422 }
+        )
+      }
+      throw err
+    }
   }
 
   const { error } = await supabase

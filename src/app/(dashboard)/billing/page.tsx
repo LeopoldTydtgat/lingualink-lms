@@ -38,7 +38,12 @@ export default async function BillingPage() {
     .eq('id', user.id)
     .single()
 
-  const tz = billingInfo?.timezone || 'UTC'
+  if (!billingInfo?.timezone) {
+    return (
+      <div className="p-8 text-gray-500">Your account is missing a timezone. Please contact admin to set it before billing can be displayed.</div>
+    )
+  }
+  const tz = billingInfo.timezone
   const currentMonthDate = getMonthKeyInTz(new Date(), tz)
 
   // ensureCurrentInvoice — moved here from BillingClient. Creates a 'pending'
