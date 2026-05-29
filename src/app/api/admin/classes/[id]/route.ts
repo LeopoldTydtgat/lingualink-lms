@@ -143,88 +143,53 @@ export async function PATCH(
 
   // --- CANCEL action ---
   if (fields.action === 'cancel') {
-    if (existing.status !== 'scheduled') {
-      return NextResponse.json(
-        { error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' },
-        { status: 400 }
-      )
-    }
-
     const { cancellation_reason, refund_hours } = fields
     const shouldRefund = refund_hours
     const hoursToRefund = existing.duration_minutes / 60
     const adminClient = createAdminClient()
 
-    // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
-    let graphSucceeded = true
+    // Cancel atomically — the RPC flips status, nulls teams_join_url, and conditionally
+    // refunds hours (gated on the admin's toggle) in ONE transaction. It is the single
+    // authority on cancellability. It deliberately does NOT touch teams_meeting_id;
+    // Graph teardown happens here AFTER the commit.
+    const { data: result, error: rpcError } = await adminClient.rpc('cancel_lesson_atomic', {
+      p_lesson_id: id,
+      p_cancelled_by: 'admin',
+      p_cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
+      p_should_refund: shouldRefund,
+    })
+    if (rpcError) {
+      console.error('CRITICAL: cancel_lesson_atomic RPC failed:', { lesson_id: id, error: rpcError })
+      return NextResponse.json({ error: 'Failed to cancel lesson' }, { status: 500 })
+    }
+    const r = result as { success: boolean; code?: string; refunded?: boolean; remaining_hours?: number }
+    if (!r.success) {
+      if (r.code === 'LESSON_NOT_FOUND') {
+        return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
+      }
+      if (r.code === 'LESSON_NOT_CANCELLABLE') {
+        return NextResponse.json(
+          { error: 'This lesson can no longer be cancelled. Please refresh and try again.', code: 'LESSON_NOT_CANCELLABLE' },
+          { status: 409 }
+        )
+      }
+      console.error('cancel_lesson_atomic unexpected failure:', { lesson_id: id, code: r.code })
+      return NextResponse.json({ error: 'Failed to cancel lesson' }, { status: 500 })
+    }
+    const refunded = r.refunded === true
+
+    // DB cancellation is durably committed. Teams teardown is now best-effort and AFTER commit
+    // so a Graph failure can never destroy a meeting for a still-scheduled lesson (NEW97).
     if (existing.teams_meeting_id) {
       try {
         await cancelTeamsMeeting(existing.teams_meeting_id)
+        await adminClient.from('lessons').update({ teams_meeting_id: null }).eq('id', id)
       } catch (teamsError) {
-        graphSucceeded = false
-        console.error('CRITICAL: orphan Teams meeting after admin cancel:', {
+        console.error('Orphan Teams meeting after cancel — sweeper will recover:', {
           teams_meeting_id: existing.teams_meeting_id,
           lesson_id: id,
           error: teamsError,
         })
-      }
-    }
-
-    // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed).
-    // hours_refunded is owned by the refund_hours_atomic RPC and set only on a successful refund.
-    const updatePayload: Record<string, unknown> = {
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancellation_reason: cancellation_reason ?? 'Cancelled by admin',
-      cancelled_by: 'admin',
-      teams_join_url: null,
-      updated_at: new Date().toISOString(),
-    }
-    if (graphSucceeded) {
-      updatePayload.teams_meeting_id = null
-    }
-
-    const { data: updated, error: cancelError } = await adminClient
-      .from('lessons')
-      .update(updatePayload)
-      .eq('id', id)
-      .eq('status', 'scheduled')
-      .select('id')
-
-    if (cancelError) {
-      return NextResponse.json({ error: cancelError.message }, { status: 500 })
-    }
-    if (!updated || updated.length === 0) {
-      console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: id })
-      return NextResponse.json({ error: 'Cancel affected no rows' }, { status: 500 })
-    }
-
-    // Refund hours to training — gated on admin's toggle choice.
-    // Atomic RPC locks the training and the lesson row, checks hours_refunded for
-    // idempotency, sets the flag on success, and clamps at zero, all in one txn.
-    if (shouldRefund) {
-      const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-        p_training_id: existing.training_id,
-        p_hours: hoursToRefund,
-        p_lesson_id: existing.id,
-      })
-      if (refundError) {
-        return NextResponse.json(
-          { error: 'Failed to refund hours', details: refundError.message },
-          { status: 500 }
-        )
-      }
-      if (
-        refundResult &&
-        typeof refundResult === 'object' &&
-        'success' in refundResult &&
-        (refundResult as { success: boolean }).success === false
-      ) {
-        const code = (refundResult as { code?: string }).code
-        return NextResponse.json(
-          { error: 'Refund could not be processed', code },
-          { status: 400 }
-        )
       }
     }
 
@@ -243,7 +208,7 @@ export async function PATCH(
         .single()
 
       if (studentData?.email) {
-        const emailHoursValue = shouldRefund ? hoursToRefund : 0
+        const emailHoursValue = refunded ? hoursToRefund : 0
         const emailBody = studentCancellationByAdminEmailContent(
           teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
@@ -288,12 +253,18 @@ export async function PATCH(
   let scheduledAtUtc: string | undefined
   if (fields.scheduled_at !== undefined) {
     const targetTeacherId = fields.teacher_id ?? existing.teacher_id
-    const { data: targetTeacherProfile } = await adminClient
+    const { data: targetTeacherProfile, error: tzError } = await adminClient
       .from('profiles')
       .select('timezone')
       .eq('id', targetTeacherId)
-      .single()
-    const targetTimezone = targetTeacherProfile?.timezone || 'UTC'
+      .maybeSingle()
+    if (tzError) {
+      return NextResponse.json({ error: 'Failed to load teacher timezone', code: 'TIMEZONE_LOOKUP_FAILED' }, { status: 500 })
+    }
+    if (!targetTeacherProfile?.timezone) {
+      return NextResponse.json({ error: 'Target teacher has no timezone set', code: 'TIMEZONE_MISSING' }, { status: 422 })
+    }
+    const targetTimezone = targetTeacherProfile.timezone
     scheduledAtUtc = localToUtc(fields.scheduled_at, targetTimezone)
 
     if (new Date(scheduledAtUtc).getTime() < Date.now()) {

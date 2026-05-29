@@ -1,3 +1,43 @@
+## Session 111 - 29 May 2026 - Timezone fallback consolidation (computation tier)
+
+### What was built
+- Made profiles.timezone and students.timezone fail-closed at the schema level: both already NOT NULL, dropped the 'Europe/London' column default via the SQL editor. Confirmed zero null rows beforehand and that both account-creation paths enforce a timezone, so no row can be null and no insert can silently inherit a default zone.
+- Removed silent timezone fallbacks from 7 computation-critical sites that fed UTC-instant calculation and slot matching. A missing timezone now surfaces as a thrown error, a 4xx or 5xx JSON response, or a blocked UI with a clear message, depending on the site, rather than silently computing against a guessed zone.
+  - src/lib/availability.ts (slot availability check)
+  - src/app/api/student/availability/route.ts (teacher timezone, plus validation of the caller-supplied timezone query param)
+  - src/app/api/admin/classes/route.ts (admin create)
+  - src/app/api/admin/classes/[id]/route.ts (admin reschedule or reassign)
+  - src/app/(admin)/admin/classes/new/BookingFlowClient.tsx (admin booking, now passes the teacher timezone to the availability endpoint)
+  - src/app/(admin)/admin/classes/[id]/edit/EditClassClient.tsx (admin edit)
+
+### Break/Fix Log
+Issue 1: Same teacher could be treated as one timezone for slot computation but a different timezone for the confirmation email. Symptom: a teacher with no timezone fell back to UTC when checking availability but to a regional zone when formatting email, internally contradictory. Cause: each code path carried its own hardcoded fallback. Fix: removed the fallbacks entirely and made the schema guarantee a non-null timezone on every row. Lesson: with a hard NOT NULL guarantee at the database level, the right move is to delete the application fallbacks, not reconcile them, since any future null is then a real bug that should surface loudly rather than be papered over with a guess.
+
+Issue 2: A bogus teacher id on the admin reschedule path computed the scheduled time against a guessed UTC zone before the database foreign key rejected the row. Symptom: a wrong stored instant was calculated against the wrong zone. Cause: a silent UTC fallback on the timezone lookup. Fix: the path now returns a clear error when the timezone is missing rather than computing against a guess. Note: this resolves only the silent-fallback half of that issue; validating that the target is an active teacher remains open as its own item.
+
+### Session result
+Consolidated the timezone handling so the system never guesses a zone when computing an actual class time. Drove this from the database upward: confirmed the columns were safe to lock down, removed the column default so the schema is genuinely fail-closed, then stripped the guessed fallbacks from every calculation path and replaced them with explicit errors. Verified with a clean type check, the full test suite passing, and lint clean on every changed file. The display layer and a separate input-validation tightening on the booking schema remain scoped for a later session.
+
+---
+
+## Session 110 - 29 May 2026 - Cancel-path partial-success cluster
+
+### What was built
+- New Postgres RPC cancel_lesson_atomic (status flip, teams_join_url null, and conditional hours refund in a single transaction), archived as supabase/migrations/add_cancel_lesson_atomic.sql
+- Rewired all three cancel handlers (student, teacher, admin) to call the RPC, with Teams meeting teardown moved to a best-effort step after the transaction commits
+- Brought the teacher cancel path to RLS parity with the student path
+
+### Break/Fix Log
+Issue 1 (NEW98): Symptom: cancellation status was committed before the separate refund call, so a refund failure left a lesson cancelled with hours not refunded. Cause: status flip and refund ran as two transactions. Fix: cancel_lesson_atomic commits both in one transaction, so a refund failure rolls back the cancellation. Lesson: a money-affecting mutation and the state change that triggers it must share one transaction.
+Issue 2 (NEW97): Symptom: a concurrent cancel could destroy the Teams meeting then fail the database update, leaving a scheduled lesson with no meeting. Cause: the Graph delete ran before the guarded update. Fix: Graph teardown now runs after the transaction commits, best-effort, with the sweeper recovering any orphan. Lesson: irreversible external side effects belong after the durable local commit, never before.
+Issue 3 (NEW118): Symptom: the teacher cancel path read the lesson via the service-role client with only a manual ownership check, while the student path used a row-scoped read. Fix: swapped the teacher fetch to the row-scoped client filtered on teacher id, after confirming the live access policy carries no status predicate, and switched to a null-tolerant single-row read since a not-visible row is now an expected outcome. Lesson: verify the actual access policy before changing which client performs a read.
+Issue 4 (NEW117, NEW125, NEW101, NEW124): NEW117 closed as moot (the RPC returns the balance; the page refetches it anyway). NEW125 fixed (the RPC returns distinct codes; not-cancellable now maps to 409). NEW101 and the related schema query closed as stale (the training id column is not nullable). NEW124 closed as not-a-bug (the student and teacher time rules differ by design).
+
+### Session result
+Closed the cancel-path partial-success cluster that was blocking the timezone consolidation work. The fix replaced a two-transaction cancel-then-refund sequence, duplicated across three handlers, with a single atomic RPC, and moved the external Teams call to a safe post-commit position. All forty-three tests pass and typecheck is clean. Two commits on the working branch, not yet pushed; nothing is live.
+
+---
+
 ## Session 109 - 29 May 2026 - Teams meeting orphan cleanup and workflow hardening
 
 ### What was built

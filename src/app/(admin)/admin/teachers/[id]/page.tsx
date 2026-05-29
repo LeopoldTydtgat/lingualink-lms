@@ -39,7 +39,11 @@ export default async function TeacherDetailPage({
 
   // Sync amount_eur for this teacher so the Invoices tab matches the latest
   // billable-lesson total.
-  await recomputeInvoiceAmountsForTeacher(id)
+  try {
+    await recomputeInvoiceAmountsForTeacher(id)
+  } catch (err) {
+    console.error('CRITICAL: teacher detail recompute failed', { teacher_id: id, error: err })
+  }
 
   // Fetch teacher's invoices
   const { data: invoices } = await supabase
