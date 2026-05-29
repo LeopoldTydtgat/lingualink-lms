@@ -38,7 +38,10 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
   const hourlyRate = Number(teacher?.hourly_rate ?? 0)
   if (!teacher || hourlyRate <= 0) return
 
-  const tz = teacher.timezone || 'UTC'
+  if (!teacher.timezone) {
+    throw new Error(`TIMEZONE_MISSING:${teacherId}`)
+  }
+  const tz = teacher.timezone
 
   const { data: invoices } = await admin
     .from('invoices')
@@ -99,6 +102,11 @@ export async function recomputeInvoiceAmountsForAllTeachers(): Promise<void> {
   const BATCH = 5
   for (let i = 0; i < ids.length; i += BATCH) {
     const slice = ids.slice(i, i + BATCH)
-    await Promise.all(slice.map(id => recomputeInvoiceAmountsForTeacher(id)))
+    const results = await Promise.allSettled(slice.map(id => recomputeInvoiceAmountsForTeacher(id)))
+    results.forEach((r, idx) => {
+      if (r.status === 'rejected') {
+        console.error('recomputeInvoiceAmountsForAllTeachers: teacher recompute failed', { teacher_id: slice[idx], error: r.reason })
+      }
+    })
   }
 }

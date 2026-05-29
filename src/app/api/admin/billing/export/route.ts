@@ -79,7 +79,17 @@ export async function GET(req: NextRequest) {
     // Refresh amount_eur before export so the CSV matches the admin Billing
     // page header. Scope to one teacher when filtered, else recompute everyone.
     if (teacherId) {
-      await recomputeInvoiceAmountsForTeacher(teacherId)
+      try {
+        await recomputeInvoiceAmountsForTeacher(teacherId)
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('TIMEZONE_MISSING:')) {
+          return NextResponse.json(
+            { error: 'TIMEZONE_MISSING', message: 'This teacher has no timezone set. Set it before exporting.' },
+            { status: 422 }
+          )
+        }
+        throw err
+      }
     } else {
       await recomputeInvoiceAmountsForAllTeachers()
     }
@@ -149,6 +159,8 @@ export async function GET(req: NextRequest) {
       totalOwed: number
     }> = {}
 
+    const missingTzTeachers = new Set<string>()
+
     for (const lesson of (lessons || [])) {
       const teacher = (teachers || []).find(t => t.id === lesson.teacher_id)
       if (!teacher) continue
@@ -163,7 +175,11 @@ export async function GET(req: NextRequest) {
       })
       if (!bill.billableToTeacher) continue
 
-      const monthKey = getMonthKeyInTz(new Date(lesson.scheduled_at), teacher.timezone || 'UTC')
+      if (!teacher.timezone) {
+        missingTzTeachers.add(teacher.id)
+        continue
+      }
+      const monthKey = getMonthKeyInTz(new Date(lesson.scheduled_at), teacher.timezone)
       const mapKey = `${teacher.id}_${monthKey}`
 
       if (!earningsMap[mapKey]) {
@@ -185,6 +201,13 @@ export async function GET(req: NextRequest) {
       if (lesson.status === 'student_no_show') entry.noShows++
       entry.totalHours += lesson.duration_minutes / 60
       entry.totalOwed += bill.amount
+    }
+
+    if (missingTzTeachers.size > 0) {
+      return NextResponse.json(
+        { error: 'TIMEZONE_MISSING', message: `Cannot export earnings: ${missingTzTeachers.size} teacher(s) have no timezone set. Set their timezones before exporting.` },
+        { status: 422 }
+      )
     }
 
     const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed', 'Currency']

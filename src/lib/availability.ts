@@ -44,12 +44,18 @@ export async function isSlotAvailable(
   durationMinutes: number,
   adminClient: AdminClient
 ): Promise<boolean> {
-  const { data: teacherProfile } = await adminClient
+  const { data: teacherProfile, error: tzError } = await adminClient
     .from('profiles')
     .select('timezone')
     .eq('id', teacherId)
-    .single()
-  const teacherTimezone = teacherProfile?.timezone ?? 'UTC'
+    .maybeSingle()
+  if (tzError) {
+    throw new Error(`isSlotAvailable: timezone lookup failed for teacher ${teacherId}: ${tzError.message}`)
+  }
+  if (!teacherProfile?.timezone) {
+    throw new Error(`isSlotAvailable: teacher ${teacherId} has no timezone set`)
+  }
+  const teacherTimezone = teacherProfile.timezone
 
   const dateStr = scheduledAtUtc.slice(0, 10) // YYYY-MM-DD in UTC
 

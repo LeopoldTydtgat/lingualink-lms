@@ -27,7 +27,8 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
     .single()
   if (!student) return { success: false, error: 'Student not found' }
 
-  // Get the lesson — confirm it belongs to this student and is not already cancelled
+  // Get the lesson — confirm it belongs to this student. Cancellability is now decided
+  // by the RPC (the single authority), so no status pre-check here.
   const { data: lesson } = await supabase
     .from('lessons')
     .select('id, student_id, training_id, teacher_id, scheduled_at, duration_minutes, status, teams_meeting_id')
@@ -36,9 +37,6 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
     .single()
 
   if (!lesson) return { success: false, error: 'Lesson not found' }
-  if (lesson.status !== 'scheduled') {
-    return { success: false, error: 'Lesson cannot be cancelled in its current state', code: 'LESSON_NOT_CANCELLABLE' }
-  }
 
   // Fetch teacher profile for email
   const adminClient = createAdminClient()
@@ -55,79 +53,42 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
   const isRefundable = hoursUntilClass > 24
   const hoursToRefund = lesson.duration_minutes / 60
 
-  // Graph DELETE first — leave teams_meeting_id set if Graph fails so cleanup script can recover
-  let graphSucceeded = true
+  // Cancel atomically — the RPC flips status, nulls teams_join_url, and conditionally
+  // refunds hours in ONE transaction. It deliberately does NOT touch teams_meeting_id;
+  // Graph teardown happens here AFTER the commit.
+  const { data: result, error: rpcError } = await adminClient.rpc('cancel_lesson_atomic', {
+    p_lesson_id: lessonId,
+    p_cancelled_by: 'student',
+    p_cancellation_reason: 'Cancelled by student',
+    p_should_refund: isRefundable,
+  })
+  if (rpcError) {
+    console.error('CRITICAL: cancel_lesson_atomic RPC failed:', { lesson_id: lessonId, error: rpcError })
+    return { success: false, error: 'Failed to cancel lesson' }
+  }
+  const r = result as { success: boolean; code?: string; refunded?: boolean; remaining_hours?: number }
+  if (!r.success) {
+    if (r.code === 'LESSON_NOT_FOUND') return { success: false, error: 'Lesson not found' }
+    if (r.code === 'LESSON_NOT_CANCELLABLE') {
+      return { success: false, error: 'This lesson can no longer be cancelled. Please refresh and try again.', code: 'LESSON_NOT_CANCELLABLE' }
+    }
+    console.error('cancel_lesson_atomic unexpected failure:', { lesson_id: lessonId, code: r.code })
+    return { success: false, error: 'Failed to cancel lesson' }
+  }
+  const refunded = r.refunded === true
+
+  // DB cancellation is durably committed. Teams teardown is now best-effort and AFTER commit
+  // so a Graph failure can never destroy a meeting for a still-scheduled lesson (NEW97).
   if (lesson.teams_meeting_id) {
     try {
       await cancelTeamsMeeting(lesson.teams_meeting_id)
+      await adminClient.from('lessons').update({ teams_meeting_id: null }).eq('id', lessonId)
     } catch (teamsError) {
-      graphSucceeded = false
-      console.error('CRITICAL: orphan Teams meeting after student cancel:', {
+      console.error('Orphan Teams meeting after cancel — sweeper will recover:', {
         teams_meeting_id: lesson.teams_meeting_id,
         lesson_id: lessonId,
         error: teamsError,
       })
-    }
-  }
-
-  // DB UPDATE — null teams_meeting_id only if Graph succeeded (or no meeting existed)
-  const updatePayload: Record<string, unknown> = {
-    status: 'cancelled_by_student',
-    cancelled_at: new Date().toISOString(),
-    cancellation_reason: 'Cancelled by student',
-    cancelled_by: 'student',
-    teams_join_url: null,
-    updated_at: new Date().toISOString(),
-  }
-  if (graphSucceeded) {
-    updatePayload.teams_meeting_id = null
-  }
-
-  const { data: updated, error: cancelError } = await adminClient
-    .from('lessons')
-    .update(updatePayload)
-    .eq('id', lessonId)
-    .eq('status', 'scheduled')
-    .select('id')
-
-  if (cancelError) return { success: false, error: 'Failed to cancel lesson' }
-  if (!updated || updated.length === 0) {
-    console.error('CRITICAL: cancel UPDATE affected 0 rows:', { lesson_id: lessonId })
-    return { success: false, error: 'Failed to cancel lesson' }
-  }
-
-  // Refund hours to training — atomic RPC locks the training and the lesson row, checks
-  // hours_refunded for idempotency, sets the flag on success, and clamps at zero, all in one txn.
-  if (isRefundable && lesson.training_id) {
-    const { data: refundResult, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-      p_training_id: lesson.training_id,
-      p_hours: hoursToRefund,
-      p_lesson_id: lesson.id,
-    })
-    if (refundError) {
-      console.error('CRITICAL: refund_hours_atomic RPC failed after student cancel:', {
-        lesson_id: lessonId,
-        training_id: lesson.training_id,
-        error: refundError,
-      })
-      return { success: false, error: 'Failed to refund hours' }
-    }
-    if (
-      refundResult &&
-      typeof refundResult === 'object' &&
-      'success' in refundResult &&
-      (refundResult as { success: boolean }).success === false
-    ) {
-      const code = (refundResult as { code?: string }).code
-      console.error('refund_hours_atomic returned failure after student cancel:', {
-        lesson_id: lessonId,
-        training_id: lesson.training_id,
-        code,
-      })
-      if (code === 'ALREADY_REFUNDED') {
-        return { success: false, error: 'This lesson has already been refunded' }
-      }
-      return { success: false, error: 'Failed to refund hours' }
     }
   }
 
@@ -148,7 +109,7 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
           bodyHtml: studentCancellationByStudentEmailContent(
             teacher?.full_name ?? 'Your teacher',
             lesson.scheduled_at,
-            isRefundable ? hoursToRefund : 0,
+            refunded ? hoursToRefund : 0,
             studentTimezone
           ),
           contactEmail: 'support@lingualinkonline.com',
@@ -185,5 +146,5 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
   revalidatePath('/upcoming-classes')
   revalidatePath('/student/my-classes')
   revalidatePath('/admin/classes')
-  return { success: true, refunded: isRefundable }
+  return { success: true, refunded }
 }
