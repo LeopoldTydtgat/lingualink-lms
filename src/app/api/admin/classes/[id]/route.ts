@@ -464,7 +464,7 @@ export async function PATCH(
           .update({ teams_meeting_id: meeting.meetingId, teams_join_url: meeting.joinUrl })
           .eq('id', id)
         if (graphUpdateError) {
-          console.error('CRITICAL: Teams meeting created but DB write failed', { lesson_id: id, meetingId: meeting.meetingId, error: graphUpdateError })
+          console.error('CRITICAL: Teams meeting created but DB write failed', { teams_meeting_id: meeting.meetingId, lesson_id: id, error: graphUpdateError })
         }
       } catch (graphError) {
         console.error('CRITICAL: Teams meeting orphan fallback creation failed', { lesson_id: id, error: graphError })
