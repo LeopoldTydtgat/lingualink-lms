@@ -156,15 +156,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  // Fetch teacher timezone
+  // Fetch teacher timezone + eligibility fields
   const adminClient = createAdminClient()
   const { data: teacherProfile, error: tzError } = await adminClient
     .from('profiles')
-    .select('timezone')
+    .select('timezone, status, account_types')
     .eq('id', teacher_id)
     .maybeSingle()
   if (tzError) {
     return NextResponse.json({ error: 'Failed to load teacher timezone' }, { status: 500 })
+  }
+  // Eligibility gate: the assignment target must be an active teacher. status='current'
+  // is the canonical active-account gate; is_active is deprecated (CLAUDE.md L135 /
+  // JOURNAL Bug 8). Runs before scheduledAtUtc and before the lesson insert.
+  const isEligibleTeacher =
+    !!teacherProfile &&
+    teacherProfile.status === 'current' &&
+    Array.isArray(teacherProfile.account_types) &&
+    teacherProfile.account_types.includes('teacher')
+  if (!isEligibleTeacher) {
+    return NextResponse.json({ error: 'Target teacher is not an active teacher', code: 'INVALID_TEACHER' }, { status: 400 })
   }
   if (!teacherProfile?.timezone) {
     return NextResponse.json({ error: 'Teacher not found or has no timezone set' }, { status: 404 })
