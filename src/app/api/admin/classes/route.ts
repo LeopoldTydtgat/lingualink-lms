@@ -294,7 +294,12 @@ export async function POST(request: NextRequest) {
       p_hours: hoursRequested,
     })
     if (refundError) {
-      console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+      console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', {
+        training_id,
+        student_id,
+        lesson_id: null,
+        error: refundError,
+      })
     }
 
     if (isSlotConflict) {

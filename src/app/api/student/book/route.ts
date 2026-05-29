@@ -381,7 +381,12 @@ export async function POST(req: NextRequest) {
         // to 'scheduled' with its original Teams link intact - the student's
         // working URL survives.
         console.error('Failed to create lesson during reschedule. Attempting unwind.', {
-          rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, error: lessonError,
+          lesson_id: rescheduleId,
+          training_id: trainingId,
+          student_id: studentId,
+          old_duration_hours: oldDurationHours,
+          new_hours_needed: hoursNeeded,
+          error: lessonError,
         })
         const { error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
           p_old_lesson_id: rescheduleId,
@@ -391,7 +396,12 @@ export async function POST(req: NextRequest) {
         })
         if (unwindError) {
           console.error('CRITICAL: unwind_reschedule_atomic failed. Manual reconciliation required.', {
-            rescheduleId, trainingId, studentId, oldDurationHours, newHoursNeeded: hoursNeeded, error: unwindError,
+            lesson_id: rescheduleId,
+            training_id: trainingId,
+            student_id: studentId,
+            old_duration_hours: oldDurationHours,
+            new_hours_needed: hoursNeeded,
+            error: unwindError,
           })
         }
         if (teamsMeetingId) {
@@ -399,7 +409,9 @@ export async function POST(req: NextRequest) {
             await cancelTeamsMeeting(teamsMeetingId)
           } catch (cancelError) {
             console.error('CRITICAL: orphan Teams meeting after reschedule unwind:', {
-              teamsMeetingId, rescheduleId, error: cancelError,
+              teams_meeting_id: teamsMeetingId,
+              lesson_id: rescheduleId,
+              error: cancelError,
             })
           }
         }
@@ -429,7 +441,12 @@ export async function POST(req: NextRequest) {
           p_hours: hoursNeeded,
         })
         if (refundError) {
-          console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', refundError)
+          console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', {
+            training_id: trainingId,
+            student_id: studentId,
+            lesson_id: null,
+            error: refundError,
+          })
         }
 
         if (isSlotConflict) {
