@@ -1,3 +1,21 @@
+## Session 110 - 29 May 2026 - Cancel-path partial-success cluster
+
+### What was built
+- New Postgres RPC cancel_lesson_atomic (status flip, teams_join_url null, and conditional hours refund in a single transaction), archived as supabase/migrations/add_cancel_lesson_atomic.sql
+- Rewired all three cancel handlers (student, teacher, admin) to call the RPC, with Teams meeting teardown moved to a best-effort step after the transaction commits
+- Brought the teacher cancel path to RLS parity with the student path
+
+### Break/Fix Log
+Issue 1 (NEW98): Symptom: cancellation status was committed before the separate refund call, so a refund failure left a lesson cancelled with hours not refunded. Cause: status flip and refund ran as two transactions. Fix: cancel_lesson_atomic commits both in one transaction, so a refund failure rolls back the cancellation. Lesson: a money-affecting mutation and the state change that triggers it must share one transaction.
+Issue 2 (NEW97): Symptom: a concurrent cancel could destroy the Teams meeting then fail the database update, leaving a scheduled lesson with no meeting. Cause: the Graph delete ran before the guarded update. Fix: Graph teardown now runs after the transaction commits, best-effort, with the sweeper recovering any orphan. Lesson: irreversible external side effects belong after the durable local commit, never before.
+Issue 3 (NEW118): Symptom: the teacher cancel path read the lesson via the service-role client with only a manual ownership check, while the student path used a row-scoped read. Fix: swapped the teacher fetch to the row-scoped client filtered on teacher id, after confirming the live access policy carries no status predicate, and switched to a null-tolerant single-row read since a not-visible row is now an expected outcome. Lesson: verify the actual access policy before changing which client performs a read.
+Issue 4 (NEW117, NEW125, NEW101, NEW124): NEW117 closed as moot (the RPC returns the balance; the page refetches it anyway). NEW125 fixed (the RPC returns distinct codes; not-cancellable now maps to 409). NEW101 and the related schema query closed as stale (the training id column is not nullable). NEW124 closed as not-a-bug (the student and teacher time rules differ by design).
+
+### Session result
+Closed the cancel-path partial-success cluster that was blocking the timezone consolidation work. The fix replaced a two-transaction cancel-then-refund sequence, duplicated across three handlers, with a single atomic RPC, and moved the external Teams call to a safe post-commit position. All forty-three tests pass and typecheck is clean. Two commits on the working branch, not yet pushed; nothing is live.
+
+---
+
 ## Session 109 - 29 May 2026 - Teams meeting orphan cleanup and workflow hardening
 
 ### What was built
