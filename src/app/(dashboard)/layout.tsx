@@ -74,16 +74,12 @@ export default async function DashboardLayout({
 
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
-  const tz = profile?.timezone ?? 'UTC'
-  const { startUtc, endUtc } = getMonthRangeInTz(now, tz)
-
-  const { data: monthLessons } = await supabase
-    .from('lessons')
-    .select('duration_minutes, status, cancelled_at, scheduled_at')
-    .eq('teacher_id', profile?.id)
-    .gte('scheduled_at', startUtc)
-    .lt('scheduled_at', endUtc)
-    .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
+  // Fail-SAFE (not fail-closed): this is the shell layout. A null timezone must
+  // degrade only the right-panel billing widget — never throw, which would bubble
+  // past the (dashboard) group to app/error.tsx and lock the teacher out of the
+  // ENTIRE portal (no error.tsx exists at this level). The canonical invoice amount
+  // is computed and guarded on the billing page, not here. Surface the null via log.
+  const tz = profile.timezone
 
   const { data: rateRow } = await admin
     .from('profiles')
@@ -96,9 +92,30 @@ export default async function DashboardLayout({
   let currentAmount = 0
   let projectedAmount = 0
 
-  for (const lesson of monthLessons ?? []) {
-    if (lesson.status !== 'scheduled') {
-      const bill = getBillability({
+  if (tz) {
+    const { startUtc, endUtc } = getMonthRangeInTz(now, tz)
+
+    const { data: monthLessons } = await supabase
+      .from('lessons')
+      .select('duration_minutes, status, cancelled_at, scheduled_at')
+      .eq('teacher_id', profile.id)
+      .gte('scheduled_at', startUtc)
+      .lt('scheduled_at', endUtc)
+      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
+
+    for (const lesson of monthLessons ?? []) {
+      if (lesson.status !== 'scheduled') {
+        const bill = getBillability({
+          status: lesson.status,
+          scheduledAt: lesson.scheduled_at,
+          cancelledAt: lesson.cancelled_at,
+          cancellationPolicy: null,
+          hourlyRate,
+          durationMinutes: lesson.duration_minutes,
+        })
+        if (bill.billableToTeacher) currentAmount += bill.amount
+      }
+      projectedAmount += getProjectedAmount({
         status: lesson.status,
         scheduledAt: lesson.scheduled_at,
         cancelledAt: lesson.cancelled_at,
@@ -106,16 +123,9 @@ export default async function DashboardLayout({
         hourlyRate,
         durationMinutes: lesson.duration_minutes,
       })
-      if (bill.billableToTeacher) currentAmount += bill.amount
     }
-    projectedAmount += getProjectedAmount({
-      status: lesson.status,
-      scheduledAt: lesson.scheduled_at,
-      cancelledAt: lesson.cancelled_at,
-      cancellationPolicy: null,
-      hourlyRate,
-      durationMinutes: lesson.duration_minutes,
-    })
+  } else {
+    console.error('CRITICAL: teacher timezone is null - billing widget degraded to zero, portal preserved', { teacher_id: profile.id })
   }
 
   const billingData = { currentAmount, projectedAmount }
