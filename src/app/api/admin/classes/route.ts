@@ -10,6 +10,7 @@ import {
   studentBookingConfirmationEmailContent,
 } from '@/lib/email/templates'
 import { localToUtc } from '@/lib/utils/timezone'
+import { requireTz } from '@/lib/time/requireTz'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -339,7 +340,7 @@ export async function POST(request: NextRequest) {
         studentData?.full_name ?? 'Your student',
         scheduledAtUtc,
         duration_minutes,
-        teacherProfile.timezone ?? 'UTC'
+        requireTz(teacherProfile.timezone, 'admin-book:teacher')
       )
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',
@@ -360,7 +361,7 @@ export async function POST(request: NextRequest) {
         teacherProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
-        studentData.timezone ?? 'UTC'
+        requireTz(studentData.timezone, 'admin-book:student')
       )
       await resend.emails.send({
         from: 'no-reply@lingualinkonline.com',

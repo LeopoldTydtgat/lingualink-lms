@@ -11,6 +11,7 @@ import {
 } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import type { CancelResult } from '@/lib/types/cancel'
+import { requireTz } from '@/lib/time/requireTz'
 
 export async function cancelLessonAction(lessonId: string): Promise<CancelResult> {
   const supabase = await createClient()
@@ -94,8 +95,8 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
 
   // Send cancellation emails — failures must not block the cancellation
   try {
-    const studentTimezone = student.timezone ?? 'Europe/London'
-    const teacherTimezone = teacher?.timezone ?? 'Africa/Johannesburg'
+    const studentTimezone = requireTz(student.timezone, 'cancel-by-student:student')
+    const teacherTimezone = requireTz(teacher?.timezone, 'cancel-by-student:teacher')
 
     const emailPromises: Promise<unknown>[] = [
       resend.emails.send({

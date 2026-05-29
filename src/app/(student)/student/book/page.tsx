@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import BookingClient from './BookingClient'
+import { requireTz } from '@/lib/time/requireTz'
 
 export default async function BookPage({
   searchParams,
@@ -90,7 +91,7 @@ export default async function BookPage({
   return (
     <BookingClient
       studentId={student.id}
-      studentTimezone={student.timezone ?? 'Europe/London'}
+      studentTimezone={requireTz(student.timezone, 'book:student')}
       trainingId={training.id}
       hoursRemaining={hoursRemaining}
       teachers={teachers}
