@@ -1,3 +1,31 @@
+## Session 117 - 29 May 2026 - Admin class write-path teacher-eligibility validation
+
+### What was built
+- Added a teacher-eligibility gate to both admin class write-paths: POST /api/admin/classes and PATCH /api/admin/classes/[id]
+- Before a teacher is assigned to a lesson, the target is validated as an active teacher: a profiles row with status equal to current and account_types containing teacher
+- Uses status as the canonical active-account gate rather than the deprecated is_active column
+- Gate fails closed and returns a 400 INVALID_TEACHER response on ineligibility
+- POST: widened the existing teacher-timezone lookup to also select status and account_types; the check runs before the time conversion and before the lesson insert
+- PATCH: the check is keyed on an actual teacher change and placed independently of the time-change branch, so a teacher-only reassignment with no time change is now validated as well, which the previous code path did not cover
+
+### Break/Fix Log
+Issue 1: Admin could assign a former or non-teacher account to a class.
+- Symptom: both write-paths selected only the timezone column before assigning a teacher, so a profiles row that was not a teacher, or was former or on hold, passed validation until the database foreign key rejected a genuinely nonexistent id. A surviving but former teacher row was accepted.
+- Cause: no role or active-status check on the assignment target before the write.
+- Fix: a single server-side eligibility check on each path, gating on status current plus teacher membership in account_types, placed ahead of every point where teacher_id reaches the database.
+- Lesson: the read-path teacher dropdowns still filter on the deprecated is_active column while the write-path now uses status, so the two can diverge. Logged as a separate follow-up for the is_active phase-out.
+
+Issue 2: Stale tracking notes were driving work toward already-closed items.
+- Symptom: the working handover described a cancel-path cluster and a timezone consolidation as open, when the bug log showed both fully closed several sessions earlier.
+- Cause: carried-forward summary text was not reconciled against the bug log before planning.
+- Fix: verified every target against the bug log and the actual source before any edit, then corrected the stale annotations so future sessions are not misdirected.
+- Lesson: the bug log is the single source of truth. Always reconcile a handover against it and against git before acting.
+
+### Session result
+Hardened both admin class write-paths so only an active teacher can be assigned to a lesson, closing a real assignment hole ahead of the repository going public. Both verification subagents passed, the change is committed to the development branch, and the divergence between the new status gate and the older is_active dropdowns is recorded as a scoped follow-up. Two phantom targets from the handover were caught by checking ground truth first, and the misleading tracking notes were corrected.
+
+---
+
 ## Session 115 - 29 May 2026 - Teams orphan cleanup and timezone reconciliation
 
 ### What was built
