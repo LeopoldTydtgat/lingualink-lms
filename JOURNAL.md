@@ -1,3 +1,22 @@
+## Session 118 - 30 May 2026 - Align admin class teacher dropdowns to status gate
+
+### What was built
+- Migrated the three admin class teacher-dropdown queries to filter on the canonical status field equal to current, replacing a deprecated active flag, so they match the server-side teacher-eligibility gate added in the previous session
+- Files: the new-class page, the class edit page, and the class list page
+- Effect: the dropdowns now list only current teachers, so a former teacher can no longer be picked and then rejected by the write-path validation at submit as a confusing dead-end
+
+### Break/Fix Log
+Issue 1: Admin class teacher dropdowns could surface a former teacher.
+- Symptom: three class teacher pickers filtered on a deprecated active flag that the teacher-archive update no longer maintains, so an archived teacher whose stale flag was still true appeared in the dropdown, could be selected, and was only rejected at submit by the write-path check.
+- Cause: the archive update writes the canonical status field but not the legacy active flag, so the two could diverge while the dropdowns still read the legacy flag.
+- Fix: migrated the three dropdown queries to filter on status equal to current, identical to the assignment gate, so dropdown and validation now agree. The deprecated flag was deliberately not restored in the archive write, since fixing the readers makes its stale value irrelevant.
+- Lesson: when a column is being phased out, point the readers at the canonical source rather than reviving writes to the deprecated one.
+
+### Session result
+Closed the divergence between the admin class teacher dropdowns and the write-path eligibility gate by migrating the three class dropdown queries to the canonical status field. A read-only audit of every active-flag usage across the codebase confirmed the scope and surfaced a fourth teacher picker on the student-create page with the same staleness, which was deferred to a separate backlog item because it sits on the legacy role column, includes admin accounts, and would need the admin rows verified for a populated status before a safe migration. The change is one line per file, the typecheck passed, the code review subagent returned clean, and the work is committed to the development branch and not yet pushed.
+
+---
+
 ## Session 117 - 29 May 2026 - Admin class write-path teacher-eligibility validation
 
 ### What was built
