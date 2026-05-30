@@ -1,3 +1,20 @@
+## Session 119 - 30 May 2026 - Three consistency fixes: teacher-picker status gate, invoice-ref collisions, viewer-timezone
+
+### What was built
+- Migrated the admin student-create teacher picker (src/app/(admin)/admin/students/new/page.tsx) from the deprecated is_active filter to the canonical status='current' gate, continuing the is_active phase-out. A data check confirmed the client admin account has status populated, so the swap could not drop any admin from the picker. The role-based filter and admin inclusion were verified correct and intentional and left unchanged.
+- Hardened invoice reference generation in the teacher billing page (src/app/(dashboard)/billing/page.tsx). The insert that creates the current-month pending invoice now captures its error result instead of discarding it, retries up to five times on a unique-constraint violation with a fresh reference suffix, distinguishes a benign concurrent-create from a true reference collision by re-checking row existence, and logs both the non-constraint error path and the exhausted-retries path. Confirmed against the live schema that the invoices table already carries unique constraints on both the reference number and the teacher-and-month pair, so no schema change was needed.
+- Changed the admin teacher-detail page (src/app/(admin)/admin/teachers/[id]/) to render all displayed timestamps in the viewing admin's own timezone rather than a hardcoded business timezone. The page now identifies the logged-in admin through the session client, reads their timezone, falls back safely to the business timezone when it is unset, and passes it to the detail component, where the class-time, invoice-created, and history-changed displays all use it.
+
+### Break/Fix Log
+Issue 1 (NEW138): Admin student-create teacher picker filtered on the deprecated is_active column / a former teacher with a stale is_active value could still appear in the picker because the archive path writes status but not is_active / swapped the filter to status='current' after first querying account data to confirm no admin row had a null status that would be dropped by the new gate / a deprecation is only safe to extend once you have confirmed the canonical column is populated on the rows that matter, especially the oldest accounts that may predate it.
+Issue 2 (NEW132): Invoice reference numbers were generated with a random suffix and the insert discarded its result / a reference collision would silently skip creating the month's invoice row with no log, and the generator width gave a small but real collision space / wrapped the insert in a bounded retry that captures the error, re-rolls the suffix on a true collision, treats a concurrent create as success, and logs the exhausted path / the real defect was the swallowed error, not the random generator, and the existing unique constraints meant no data could ever be duplicated, only silently skipped.
+Issue 3 (NEW133): The admin teacher-detail page hardcoded a single timezone for all displayed timestamps / an overseas teacher's class times rendered in the business timezone regardless of who was viewing / resolved the viewing admin's own timezone server-side and rendered every timestamp in it, with a safe fallback when unset / the durable rule is that each account sees times in its own timezone, and hardcoding the head-office timezone would have become a defect as soon as the business operated from more than one country.
+
+### Session result
+Three independent consistency and correctness fixes shipped to the dev branch, each verified by reading the changed files in full after editing and by a code review pass on the timezone change, which touched an authentication-adjacent data fetch. None altered the database schema. The session reinforced a recurring discipline: verify every assumption against ground truth before editing, since a carried-forward branch state and two prior bug summaries again proved stale on inspection. Heavier items remain queued for dedicated sessions.
+
+---
+
 ## Session 118 - 30 May 2026 - Align admin class teacher dropdowns to status gate
 
 ### What was built
