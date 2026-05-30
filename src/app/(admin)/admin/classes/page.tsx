@@ -25,7 +25,7 @@ export default async function AdminClassesPage() {
     .from('profiles')
     .select('id, full_name')
     .contains('account_types', ['teacher'])
-    .eq('is_active', true)
+    .eq('status', 'current')
     .order('full_name')
 
   return (

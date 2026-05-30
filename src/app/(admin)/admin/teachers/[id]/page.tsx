@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
 import TeacherDetailClient from './TeacherDetailClient'
 import type { AdminConversation } from './TeacherDetailClient'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
@@ -11,6 +12,20 @@ export default async function TeacherDetailPage({
 }) {
   const { id } = await params
   const supabase = createAdminClient()
+
+  // Identify the viewing admin and resolve THEIR timezone — every account sees
+  // timestamps in its own tz. Admin-only page, so the viewer is always an admin.
+  const sessionClient = await createClient()
+  const { data: { user: viewer } } = await sessionClient.auth.getUser()
+  let adminTz = 'Africa/Johannesburg'
+  if (viewer) {
+    const { data: viewerProfile } = await supabase
+      .from('profiles')
+      .select('timezone')
+      .eq('id', viewer.id)
+      .maybeSingle()
+    if (viewerProfile?.timezone) adminTz = viewerProfile.timezone
+  }
 
   // Fetch teacher profile — includes sensitive admin-only fields
   const { data: teacher, error } = await supabase
@@ -163,6 +178,7 @@ export default async function TeacherDetailPage({
       history={history || []}
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}
+      adminTz={adminTz}
     />
   )
 }

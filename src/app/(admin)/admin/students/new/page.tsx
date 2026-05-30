@@ -27,7 +27,7 @@ export default async function NewStudentPage() {
     .from('profiles')
     .select('id, full_name')
     .in('role', ['teacher', 'admin'])
-    .eq('is_active', true)
+    .eq('status', 'current')
     .order('full_name', { ascending: true })
 
   return (
