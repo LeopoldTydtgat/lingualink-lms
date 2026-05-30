@@ -25,7 +25,7 @@ export default async function AdminNewClassPage() {
     .from('profiles')
     .select('id, full_name, photo_url, bio, timezone')
     .contains('account_types', ['teacher'])
-    .eq('is_active', true)
+    .eq('status', 'current')
     .order('full_name')
 
   // Fetch all active students with their active training for hours check
