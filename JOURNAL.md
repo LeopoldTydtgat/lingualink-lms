@@ -1,3 +1,25 @@
+## Session 121 - 30 May 2026 - Hours ledger writes and refund logic fix
+
+### What was built
+- Added hours_log ledger writes inside the two hours-moving database functions so every automatic balance change is now recorded: class bookings write a negative ledger row, and refunded cancellations write a positive one. The running balance on each row reconciles exactly against the canonical training balance. Manual admin add and remove already wrote the ledger; this closes the automated paths.
+- Hardened the booking function to reject non-positive hour values, closing a path where a crafted negative value could self-grant hours.
+- Revoked direct execute access on all five hours-moving functions from logged-in and anonymous roles, so they can only be called server side through the trusted service role. They were previously callable directly, which combined with the missing guard above was an exploitable hours-theft vector.
+
+### Break/Fix Log
+Issue 1: Every student cancellation of a future class reported no refund and returned no hours, even for classes booked well over a week ahead. The email read cancellation within 24 hours of class for a class three days out.
+Cause: The lessons refund flag column was nullable with no default, so existing rows held null. The refund function guarded the refund with a condition that negated this flag. In three-valued logic, negating null yields null, not true, so the refund branch was silently skipped on every cancellation regardless of timing. The date arithmetic was correct the entire time; the flag was the fault.
+Fix: Set a default of false on the column and backfilled existing null rows. Made both the cancellation and refund functions null-safe by wrapping the flag check so a null can never again skip a refund. Diagnosed with a temporary runtime log after the database confirmed the data and grants were correct, which ruled out the timezone and data hypotheses before any code was drafted.
+Lesson: A nullable boolean with no default is a latent bug wherever it is read in a negated condition. Three-valued logic turns a missing value into a silently skipped branch, not an error. Prove the runtime value before assuming the calculation is at fault.
+
+Issue 2: During audit, the hours functions were found callable directly by any logged-in user, and the booking function had no lower bound on its hours parameter.
+Cause: Postgres grants execute to public by default on function creation, and no explicit revoke had ever been applied. The booking function trusted its callers for a positive value.
+Fix: Revoked execute from anonymous and authenticated roles on all five functions, leaving only the service role the application uses. Added a positive-value guard inside the booking function as defence in depth.
+Lesson: Security-definer functions are authorization-free primitives. Their safety depends entirely on either revoked execute access or internal authorization checks. Never rely solely on the application layer compensating.
+
+### Session result
+Both the ledger writes and the refund fix were verified end to end against a real booking and cancellation cycle, with the ledger balances chaining correctly and the refund landing. The function changes were applied via the database editor and archived into a migration so the repository reflects the live database. The refund logic bug was the more serious of the two issues found, as it silently denied refunds to paying students on every cancellation.
+---
+
 ## Session 120 (continued) - 30 May 2026 - Availability advisory: admin bypass of the 24hr soft-warning
 
 ### What was built
