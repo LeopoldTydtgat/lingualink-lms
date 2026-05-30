@@ -81,6 +81,7 @@ type Props = {
   history: HistoryEntry[]
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
+  adminTz: string
 }
 
 type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
@@ -282,7 +283,7 @@ function MessageThread({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy }: Props) {
+export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy, adminTz }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
@@ -659,7 +660,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                       {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
                         hour: '2-digit', minute: '2-digit',
-                        timeZone: 'Africa/Johannesburg',
+                        timeZone: adminTz,
                       })}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
@@ -708,7 +709,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                     <td className="px-4 py-3 text-gray-600">
                       {new Date(inv.created_at).toLocaleDateString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
-                        timeZone: 'Africa/Johannesburg',
+                        timeZone: adminTz,
                       })}
                     </td>
                   </tr>
@@ -750,7 +751,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                       {new Date(entry.changed_at).toLocaleString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
                         hour: '2-digit', minute: '2-digit',
-                        timeZone: 'Africa/Johannesburg',
+                        timeZone: adminTz,
                       })}
                     </td>
                   </tr>
