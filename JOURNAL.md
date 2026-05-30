@@ -1,3 +1,20 @@
+## Session 120 (continued) - 30 May 2026 - Availability advisory: admin bypass of the 24hr soft-warning
+
+### What was built
+- Fixed the availability endpoint so admin and staff callers no longer trip the "outside teacher's set availability" soft-warning on legitimate near-future bookings. The endpoint now reads the caller's role from their session and skips the 24-hour portion of the cutoff for admins, while keeping it for students.
+- Confirmed this is safe: the 24-hour rule is enforced independently on the student booking write path, so relaxing the advisory display cannot let a student book inside the window.
+- No client changes. All three calling screens (student booking, admin new-class, admin reschedule) were left untouched; the role is read from the session cookie and the response shape is unchanged.
+
+### Break/Fix Log
+Issue 1: Admins booking a class less than 24 hours out saw a misleading warning that the teacher was unavailable, even when the teacher was free.
+Cause: The availability endpoint marked every slot inside 24 hours as unavailable and did not distinguish admin callers, who are allowed to bypass the 24-hour rule. The response could not tell the client whether a slot was a genuine conflict or just inside the window, so the fix had to be server-side.
+Fix: Added a session-derived admin check matching the one already used on the admin class route, using a null-tolerant lookup since students have no matching profile row. Made the cutoff conditional so admins skip only the 24-hour window and still see real conflicts and past-slot blocks.
+Lesson: An advisory check that mirrors a hard rule must mirror the same exceptions, or it will contradict the action it is meant to preview. Role belongs in the server response, not inferred by the client.
+
+### Session result
+A low-priority advisory false-positive is resolved with a contained server-side change and no client impact. A pre-existing, separate issue surfaced during review (the booked-lessons read uses the caller-scoped client against another teacher's rows, which can make the advisory miss other students' bookings) was logged as a new backlog item rather than bundled in, since it needs the lessons access policy confirmed first. Type-check clean, full review found no critical issues, all three calling screens verified unaffected.
+---
+
 ## Session 120 - 30 May 2026 - Dependency security remediation: npm audit cleared to zero actionable
 
 ### What was built
