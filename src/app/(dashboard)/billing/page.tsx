@@ -58,13 +58,34 @@ export default async function BillingPage() {
 
   if (!existingCurrent) {
     const nowDate = new Date()
-    const refNumber = `INV-${nowDate.getFullYear()}${String(nowDate.getMonth() + 1).padStart(2, '0')}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
-    await admin.from('invoices').insert({
-      teacher_id: user.id,
-      billing_month: currentMonthDate,
-      status: 'pending',
-      reference_number: refNumber,
-    })
+    let exhausted = true
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const refNumber = `INV-${nowDate.getFullYear()}${String(nowDate.getMonth() + 1).padStart(2, '0')}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+      const { error } = await admin.from('invoices').insert({
+        teacher_id: user.id,
+        billing_month: currentMonthDate,
+        status: 'pending',
+        reference_number: refNumber,
+      })
+      if (!error) { exhausted = false; break }
+      if (error.code === '23505') {
+        const { data: nowExists } = await admin
+          .from('invoices')
+          .select('id')
+          .eq('teacher_id', user.id)
+          .eq('billing_month', currentMonthDate)
+          .maybeSingle()
+        if (nowExists) { exhausted = false; break }
+        // reference_number collision — retry with fresh suffix
+      } else {
+        console.error('[billing] invoice insert failed', error)
+        exhausted = false
+        break
+      }
+    }
+    if (exhausted) {
+      console.error('[billing] invoice insert exhausted 5 reference-number collisions; current-month row not created', { teacher_id: user.id, billing_month: currentMonthDate })
+    }
   }
 
   // Sync amount_eur for this teacher so the page header matches expanded detail.

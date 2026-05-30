@@ -65,7 +65,7 @@ export default async function AdminEditClassPage({
     .from('profiles')
     .select('id, full_name, timezone')
     .contains('account_types', ['teacher'])
-    .eq('is_active', true)
+    .eq('status', 'current')
     .order('full_name')
 
   // Fetch the parent training's hours balance so the client can disable

@@ -1,3 +1,67 @@
+## Session 119 - 30 May 2026 - Three consistency fixes: teacher-picker status gate, invoice-ref collisions, viewer-timezone
+
+### What was built
+- Migrated the admin student-create teacher picker (src/app/(admin)/admin/students/new/page.tsx) from the deprecated is_active filter to the canonical status='current' gate, continuing the is_active phase-out. A data check confirmed the client admin account has status populated, so the swap could not drop any admin from the picker. The role-based filter and admin inclusion were verified correct and intentional and left unchanged.
+- Hardened invoice reference generation in the teacher billing page (src/app/(dashboard)/billing/page.tsx). The insert that creates the current-month pending invoice now captures its error result instead of discarding it, retries up to five times on a unique-constraint violation with a fresh reference suffix, distinguishes a benign concurrent-create from a true reference collision by re-checking row existence, and logs both the non-constraint error path and the exhausted-retries path. Confirmed against the live schema that the invoices table already carries unique constraints on both the reference number and the teacher-and-month pair, so no schema change was needed.
+- Changed the admin teacher-detail page (src/app/(admin)/admin/teachers/[id]/) to render all displayed timestamps in the viewing admin's own timezone rather than a hardcoded business timezone. The page now identifies the logged-in admin through the session client, reads their timezone, falls back safely to the business timezone when it is unset, and passes it to the detail component, where the class-time, invoice-created, and history-changed displays all use it.
+
+### Break/Fix Log
+Issue 1 (NEW138): Admin student-create teacher picker filtered on the deprecated is_active column / a former teacher with a stale is_active value could still appear in the picker because the archive path writes status but not is_active / swapped the filter to status='current' after first querying account data to confirm no admin row had a null status that would be dropped by the new gate / a deprecation is only safe to extend once you have confirmed the canonical column is populated on the rows that matter, especially the oldest accounts that may predate it.
+Issue 2 (NEW132): Invoice reference numbers were generated with a random suffix and the insert discarded its result / a reference collision would silently skip creating the month's invoice row with no log, and the generator width gave a small but real collision space / wrapped the insert in a bounded retry that captures the error, re-rolls the suffix on a true collision, treats a concurrent create as success, and logs the exhausted path / the real defect was the swallowed error, not the random generator, and the existing unique constraints meant no data could ever be duplicated, only silently skipped.
+Issue 3 (NEW133): The admin teacher-detail page hardcoded a single timezone for all displayed timestamps / an overseas teacher's class times rendered in the business timezone regardless of who was viewing / resolved the viewing admin's own timezone server-side and rendered every timestamp in it, with a safe fallback when unset / the durable rule is that each account sees times in its own timezone, and hardcoding the head-office timezone would have become a defect as soon as the business operated from more than one country.
+
+### Session result
+Three independent consistency and correctness fixes shipped to the dev branch, each verified by reading the changed files in full after editing and by a code review pass on the timezone change, which touched an authentication-adjacent data fetch. None altered the database schema. The session reinforced a recurring discipline: verify every assumption against ground truth before editing, since a carried-forward branch state and two prior bug summaries again proved stale on inspection. Heavier items remain queued for dedicated sessions.
+
+---
+
+## Session 118 - 30 May 2026 - Align admin class teacher dropdowns to status gate
+
+### What was built
+- Migrated the three admin class teacher-dropdown queries to filter on the canonical status field equal to current, replacing a deprecated active flag, so they match the server-side teacher-eligibility gate added in the previous session
+- Files: the new-class page, the class edit page, and the class list page
+- Effect: the dropdowns now list only current teachers, so a former teacher can no longer be picked and then rejected by the write-path validation at submit as a confusing dead-end
+
+### Break/Fix Log
+Issue 1: Admin class teacher dropdowns could surface a former teacher.
+- Symptom: three class teacher pickers filtered on a deprecated active flag that the teacher-archive update no longer maintains, so an archived teacher whose stale flag was still true appeared in the dropdown, could be selected, and was only rejected at submit by the write-path check.
+- Cause: the archive update writes the canonical status field but not the legacy active flag, so the two could diverge while the dropdowns still read the legacy flag.
+- Fix: migrated the three dropdown queries to filter on status equal to current, identical to the assignment gate, so dropdown and validation now agree. The deprecated flag was deliberately not restored in the archive write, since fixing the readers makes its stale value irrelevant.
+- Lesson: when a column is being phased out, point the readers at the canonical source rather than reviving writes to the deprecated one.
+
+### Session result
+Closed the divergence between the admin class teacher dropdowns and the write-path eligibility gate by migrating the three class dropdown queries to the canonical status field. A read-only audit of every active-flag usage across the codebase confirmed the scope and surfaced a fourth teacher picker on the student-create page with the same staleness, which was deferred to a separate backlog item because it sits on the legacy role column, includes admin accounts, and would need the admin rows verified for a populated status before a safe migration. The change is one line per file, the typecheck passed, the code review subagent returned clean, and the work is committed to the development branch and not yet pushed.
+
+---
+
+## Session 117 - 29 May 2026 - Admin class write-path teacher-eligibility validation
+
+### What was built
+- Added a teacher-eligibility gate to both admin class write-paths: POST /api/admin/classes and PATCH /api/admin/classes/[id]
+- Before a teacher is assigned to a lesson, the target is validated as an active teacher: a profiles row with status equal to current and account_types containing teacher
+- Uses status as the canonical active-account gate rather than the deprecated is_active column
+- Gate fails closed and returns a 400 INVALID_TEACHER response on ineligibility
+- POST: widened the existing teacher-timezone lookup to also select status and account_types; the check runs before the time conversion and before the lesson insert
+- PATCH: the check is keyed on an actual teacher change and placed independently of the time-change branch, so a teacher-only reassignment with no time change is now validated as well, which the previous code path did not cover
+
+### Break/Fix Log
+Issue 1: Admin could assign a former or non-teacher account to a class.
+- Symptom: both write-paths selected only the timezone column before assigning a teacher, so a profiles row that was not a teacher, or was former or on hold, passed validation until the database foreign key rejected a genuinely nonexistent id. A surviving but former teacher row was accepted.
+- Cause: no role or active-status check on the assignment target before the write.
+- Fix: a single server-side eligibility check on each path, gating on status current plus teacher membership in account_types, placed ahead of every point where teacher_id reaches the database.
+- Lesson: the read-path teacher dropdowns still filter on the deprecated is_active column while the write-path now uses status, so the two can diverge. Logged as a separate follow-up for the is_active phase-out.
+
+Issue 2: Stale tracking notes were driving work toward already-closed items.
+- Symptom: the working handover described a cancel-path cluster and a timezone consolidation as open, when the bug log showed both fully closed several sessions earlier.
+- Cause: carried-forward summary text was not reconciled against the bug log before planning.
+- Fix: verified every target against the bug log and the actual source before any edit, then corrected the stale annotations so future sessions are not misdirected.
+- Lesson: the bug log is the single source of truth. Always reconcile a handover against it and against git before acting.
+
+### Session result
+Hardened both admin class write-paths so only an active teacher can be assigned to a lesson, closing a real assignment hole ahead of the repository going public. Both verification subagents passed, the change is committed to the development branch, and the divergence between the new status gate and the older is_active dropdowns is recorded as a scoped follow-up. Two phantom targets from the handover were caught by checking ground truth first, and the misleading tracking notes were corrected.
+
+---
+
 ## Session 115 - 29 May 2026 - Teams orphan cleanup and timezone reconciliation
 
 ### What was built
