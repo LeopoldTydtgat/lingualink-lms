@@ -1,3 +1,26 @@
+## Session 120 - 30 May 2026 - Dependency security remediation: npm audit cleared to zero actionable
+
+### What was built
+- Removed the shadcn CLI package from production dependencies. It was never imported by application code and was pulling a large vulnerable subtree through @modelcontextprotocol/sdk, accounting for the only high-severity advisory plus most of the moderate ones. New shadcn/ui components are still added on demand via npx, and the vendored components were untouched.
+- Patched next and eslint-config-next from 16.2.1 to 16.2.6, the latest patch on the same minor, clearing 14 framework advisories including middleware bypass, denial of service, cross-site scripting, server-side request forgery, and cache poisoning.
+- Ran a non-forced npm audit fix to clear the remaining in-range transitive advisories (brace-expansion, the uuid chain via svix and resend, and ws).
+- Inlined the contents of shadcn/tailwind.css directly into globals.css after the package removal broke the build, preserving the accordion keyframes, the Radix data-state custom variants, and the no-scrollbar utility that the UI components depend on.
+
+### Break/Fix Log
+Issue 1: npm audit reported 15 advisories (2 high, 13 moderate), carried unaddressed across several prior sessions.
+Cause: The shadcn scaffolding CLI was listed as a runtime dependency rather than a dev tool, dragging an entire HTTP-server and validator subtree into the production tree. Separately, the framework sat a patch behind on published fixes.
+Fix: Uninstalled the CLI (239 packages pruned), patched the framework to the latest safe patch, and applied non-forced transitive fixes. Verified zero application and zero build imports of the removed package before removing it.
+Lesson: A dependency that looks unused at the code level can still be a build-time dependency. My first search covered only TypeScript source and missed a CSS import, so the build broke on removal. Search every file type a bundler reads, not just application code, before removing a package.
+
+Issue 2: All project documentation described the stack as Next.js 15.
+Cause: The framework had been upgraded to 16 at an earlier session and the supporting documents were never updated, so every session was reinforcing rules against the wrong major version.
+Fix: Confirmed the pinned and installed version is 16 and corrected the version label in the two subagent prompts. Left the historical incident notes in this journal unchanged, as they accurately describe behaviour introduced in 15.
+Lesson: Treat the manifest as the source of truth for versions, not the prose. Verify the installed version at the start of any dependency work.
+
+### Session result
+Cleared the standing security backlog ahead of making the repository public. The advisory count dropped from 15 to 2, and the 2 that remain are a single postcss issue bundled inside the framework itself, whose only published fix is a seven-major-version downgrade and therefore cannot be applied without breaking the application. It will clear when the framework bundles a newer postcss or the advisory is updated for the current version. The change was confined to the dependency manifest and a single stylesheet, with no change to application logic. A clean type-check, the full 43-test suite, a successful production build of all 82 routes, and a local visual check of the tab and accordion components together confirmed it was safe.
+---
+
 ## Session 119 - 30 May 2026 - Three consistency fixes: teacher-picker status gate, invoice-ref collisions, viewer-timezone
 
 ### What was built
