@@ -22,7 +22,8 @@
       "Bash(echo \"EXIT_CODE: $?\")",
       "Bash(echo \"EXIT:$?\")",
       "Bash(grep -iE \"api[\\\\\\\\/]\\(student[\\\\\\\\/]book|admin[\\\\\\\\/]classes\\)\")",
-      "Bash(echo \"---grep exit: $? \\(1 = no matches = edited files clean\\)---\")"
+      "Bash(echo \"---grep exit: $? \\(1 = no matches = edited files clean\\)---\")",
+      "Bash(npm audit *)"
     ]
   }
 }
