@@ -164,6 +164,10 @@ function HoursTypeBadge({ type }: { type: string }) {
     class_booking: 'Class Booking',
     cancellation_refund: 'Cancellation Refund',
     admin_adjustment: 'Admin Adjustment',
+    reschedule: 'Rescheduled',
+    duration_change: 'Duration Changed',
+    reschedule_reversal: 'Reschedule Reversed',
+    booking_reversal: 'Booking Reversed',
   }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={colour}>
