@@ -309,6 +309,7 @@ export async function PATCH(
       p_lesson_id: id,
       p_old_duration_minutes: existing.duration_minutes,
       p_new_duration_minutes: newDurationMinutes,
+      p_created_by: user.id,
     })
 
     if (rpcError) {
