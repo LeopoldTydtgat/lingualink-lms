@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
@@ -154,6 +155,14 @@ export async function POST(request: NextRequest) {
 
   if (!teacher_id || !student_id || !training_id || !scheduled_at || !duration_minutes) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  }
+
+  const durationCheck = z.union(
+    [z.literal(30), z.literal(60), z.literal(90)],
+    { error: 'Duration must be 30, 60, or 90 minutes' }
+  ).safeParse(duration_minutes)
+  if (!durationCheck.success) {
+    return NextResponse.json({ error: durationCheck.error.issues[0].message }, { status: 400 })
   }
 
   // Fetch teacher timezone + eligibility fields
