@@ -1,3 +1,34 @@
+## Session 128 - 31 May 2026 - Company billing export repair and no-show fault label fix
+
+### What was built
+
+- Repaired the company billing CSV export, which had been failing on every run because it read a restricted column under a database role not permitted to see it, and routed it through the shared billability calculator so it no longer keeps its own copy of the rules.
+- Audited the five other admin CSV exports and confirmed none has the same fault and none leaks a restricted field into its output.
+- Corrected a fault-attribution label on the teacher-facing student detail page, where every student no-show was being shown as the teacher's absence.
+- Reconciled the bug log against live code and git, closing out the previous session's housekeeping and clearing duplicate entry numbers.
+
+### Break/Fix Log
+
+Issue 1: Company billing export failed on every run, and kept its own copy of the billing rules
+
+- Symptom: the admin Company Billing CSV export produced no file. The button returned a server error rather than a download, for as long as the query had referenced the restricted field.
+- Cause: the export read a student's cancellation-policy field through the standard logged-in database client, but that field is revoked from the standard role and readable only by the privileged server client. The database rejected the read and the route errored before producing any output. A live database check confirmed the standard role genuinely cannot read the field. Separately, this same branch carried its own hand-written copy of the 24-hour and 48-hour billing arithmetic instead of calling the shared calculator.
+- Fix: switched the student read to the privileged server client, matching the pattern the teacher-earnings export in the same file already uses for a different restricted field, after the existing admin access check. With the field now readable, replaced the inline arithmetic with the shared calculator, removing the last hand-maintained copy of that rule. The eight CSV columns are unchanged. A data-access security audit confirmed the restricted field is used only as a calculation input and never written into the output, and a code review confirmed the new logic matches the old arithmetic for every status and every cancellation-timing boundary.
+- Lesson: a restricted field referenced by the wrong database role does not silently return empty here, it errors the whole request, so the feature was not under-reporting, it was entirely dead. The business consequence is that this export was never a usable source for company invoicing, which the client should know in case it was assumed to work. Reading a restricted field always requires both the privileged client and the access check in front of it.
+
+Issue 2: Student no-shows were labelled as teacher absences on the teacher student-detail page
+
+- Symptom: on the teacher-facing student detail page, under past classes, a class the student missed was shown as the teacher having been absent. Fault was attributed to the wrong party in the teacher's own view of their student.
+- Cause: the label compared the no-show-type field against a long-form value that the field never holds. The field stores a short form, confirmed by the database constraint, the input validation, and the code that writes it, while the long form belongs to a different column entirely. The comparison therefore never matched, and every student no-show fell through to a catch-all that asserted teacher absence. A class missed with no recorded type also fell through to the same wrong label.
+- Fix: matched the short-form value the field actually stores, consistent with the four other places in the codebase that read this field, added an explicit branch for the teacher case, and gave the unrecorded case a neutral label rather than asserting teacher fault. One line of display logic, no data or behaviour change beyond the rendered text.
+- Lesson: the bug log entry named the wrong file, pointing at the admin portal when the fault was in the teacher portal, the same file-name confusion seen in an earlier session. Verifying the reported location against the actual file before any change, and tracing the field's real stored values rather than trusting the comparison already in the code, both prevented a wrong fix.
+
+### Session result
+
+I repaired the company billing CSV export, which a live database check proved had been erroring on every run rather than merely under-reporting, and in the same change routed it through the shared billability calculator so the last hand-maintained copy of the billing rules is gone. I then audited the five other admin exports and confirmed none shares the fault and none leaks a restricted field. Separately I corrected a fault-attribution label on the teacher student-detail page, where a field comparison against a value the column never holds had been showing every student no-show as a teacher absence. Both fixes were verified against live code, the database constraints, and where relevant the live grants before any change was written, and the billing change cleared both a code review and a data-access security audit. The two fixes were committed separately. The session also reconciled the bug log against live code and git, which showed the previous session's housekeeping had in fact landed and only needed a missing commit reference and three duplicate entry numbers corrected.
+
+---
+
 ## Session 127 - 31 May 2026 - Company billing correctness: phantom status and deletable billable lessons
 
 ### What was built
