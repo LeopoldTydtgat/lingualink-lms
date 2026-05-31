@@ -1,3 +1,26 @@
+## Session 129 - 31 May 2026 - Fail-closed participant timezones
+
+### What was built
+
+- NEW17 resolved. Two admin paths that silently defaulted a missing timezone now fail closed.
+- Admin reschedule (`api/admin/classes/[id]/route.ts`): moved participant name, email, and timezone resolution to before the duration RPC and lesson UPDATE, so a null timezone aborts the reschedule before any write with a 422, instead of half-applying it and emailing a UTC-rendered time. Timezones now require a real value; names still degrade to placeholders.
+- Admin teacher detail (`admin/teachers/[id]/page.tsx`): replaced a hardcoded regional timezone default with the viewer's own timezone, surfaced via the error boundary if absent rather than rendering a wrong zone.
+
+### Break/Fix Log
+
+Issue 1: Admin reschedule emailed wrong-timezone class times when a participant timezone was missing.
+
+- Symptom: a null timezone silently fell back to UTC, so the reschedule email could show the wrong time with no error.
+- Cause: timezone reads defaulted to 'UTC' and sat after the lesson had already been updated, so even a thrown error would have left a half-applied reschedule.
+- Fix: hoisted the resolution above all writes and gated it with a fail-closed timezone check returning a 422 pre-commit.
+- Lesson: a fail-closed check is only safe if it runs before the write it protects; placement matters as much as the check.
+
+### Session result
+
+Branch reconciled at session start after an unexpected dev-into-main merge, fast-forwarded clean. NEW17 was audited live before any edit, which revealed it was not the simple line-swap the handover assumed: the fallbacks sat after the commit, behind a swallowing catch. The fix hoisted the resolution pre-commit and made both admin paths fail closed. A code review found nothing critical. Committed to dev as e6cd65e, not pushed. No impactful bugs remain.
+
+---
+
 ## Session 128 - 31 May 2026 - Company billing export repair and no-show fault label fix
 
 ### What was built
