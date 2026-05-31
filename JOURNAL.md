@@ -1,3 +1,40 @@
+## Session 124 - 31 May 2026 - Atomic hours adjustment RPC for admin balance changes
+
+### What was built
+- Built a new database function, adjust_hours_atomic, as the single locked path for every admin change to a student's hours balance. It locks the training row, applies the change, and writes the audit-ledger row in one transaction, so a failed ledger write rolls back the balance change instead of letting the two drift apart. It handles three actions: adding hours, which grows the package total; removing hours, which increases consumed hours; and setting an absolute new package total, used when editing a student profile.
+- Converted the manual Add and Remove Hours route to call the new function instead of its previous read, compute in code, and write back approach, which had no row lock and could silently lose a concurrent change or drop the ledger row on failure.
+- Redirected only the package-size write inside the student profile edit route through the same function, so a correction to a student's total hours is locked and produces an admin_adjustment ledger row. The change is gated so a profile edit that does not touch hours logs nothing. Every other field in that form continues to save exactly as before.
+- Added an ownership guard to the Add and Remove route so it rejects a training that does not belong to the named student, enforcing that check in the route as well as in the function.
+- Locked the new function so only the service role can run it, matching the other hours functions, and captured it as a versioned migration.
+
+### Break/Fix Log
+Issue 1: Two admin hours adjustments firing at the same moment, or an adjustment racing a student booking, could silently discard one of the changes. Cause: the route read the balance, computed a new absolute value in application code, and wrote it straight back with no row lock, so a concurrent committed change was overwritten. Fix: moved the whole read, change, and ledger write into a single database function that locks the training row for the duration. Lesson: any balance mutation must take a row lock and apply its change inside one transaction; doing the arithmetic in application code between a separate read and write is a lost-update race by construction.
+Issue 2: A balance change could succeed while its audit-ledger row silently failed to write, leaving the books and the balance out of step. Cause: the ledger insert was a separate statement after the balance update, and its failure was caught and ignored so the request still reported success. Fix: the new function writes the ledger row in the same transaction as the balance change, so either both land or neither does. Lesson: in a billing system the ledger write is not optional bookkeeping, it is part of the mutation and belongs in the same transaction.
+Issue 3: A second, unflagged raw balance write existed in the student profile edit route, writing the package total with no lock and no ledger row at all. Cause: the audit before fixing the first route surfaced it. Fix: redirected only that write through the new function, gated so it only fires and only logs when the value actually changed. Lesson: audit for the same pattern across the codebase before fixing one instance, or the fix leaves a sibling race in place and creates an inconsistency between the two paths.
+
+### Session result
+NEW141 resolved, and the audit-before-fix step caught a second raw balance writer in the profile edit route that is now fixed in the same session. All admin balance changes, manual add and remove and package-size edits, now flow through one locked atomic function that also records the audit-ledger row in the same transaction. The function is restricted to the service role and captured as a migration. The decision to log package-size edits as admin_adjustment entries means every balance movement is now traceable for invoicing. No behaviour change for normal use.
+
+---
+
+## Session 123 - 31 May 2026 - Reschedule recovery hardening and RPC lockdown
+
+### What was built
+- Rewrote the unwind_reschedule_atomic database function so a failed reschedule never leaves a student charged for a class that does not exist. It now always reverses the hours delta in the outer transaction block and attempts to restore the original lesson in a guarded sub-block. If the freed slot was retaken in the interim, restoring the lesson trips the no_teacher_overlap exclusion constraint, which is caught so the hours reversal still commits. The function returns a boolean: true when the original lesson is restored, false when hours are returned but the lesson could not be.
+- Updated the student booking route recovery branch to read that boolean and respond honestly: a new RESCHEDULE_FAILED_HOURS_RETURNED response tells the student their hours are back and to rebook, while a restored original lesson surfaces the existing slot-conflict message with reassurance that the original class is unchanged.
+- Updated the booking client to display the human readable message field instead of the raw error code, so the new copy actually reaches the student.
+- Closed a privilege hole: unwind_reschedule_atomic still had EXECUTE granted to PUBLIC, anon, and authenticated, unlike the other five hours RPCs. Locked it to service_role only.
+- Captured the function as a versioned migration so the repo matches the live database.
+
+### Break/Fix Log
+Issue 1: A student rescheduling a class could lose their hours and end up with no class at all. Cause: when the new lesson insert failed after the old lesson was already cancelled and hours re netted, the recovery function raised an exception on the no restore case, which rolled back the entire transaction including the hours reversal, leaving the student with a cancelled class, no replacement, and hours still deducted behind a misleading retry message. Fix: restructured the function so the hours reversal commits unconditionally and the lesson restore is best effort, returning a boolean the route uses to message the student correctly. Lesson: in plpgsql an exception caught inside an inner block rolls back only that block, so a compensation action that must always succeed belongs in the outer block, separate from the one that may legitimately fail.
+Issue 2: One of the six hours related database functions was callable by any logged in user. Cause: it was created without revoking the default PUBLIC execute grant, unlike its five siblings which were locked down in an earlier session. Because it is a privileged function taking raw record identifiers with no ownership check, a logged in user could have manipulated lesson and hours state directly. Fix: revoked execute from PUBLIC, anon, and authenticated and granted it to service_role only. Lesson: when a family of privileged functions is hardened, audit every member by name against the live grants rather than trusting an assumed count.
+
+### Session result
+NEW146 was reframed and resolved. The bug log had recorded the recovery function as missing from the database, but a live check showed it existed and was being called correctly. The real faults were that its failure path destroyed hours on a rare double booking race, and that it had been left open to all logged in users. Both are now fixed and verified against the live database, the student facing message is honest, and the function is captured in a migration so a fresh rebuild reproduces it. No behaviour changes for reschedules that succeed.
+
+---
+
 ## Session 122 - 31 May 2026 - Schema baseline capture and hours RPC execute lockdown
 
 ### What was built
