@@ -1,3 +1,33 @@
+## Session 127 - 31 May 2026 - Company billing correctness: phantom status and deletable billable lessons
+
+### What was built
+
+- Fixed a silent under-billing bug in the company billing CSV export, where business-to-business clients were not charged for student no-shows.
+- Closed a data-loss path where the admin Delete button could permanently remove a cancelled lesson that was still needed to invoice a company.
+- Audited and confirmed a third reported bug was not reachable, avoiding unnecessary changes to a working email path.
+
+### Break/Fix Log
+
+Issue 1: Company billing export omitted student no-shows
+
+- Symptom: business-to-business clients were under-billed on the billing export. A student who failed to attend a class did not appear as a billable line item, even though the teacher held the slot and was paid.
+- Cause: the company billing branch of the export compared a lesson's status against the string 'no_show', a value no lesson ever holds. The real status for this case is 'student_no_show', so the comparison never matched and the lesson scored as not billable.
+- Fix: corrected the comparison to 'student_no_show'. Teacher no-shows still fall through to not billable, which is the intended behaviour, because a company should not be charged when the teacher is the party who failed to attend.
+- Lesson: this was the final instance of a status-typo bug class that had already caused an earlier teacher-pay error in the same file. A single hand-written status string, drifted from the canonical set of valid statuses, was enough to produce a silent and ongoing money error. A repository-wide search confirmed the only remaining 'no_show' literal is a legitimate interface-to-database filter alias, not a stored status comparison.
+
+Issue 2: Cancelled lessons that a company still owed for could be permanently deleted
+
+- Symptom: the admin Class Detail page offered a Delete button that permanently removed a cancelled lesson. Some cancelled lessons are still billable to a company, and deleting one silently removed it from the billing export, so the portal and any invoice already sent to the client could disagree.
+- Cause: the Delete button was built in an earlier session as a simple record-removal action, with a safety gate that allowed deletion only of cancelled lessons, on the assumption that a cancelled lesson is disposable. Company billing, built later, reads those same cancelled rows to charge clients for late cancellations, specifically cancellations made within 24 hours, or between 24 and 48 hours for students on a 48-hour cancellation policy. The two features were never reconciled.
+- Fix: the delete handler now refuses to delete a cancelled lesson that is still billable to a company, returning an error explaining that the lesson is needed for invoicing. The decision reuses the shared billability calculator, so it blocks exactly the lessons the export would charge for and cannot drift from it. Clean cancellations with more than 24 hours notice, and teacher cancellations, remain deletable, so the button keeps its original purpose of clearing unwanted records. The sensitive cancellation-policy field is read strictly on the server after the admin access check and is never included in any response.
+- Lesson: a safety assumption that holds when a feature is first built can quietly become false once a later feature depends on the same data. The correct fix preserved the existing workflow rather than removing the button, and reused shared logic rather than introducing a third hand-written copy of the billability rules.
+
+### Session result
+
+I shipped two billing-correctness fixes, both affecting real business-to-business invoicing, and both committed and pushed to the development branch. Each was verified against live code before any change was written, and each cleared an automated code review, with the second also passing a data-access security audit because it reads a sensitive field. A third reported issue, a missing null guard on a student email in the cancellation email path, was audited and confirmed not to be reachable, because the email column is required at the database level and the email send is already non-blocking. Both real bugs traced to the same underlying pattern that has recurred across recent sessions: billability logic that was duplicated or assumed rather than centralised. The remaining structural cleanup, routing the company billing export through the shared calculator instead of its own copy of the rules, was deliberately left as separate future work rather than bundled into a fix of the same path.
+
+---
+
 ## Session 126 - 31 May 2026 - Billing and status-gating correctness (three fixes)
 
 ### What was built
