@@ -1,3 +1,25 @@
+## Session 126 - 31 May 2026 - Billing export billability correctness
+
+### What was built
+- Routed the admin data-export route through the canonical getBillability() calculator, removing a divergent local billability function that had drifted from the shared logic the rest of the app and the test suite rely on.
+- Fixed two dead-status conditions in the teacher-earnings export that compared against status strings that do not exist in the database, so they silently never fired.
+
+### Break/Fix Log
+Issue 1: Teacher earnings export under-counted teacher pay.
+Cause: The export route carried its own local isTeacherBillable() instead of using the shared getBillability(). The local copy checked for a status of 'no_show', but the real database value is 'student_no_show', so the student-no-show branch never matched and every student no-show scored as not billable. Teachers are owed pay for student no-shows, so the pay CSV the client downloads was under-counting them.
+Fix: Deleted the local function and routed both export call sites (all-classes, teacher-earnings) through getBillability(), passing cancellationPolicy as null because teacher pay is independent of the 48hr company policy. Reading .billableToTeacher gives the same decision the rest of the app already makes.
+Lesson: A second copy of business logic is a latent bug waiting to drift from the original. The canonical calculator was already correct and test-covered; the export had quietly diverged. Audit for duplicate implementations before trusting either one, and prefer the shared source.
+
+Issue 2: Two dead conditions in the teacher-earnings export.
+Cause: The settled-lessons filter excluded status 'upcoming' and the student-no-show counter compared no_show_type against 'student_no_show'. Neither string exists in the data ('scheduled' is the real not-yet-happened status; no_show_type holds 'student' or 'teacher'), so the filter excluded nothing and the counter never incremented.
+Fix: Changed the filter to exclude 'scheduled' and the counter to compare against 'student'.
+Lesson: A condition that compares against a value the column never holds fails silently with no error. Confirm status and enum values against the live schema, not against assumed names.
+
+### Session result
+Closed a real teacher-pay under-count on the admin earnings export by replacing a drifted local billability copy with the canonical shared calculator, and fixed two silently-dead conditions in the same export. One file changed, reviewed GREEN, committed as d46a87f. A separate phantom-status bug in the company-billing export (under-billing companies in the opposite direction) was surfaced during the audit and left for a follow-up to keep this change single-purpose.
+
+---
+
 ## Session 125 - 31 May 2026 - Hours ledger completion and two endpoint hardening fixes
 
 ### What was built
