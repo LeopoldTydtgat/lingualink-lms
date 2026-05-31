@@ -1,3 +1,26 @@
+## Session 125 - 31 May 2026 - Hours ledger completion and two endpoint hardening fixes
+
+### What was built
+- Completed Phase 2 of the hours ledger retrofit (NEW71). Reschedules and duration changes were moving a student's consumed hours but writing nothing to the hours_log audit trail, leaving those movements invisible for invoicing and dispute resolution. Four database functions were updated so every hours movement is recorded and paired with a matching ledger row.
+- Updated reschedule_class_atomic to log a single net row of type reschedule reflecting the real balance change. A same-length move logs a zero-hours row, which still records that the class moved on a given date, preserving a complete timeline of scheduling events.
+- Updated change_duration_atomic to log the balance change as a duration_change row and added a created_by argument so the row is stamped with the admin who made it. The old three-argument version was dropped so no unlogged path remains callable.
+- Updated unwind_reschedule_atomic and refund_hours_atomic to each write a reversing ledger row of type reschedule_reversal and booking_reversal respectively. These recovery functions run when a booking or reschedule fails partway through; without a reversing row the ledger would retain a phantom entry for a class that never happened. Every hours movement now has a matching counter-entry that nets to the true balance.
+- Added the four new ledger type strings to the admin student-detail badge component so they render as labelled badges instead of raw strings.
+- NEW145: the admin create-class endpoint accepted duration_minutes with only a presence check and no value validation. Added a Zod 30/60/90 literal-union check matching the student and edit routes, so a forged or malformed duration is rejected at the endpoint rather than relying on the database guard alone.
+- NEW140: the create-class availability calendar read booked lessons through the RLS-bound client, which cannot see other students' bookings for a given teacher, so the preview could show a taken slot as free. Switched that one read to the service-role client, consistent with the timezone and availability reads beside it. Booking integrity was never affected as the write-time guard already uses the service-role client.
+
+### Break/Fix Log
+Issue 1: Reschedules and duration changes left no audit trail in the hours ledger. Cause: reschedule_class_atomic and change_duration_atomic moved hours_consumed but never inserted a hours_log row, and their recovery counterparts unwind_reschedule_atomic and refund_hours_atomic also wrote nothing, so a failed-then-undone operation left a phantom entry that was never reversed. Fix: added paired ledger writes to all four functions in one migration; reschedule logs one net row, duration change logs one row stamped with the acting admin, and the two recovery functions write reversing rows so a failed and unwound operation leaves no phantom entry. Lesson: a balance mutation and its audit row must be written in the same function, and any function that reverses a mutation must also reverse its ledger row, or the trail drifts from the balance.
+
+Issue 2: The admin create-class endpoint did not validate the duration value. Cause: duration_minutes was destructured and checked only for truthiness, so a present but invalid value such as 45 or a string passed the endpoint and reached the database. Fix: added a Zod 30/60/90 literal-union check after the missing-fields guard, matching the sibling student and edit routes. Lesson: defence in depth means every endpoint validates its own input rather than trusting the layer below, even when a database constraint would catch the same error downstream.
+
+Issue 3: The availability preview could show taken slots as free. Cause: the conflicting-lessons read used the RLS-bound cookie client against a foreign teacher's lessons; the lessons SELECT policy scopes students to their own rows, so other students' bookings for that teacher were invisible and overlapping slots stayed marked available. Fix: switched that single read to the service-role client, consistent with the timezone and availability reads directly above it in the same function. Verified the RLS policy before changing anything and confirmed via a supabase-rls-auditor review that the query is scoped to the requested teacher and week and that no raw lesson rows are returned to the caller. Lesson: when a read crosses a trust boundary that RLS deliberately blocks, it must use the service-role client, but only after confirming exactly what the read returns and that no extra data reaches the response.
+
+### Session result
+Closed three backlog items. The hours ledger is now complete across all balance-mutating functions, with every movement paired and audit-traceable for invoicing and disputes. Two endpoint hardening fixes followed: input validation on the admin booking route and a corrected availability advisory. All three shipped to dev with clean typechecks and subagent review where billing logic or data-access trust boundaries were touched.
+
+---
+
 ## Session 124 - 31 May 2026 - Atomic hours adjustment RPC for admin balance changes
 
 ### What was built
