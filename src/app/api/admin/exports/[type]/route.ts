@@ -331,8 +331,12 @@ export async function GET(
       case 'company-billing': {
         filename = `lingualink-company-billing-${Date.now()}.csv`
 
+        // cancellation_policy has a column-level REVOKE on `authenticated` — must use
+        // the admin client. Role check above has already gated access here.
+        const adminClient = createAdminClient()
+
         // Get all B2B students (those with a company_id)
-        let studentQuery = supabase
+        let studentQuery = adminClient
           .from('students')
           .select('id, full_name, company_id, cancellation_policy')
           .not('company_id', 'is', null)
@@ -366,24 +370,18 @@ export async function GET(
 
         const rows = (lessons ?? []).map((l: any) => {
           const student = sMap[l.student_id]
-          const policy = student?.cancellation_policy ?? '24hr'
 
-          // Billable to company under 48hr policy
-          let billable24 = false
-          let billable48 = false
-
-          if (l.status === 'completed') {
-            billable24 = true
-          } else if ((l.status === 'cancelled' || l.status === 'cancelled_by_student') && l.cancelled_at) {
-            const scheduled = new Date(l.scheduled_at).getTime()
-            const cancelled = new Date(l.cancelled_at).getTime()
-            const hours = (scheduled - cancelled) / (1000 * 60 * 60)
-            if (hours < 24) billable24 = true
-            else if (hours >= 24 && hours < 48 && policy === '48hr') billable48 = true
-          // Student no-show: the slot was held and the teacher was ready, so the company is billed (brief 9.4). A teacher no-show is intentionally NOT billed to the company and falls through to non-billable below.
-          } else if (l.status === 'student_no_show') {
-            billable24 = true
-          }
+          // company-standard billing intentionally tracks billableToTeacher; the 48hr B2B split is billable48hr — single source of truth, do not reintroduce inline arithmetic.
+          const bill = getBillability({
+            status: l.status,
+            scheduledAt: l.scheduled_at,
+            cancelledAt: l.cancelled_at,
+            cancellationPolicy: student?.cancellation_policy as '24hr' | '48hr' | null,
+            hourlyRate: 0,
+            durationMinutes: l.duration_minutes ?? 0,
+          })
+          const billable24 = bill.billableToTeacher
+          const billable48 = bill.billable48hr
 
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
