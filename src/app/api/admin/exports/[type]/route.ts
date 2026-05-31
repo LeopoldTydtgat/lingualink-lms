@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getBillability } from '@/lib/billing/billability'
 import { NextRequest, NextResponse } from 'next/server'
 
 // ─── CSV helper ───────────────────────────────────────────────────────────────
@@ -36,28 +37,7 @@ function formatDate(iso: string | null): string {
   return iso.slice(0, 10)
 }
 
-// Determine if a lesson is billable to the teacher
-// Paid: completed classes, student no-shows, student cancels <24hr
-// Not paid: teacher no-show, cancellations >24hr, teacher cancels
-function isTeacherBillable(
-  lessonStatus: string,
-  didClassHappen: boolean | null,
-  noShowType: string | null,
-  scheduledAt: string,
-  cancelledAt: string | null
-): boolean {
-  if (lessonStatus === 'completed') return true
-  if (lessonStatus === 'no_show' && noShowType === 'student_no_show') return true
-  if (lessonStatus === 'cancelled_by_teacher') return false
-  if ((lessonStatus === 'cancelled' || lessonStatus === 'cancelled_by_student') && cancelledAt) {
-    const scheduled = new Date(scheduledAt).getTime()
-    const cancelled = new Date(cancelledAt).getTime()
-    const hoursNotice = (scheduled - cancelled) / (1000 * 60 * 60)
-    // Student cancelled with less than 24hr notice → teacher still paid
-    if (hoursNotice < 24) return true
-  }
-  return false
-}
+// Teacher billability comes from the canonical getBillability() in @/lib/billing/billability — do not reintroduce a local copy.
 
 // ─── Auth guard ───────────────────────────────────────────────────────────────
 
@@ -157,7 +137,14 @@ export async function GET(
         const rows = filtered.map((l: any) => {
           const report = reportMap[l.id]
           const student = studentMap[l.student_id]
-          const billable = isTeacherBillable(l.status, report?.did_class_happen, report?.no_show_type, l.scheduled_at, l.cancelled_at)
+          const billable = getBillability({
+            status: l.status,
+            scheduledAt: l.scheduled_at,
+            cancelledAt: l.cancelled_at,
+            cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
+            hourlyRate: 0,            // amount unused here — this export only shows Yes/No
+            durationMinutes: l.duration_minutes ?? 0,
+          }).billableToTeacher
           return {
             'Date': formatDate(l.scheduled_at),
             'Time (UTC)': formatDateTime(l.scheduled_at).slice(11),
@@ -183,7 +170,7 @@ export async function GET(
         let lessonsQuery = supabase
           .from('lessons')
           .select('id, scheduled_at, duration_minutes, status, cancelled_at, teacher_id')
-          .neq('status', 'upcoming') // only settled lessons
+          .neq('status', 'scheduled') // only settled lessons
           .order('scheduled_at', { ascending: false })
 
         if (fromTs) lessonsQuery = lessonsQuery.gte('scheduled_at', fromTs)
@@ -229,7 +216,14 @@ export async function GET(
 
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
-          const billable = isTeacherBillable(lesson.status, report?.did_class_happen, report?.no_show_type, lesson.scheduled_at, lesson.cancelled_at)
+          const billable = getBillability({
+            status: lesson.status,
+            scheduledAt: lesson.scheduled_at,
+            cancelledAt: lesson.cancelled_at,
+            cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
+            hourlyRate: 0,            // gate only — amount is summed separately below with the real rate
+            durationMinutes: lesson.duration_minutes ?? 0,
+          }).billableToTeacher
           if (!billable) continue
 
           const d = new Date(lesson.scheduled_at)
@@ -251,7 +245,7 @@ export async function GET(
           }
 
           summary[key].classesTaken++
-          if (report?.no_show_type === 'student_no_show') summary[key].studentNoShows++
+          if (report?.no_show_type === 'student') summary[key].studentNoShows++
           summary[key].totalMinutes += lesson.duration_minutes ?? 0
           summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * (profile?.rate ?? 0)
         }
