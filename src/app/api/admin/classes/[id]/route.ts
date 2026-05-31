@@ -7,6 +7,7 @@ import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentResc
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
+import { getBillability } from '@/lib/billing/billability'
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 
@@ -598,7 +599,7 @@ export async function DELETE(
 
   const { data: lesson, error: fetchError } = await adminClient
     .from('lessons')
-    .select('id, status')
+    .select('id, status, scheduled_at, cancelled_at, student_id')
     .eq('id', id)
     .single()
 
@@ -609,6 +610,38 @@ export async function DELETE(
   const cancelledStatuses = ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher']
   if (!cancelledStatuses.includes(lesson.status)) {
     return NextResponse.json({ error: 'Only cancelled classes can be deleted. Please cancel the class first.' }, { status: 422 })
+  }
+
+  // NEW106: A cancelled lesson can still be billable to the B2B company (a <24h cancellation,
+  // or a 24-48h cancellation under a 48hr-policy student). The company-billing CSV export reads
+  // these exact rows to invoice the company, so hard-deleting one silently drops a billable line
+  // item. We block deletion using getBillability(), whose billable predicate for the cancelled
+  // statuses reachable here equals the company-billing export's inline 24h/48h computation, so this
+  // guard blocks precisely the rows the export would bill. (That export case inlines the same math
+  // rather than calling getBillability — keep the two in sync.) Clean >24h cancellations and
+  // teacher-cancellations are not billable to the company and remain deletable.
+  const { data: student } = await adminClient
+    .from('students')
+    .select('cancellation_policy')
+    .eq('id', lesson.student_id)
+    .maybeSingle()
+  const policy = student?.cancellation_policy ?? '24hr'
+  const { billableToTeacher, billable48hr } = getBillability({
+    status: lesson.status,
+    scheduledAt: lesson.scheduled_at,
+    cancelledAt: lesson.cancelled_at,
+    cancellationPolicy: policy,
+    hourlyRate: 0,        // irrelevant: the billable booleans do not depend on rate/duration
+    durationMinutes: 0,
+  })
+  if (billableToTeacher || billable48hr) {
+    return NextResponse.json(
+      {
+        error: 'This cancelled class is billable to the company and cannot be deleted, because it is needed for company invoicing. Late cancellations within the billing window must stay on record.',
+        code: 'LESSON_BILLABLE_TO_COMPANY',
+      },
+      { status: 422 }
+    )
   }
 
   const { error: deleteError } = await adminClient
