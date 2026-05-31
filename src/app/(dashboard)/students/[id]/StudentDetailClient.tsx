@@ -307,7 +307,13 @@ export default function StudentDetailClient({
                     className="text-xs px-2 py-1 rounded-full text-white"
                     style={{ backgroundColor: report.did_class_happen ? '#22c55e' : '#FD5602' }}
                   >
-                    {report.did_class_happen ? 'Class taken' : report.no_show_type === 'student_no_show' ? 'Student absent' : 'Teacher absent'}
+                    {report.did_class_happen
+                      ? 'Class taken'
+                      : report.no_show_type === 'student'
+                      ? 'Student absent'
+                      : report.no_show_type === 'teacher'
+                      ? 'Teacher absent'
+                      : 'Class missed'}
                   </span>
                 ) : (
                   <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">
