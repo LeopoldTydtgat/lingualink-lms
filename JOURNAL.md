@@ -1,8 +1,10 @@
-## Session 126 - 31 May 2026 - Billing export billability correctness
+## Session 126 - 31 May 2026 - Billing and status-gating correctness (three fixes)
 
 ### What was built
 - Routed the admin data-export route through the canonical getBillability() calculator, removing a divergent local billability function that had drifted from the shared logic the rest of the app and the test suite rely on.
 - Fixed two dead-status conditions in the teacher-earnings export that compared against status strings that do not exist in the database, so they silently never fired.
+- Replaced a drifted local BLOCKED_STATUSES array in the teacher-portal student-detail page with the canonical shared constant, so a lesson cancelled by a student or teacher no longer shows a Teams join button.
+- Rerouted the admin-role mark-paid action on the dashboard billing screen through the recompute API instead of a direct database write, so the invoice amount is recalculated before it is frozen as paid, and added error surfacing for the cases the direct write silently swallowed.
 
 ### Break/Fix Log
 Issue 1: Teacher earnings export under-counted teacher pay.
@@ -15,8 +17,18 @@ Cause: The settled-lessons filter excluded status 'upcoming' and the student-no-
 Fix: Changed the filter to exclude 'scheduled' and the counter to compare against 'student'.
 Lesson: A condition that compares against a value the column never holds fails silently with no error. Confirm status and enum values against the live schema, not against assumed names.
 
+Issue 3: Teacher join button could appear on cancelled lessons.
+Cause: The teacher-portal student-detail page hand-rolled its own BLOCKED_STATUSES list that omitted the cancelled-by-student and cancelled-by-teacher statuses, while every other part of the app imported the canonical list. A lesson cancelled by either party slipped past the local list and showed a join button until the class end time passed.
+Fix: Deleted the local array and imported the canonical BLOCKED_STATUSES, which is a strict superset (adds the two missing statuses, keeps the rest). It can only add blocking, never remove it. This was the last remaining local copy of that constant.
+Lesson: The same drift that caused the billing bug in the same session. A local duplicate of a shared list silently goes stale. Search for hand-rolled copies and replace them with the shared source.
+
+Issue 4: Marking an invoice paid could freeze a stale amount.
+Cause: The billing screen's mark-paid handler wrote the invoice status directly to the database via the browser client, bypassing the API route that recalculates the billable amount before freezing it. The button is admin-only (it is the business owner's dual-role view), so it is legitimate, but it skipped the recompute that every other paid path runs. Whatever stale amount sat on the row would be frozen as the historical paid figure. It also had no error handling, so a failure was invisible.
+Fix: Rerouted the handler through the mark-paid API route, which recomputes the amount before freezing and notifies the teacher by email (matching the admin component). Added an error state rendered in the confirmation block so a recompute failure (for example, a teacher with no timezone set) is shown to the user instead of silently swallowed.
+Lesson: A money figure that gets frozen as a historical record must go through the single canonical calculation path. A second write path that skips it will eventually freeze a wrong number.
+
 ### Session result
-Closed a real teacher-pay under-count on the admin earnings export by replacing a drifted local billability copy with the canonical shared calculator, and fixed two silently-dead conditions in the same export. One file changed, reviewed GREEN, committed as d46a87f. A separate phantom-status bug in the company-billing export (under-billing companies in the opposite direction) was surfaced during the audit and left for a follow-up to keep this change single-purpose.
+Shipped three correctness fixes, two of them sharing one root cause: logic that should be shared had been duplicated and the copies drifted. The admin earnings export was routed through the canonical billability calculator (fixing a teacher-pay under-count on student no-shows), the teacher-portal student-detail page was switched to the canonical blocked-status list (fixing a join button on cancelled lessons), and the dashboard mark-paid action was rerouted through the recompute API (fixing a stale frozen invoice amount, with error surfacing added). Three files, each reviewed, committed as d46a87f, 33efeb5, and c741ca3. Also reconciled several stale backlog entries against the live code: multiple items marked open were already resolved in earlier sessions and were corrected in the bug log.
 
 ---
 
