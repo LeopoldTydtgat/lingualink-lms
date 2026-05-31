@@ -380,7 +380,8 @@ export async function GET(
             const hours = (scheduled - cancelled) / (1000 * 60 * 60)
             if (hours < 24) billable24 = true
             else if (hours >= 24 && hours < 48 && policy === '48hr') billable48 = true
-          } else if (l.status === 'no_show') {
+          // Student no-show: the slot was held and the teacher was ready, so the company is billed (brief 9.4). A teacher no-show is intentionally NOT billed to the company and falls through to non-billable below.
+          } else if (l.status === 'student_no_show') {
             billable24 = true
           }
 
