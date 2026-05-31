@@ -157,6 +157,7 @@ export default function BillingClient({
   >([])
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
+  const [markPaidError, setMarkPaidError] = useState<string | null>(null)
 
   const loadAdminData = useCallback(async () => {
     if (!isAdmin) return
@@ -239,13 +240,27 @@ export default function BillingClient({
 
   const handleMarkPaid = async (invoiceId: string) => {
     setSavingPaid(true)
-    await supabase
-      .from('invoices')
-      .update({ status: 'paid', paid_at: new Date().toISOString() })
-      .eq('id', invoiceId)
-    setMarkingPaidId(null)
-    setSavingPaid(false)
-    await loadAdminData()
+    setMarkPaidError(null)
+    try {
+      const res = await fetch('/api/admin/billing/mark-paid', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId }),
+      })
+      if (!res.ok) {
+        // 422 returns { error, message }; other failures carry only { error }
+        const body = await res.json().catch(() => ({}))
+        setMarkPaidError(body.message || body.error || 'Failed to mark invoice as paid.')
+        setSavingPaid(false)
+        return
+      }
+      setMarkingPaidId(null)
+      setSavingPaid(false)
+      await loadAdminData()
+    } catch {
+      setMarkPaidError('Something went wrong. Please try again.')
+      setSavingPaid(false)
+    }
   }
 
   return (
@@ -626,10 +641,13 @@ export default function BillingClient({
                             >
                               {savingPaid ? 'Saving…' : 'Confirm'}
                             </button>
-                            <button onClick={() => setMarkingPaidId(null)} className="text-sm text-gray-400 underline">
+                            <button onClick={() => { setMarkingPaidId(null); setMarkPaidError(null) }} className="text-sm text-gray-400 underline">
                               Cancel
                             </button>
                           </div>
+                        )}
+                        {markingPaidId === invoice.id && markPaidError && (
+                          <p className="mt-2 text-sm" style={{ color: '#dc2626' }}>{markPaidError}</p>
                         )}
                       </div>
                     ))}

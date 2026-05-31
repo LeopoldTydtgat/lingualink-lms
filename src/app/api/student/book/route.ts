@@ -389,7 +389,7 @@ export async function POST(req: NextRequest) {
           new_hours_needed: hoursNeeded,
           error: lessonError,
         })
-        const { error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
+        const { data: unwindRestored, error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
           p_old_lesson_id: rescheduleId,
           p_training_id: trainingId,
           p_old_duration_hours: oldDurationHours,
@@ -417,12 +417,35 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (isSlotConflict && !unwindError) {
+        if (!unwindError && unwindRestored === false) {
+          // Hours were returned, but the original lesson could not be restored
+          // (its freed slot was taken). The student has no class now but their
+          // hours are back — tell them to rebook.
           return NextResponse.json(
-            { error: 'SLOT_NOT_AVAILABLE', message: 'This slot was just booked by another student. Please choose a different time.' },
+            {
+              error: 'RESCHEDULE_FAILED_HOURS_RETURNED',
+              message:
+                'We could not keep your original class and the new time was no longer available. Your hours have been returned — please book a new class.',
+            },
             { status: 409 }
           )
         }
+
+        if (isSlotConflict && !unwindError) {
+          // unwindRestored === true: original lesson is back at its original time.
+          // The reschedule simply did not go through — original class is intact.
+          return NextResponse.json(
+            {
+              error: 'SLOT_NOT_AVAILABLE',
+              message:
+                'That time was just booked by someone else. Your original class is unchanged — please choose a different time.',
+            },
+            { status: 409 }
+          )
+        }
+        // Any other case (unwindError set, or restored but a non-slot insert error)
+        // falls through to the generic 500 below; the CRITICAL log above flags
+        // genuine unwind failures for manual reconciliation.
       } else {
         if (teamsMeetingId) {
           try {

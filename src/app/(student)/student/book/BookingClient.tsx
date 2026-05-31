@@ -889,7 +889,7 @@ export default function BookingClient({
       const data = await res.json()
 
       if (!res.ok || data.error) {
-        setSubmitError(data.error ?? 'Something went wrong. Please try again.')
+        setSubmitError(data.message ?? data.error ?? 'Something went wrong. Please try again.')
         setIsSubmitting(false)
         return
       }
