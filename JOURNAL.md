@@ -1,3 +1,86 @@
+## Session 122 - 31 May 2026 - Schema baseline capture and hours RPC execute lockdown
+
+### What was built
+- Captured the full production database schema into a version controlled baseline at supabase/migrations/00000000000000_baseline_schema.sql using pg_dump in schema-only mode. The file holds all table definitions, 91 RLS policies, all five hours RPC bodies, and the full grant and revoke state in one place. This closes the long-standing gap where the repo held only four hand-written migration files against a database with around fifteen tables, so a fresh clone could never reproduce the live schema. With the repo about to go public, a baseline that reproduces the database is a hard requirement.
+- Installed the Supabase CLI and a native PostgreSQL client (pg_dump) on the build machine. The CLI's own db dump command shells out to a Docker container to match the server Postgres version, and Docker is not installed, so I produced the baseline with a direct pg_dump over the session pooler instead. This keeps the build environment lighter while still producing the authoritative dump.
+- Completed the EXECUTE lockdown on the hours RPCs that was only partially applied last session.
+
+### Break/Fix Log
+Issue 1: The backlog recorded that a migration file capturing the hours RPC bodies had been written last session, but the file was not on disk. Cause: the file-writing step was skipped during the previous session and the backlog entry was updated to the intended state rather than the actual one. Fix: confirmed the absence directly on the filesystem before planning any work, then produced the real baseline this session. Lesson: a tool reporting success is not proof a file was written. Verify against the filesystem before trusting any claim that an artifact exists.
+
+Issue 2: Four of the five hours RPCs still allowed PUBLIC to execute them, despite last session recording that this had been fixed. Cause: the previous revoke was written as REVOKE EXECUTE FROM anon, authenticated, which is a no-op against a grant held by PUBLIC. In Postgres, EXECUTE granted to PUBLIC must be removed with REVOKE FROM PUBLIC. Only one of the five functions had been revoked correctly. Because these functions are SECURITY DEFINER with no internal ownership check, any logged-in user could call them directly through the data API to alter any training's hours or cancel any lesson. Fix: REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC on all five, then confirmed the access control list on each showed no PUBLIC entry. Lesson: revoking from named roles does not remove a PUBLIC grant. Always check the function's actual access control list after a revoke rather than trusting the statement ran.
+
+Issue 3: The first schema dump silently included every row of production data, including student personal information. Cause: I built the pg_dump command with the public namespace selected but did not pass schema-only, and pg_dump includes data by default. Fix: the file was never staged or committed, so deleting it from disk was complete remediation. I re-ran the dump in schema-only mode and verified zero data rows and zero secrets in the output before committing. Lesson: selecting a namespace is not the same as excluding data. The output of any dump must be checked for data and secrets before it ever reaches git.
+
+Issue 4: A reschedule recovery path calls a database function that does not exist. Cause: the code at the student booking route calls unwind_reschedule_atomic when a reschedule succeeds in cancelling the old lesson but then fails to create the new one, but that function is not in the database. The backlog had this filed as a harmless stale reference. The call site is live, not dead, so a mid-reschedule failure would leave the student with their old class cancelled, hours adjusted, and no new class. Fix: not fixed this session. Reclassified in the backlog from a cosmetic cleanup to a data-integrity repair and raised its priority. Lesson: a reference to a missing function is not automatically dead code. Confirm whether the call site is reachable before downgrading it.
+
+### Session result
+This session closed the repo-versus-database drift that had been blocking the repo from going public. The full schema is now captured in a single pg_dump baseline covering tables, policies, RPC bodies, and grants, verified to contain no data and no secrets. Along the way I found and closed a real security hole where four of the five hours RPCs were still executable by any authenticated user through the data API, a gap left by a revoke that targeted named roles instead of PUBLIC last session. I also caught a schema dump that had silently pulled in all production data and removed it before it could be committed. Finally I reclassified a backlog item after confirming that a missing database function is actually referenced by a live reschedule recovery path. The hours RPC execute lockdown is verified complete, the baseline is committed, and the two remaining issues are documented for the next session.
+
+---
+
+## Session 121 - 30 May 2026 - Hours ledger writes and refund logic fix
+
+### What was built
+- Added hours_log ledger writes inside the two hours-moving database functions so every automatic balance change is now recorded: class bookings write a negative ledger row, and refunded cancellations write a positive one. The running balance on each row reconciles exactly against the canonical training balance. Manual admin add and remove already wrote the ledger; this closes the automated paths.
+- Hardened the booking function to reject non-positive hour values, closing a path where a crafted negative value could self-grant hours.
+- Revoked direct execute access on all five hours-moving functions from logged-in and anonymous roles, so they can only be called server side through the trusted service role. They were previously callable directly, which combined with the missing guard above was an exploitable hours-theft vector.
+
+### Break/Fix Log
+Issue 1: Every student cancellation of a future class reported no refund and returned no hours, even for classes booked well over a week ahead. The email read cancellation within 24 hours of class for a class three days out.
+Cause: The lessons refund flag column was nullable with no default, so existing rows held null. The refund function guarded the refund with a condition that negated this flag. In three-valued logic, negating null yields null, not true, so the refund branch was silently skipped on every cancellation regardless of timing. The date arithmetic was correct the entire time; the flag was the fault.
+Fix: Set a default of false on the column and backfilled existing null rows. Made both the cancellation and refund functions null-safe by wrapping the flag check so a null can never again skip a refund. Diagnosed with a temporary runtime log after the database confirmed the data and grants were correct, which ruled out the timezone and data hypotheses before any code was drafted.
+Lesson: A nullable boolean with no default is a latent bug wherever it is read in a negated condition. Three-valued logic turns a missing value into a silently skipped branch, not an error. Prove the runtime value before assuming the calculation is at fault.
+
+Issue 2: During audit, the hours functions were found callable directly by any logged-in user, and the booking function had no lower bound on its hours parameter.
+Cause: Postgres grants execute to public by default on function creation, and no explicit revoke had ever been applied. The booking function trusted its callers for a positive value.
+Fix: Revoked execute from anonymous and authenticated roles on all five functions, leaving only the service role the application uses. Added a positive-value guard inside the booking function as defence in depth.
+Lesson: Security-definer functions are authorization-free primitives. Their safety depends entirely on either revoked execute access or internal authorization checks. Never rely solely on the application layer compensating.
+
+### Session result
+Both the ledger writes and the refund fix were verified end to end against a real booking and cancellation cycle, with the ledger balances chaining correctly and the refund landing. The function changes were applied via the database editor and archived into a migration so the repository reflects the live database. The refund logic bug was the more serious of the two issues found, as it silently denied refunds to paying students on every cancellation.
+---
+
+## Session 120 (continued) - 30 May 2026 - Availability advisory: admin bypass of the 24hr soft-warning
+
+### What was built
+- Fixed the availability endpoint so admin and staff callers no longer trip the "outside teacher's set availability" soft-warning on legitimate near-future bookings. The endpoint now reads the caller's role from their session and skips the 24-hour portion of the cutoff for admins, while keeping it for students.
+- Confirmed this is safe: the 24-hour rule is enforced independently on the student booking write path, so relaxing the advisory display cannot let a student book inside the window.
+- No client changes. All three calling screens (student booking, admin new-class, admin reschedule) were left untouched; the role is read from the session cookie and the response shape is unchanged.
+
+### Break/Fix Log
+Issue 1: Admins booking a class less than 24 hours out saw a misleading warning that the teacher was unavailable, even when the teacher was free.
+Cause: The availability endpoint marked every slot inside 24 hours as unavailable and did not distinguish admin callers, who are allowed to bypass the 24-hour rule. The response could not tell the client whether a slot was a genuine conflict or just inside the window, so the fix had to be server-side.
+Fix: Added a session-derived admin check matching the one already used on the admin class route, using a null-tolerant lookup since students have no matching profile row. Made the cutoff conditional so admins skip only the 24-hour window and still see real conflicts and past-slot blocks.
+Lesson: An advisory check that mirrors a hard rule must mirror the same exceptions, or it will contradict the action it is meant to preview. Role belongs in the server response, not inferred by the client.
+
+### Session result
+A low-priority advisory false-positive is resolved with a contained server-side change and no client impact. A pre-existing, separate issue surfaced during review (the booked-lessons read uses the caller-scoped client against another teacher's rows, which can make the advisory miss other students' bookings) was logged as a new backlog item rather than bundled in, since it needs the lessons access policy confirmed first. Type-check clean, full review found no critical issues, all three calling screens verified unaffected.
+---
+
+## Session 120 - 30 May 2026 - Dependency security remediation: npm audit cleared to zero actionable
+
+### What was built
+- Removed the shadcn CLI package from production dependencies. It was never imported by application code and was pulling a large vulnerable subtree through @modelcontextprotocol/sdk, accounting for the only high-severity advisory plus most of the moderate ones. New shadcn/ui components are still added on demand via npx, and the vendored components were untouched.
+- Patched next and eslint-config-next from 16.2.1 to 16.2.6, the latest patch on the same minor, clearing 14 framework advisories including middleware bypass, denial of service, cross-site scripting, server-side request forgery, and cache poisoning.
+- Ran a non-forced npm audit fix to clear the remaining in-range transitive advisories (brace-expansion, the uuid chain via svix and resend, and ws).
+- Inlined the contents of shadcn/tailwind.css directly into globals.css after the package removal broke the build, preserving the accordion keyframes, the Radix data-state custom variants, and the no-scrollbar utility that the UI components depend on.
+
+### Break/Fix Log
+Issue 1: npm audit reported 15 advisories (2 high, 13 moderate), carried unaddressed across several prior sessions.
+Cause: The shadcn scaffolding CLI was listed as a runtime dependency rather than a dev tool, dragging an entire HTTP-server and validator subtree into the production tree. Separately, the framework sat a patch behind on published fixes.
+Fix: Uninstalled the CLI (239 packages pruned), patched the framework to the latest safe patch, and applied non-forced transitive fixes. Verified zero application and zero build imports of the removed package before removing it.
+Lesson: A dependency that looks unused at the code level can still be a build-time dependency. My first search covered only TypeScript source and missed a CSS import, so the build broke on removal. Search every file type a bundler reads, not just application code, before removing a package.
+
+Issue 2: All project documentation described the stack as Next.js 15.
+Cause: The framework had been upgraded to 16 at an earlier session and the supporting documents were never updated, so every session was reinforcing rules against the wrong major version.
+Fix: Confirmed the pinned and installed version is 16 and corrected the version label in the two subagent prompts. Left the historical incident notes in this journal unchanged, as they accurately describe behaviour introduced in 15.
+Lesson: Treat the manifest as the source of truth for versions, not the prose. Verify the installed version at the start of any dependency work.
+
+### Session result
+Cleared the standing security backlog ahead of making the repository public. The advisory count dropped from 15 to 2, and the 2 that remain are a single postcss issue bundled inside the framework itself, whose only published fix is a seven-major-version downgrade and therefore cannot be applied without breaking the application. It will clear when the framework bundles a newer postcss or the advisory is updated for the current version. The change was confined to the dependency manifest and a single stylesheet, with no change to application logic. A clean type-check, the full 43-test suite, a successful production build of all 82 routes, and a local visual check of the tab and accordion components together confirmed it was safe.
+---
+
 ## Session 119 - 30 May 2026 - Three consistency fixes: teacher-picker status gate, invoice-ref collisions, viewer-timezone
 
 ### What was built

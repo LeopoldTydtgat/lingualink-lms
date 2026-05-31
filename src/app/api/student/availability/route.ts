@@ -35,6 +35,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
 
+  // Detect admin/staff caller: they bypass the 24hr booking rule (enforced
+  // independently on the write paths, e.g. student/book/route.ts), so the
+  // 24hr-derived advisory cutoff below should not apply to them. Students
+  // have no profiles row -> maybeSingle returns null -> isAdmin false.
+  const { data: callerProfile } = await supabase
+    .from('profiles')
+    .select('account_types')
+    .eq('id', user.id)
+    .maybeSingle()
+  const isAdmin =
+    callerProfile?.account_types?.includes('school_admin') ||
+    callerProfile?.account_types?.includes('staff')
+
   const { searchParams } = new URL(req.url)
   const teacherId = searchParams.get('teacherId')
   const weekStart = searchParams.get('weekStart') // YYYY-MM-DD (Monday)
@@ -179,7 +192,7 @@ export async function GET(req: NextRequest) {
 
     // Block slots within 24 hours (24-hour booking rule) or in the past
     const now = Date.now()
-    const cutoff = now + 24 * 60 * 60 * 1000
+    const cutoff = isAdmin ? now : now + 24 * 60 * 60 * 1000
     for (const slot of slots) {
       if (new Date(slot.startIso).getTime() < cutoff) {
         slot.available = false
