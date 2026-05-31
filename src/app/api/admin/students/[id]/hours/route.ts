@@ -83,72 +83,52 @@ export async function POST(
       )
     }
 
-    // ── 4. Fetch current training balance ─────────────────────────────────────
+    // ── 4. Apply the adjustment atomically ────────────────────────────────────
+    // Locked balance read + total_hours/hours_consumed write + hours_log insert,
+    // all in one transaction. Replaces the former read-modify-write, which raced
+    // concurrent writers and could silently drop the ledger row on insert failure.
     const adminClient = createAdminClient()
 
-    const { data: training, error: trainError } = await adminClient
+    // Defense-in-depth ownership guard: reject a training_id that isn't this
+    // student's before mutating. adjust_hours_atomic also scopes its locked read
+    // by (id, student_id), but the route enforces its own authorization invariant
+    // here too (mirrors the profile-edit route). Ownership 404 only — no balance
+    // read; the locked balance read still happens inside the RPC, so no race.
+    const { data: owned, error: ownErr } = await adminClient
       .from('trainings')
-      .select('id, total_hours, hours_consumed')
+      .select('id')
       .eq('id', data.training_id)
       .eq('student_id', studentId)
-      .single()
+      .maybeSingle()
 
-    if (trainError || !training) {
+    if (ownErr || !owned) {
       return NextResponse.json({ error: 'Training record not found.' }, { status: 404 })
     }
 
-    const currentBalance = Number(training.total_hours) - Number(training.hours_consumed)
+    const { data: newBalance, error: rpcError } = await adminClient.rpc('adjust_hours_atomic', {
+      p_training_id: data.training_id,
+      p_student_id: studentId,
+      p_action: data.action,
+      p_amount: data.amount,
+      p_log_type: data.action === 'add' ? 'add' : 'deduct',
+      p_created_by: adminProfile.id,
+      p_invoice_reference: data.invoice_reference ?? null,
+      p_notes: data.notes ?? null,
+    })
 
-    // For 'add': increase total_hours (student has more hours available)
-    // For 'remove': increase hours_consumed (student has used more hours)
-    let newTotalHours = Number(training.total_hours)
-    let newHoursConsumed = Number(training.hours_consumed)
-
-    if (data.action === 'add') {
-      newTotalHours = newTotalHours + data.amount
-    } else {
-      if (data.amount > currentBalance) {
+    if (rpcError) {
+      const msg = (rpcError.message || '').toLowerCase()
+      if (msg.includes('insufficient_balance')) {
         return NextResponse.json(
-          { error: `Cannot remove ${data.amount}h — only ${currentBalance}h available.` },
+          { error: `Cannot remove ${data.amount}h — only the available balance can be removed.` },
           { status: 400 }
         )
       }
-      newHoursConsumed = newHoursConsumed + data.amount
-    }
-
-    const newBalance = newTotalHours - newHoursConsumed
-
-    // ── 5. Update the training record ─────────────────────────────────────────
-    const { error: updateError } = await adminClient
-      .from('trainings')
-      .update({
-        total_hours: newTotalHours,
-        hours_consumed: newHoursConsumed,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', data.training_id)
-
-    if (updateError) {
-      console.error('Training update error:', updateError)
+      if (msg.includes('training_not_found')) {
+        return NextResponse.json({ error: 'Training record not found.' }, { status: 404 })
+      }
+      console.error('adjust_hours_atomic error:', rpcError)
       return NextResponse.json({ error: 'Failed to update training.' }, { status: 500 })
-    }
-
-    // ── 6. Write to hours_log ─────────────────────────────────────────────────
-    const { error: logError } = await adminClient
-      .from('hours_log')
-      .insert({
-        student_id: studentId,
-        type: data.action === 'add' ? 'add' : 'deduct',
-        amount_hours: data.action === 'add' ? data.amount : -data.amount,
-        balance_after: newBalance,
-        invoice_reference: data.invoice_reference ?? null,
-        notes: data.notes ?? null,
-        created_by: adminProfile.id,
-      })
-
-    if (logError) {
-      // Non-fatal — training is already updated. Log the error but don't fail.
-      console.error('hours_log insert error:', logError)
     }
 
     return NextResponse.json({ success: true, new_balance: newBalance })
