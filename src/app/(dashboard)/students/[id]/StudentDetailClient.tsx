@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 type Student = {
   id: string
@@ -68,8 +69,6 @@ type Props = {
 }
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
-
-const BLOCKED_STATUSES = ['cancelled', 'completed', 'student_no_show', 'teacher_no_show']
 
 function CategoryBadge({ category }: { category: string }) {
   const style =
