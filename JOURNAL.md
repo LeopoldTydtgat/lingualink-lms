@@ -1,3 +1,158 @@
+## Session 128 - 31 May 2026 - Company billing export repair and no-show fault label fix
+
+### What was built
+
+- Repaired the company billing CSV export, which had been failing on every run because it read a restricted column under a database role not permitted to see it, and routed it through the shared billability calculator so it no longer keeps its own copy of the rules.
+- Audited the five other admin CSV exports and confirmed none has the same fault and none leaks a restricted field into its output.
+- Corrected a fault-attribution label on the teacher-facing student detail page, where every student no-show was being shown as the teacher's absence.
+- Reconciled the bug log against live code and git, closing out the previous session's housekeeping and clearing duplicate entry numbers.
+
+### Break/Fix Log
+
+Issue 1: Company billing export failed on every run, and kept its own copy of the billing rules
+
+- Symptom: the admin Company Billing CSV export produced no file. The button returned a server error rather than a download, for as long as the query had referenced the restricted field.
+- Cause: the export read a student's cancellation-policy field through the standard logged-in database client, but that field is revoked from the standard role and readable only by the privileged server client. The database rejected the read and the route errored before producing any output. A live database check confirmed the standard role genuinely cannot read the field. Separately, this same branch carried its own hand-written copy of the 24-hour and 48-hour billing arithmetic instead of calling the shared calculator.
+- Fix: switched the student read to the privileged server client, matching the pattern the teacher-earnings export in the same file already uses for a different restricted field, after the existing admin access check. With the field now readable, replaced the inline arithmetic with the shared calculator, removing the last hand-maintained copy of that rule. The eight CSV columns are unchanged. A data-access security audit confirmed the restricted field is used only as a calculation input and never written into the output, and a code review confirmed the new logic matches the old arithmetic for every status and every cancellation-timing boundary.
+- Lesson: a restricted field referenced by the wrong database role does not silently return empty here, it errors the whole request, so the feature was not under-reporting, it was entirely dead. The business consequence is that this export was never a usable source for company invoicing, which the client should know in case it was assumed to work. Reading a restricted field always requires both the privileged client and the access check in front of it.
+
+Issue 2: Student no-shows were labelled as teacher absences on the teacher student-detail page
+
+- Symptom: on the teacher-facing student detail page, under past classes, a class the student missed was shown as the teacher having been absent. Fault was attributed to the wrong party in the teacher's own view of their student.
+- Cause: the label compared the no-show-type field against a long-form value that the field never holds. The field stores a short form, confirmed by the database constraint, the input validation, and the code that writes it, while the long form belongs to a different column entirely. The comparison therefore never matched, and every student no-show fell through to a catch-all that asserted teacher absence. A class missed with no recorded type also fell through to the same wrong label.
+- Fix: matched the short-form value the field actually stores, consistent with the four other places in the codebase that read this field, added an explicit branch for the teacher case, and gave the unrecorded case a neutral label rather than asserting teacher fault. One line of display logic, no data or behaviour change beyond the rendered text.
+- Lesson: the bug log entry named the wrong file, pointing at the admin portal when the fault was in the teacher portal, the same file-name confusion seen in an earlier session. Verifying the reported location against the actual file before any change, and tracing the field's real stored values rather than trusting the comparison already in the code, both prevented a wrong fix.
+
+### Session result
+
+I repaired the company billing CSV export, which a live database check proved had been erroring on every run rather than merely under-reporting, and in the same change routed it through the shared billability calculator so the last hand-maintained copy of the billing rules is gone. I then audited the five other admin exports and confirmed none shares the fault and none leaks a restricted field. Separately I corrected a fault-attribution label on the teacher student-detail page, where a field comparison against a value the column never holds had been showing every student no-show as a teacher absence. Both fixes were verified against live code, the database constraints, and where relevant the live grants before any change was written, and the billing change cleared both a code review and a data-access security audit. The two fixes were committed separately. The session also reconciled the bug log against live code and git, which showed the previous session's housekeeping had in fact landed and only needed a missing commit reference and three duplicate entry numbers corrected.
+
+---
+
+## Session 127 - 31 May 2026 - Company billing correctness: phantom status and deletable billable lessons
+
+### What was built
+
+- Fixed a silent under-billing bug in the company billing CSV export, where business-to-business clients were not charged for student no-shows.
+- Closed a data-loss path where the admin Delete button could permanently remove a cancelled lesson that was still needed to invoice a company.
+- Audited and confirmed a third reported bug was not reachable, avoiding unnecessary changes to a working email path.
+
+### Break/Fix Log
+
+Issue 1: Company billing export omitted student no-shows
+
+- Symptom: business-to-business clients were under-billed on the billing export. A student who failed to attend a class did not appear as a billable line item, even though the teacher held the slot and was paid.
+- Cause: the company billing branch of the export compared a lesson's status against the string 'no_show', a value no lesson ever holds. The real status for this case is 'student_no_show', so the comparison never matched and the lesson scored as not billable.
+- Fix: corrected the comparison to 'student_no_show'. Teacher no-shows still fall through to not billable, which is the intended behaviour, because a company should not be charged when the teacher is the party who failed to attend.
+- Lesson: this was the final instance of a status-typo bug class that had already caused an earlier teacher-pay error in the same file. A single hand-written status string, drifted from the canonical set of valid statuses, was enough to produce a silent and ongoing money error. A repository-wide search confirmed the only remaining 'no_show' literal is a legitimate interface-to-database filter alias, not a stored status comparison.
+
+Issue 2: Cancelled lessons that a company still owed for could be permanently deleted
+
+- Symptom: the admin Class Detail page offered a Delete button that permanently removed a cancelled lesson. Some cancelled lessons are still billable to a company, and deleting one silently removed it from the billing export, so the portal and any invoice already sent to the client could disagree.
+- Cause: the Delete button was built in an earlier session as a simple record-removal action, with a safety gate that allowed deletion only of cancelled lessons, on the assumption that a cancelled lesson is disposable. Company billing, built later, reads those same cancelled rows to charge clients for late cancellations, specifically cancellations made within 24 hours, or between 24 and 48 hours for students on a 48-hour cancellation policy. The two features were never reconciled.
+- Fix: the delete handler now refuses to delete a cancelled lesson that is still billable to a company, returning an error explaining that the lesson is needed for invoicing. The decision reuses the shared billability calculator, so it blocks exactly the lessons the export would charge for and cannot drift from it. Clean cancellations with more than 24 hours notice, and teacher cancellations, remain deletable, so the button keeps its original purpose of clearing unwanted records. The sensitive cancellation-policy field is read strictly on the server after the admin access check and is never included in any response.
+- Lesson: a safety assumption that holds when a feature is first built can quietly become false once a later feature depends on the same data. The correct fix preserved the existing workflow rather than removing the button, and reused shared logic rather than introducing a third hand-written copy of the billability rules.
+
+### Session result
+
+I shipped two billing-correctness fixes, both affecting real business-to-business invoicing, and both committed and pushed to the development branch. Each was verified against live code before any change was written, and each cleared an automated code review, with the second also passing a data-access security audit because it reads a sensitive field. A third reported issue, a missing null guard on a student email in the cancellation email path, was audited and confirmed not to be reachable, because the email column is required at the database level and the email send is already non-blocking. Both real bugs traced to the same underlying pattern that has recurred across recent sessions: billability logic that was duplicated or assumed rather than centralised. The remaining structural cleanup, routing the company billing export through the shared calculator instead of its own copy of the rules, was deliberately left as separate future work rather than bundled into a fix of the same path.
+
+---
+
+## Session 126 - 31 May 2026 - Billing and status-gating correctness (three fixes)
+
+### What was built
+- Routed the admin data-export route through the canonical getBillability() calculator, removing a divergent local billability function that had drifted from the shared logic the rest of the app and the test suite rely on.
+- Fixed two dead-status conditions in the teacher-earnings export that compared against status strings that do not exist in the database, so they silently never fired.
+- Replaced a drifted local BLOCKED_STATUSES array in the teacher-portal student-detail page with the canonical shared constant, so a lesson cancelled by a student or teacher no longer shows a Teams join button.
+- Rerouted the admin-role mark-paid action on the dashboard billing screen through the recompute API instead of a direct database write, so the invoice amount is recalculated before it is frozen as paid, and added error surfacing for the cases the direct write silently swallowed.
+
+### Break/Fix Log
+Issue 1: Teacher earnings export under-counted teacher pay.
+Cause: The export route carried its own local isTeacherBillable() instead of using the shared getBillability(). The local copy checked for a status of 'no_show', but the real database value is 'student_no_show', so the student-no-show branch never matched and every student no-show scored as not billable. Teachers are owed pay for student no-shows, so the pay CSV the client downloads was under-counting them.
+Fix: Deleted the local function and routed both export call sites (all-classes, teacher-earnings) through getBillability(), passing cancellationPolicy as null because teacher pay is independent of the 48hr company policy. Reading .billableToTeacher gives the same decision the rest of the app already makes.
+Lesson: A second copy of business logic is a latent bug waiting to drift from the original. The canonical calculator was already correct and test-covered; the export had quietly diverged. Audit for duplicate implementations before trusting either one, and prefer the shared source.
+
+Issue 2: Two dead conditions in the teacher-earnings export.
+Cause: The settled-lessons filter excluded status 'upcoming' and the student-no-show counter compared no_show_type against 'student_no_show'. Neither string exists in the data ('scheduled' is the real not-yet-happened status; no_show_type holds 'student' or 'teacher'), so the filter excluded nothing and the counter never incremented.
+Fix: Changed the filter to exclude 'scheduled' and the counter to compare against 'student'.
+Lesson: A condition that compares against a value the column never holds fails silently with no error. Confirm status and enum values against the live schema, not against assumed names.
+
+Issue 3: Teacher join button could appear on cancelled lessons.
+Cause: The teacher-portal student-detail page hand-rolled its own BLOCKED_STATUSES list that omitted the cancelled-by-student and cancelled-by-teacher statuses, while every other part of the app imported the canonical list. A lesson cancelled by either party slipped past the local list and showed a join button until the class end time passed.
+Fix: Deleted the local array and imported the canonical BLOCKED_STATUSES, which is a strict superset (adds the two missing statuses, keeps the rest). It can only add blocking, never remove it. This was the last remaining local copy of that constant.
+Lesson: The same drift that caused the billing bug in the same session. A local duplicate of a shared list silently goes stale. Search for hand-rolled copies and replace them with the shared source.
+
+Issue 4: Marking an invoice paid could freeze a stale amount.
+Cause: The billing screen's mark-paid handler wrote the invoice status directly to the database via the browser client, bypassing the API route that recalculates the billable amount before freezing it. The button is admin-only (it is the business owner's dual-role view), so it is legitimate, but it skipped the recompute that every other paid path runs. Whatever stale amount sat on the row would be frozen as the historical paid figure. It also had no error handling, so a failure was invisible.
+Fix: Rerouted the handler through the mark-paid API route, which recomputes the amount before freezing and notifies the teacher by email (matching the admin component). Added an error state rendered in the confirmation block so a recompute failure (for example, a teacher with no timezone set) is shown to the user instead of silently swallowed.
+Lesson: A money figure that gets frozen as a historical record must go through the single canonical calculation path. A second write path that skips it will eventually freeze a wrong number.
+
+### Session result
+Shipped three correctness fixes, two of them sharing one root cause: logic that should be shared had been duplicated and the copies drifted. The admin earnings export was routed through the canonical billability calculator (fixing a teacher-pay under-count on student no-shows), the teacher-portal student-detail page was switched to the canonical blocked-status list (fixing a join button on cancelled lessons), and the dashboard mark-paid action was rerouted through the recompute API (fixing a stale frozen invoice amount, with error surfacing added). Three files, each reviewed, committed as d46a87f, 33efeb5, and c741ca3. Also reconciled several stale backlog entries against the live code: multiple items marked open were already resolved in earlier sessions and were corrected in the bug log.
+
+---
+
+## Session 125 - 31 May 2026 - Hours ledger completion and two endpoint hardening fixes
+
+### What was built
+- Completed Phase 2 of the hours ledger retrofit (NEW71). Reschedules and duration changes were moving a student's consumed hours but writing nothing to the hours_log audit trail, leaving those movements invisible for invoicing and dispute resolution. Four database functions were updated so every hours movement is recorded and paired with a matching ledger row.
+- Updated reschedule_class_atomic to log a single net row of type reschedule reflecting the real balance change. A same-length move logs a zero-hours row, which still records that the class moved on a given date, preserving a complete timeline of scheduling events.
+- Updated change_duration_atomic to log the balance change as a duration_change row and added a created_by argument so the row is stamped with the admin who made it. The old three-argument version was dropped so no unlogged path remains callable.
+- Updated unwind_reschedule_atomic and refund_hours_atomic to each write a reversing ledger row of type reschedule_reversal and booking_reversal respectively. These recovery functions run when a booking or reschedule fails partway through; without a reversing row the ledger would retain a phantom entry for a class that never happened. Every hours movement now has a matching counter-entry that nets to the true balance.
+- Added the four new ledger type strings to the admin student-detail badge component so they render as labelled badges instead of raw strings.
+- NEW145: the admin create-class endpoint accepted duration_minutes with only a presence check and no value validation. Added a Zod 30/60/90 literal-union check matching the student and edit routes, so a forged or malformed duration is rejected at the endpoint rather than relying on the database guard alone.
+- NEW140: the create-class availability calendar read booked lessons through the RLS-bound client, which cannot see other students' bookings for a given teacher, so the preview could show a taken slot as free. Switched that one read to the service-role client, consistent with the timezone and availability reads beside it. Booking integrity was never affected as the write-time guard already uses the service-role client.
+
+### Break/Fix Log
+Issue 1: Reschedules and duration changes left no audit trail in the hours ledger. Cause: reschedule_class_atomic and change_duration_atomic moved hours_consumed but never inserted a hours_log row, and their recovery counterparts unwind_reschedule_atomic and refund_hours_atomic also wrote nothing, so a failed-then-undone operation left a phantom entry that was never reversed. Fix: added paired ledger writes to all four functions in one migration; reschedule logs one net row, duration change logs one row stamped with the acting admin, and the two recovery functions write reversing rows so a failed and unwound operation leaves no phantom entry. Lesson: a balance mutation and its audit row must be written in the same function, and any function that reverses a mutation must also reverse its ledger row, or the trail drifts from the balance.
+
+Issue 2: The admin create-class endpoint did not validate the duration value. Cause: duration_minutes was destructured and checked only for truthiness, so a present but invalid value such as 45 or a string passed the endpoint and reached the database. Fix: added a Zod 30/60/90 literal-union check after the missing-fields guard, matching the sibling student and edit routes. Lesson: defence in depth means every endpoint validates its own input rather than trusting the layer below, even when a database constraint would catch the same error downstream.
+
+Issue 3: The availability preview could show taken slots as free. Cause: the conflicting-lessons read used the RLS-bound cookie client against a foreign teacher's lessons; the lessons SELECT policy scopes students to their own rows, so other students' bookings for that teacher were invisible and overlapping slots stayed marked available. Fix: switched that single read to the service-role client, consistent with the timezone and availability reads directly above it in the same function. Verified the RLS policy before changing anything and confirmed via a supabase-rls-auditor review that the query is scoped to the requested teacher and week and that no raw lesson rows are returned to the caller. Lesson: when a read crosses a trust boundary that RLS deliberately blocks, it must use the service-role client, but only after confirming exactly what the read returns and that no extra data reaches the response.
+
+### Session result
+Closed three backlog items. The hours ledger is now complete across all balance-mutating functions, with every movement paired and audit-traceable for invoicing and disputes. Two endpoint hardening fixes followed: input validation on the admin booking route and a corrected availability advisory. All three shipped to dev with clean typechecks and subagent review where billing logic or data-access trust boundaries were touched.
+
+---
+
+## Session 124 - 31 May 2026 - Atomic hours adjustment RPC for admin balance changes
+
+### What was built
+- Built a new database function, adjust_hours_atomic, as the single locked path for every admin change to a student's hours balance. It locks the training row, applies the change, and writes the audit-ledger row in one transaction, so a failed ledger write rolls back the balance change instead of letting the two drift apart. It handles three actions: adding hours, which grows the package total; removing hours, which increases consumed hours; and setting an absolute new package total, used when editing a student profile.
+- Converted the manual Add and Remove Hours route to call the new function instead of its previous read, compute in code, and write back approach, which had no row lock and could silently lose a concurrent change or drop the ledger row on failure.
+- Redirected only the package-size write inside the student profile edit route through the same function, so a correction to a student's total hours is locked and produces an admin_adjustment ledger row. The change is gated so a profile edit that does not touch hours logs nothing. Every other field in that form continues to save exactly as before.
+- Added an ownership guard to the Add and Remove route so it rejects a training that does not belong to the named student, enforcing that check in the route as well as in the function.
+- Locked the new function so only the service role can run it, matching the other hours functions, and captured it as a versioned migration.
+
+### Break/Fix Log
+Issue 1: Two admin hours adjustments firing at the same moment, or an adjustment racing a student booking, could silently discard one of the changes. Cause: the route read the balance, computed a new absolute value in application code, and wrote it straight back with no row lock, so a concurrent committed change was overwritten. Fix: moved the whole read, change, and ledger write into a single database function that locks the training row for the duration. Lesson: any balance mutation must take a row lock and apply its change inside one transaction; doing the arithmetic in application code between a separate read and write is a lost-update race by construction.
+Issue 2: A balance change could succeed while its audit-ledger row silently failed to write, leaving the books and the balance out of step. Cause: the ledger insert was a separate statement after the balance update, and its failure was caught and ignored so the request still reported success. Fix: the new function writes the ledger row in the same transaction as the balance change, so either both land or neither does. Lesson: in a billing system the ledger write is not optional bookkeeping, it is part of the mutation and belongs in the same transaction.
+Issue 3: A second, unflagged raw balance write existed in the student profile edit route, writing the package total with no lock and no ledger row at all. Cause: the audit before fixing the first route surfaced it. Fix: redirected only that write through the new function, gated so it only fires and only logs when the value actually changed. Lesson: audit for the same pattern across the codebase before fixing one instance, or the fix leaves a sibling race in place and creates an inconsistency between the two paths.
+
+### Session result
+NEW141 resolved, and the audit-before-fix step caught a second raw balance writer in the profile edit route that is now fixed in the same session. All admin balance changes, manual add and remove and package-size edits, now flow through one locked atomic function that also records the audit-ledger row in the same transaction. The function is restricted to the service role and captured as a migration. The decision to log package-size edits as admin_adjustment entries means every balance movement is now traceable for invoicing. No behaviour change for normal use.
+
+---
+
+## Session 123 - 31 May 2026 - Reschedule recovery hardening and RPC lockdown
+
+### What was built
+- Rewrote the unwind_reschedule_atomic database function so a failed reschedule never leaves a student charged for a class that does not exist. It now always reverses the hours delta in the outer transaction block and attempts to restore the original lesson in a guarded sub-block. If the freed slot was retaken in the interim, restoring the lesson trips the no_teacher_overlap exclusion constraint, which is caught so the hours reversal still commits. The function returns a boolean: true when the original lesson is restored, false when hours are returned but the lesson could not be.
+- Updated the student booking route recovery branch to read that boolean and respond honestly: a new RESCHEDULE_FAILED_HOURS_RETURNED response tells the student their hours are back and to rebook, while a restored original lesson surfaces the existing slot-conflict message with reassurance that the original class is unchanged.
+- Updated the booking client to display the human readable message field instead of the raw error code, so the new copy actually reaches the student.
+- Closed a privilege hole: unwind_reschedule_atomic still had EXECUTE granted to PUBLIC, anon, and authenticated, unlike the other five hours RPCs. Locked it to service_role only.
+- Captured the function as a versioned migration so the repo matches the live database.
+
+### Break/Fix Log
+Issue 1: A student rescheduling a class could lose their hours and end up with no class at all. Cause: when the new lesson insert failed after the old lesson was already cancelled and hours re netted, the recovery function raised an exception on the no restore case, which rolled back the entire transaction including the hours reversal, leaving the student with a cancelled class, no replacement, and hours still deducted behind a misleading retry message. Fix: restructured the function so the hours reversal commits unconditionally and the lesson restore is best effort, returning a boolean the route uses to message the student correctly. Lesson: in plpgsql an exception caught inside an inner block rolls back only that block, so a compensation action that must always succeed belongs in the outer block, separate from the one that may legitimately fail.
+Issue 2: One of the six hours related database functions was callable by any logged in user. Cause: it was created without revoking the default PUBLIC execute grant, unlike its five siblings which were locked down in an earlier session. Because it is a privileged function taking raw record identifiers with no ownership check, a logged in user could have manipulated lesson and hours state directly. Fix: revoked execute from PUBLIC, anon, and authenticated and granted it to service_role only. Lesson: when a family of privileged functions is hardened, audit every member by name against the live grants rather than trusting an assumed count.
+
+### Session result
+NEW146 was reframed and resolved. The bug log had recorded the recovery function as missing from the database, but a live check showed it existed and was being called correctly. The real faults were that its failure path destroyed hours on a rare double booking race, and that it had been left open to all logged in users. Both are now fixed and verified against the live database, the student facing message is honest, and the function is captured in a migration so a fresh rebuild reproduces it. No behaviour changes for reschedules that succeed.
+
+---
+
 ## Session 122 - 31 May 2026 - Schema baseline capture and hours RPC execute lockdown
 
 ### What was built

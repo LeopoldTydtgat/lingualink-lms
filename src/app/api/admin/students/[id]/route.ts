@@ -132,10 +132,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Failed to update student.' }, { status: 500 })
     }
 
-    if (training_id && (package_name !== undefined || total_hours !== undefined || end_date !== undefined)) {
+    // Non-balance training fields write via a normal .update(). total_hours is
+    // deliberately excluded here — it is a billing-balance mutation and routes
+    // through adjust_hours_atomic below (NEW141) so the row is locked and a
+    // ledger row is recorded.
+    if (training_id && (package_name !== undefined || end_date !== undefined)) {
       const trainingUpdate: Record<string, unknown> = {}
       if (package_name !== undefined) trainingUpdate.package_name = package_name
-      if (total_hours !== undefined) trainingUpdate.total_hours = total_hours
       if (end_date !== undefined) trainingUpdate.end_date = end_date
 
       const { error: trainingError } = await adminClient
@@ -146,6 +149,54 @@ export async function PATCH(
       if (trainingError) {
         console.error('Training update error:', trainingError)
         return NextResponse.json({ error: 'Failed to update training.' }, { status: 500 })
+      }
+    }
+
+    // total_hours (package size) is a balance mutation — it must go through the
+    // atomic RPC so the row is locked, the new total can't drop below hours
+    // already consumed, and an admin_adjustment ledger row is recorded. Only fire
+    // when the value actually changed, so a profile-only edit logs no adjustment.
+    if (training_id && total_hours !== undefined) {
+      const { data: training, error: trainingFetchError } = await adminClient
+        .from('trainings')
+        .select('total_hours')
+        .eq('id', training_id)
+        .eq('student_id', id)
+        .maybeSingle()
+
+      if (trainingFetchError || !training) {
+        return NextResponse.json({ error: 'Training record not found.' }, { status: 404 })
+      }
+
+      if (Number(training.total_hours) !== Number(total_hours)) {
+        const { error: rpcError } = await adminClient.rpc('adjust_hours_atomic', {
+          p_training_id: training_id,
+          p_student_id: id,
+          p_action: 'set_total',
+          p_amount: Number(total_hours),
+          p_log_type: 'admin_adjustment',
+          p_created_by: user.id,
+          p_invoice_reference: null,
+          p_notes: 'Package size edited via student profile',
+        })
+
+        if (rpcError) {
+          const msg = (rpcError.message || '').toLowerCase()
+          if (msg.includes('total_below_consumed')) {
+            return NextResponse.json(
+              { error: 'New package total cannot be below the hours already used.' },
+              { status: 400 }
+            )
+          }
+          if (msg.includes('invalid_amount')) {
+            return NextResponse.json(
+              { error: 'Package total must be greater than zero.' },
+              { status: 400 }
+            )
+          }
+          console.error('adjust_hours_atomic (set_total) error:', rpcError)
+          return NextResponse.json({ error: 'Failed to update training.' }, { status: 500 })
+        }
       }
     }
 

@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
     .eq('teacher_id', teacherId)
 
   // Already booked lessons for this teacher this week
-  const { data: bookedLessons } = await supabase
+  const { data: bookedLessons } = await admin
     .from('lessons')
     .select('scheduled_at, duration_minutes')
     .eq('teacher_id', teacherId)
