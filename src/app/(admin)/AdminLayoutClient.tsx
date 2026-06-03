@@ -159,7 +159,7 @@ export default function AdminLayoutClient({
         className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
         style={
           active
-            ? { backgroundColor: '#FF8303', color: '#ffffff' }
+            ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
             : { color: '#9ca3af' }
         }
       >

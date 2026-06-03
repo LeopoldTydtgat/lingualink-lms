@@ -121,6 +121,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
               <Link
                 href={item.href}
                 prefetch={false}
+                style={active ? { clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' } : undefined}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
@@ -137,7 +138,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
                 {item.label === 'Messages' && liveUnreadCount > 0 && (
                   <span
                     className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
-                    style={{ backgroundColor: active ? 'rgba(255,255,255,0.35)' : '#FF8303', fontSize: '10px' }}
+                    style={{ backgroundColor: active ? '#ffffff' : '#FF8303', color: active ? '#FF8303' : '#ffffff', fontSize: '10px' }}
                   >
                     {liveUnreadCount > 9 ? '9+' : liveUnreadCount}
                   </span>
