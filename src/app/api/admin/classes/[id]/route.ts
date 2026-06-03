@@ -274,6 +274,72 @@ export async function PATCH(
     }
   }
 
+  // Resolve participant names/emails/timezones up front — hoisted ABOVE the duration
+  // RPC, lesson UPDATE, Graph sync, emails, and invoice recompute so a missing timezone
+  // aborts the reschedule pre-commit instead of half-applying it. Timezone is non-null by
+  // schema (post-S111): a null here is a real violation and fails closed below. Names are
+  // label-only and degrade to placeholders.
+  let studentName = 'Student'
+  let teacherName = 'Teacher'
+  let studentEmail: string | null = null
+  let studentTimezone: string | null = null
+  let teacherEmail: string | null = null
+  let teacherTimezone: string | null = null
+  try {
+    const [studentRes, teacherRes] = await Promise.all([
+      adminClient.from('students').select('full_name, email, timezone').eq('id', existing.student_id).maybeSingle(),
+      adminClient.from('profiles').select('full_name, email, timezone').eq('id', existing.teacher_id).maybeSingle(),
+    ])
+    if (studentRes.data) {
+      studentName = studentRes.data.full_name ?? 'Student'
+      studentEmail = studentRes.data.email ?? null
+      studentTimezone = studentRes.data.timezone ?? null
+    }
+    if (teacherRes.data) {
+      teacherName = teacherRes.data.full_name ?? 'Teacher'
+      teacherEmail = teacherRes.data.email ?? null
+      teacherTimezone = teacherRes.data.timezone ?? null
+    }
+  } catch (nameFetchError) {
+    console.warn('Reschedule name fetch failed, using fallbacks', { lesson_id: id, error: nameFetchError })
+  }
+
+  // If the teacher was reassigned, swap the teacher-side context to the NEW
+  // teacher so the Graph subject, student email teacherName, and teacher
+  // email recipient all reference the new teacher. The old teacher is no
+  // longer involved with this lesson and receives no notification.
+  if (teacherChanged && fields.teacher_id) {
+    try {
+      const { data: newTeacherRes } = await adminClient
+        .from('profiles')
+        .select('full_name, email, timezone')
+        .eq('id', fields.teacher_id)
+        .maybeSingle()
+      if (newTeacherRes) {
+        teacherName = newTeacherRes.full_name ?? 'Teacher'
+        teacherEmail = newTeacherRes.email ?? null
+        teacherTimezone = newTeacherRes.timezone ?? null
+      }
+    } catch (newTeacherFetchError) {
+      console.warn('New teacher fetch failed after reassign, using fallbacks', { lesson_id: id, new_teacher_id: fields.teacher_id, error: newTeacherFetchError })
+    }
+  }
+
+  // Fail closed: a null participant timezone (schema violation) aborts the reschedule
+  // before any write — never silently default to a wrong zone (which mis-renders the
+  // email times). error holds the human message; this endpoint's client renders it.
+  let studentTz: string
+  let teacherTz: string
+  try {
+    studentTz = requireTz(studentTimezone, 'admin-reschedule:student')
+    teacherTz = requireTz(teacherTimezone, 'admin-reschedule:teacher')
+  } catch {
+    return NextResponse.json(
+      { error: 'Cannot reschedule: a participant timezone is not set.', code: 'TIMEZONE_MISSING' },
+      { status: 422 }
+    )
+  }
+
   // Convert naive local scheduled_at to canonical UTC using the target teacher's
   // timezone. The "target" is the new teacher if reassigned, else the current.
   let scheduledAtUtc: string | undefined
@@ -384,54 +450,6 @@ export async function PATCH(
     }
   }
 
-  // Fetch student/teacher names once for both the Graph subject and the email body.
-  // A failure here only degrades labels; reschedule remains durable.
-  let studentName = 'Student'
-  let teacherName = 'Teacher'
-  let studentEmail: string | null = null
-  let studentTimezone = 'UTC'
-  let teacherEmail: string | null = null
-  let teacherTimezone = 'UTC'
-  try {
-    const [studentRes, teacherRes] = await Promise.all([
-      adminClient.from('students').select('full_name, email, timezone').eq('id', existing.student_id).maybeSingle(),
-      adminClient.from('profiles').select('full_name, email, timezone').eq('id', existing.teacher_id).maybeSingle(),
-    ])
-    if (studentRes.data) {
-      studentName = studentRes.data.full_name ?? 'Student'
-      studentEmail = studentRes.data.email ?? null
-      studentTimezone = studentRes.data.timezone ?? 'UTC'
-    }
-    if (teacherRes.data) {
-      teacherName = teacherRes.data.full_name ?? 'Teacher'
-      teacherEmail = teacherRes.data.email ?? null
-      teacherTimezone = teacherRes.data.timezone ?? 'UTC'
-    }
-  } catch (nameFetchError) {
-    console.warn('Reschedule name fetch failed, using fallbacks', { lesson_id: id, error: nameFetchError })
-  }
-
-  // If the teacher was reassigned, swap the teacher-side context to the NEW
-  // teacher so the Graph subject, student email teacherName, and teacher
-  // email recipient all reference the new teacher. The old teacher is no
-  // longer involved with this lesson and receives no notification.
-  if (teacherChanged && fields.teacher_id) {
-    try {
-      const { data: newTeacherRes } = await adminClient
-        .from('profiles')
-        .select('full_name, email, timezone')
-        .eq('id', fields.teacher_id)
-        .maybeSingle()
-      if (newTeacherRes) {
-        teacherName = newTeacherRes.full_name ?? 'Teacher'
-        teacherEmail = newTeacherRes.email ?? null
-        teacherTimezone = newTeacherRes.timezone ?? 'UTC'
-      }
-    } catch (newTeacherFetchError) {
-      console.warn('New teacher fetch failed after reassign, using fallbacks', { lesson_id: id, new_teacher_id: fields.teacher_id, error: newTeacherFetchError })
-    }
-  }
-
   // Sync the Teams meeting when time or duration changes.
   // updateTeamsMeeting preserves the join URL; teacher-only swaps skip Graph entirely.
   // Graph + email templates require canonical UTC; existing.scheduled_at already is.
@@ -500,7 +518,7 @@ export async function PATCH(
           timeChanged ? existing.scheduled_at : null,
           newScheduledAt,
           newDuration,
-          studentTimezone
+          studentTz
         )
         await resend.emails.send({
           from: 'no-reply@lingualinkonline.com',
@@ -530,7 +548,7 @@ export async function PATCH(
           timeChanged ? existing.scheduled_at : null,
           newScheduledAt,
           newDuration,
-          teacherTimezone
+          teacherTz
         )
         await resend.emails.send({
           from: 'no-reply@lingualinkonline.com',
