@@ -1,3 +1,29 @@
+## Session 130 - 03 June 2026 - Lingueo-style active states and message thread polish
+
+### What was built
+- Added a Lingueo-style arrow taper to the active pill in all three left-nav components (teacher, student, admin). The active orange pill now tapers to a single point on its right edge via an inline clip-path, pointing into the content area.
+- Converted the Schedule and Availability sub-tabs (teacher portal) from the old browser-tab lift style to a filled orange pill with a downward-pointing tail, matching the left-nav language.
+- Gave the message thread a warm cream background (#FFF9F3) across all three portals, and changed received bubbles to white with a grey border (#E0DFDC) so they read clearly against the cream. Sent bubbles left dark and unchanged.
+- Fixed the active-pill unread badge in the teacher and student navs: solid white background with an orange numeral when active, instead of a translucent white that blended into the orange pill. Admin nav already used the correct pattern.
+
+### Break/Fix Log
+Issue 1
+- Symptom: first attempt at the nav arrow rendered as a separate floating triangle stuck on the side of the pill, with a visible gap. Looked detached.
+- Cause: implemented as an absolutely-positioned child span offset 7px past the pill edge.
+- Fix: scrapped the child element. Shaped the pill itself with an inline clip-path polygon so it tapers to a point as one continuous shape. Carved inward, so no overflow clipping or scrollbar risk against the nav's overflow-y-auto.
+- Lesson: a tail that reads as continuous has to be part of the shape, not a separate element beside it.
+
+Issue 2
+- Symptom: the active-pill unread count badge blended into the orange nav pill, nearly invisible.
+- Cause: badge background was rgba(255,255,255,0.35) on active, which over orange renders as a pale orange, not white.
+- Fix: solid white background with orange numeral on active. Moved colour into the inline style so it overrides the hardcoded text-white class.
+- Lesson: a translucent white over a colour is that colour lightened, not white. For a crisp badge on a coloured pill, use solid white.
+
+### Session result
+Cosmetic polish session across all three portals. Established a consistent speech-bubble language on active states: left-nav pills taper to a side point, Schedule sub-tabs taper to a downward tail. Reworked the message threads with a cream background and white-bordered received bubbles, and made the active-nav unread badge legible. Three commits earlier in the session, with the message and badge changes committed at the end. Also logged two pre-existing code-quality issues found during the nav audit (admin NavLink missing prefetch false, and a dead Sidebar component in the admin layout) to the bug log for a future fix session, kept out of this cosmetic workstream.
+
+---
+
 ## Session 129 - 31 May 2026 - Fail-closed participant timezones
 
 ### What was built
