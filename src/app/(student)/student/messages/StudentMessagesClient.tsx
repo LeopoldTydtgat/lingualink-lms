@@ -450,7 +450,7 @@ export default function StudentMessagesClient({
             </div>
 
             {/* Message thread */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll">
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">Loading...</div>
               ) : messages.length === 0 ? (
@@ -489,7 +489,7 @@ export default function StudentMessagesClient({
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
                                 ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
+                                : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />

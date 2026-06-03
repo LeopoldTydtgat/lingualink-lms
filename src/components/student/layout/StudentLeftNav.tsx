@@ -135,8 +135,8 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 <span
                   style={{
                     marginLeft: 'auto',
-                    backgroundColor: isActive ? 'rgba(255,255,255,0.35)' : '#FF8303',
-                    color: '#ffffff',
+                    backgroundColor: isActive ? '#ffffff' : '#FF8303',
+                    color: isActive ? '#FF8303' : '#ffffff',
                     fontSize: '10px',
                     fontWeight: 700,
                     minWidth: '18px',
