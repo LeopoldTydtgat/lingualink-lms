@@ -58,21 +58,43 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
       </div>
 
       {/* Tab buttons */}
-      <div className="flex gap-1 border-b border-gray-200 mb-6">
-        {TABS.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={[
-              'px-4 py-2 text-sm font-medium rounded-t-md transition-colors',
-              activeTab === tab.id
-                ? 'bg-white border border-b-white border-gray-200 text-[#FF8303] -mb-px'
-                : 'text-gray-500 hover:text-gray-800',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex gap-6 items-end mb-6">
+        {TABS.map(tab => {
+          const isActive = activeTab === tab.id
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={[
+                'relative text-sm font-medium transition-colors',
+                isActive ? '' : 'text-gray-500 hover:text-gray-800',
+              ].join(' ')}
+              style={
+                isActive
+                  ? { backgroundColor: '#FF8303', color: 'white', padding: '9px 16px', borderRadius: '8px' }
+                  : { padding: '0 4px 10px' }
+              }
+            >
+              {tab.label}
+              {isActive && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    bottom: '-6px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 0,
+                    height: 0,
+                    borderLeft: '7px solid transparent',
+                    borderRight: '7px solid transparent',
+                    borderTop: '7px solid #FF8303',
+                  }}
+                />
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* Tab content — all three tabs receive the FULL availability array */}
