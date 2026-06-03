@@ -121,6 +121,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
               <Link
                 href={item.href}
                 prefetch={false}
+                style={active ? { clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' } : undefined}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active

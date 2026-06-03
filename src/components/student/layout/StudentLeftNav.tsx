@@ -91,7 +91,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
           display: 'flex',
           alignItems: 'center',
           padding: '0 16px', justifyContent: 'center',
-          
+
           flexShrink: 0,
         }}
       >
@@ -123,6 +123,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 backgroundColor: isActive ? '#FF8303' : 'transparent',
                 textDecoration: 'none',
                 borderRadius: '6px',
+                clipPath: isActive ? 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' : undefined,
               }}
             >
               <Icon
