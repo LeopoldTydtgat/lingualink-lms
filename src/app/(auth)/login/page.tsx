@@ -50,7 +50,7 @@ function LoginPageContent() {
           returnUrl.startsWith('/') &&
           !returnUrl.startsWith('//') &&
           !returnUrl.startsWith('/\\')
-        router.push(safeReturn ? returnUrl : '/dashboard')
+        router.push(safeReturn ? returnUrl : '/upcoming-classes')
       }
     })
   }
