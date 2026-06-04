@@ -148,6 +148,7 @@ export default function MessagesClient({
   const [messages, setMessages] = useState<Message[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const [showNewMessage, setShowNewMessage] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [newMsgSearch, setNewMsgSearch] = useState('')
@@ -271,39 +272,44 @@ export default function MessagesClient({
     if ((!html || html === '<p></p>') && pendingAttachments.length === 0) return
 
     setSending(true)
+    setSendError(null)
+    try {
+      const result = await sendMessage(
+        selectedContact.id,
+        selectedContact.type as 'teacher' | 'admin' | 'student',
+        html,
+        pendingAttachments.length > 0 ? pendingAttachments : undefined
+      )
 
-    const result = await sendMessage(
-      selectedContact.id,
-      selectedContact.type as 'teacher' | 'admin' | 'student',
-      html,
-      pendingAttachments.length > 0 ? pendingAttachments : undefined
-    )
+      if (result?.error) {
+        setSendError('Message failed to send. Please try again.')
+        return
+      }
 
-    if (result?.error) {
-      console.error('Send failed:', result.error)
+      const optimisticMsg: Message = {
+        id: crypto.randomUUID(),
+        sender_id: currentUser.id,
+        sender_type: currentUser.role,
+        receiver_id: selectedContact.id,
+        receiver_type: selectedContact.type,
+        content: html,
+        attachments: pendingAttachments,
+        read_at: null,
+        created_at: new Date().toISOString(),
+      }
+
+      setMessages(prev => [...prev, optimisticMsg])
+      setContacts(prev =>
+        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
+      )
+      editor.commands.clearContent()
+      setPendingAttachments([])
+    } catch (err) {
+      console.error('Send failed:', err)
+      setSendError('Message failed to send. Please try again.')
+    } finally {
       setSending(false)
-      return
     }
-
-    const optimisticMsg: Message = {
-      id: crypto.randomUUID(),
-      sender_id: currentUser.id,
-      sender_type: currentUser.role,
-      receiver_id: selectedContact.id,
-      receiver_type: selectedContact.type,
-      content: html,
-      attachments: pendingAttachments,
-      read_at: null,
-      created_at: new Date().toISOString(),
-    }
-
-    setMessages(prev => [...prev, optimisticMsg])
-    setContacts(prev =>
-      prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
-    )
-    editor.commands.clearContent()
-    setPendingAttachments([])
-    setSending(false)
   }
 
   const handleNewConversation = (student: Student) => {
@@ -623,6 +629,11 @@ export default function MessagesClient({
                 </div>
               )}
 
+              {sendError && (
+                <div style={{ color: '#FD5602', fontSize: '13px', padding: '4px 16px' }}>
+                  {sendError}
+                </div>
+              )}
               {/* Send row */}
               <div className="flex items-center justify-between px-4 pb-3 pt-1">
                 <div className="flex items-center gap-2">
