@@ -230,6 +230,10 @@
     font-size: 15px;
     @apply font-sans;
   }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 /* Primary orange button hover — applies to any element with this class */
