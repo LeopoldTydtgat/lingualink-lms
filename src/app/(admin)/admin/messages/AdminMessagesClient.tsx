@@ -169,13 +169,19 @@ export default function AdminMessagesClient({
 
   const fetchMessages = useCallback(async (conv: AdminConversation) => {
     setLoadingMessages(true)
-    const data = await getAdminThreadMessages(conv.teacherSideId, conv.studentId)
-    setMessages(data as AdminMessage[])
-    setLoadingMessages(false)
-    await markAdminThreadRead(conv.teacherSideId, conv.studentId)
-    setConversations(prev =>
-      prev.map(c => c.key === conv.key ? { ...c, unreadCount: 0 } : c)
-    )
+    try {
+      const data = await getAdminThreadMessages(conv.teacherSideId, conv.studentId)
+      setMessages(data as AdminMessage[])
+      await markAdminThreadRead(conv.teacherSideId, conv.studentId)
+      setConversations(prev =>
+        prev.map(c => c.key === conv.key ? { ...c, unreadCount: 0 } : c)
+      )
+    } catch (err) {
+      console.error('Failed to load admin thread messages', err)
+      setMessages([])
+    } finally {
+      setLoadingMessages(false)
+    }
   }, [])
 
   const handleSelectConv = useCallback(async (conv: AdminConversation) => {
@@ -434,9 +440,9 @@ export default function AdminMessagesClient({
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isStudent
-                              ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                              ? { backgroundColor: '#FF8303', color: '#ffffff', borderBottomRightRadius: '4px' }
                               : isAdmin
-                              ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                              ? { backgroundColor: '#374151', color: '#f9fafb', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
