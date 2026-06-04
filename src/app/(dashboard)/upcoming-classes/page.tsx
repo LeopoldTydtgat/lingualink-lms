@@ -8,37 +8,36 @@ export default async function UpcomingClassesPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, full_name, role, photo_url, timezone, profile_completed, profile_banner_dismissed')
-    .eq('id', user.id)
-    .single()
-
-  // Do NOT redirect to /login if profile is null — the layout already
-  // verified authentication. A missing profile is a data issue, not an auth issue.
-
   const adminClient = createAdminClient()
-  const { data: rawLessons, error } = await adminClient
-    .from('lessons')
-    .select(`
-      id,
-      scheduled_at,
-      duration_minutes,
-      status,
-      teams_join_url,
-      cancelled_at,
-      cancellation_reason,
-      cancelled_by,
-      students (
+
+  const [{ data: profile }, { data: rawLessons, error }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, full_name, role, photo_url, timezone, profile_completed, profile_banner_dismissed')
+      .eq('id', user.id)
+      .maybeSingle(),
+    adminClient
+      .from('lessons')
+      .select(`
         id,
-        full_name,
-        photo_url
-      )
-    `)
-    .eq('teacher_id', user.id)
-    .in('status', ['scheduled', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
-    .gte('scheduled_at', new Date().toISOString())
-    .order('scheduled_at', { ascending: true })
+        scheduled_at,
+        duration_minutes,
+        status,
+        teams_join_url,
+        cancelled_at,
+        cancellation_reason,
+        cancelled_by,
+        students (
+          id,
+          full_name,
+          photo_url
+        )
+      `)
+      .eq('teacher_id', user.id)
+      .in('status', ['scheduled', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+      .gte('scheduled_at', new Date().toISOString())
+      .order('scheduled_at', { ascending: true }),
+  ])
 
   if (error) {
     console.error('Error fetching lessons:', error)
