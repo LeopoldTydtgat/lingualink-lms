@@ -82,6 +82,7 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['isomorphic-dompurify'],
   images: {
     remotePatterns: [
       {
