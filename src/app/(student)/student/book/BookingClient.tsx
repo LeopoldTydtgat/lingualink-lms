@@ -414,25 +414,85 @@ function StepDateTime({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Fetch availability slots from the API whenever week or teacher changes
+  // Fetch availability slots from the API whenever week or teacher changes.
+  //
+  // The first fetch on step entry can lose the Supabase refresh-token race in
+  // proxy.ts and resolve as a non-2xx (typically a 401): the body is JSON with
+  // no `.slots`, so reading it without an `r.ok` check would silently render an
+  // empty week with no error. A plain re-fetch once the rotated cookies settle
+  // is what recovers it (proven: week-nav and remount both heal the grid), so
+  // we self-heal with a short bounded retry. We deliberately do NOT call
+  // refreshSession() here — forcing a refresh could consume the single-use
+  // token and worsen the race.
   useEffect(() => {
     setLoading(true)
     setError(null)
 
+    const controller = new AbortController()
     const weekStartStr = getLocalDateKey(weekStart, 'UTC')
+    const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartStr}&timezone=${encodeURIComponent(studentTimezone)}`
 
-    fetch(
-      `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartStr}&timezone=${encodeURIComponent(studentTimezone)}`
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        setSlots(data.slots ?? {})
-        setLoading(false)
+    // Immediate first attempt, then up to two retries with short back-off.
+    const RETRY_DELAYS = [400, 800]
+
+    // Abortable delay so a back-off in flight is cancelled on cleanup.
+    const wait = (ms: number) =>
+      new Promise<void>((resolve, reject) => {
+        if (controller.signal.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'))
+          return
+        }
+        const timer = setTimeout(resolve, ms)
+        controller.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer)
+            reject(new DOMException('Aborted', 'AbortError'))
+          },
+          { once: true }
+        )
       })
-      .catch(() => {
-        setError('Could not load availability. Please try again.')
-        setLoading(false)
-      })
+
+    async function load() {
+      for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+        try {
+          const r = await fetch(url, { signal: controller.signal })
+          if (r.ok) {
+            const data = await r.json()
+            if (controller.signal.aborted) return // superseded — don't clobber newer state
+            setSlots(data.slots ?? {})
+            setLoading(false)
+            return
+          }
+          // Non-2xx (e.g. a transient 401 from the refresh-token race): do NOT
+          // treat the body as slots — fall through to the retry/fail logic.
+        } catch {
+          if (controller.signal.aborted) return // our own abort — drop silently
+          // Network error — fall through to the retry/fail logic.
+        }
+
+        const delay = RETRY_DELAYS[attempt]
+        if (delay === undefined) {
+          // No await sits between the non-ok fetch and here, so abort cannot
+          // flip mid-path today; guard anyway so a superseded run never paints
+          // a stale error over the newer run's data.
+          if (controller.signal.aborted) return
+          // Retries exhausted — surface a real, retryable message, never a silent blank.
+          setError('Could not load availability. Please try again.')
+          setLoading(false)
+          return
+        }
+        try {
+          await wait(delay)
+        } catch {
+          return // aborted during back-off
+        }
+      }
+    }
+
+    void load()
+
+    return () => controller.abort()
   }, [teacherId, weekStart, studentTimezone])
 
   // Build the 7 days of this week to display
@@ -545,7 +605,7 @@ function StepDateTime({
             border: '1px solid #fecaca',
             borderRadius: '8px',
             fontSize: '13px',
-            color: '#dc2626',
+            color: '#FD5602',
           }}
         >
           {error}

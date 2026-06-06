@@ -23,7 +23,8 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(grep -iE \"api[\\\\\\\\/]\\(student[\\\\\\\\/]book|admin[\\\\\\\\/]classes\\)\")",
       "Bash(echo \"---grep exit: $? \\(1 = no matches = edited files clean\\)---\")",
-      "Bash(npm audit *)"
+      "Bash(npm audit *)",
+      "Bash(rg *)"
     ]
   }
 }
