@@ -542,6 +542,7 @@ export async function PATCH(
         })
       } catch (emailErr) {
         console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
+        Sentry.captureException(emailErr)
       }
     }
   }
@@ -572,6 +573,7 @@ export async function PATCH(
         })
       } catch (emailErr) {
         console.error('CRITICAL: [Email] Teacher reschedule email failed — lesson still updated:', emailErr)
+        Sentry.captureException(emailErr)
       }
     }
   }
