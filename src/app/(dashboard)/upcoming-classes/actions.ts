@@ -8,6 +8,7 @@ import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCa
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import type { CancelResult } from '@/lib/types/cancel'
 import { requireTz } from '@/lib/time/requireTz'
+import * as Sentry from '@sentry/nextjs'
 
 export async function teacherCancelLesson(
   lessonId: string,
@@ -40,11 +41,14 @@ export async function teacherCancelLesson(
   if (hoursUntil < 24) return { success: false, error: 'You cannot cancel within 24 hours of the class. Please contact admin.' }
 
   // Get teacher name
-  const { data: teacherProfile } = await adminClient
+  const { data: teacherProfile, error: teacherProfileError } = await adminClient
     .from('profiles')
     .select('full_name, email, timezone')
     .eq('id', user.id)
     .single()
+  if (teacherProfileError) {
+    console.error('Teacher profile fetch failed in cancel-by-teacher — emails may be skipped:', teacherProfileError)
+  }
   const teacherName = teacherProfile?.full_name ?? 'Your teacher'
 
   // Get student info
@@ -101,28 +105,33 @@ export async function teacherCancelLesson(
 
   // Send email to student
   try {
-    const hoursRefunded = refunded ? (lesson.duration_minutes / 60) : 0
-    const emailBody = studentCancellationByTeacherEmailContent(
-      teacherName,
-      lesson.scheduled_at,
-      hoursRefunded,
-      requireTz(student.timezone, 'cancel-by-teacher:student'),
-      messageToStudent
-    )
-    await resend.emails.send({
-      from: 'no-reply@lingualinkonline.com',
-      to: student.email,
-      subject: 'Lingualink Online - Your class has been cancelled by your teacher',
-      html: buildEmailTemplate({
-        recipientName: student.full_name,
-        recipientFallback: 'Student',
-        subject: 'Your class has been cancelled',
-        bodyHtml: emailBody,
-        contactEmail: 'support@lingualinkonline.com',
-      }),
-    })
+    if (student?.email) {
+      const hoursRefunded = refunded ? (lesson.duration_minutes / 60) : 0
+      const emailBody = studentCancellationByTeacherEmailContent(
+        teacherName,
+        lesson.scheduled_at,
+        hoursRefunded,
+        requireTz(student.timezone, 'cancel-by-teacher:student'),
+        messageToStudent
+      )
+      await resend.emails.send({
+        from: 'no-reply@lingualinkonline.com',
+        to: student.email,
+        subject: 'Lingualink Online - Your class has been cancelled by your teacher',
+        html: buildEmailTemplate({
+          recipientName: student.full_name,
+          recipientFallback: 'Student',
+          subject: 'Your class has been cancelled',
+          bodyHtml: emailBody,
+          contactEmail: 'support@lingualinkonline.com',
+        }),
+      })
+    } else {
+      console.error('Student email missing — cancellation email skipped:', { lessonId })
+    }
   } catch (emailErr) {
     console.error('Cancellation email to student failed — lesson still cancelled:', emailErr)
+    Sentry.captureException(emailErr)
   }
 
   // Send confirmation email to the teacher
@@ -148,6 +157,7 @@ export async function teacherCancelLesson(
     }
   } catch (teacherEmailErr) {
     console.error('Teacher confirmation email failed — lesson still cancelled:', teacherEmailErr)
+    Sentry.captureException(teacherEmailErr)
   }
 
   revalidatePath('/upcoming-classes')
