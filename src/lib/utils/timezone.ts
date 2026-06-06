@@ -22,3 +22,13 @@ export function localToUtc(localIso: string, tz: string): string {
                - Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
   return new Date(probe.getTime() + diffMs).toISOString()
 }
+
+// en-CA reliably produces YYYY-MM-DD; avoids toISOString() local-date pitfalls.
+export function getLocalDateKey(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: timezone,
+  }).format(date)
+}
