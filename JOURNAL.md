@@ -1,3 +1,37 @@
+## Session 132 - 06 June 2026 - Booking calendar reliability and admin dashboard hardening
+
+### What was built
+- Hardened the student booking availability fetch: bounded retry (immediate plus 400ms and 800ms back-off) with an AbortController, and an r.ok check so a transient non-2xx response no longer silently renders a blank week. After retries are exhausted it surfaces a real error in brand red instead of an empty grid.
+- Fixed the blank Sunday column in the student booking calendar for positive-offset timezones. weekStart is now formatted in the student timezone instead of UTC, so the server's seven-day window aligns with the client's Monday to Sunday columns. Lifted getLocalDateKey into a shared timezone util and added seven regression tests covering the week-boundary keying.
+- Admin dashboard: added a dashboard-level error state so a failed query no longer shows zeros indistinguishable from a genuinely empty day, and re-anchored the "today" range to the business timezone (SAST, UTC+2) across the stat card, the Today's Classes panel, and the sidebar badge.
+- Brought the student booking page error text onto the locked brand red.
+
+### Break/Fix Log
+Issue 1: Student booking grid showed a blank week on first entry into the date and time step.
+Symptom: the availability fetch read the response body without checking r.ok, so a transient 401 from the Supabase refresh-token race rendered as an empty grid with no retry, and the swallowed failure made it look permanent.
+Fix: bounded retry plus AbortController plus an r.ok guard, with a real error surfaced after retries.
+Lesson: a swallowed non-2xx turns a transient failure into a permanent silent dead-end. Always check r.ok and surface the error.
+
+Issue 2: Sunday column always blank for positive-offset timezones.
+Cause: weekStart (browser-local Monday midnight) was formatted in UTC, which rolled positive-offset browsers back to Sunday so the server built a Sunday to Saturday window while the client displayed Monday to Sunday.
+Fix: format weekStart in the student timezone so both sides share the same Monday anchor.
+Lesson: format a local-midnight date in the same timezone it will later be keyed in, never UTC.
+
+Issue 3: Admin dashboard counters were suspected to be broken because every stat showed zero.
+Cause: not a bug. The test dataset had no classes scheduled for today.
+Fix: none needed. Verified by booking a class for today via the admin portal, which correctly showed a count of one. Report flagging was also confirmed wired, with the pg_cron job active and deadline_at populated.
+Lesson: verify a suspected-empty counter against known non-zero data before assuming the query is broken.
+
+Issue 4: Dashboard query errors rendered as zeros, and the "today" range used UTC midnight on a SAST business view.
+Cause: none of the eight dashboard queries checked their error field, and the today range was UTC-anchored.
+Fix: a dashboard-level error state on any query error, and a SAST-anchored today range applied consistently to the card, the panel, and the sidebar badge.
+Lesson: on an operations dashboard, "query failed" and "nothing to do" must look different, and a business-day range must be anchored to the business timezone.
+
+### Session result
+Shipped four fixes to production: the booking availability race, the blank Sunday column, the admin dashboard error handling and timezone anchoring, and the booking page error-text colour. NEW154 was closed as not-a-bug after verification against real data. The student booking flow now loads reliably on first entry and displays all seven days correctly for European and South African users. A live read of the bug log showed NEW71 already resolved in an earlier session, and surfaced the admin booking calendar showing all hours rather than teacher availability (NEW55) as the next candidate for a following session, alongside the invoice reminder cron month and greeting bug.
+
+---
+
 ## Session 131 - 06 June 2026 - Live messages outage: jsdom serverless fix, send-handler hardening, admin bubble parity
 
 ### What was built
