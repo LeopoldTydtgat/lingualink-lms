@@ -337,7 +337,7 @@ function StepDuration({
                 <span
                   style={{
                     fontSize: '12px',
-                    color: '#dc2626',
+                    color: '#FD5602',
                     fontWeight: '500',
                   }}
                 >
@@ -374,7 +374,7 @@ function StepDuration({
             borderRadius: '8px',
           }}
         >
-          <p style={{ fontSize: '13px', color: '#dc2626' }}>
+          <p style={{ fontSize: '13px', color: '#FD5602' }}>
             You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
           </p>
         </div>
@@ -1041,7 +1041,7 @@ export default function BookingClient({
               border: '1px solid #fecaca',
               borderRadius: '8px',
               fontSize: '13px',
-              color: '#dc2626',
+              color: '#FD5602',
             }}
           >
             {submitError}
