@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { localToUtc } from '@/lib/utils/timezone'
+import { localToUtc, getLocalDateKey } from '@/lib/utils/timezone'
 
 /**
  * Tests for src/lib/utils/timezone.ts — the single source of truth for
@@ -128,5 +128,110 @@ describe('localToUtc', () => {
       const localIso = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
       expect(localToUtc(localIso, tz)).toBe(utcOriginal)
     }
+  })
+})
+
+// ─── getLocalDateKey ──────────────────────────────────────────────────────────
+
+describe('getLocalDateKey', () => {
+  it('positive-offset: UTC midnight on a date stays on the same calendar date', () => {
+    // 2026-06-08T00:00Z in SAST (UTC+2) = 02:00 SAST same day → "2026-06-08"
+    expect(getLocalDateKey(new Date('2026-06-08T00:00:00Z'), 'Africa/Johannesburg')).toBe('2026-06-08')
+  })
+
+  it('positive-offset: browser local Monday midnight (Sunday 22:00 UTC) reads as Monday', () => {
+    // Monday 8 Jun 2026 00:00 SAST = 2026-06-07T22:00Z; must resolve to "2026-06-08" not "2026-06-07"
+    expect(getLocalDateKey(new Date('2026-06-07T22:00:00Z'), 'Africa/Johannesburg')).toBe('2026-06-08')
+  })
+
+  it('UTC: same moment reads as Sunday, exposing the pre-fix bug', () => {
+    // The old code passed "UTC" here — 2026-06-07T22:00Z in UTC is "2026-06-07" (Sunday)
+    expect(getLocalDateKey(new Date('2026-06-07T22:00:00Z'), 'UTC')).toBe('2026-06-07')
+  })
+
+  it('negative-offset: Monday midnight EDT stays Monday', () => {
+    // Monday 8 Jun 2026 00:00 EDT (UTC-4) = 2026-06-08T04:00Z → "2026-06-08"
+    expect(getLocalDateKey(new Date('2026-06-08T04:00:00Z'), 'America/New_York')).toBe('2026-06-08')
+  })
+})
+
+// ─── Booking availability — week keying alignment ─────────────────────────────
+//
+// Regression guard for the bug where the client's Sunday column was always blank
+// for positive-offset browsers (Europe/Madrid, Africa/Johannesburg).
+//
+// ROOT CAUSE: BookingClient formatted weekStart (browser-local Monday midnight)
+// in 'UTC', which for UTC+2 browsers rolled it back to Sunday — giving the server
+// a Sun-Sat anchor while the client displayed Mon-Sun. The fix formats in
+// studentTimezone so both sides use the same Monday anchor.
+
+describe('booking availability — week keying alignment', () => {
+  // Mirrors route.ts:72-79 + 203-208: treat param as UTC midnight, step by UTC
+  // day, then re-express each anchor in the student tz (the emitted slotsByDate key).
+  function buildServerKeys(weekStartParam: string, studentTz: string): string[] {
+    const base = new Date(weekStartParam + 'T00:00:00.000Z')
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base)
+      d.setUTCDate(d.getUTCDate() + i)
+      return getLocalDateKey(d, studentTz)
+    })
+  }
+
+  // Mirrors BookingClient weekDays loop + column lookup (line 618): add calendar
+  // days from weekStart and format in student tz. SAST has no DST so +86400000ms
+  // = exactly one local day — safe to use for deterministic testing.
+  function buildClientKeys(weekStart: Date, studentTz: string): string[] {
+    return Array.from({ length: 7 }, (_, i) =>
+      getLocalDateKey(new Date(weekStart.getTime() + i * 86400000), studentTz)
+    )
+  }
+
+  // Africa/Johannesburg (SAST, UTC+2, no DST) — our primary user timezone.
+  // Monday 8 Jun 2026 00:00 SAST = 2026-06-07T22:00:00Z (Sunday evening in UTC).
+  const studentTz = 'Africa/Johannesburg'
+  const weekStart = new Date('2026-06-07T22:00:00Z')
+
+  it('OLD param ("UTC"): sends Sunday anchor → server covers Sun–Sat, client Sunday column "2026-06-14" missing', () => {
+    const oldParam = getLocalDateKey(weekStart, 'UTC')
+    expect(oldParam).toBe('2026-06-07')  // Sunday — wrong anchor
+
+    const serverKeys = buildServerKeys(oldParam, studentTz)
+    // Server covers Sun 7 Jun through Sat 13 Jun
+    expect(serverKeys).toEqual([
+      '2026-06-07', '2026-06-08', '2026-06-09', '2026-06-10',
+      '2026-06-11', '2026-06-12', '2026-06-13',
+    ])
+
+    // Client's last column (Sunday 14 Jun) is not in the server response → blank
+    const clientLastKey = buildClientKeys(weekStart, studentTz)[6]
+    expect(clientLastKey).toBe('2026-06-14')
+    expect(serverKeys).not.toContain(clientLastKey)
+  })
+
+  it('FIXED param (studentTz): sends Monday anchor → server covers Mon–Sun, all 7 client keys match', () => {
+    const param = getLocalDateKey(weekStart, studentTz)
+    expect(param).toBe('2026-06-08')  // Monday — correct anchor
+
+    const serverKeys = buildServerKeys(param, studentTz)
+    expect(serverKeys).toEqual([
+      '2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11',
+      '2026-06-12', '2026-06-13', '2026-06-14',
+    ])
+
+    const clientKeys = buildClientKeys(weekStart, studentTz)
+    expect(clientKeys).toEqual(serverKeys)            // exact 7-key match
+    expect(serverKeys).toContain(clientKeys[6])       // Sunday column is not blank
+  })
+
+  it('America/New_York (UTC-4 EDT in June): fix does not regress negative-offset browsers', () => {
+    // Monday midnight EDT = 2026-06-08T04:00Z; 04:00Z is still Monday in UTC,
+    // so old code ("UTC") and new code (studentTz) both produce "2026-06-08".
+    // The fix changes nothing for negative-offset browsers.
+    const weekStartNYC = new Date('2026-06-08T04:00:00Z')
+    const fixedParam   = getLocalDateKey(weekStartNYC, 'America/New_York')
+    const oldParam     = getLocalDateKey(weekStartNYC, 'UTC')
+    expect(fixedParam).toBe('2026-06-08')
+    expect(oldParam).toBe('2026-06-08')
+    expect(fixedParam).toBe(oldParam)  // identical — no regression
   })
 })

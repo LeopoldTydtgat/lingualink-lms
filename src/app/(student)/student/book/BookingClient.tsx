@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, Check } from 'lucide-react'
+import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,16 +90,6 @@ function formatConfirmDateTime(isoString: string, timezone: string): string {
     hour12: false,
     timeZone: timezone,
   }).format(new Date(isoString))
-}
-
-// Build YYYY-MM-DD from a Date in a given timezone — avoids toISOString() local date issues
-function getLocalDateKey(date: Date, timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: timezone,
-  }).format(date)
 }
 
 // Get day-of-week (0=Sun, 1=Mon ... 6=Sat) for a date in a given timezone
@@ -429,7 +420,8 @@ function StepDateTime({
     setError(null)
 
     const controller = new AbortController()
-    const weekStartStr = getLocalDateKey(weekStart, 'UTC')
+    // weekStart is browser-local Monday midnight; format it in the STUDENT tz (not UTC) so the server's 7-day window matches the client's Mon–Sun columns. Formatting in UTC rolls positive-offset browsers back to Sunday and blanks the Sunday column.
+    const weekStartStr = getLocalDateKey(weekStart, studentTimezone)
     const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartStr}&timezone=${encodeURIComponent(studentTimezone)}`
 
     // Immediate first attempt, then up to two retries with short back-off.

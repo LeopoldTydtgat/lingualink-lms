@@ -16,10 +16,17 @@ function utcTimestamp(d: Date): string {
   )
 }
 
-function getTodayUTCRange() {
-  const now = new Date()
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const end   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+// Anchor "today" to SAST (UTC+2, no DST) so lessons in the 00:00–02:00 SAST window
+// — which carry previous-UTC-day timestamps — fall on the correct SAST business day.
+// SAST midnight = 00:00 SAST = 22:00 UTC the previous calendar day.
+// Matches getTodaySASTRange in admin/page.tsx exactly.
+function getTodaySASTRange() {
+  const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  const y = sastNow.getUTCFullYear()
+  const m = sastNow.getUTCMonth()
+  const d = sastNow.getUTCDate()
+  const start = new Date(Date.UTC(y, m, d) - 2 * 60 * 60 * 1000)
+  const end   = new Date(Date.UTC(y, m, d + 1) - 2 * 60 * 60 * 1000)
   return { start: utcTimestamp(start), end: utcTimestamp(end) }
 }
 
@@ -58,7 +65,8 @@ export default async function AdminLayout({
   if (profile.role !== 'admin') redirect('/dashboard')
 
   // ── right panel stats ─────────────────────────────────────────────────────
-  const { start: todayStart, end: todayEnd } = getTodayUTCRange()
+  // SAST-anchored range — same convention as admin/page.tsx
+  const { start: todayStart, end: todayEnd } = getTodaySASTRange()
 
   const [
     todayRes,
