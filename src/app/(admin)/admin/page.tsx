@@ -15,10 +15,20 @@ function utcTimestamp(d: Date): string {
   )
 }
 
-function getTodayUTCRange() {
-  const now = new Date()
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+// Anchor "today" to SAST (UTC+2, no DST) so lessons in the 00:00–02:00 SAST window
+// — which carry previous-UTC-day timestamps — fall on the correct SAST business day.
+// SAST midnight = 00:00 SAST = 22:00 UTC the previous calendar day.
+// Reuses the same +2h shift convention as buildSASTDateLabel and DashboardClient's toSAST.
+function getTodaySASTRange() {
+  // Shift "now" by +2h to get the current SAST instant, then read its UTC calendar fields
+  const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  const y = sastNow.getUTCFullYear()
+  const m = sastNow.getUTCMonth()
+  const d = sastNow.getUTCDate()
+  // Date.UTC(y,m,d) is SAST-calendar-midnight expressed as "00:00 UTC" (= 02:00 SAST).
+  // Subtract 2h to land on the true SAST midnight (= 22:00 UTC the previous day).
+  const start = new Date(Date.UTC(y, m, d) - 2 * 60 * 60 * 1000)
+  const end   = new Date(Date.UTC(y, m, d + 1) - 2 * 60 * 60 * 1000)
   return { start: utcTimestamp(start), end: utcTimestamp(end) }
 }
 
@@ -85,7 +95,8 @@ export default async function AdminDashboardPage() {
     { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
   )
 
-  const { start: todayStart, end: todayEnd } = getTodayUTCRange()
+  // SAST-anchored today range — applied to both the Classes Today card and Today's Classes panel
+  const { start: todayStart, end: todayEnd } = getTodaySASTRange()
   const now = new Date()
   const nowStr = utcTimestamp(now)
   const in24hStr = utcTimestamp(new Date(now.getTime() + 24 * 60 * 60 * 1000))
@@ -101,7 +112,7 @@ export default async function AdminDashboardPage() {
     announcementsRes,
     missingTeamsRes,
   ] = await Promise.all([
-    // Today's lessons (live classes feed)
+    // Today's lessons (live classes feed) — range is SAST-anchored (UTC+2, no DST)
     supabase
       .from('lessons')
       .select(`
@@ -166,6 +177,7 @@ export default async function AdminDashboardPage() {
       .eq('is_active', true),
 
     // Alert: classes in next 24h with no Teams link (Graph API failure)
+    // nowStr / in24hStr are UTC instants — correct as-is for these future-lesson comparisons
     supabase
       .from('lessons')
       .select(`
@@ -178,6 +190,20 @@ export default async function AdminDashboardPage() {
       .is('teams_join_url', null)
       .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")'),
   ])
+
+  // ── error detection ───────────────────────────────────────────────────────
+  // Any query error (transient failure, Hobby-plan timeout, RLS denial) must surface
+  // as a dashboard-level error rather than silently rendering zeros for all stats.
+  const hasError = !!(
+    todayRes.error       ||
+    pendingRes.error     ||
+    flaggedRes.error     ||
+    flaggedCountRes.error ||
+    trainingsRes.error   ||
+    invoicesRes.error    ||
+    announcementsRes.error ||
+    missingTeamsRes.error
+  )
 
   // ── compute low-hours and zero-balance counts ─────────────────────────────
   const trainings = trainingsRes.data ?? []
@@ -261,6 +287,7 @@ export default async function AdminDashboardPage() {
       missingTeamsLessons={missingTeamsLessons}
       zeroBalanceWithClassesCount={zeroBalanceWithClassesCount}
       todayLabel={buildSASTDateLabel()}
+      hasError={hasError}
     />
   )
 }
