@@ -513,12 +513,24 @@ export async function POST(req: NextRequest) {
       //   we leave the id set so scripts/cleanup-orphan-teams-meetings.ts
       //   can recover (sweeper predicate: teams_meeting_id IS NOT NULL
       //   AND status IN cancel-family).
+      // needs_teams_cleanup: set true ONLY when Graph DELETE failed. The
+      //   orphan meeting still lives in M365 and teams_meeting_id is retained
+      //   above; this flag is an explicit admin-visible signal so the orphan
+      //   row is directly findable. The intended worklist is
+      //   needs_teams_cleanup = true AND teams_meeting_id IS NOT NULL (the AND
+      //   excludes rows the sweeper later resolves but does not un-flag). That
+      //   beats relying solely on CRITICAL #1 in the logs. The sweeper does not
+      //   read this column today (it matches on teams_meeting_id +
+      //   cancel-status), so the flag is purely additive. On Graph success we
+      //   leave the column at its NOT NULL DEFAULT false — nothing to clean up.
       const updatePayload: Record<string, unknown> = {
         teams_join_url: null,
         updated_at: new Date().toISOString(),
       }
       if (graphSucceeded) {
         updatePayload.teams_meeting_id = null
+      } else {
+        updatePayload.needs_teams_cleanup = true
       }
 
       const { data: nulled, error: nullError } = await adminClient
@@ -533,6 +545,11 @@ export async function POST(req: NextRequest) {
           error: nullError,
         })
       } else if (!nulled || nulled.length === 0) {
+        // 0 rows matched means the UPDATE itself landed on no row, so neither
+        // the null nor the needs_teams_cleanup flag could be persisted
+        // anywhere. This is the one orphan scenario the flag cannot capture
+        // (nothing was updated); by necessity the CRITICAL log below is the
+        // only signal — it cannot self-heal via the same (unmatched) row.
         console.error('CRITICAL: Teams col null UPDATE affected 0 rows:', {
           lesson_id: rescheduleId,
         })
