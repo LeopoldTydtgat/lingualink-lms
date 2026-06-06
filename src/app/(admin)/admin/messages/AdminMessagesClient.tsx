@@ -440,9 +440,9 @@ export default function AdminMessagesClient({
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isStudent
-                              ? { backgroundColor: '#FF8303', color: '#ffffff', borderBottomRightRadius: '4px' }
+                              ? { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomRightRadius: '4px' }
                               : isAdmin
-                              ? { backgroundColor: '#374151', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                              ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
                               : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
