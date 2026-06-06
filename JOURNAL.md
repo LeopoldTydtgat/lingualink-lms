@@ -1,3 +1,60 @@
+## Session 133 - 06 June 2026 - Admin booking availability annotation, cancel path hardening and H1i orphan column
+
+### Branch reconciliation
+Started by reconciling branch state from git rather than trusting the handover notes. A fetch showed main had advanced, and three of the four fixes from the previous session were already ancestors of main and live in production. Two commits, an off-palette colour correction and the previous session's journal entry, had landed on dev after the pull request was cut and so had missed the merge. Ground truth from git, never the handover doc.
+
+### NEW55: admin booking availability visibility
+The reported bug was that the admin class-booking calendar showed every hour as selectable instead of filtering to the selected teacher's availability. A read-only audit corrected two parts of that description. There is no calendar in this flow: it is a five-step wizard with a static time dropdown. And the admin was not blindsided at confirm time, there was already a bypassable advisory warning before confirmation.
+
+The audit then settled whether this was a data-integrity bug or a usability one by reading the server confirm path directly. The admin write route deliberately does not validate the chosen slot against teacher availability. This is an intentional override documented in the route and the project rules, and double-booking remains hard-blocked by a clash check and a database exclusion constraint. So the correct fix was a guidance change, not a server block. The time dropdown now greys and labels any hour outside the teacher's availability as unavailable, while keeping every hour selectable so the admin override is preserved. The annotation reuses the exact availability lookup the existing advisory warning already performs, so the two always agree.
+
+### Verifying a cluster before fixing
+Investigated a batch of low-severity reports flagged as the same error-swallowing family. Verifying each against live code first paid off again. One entry describing a silent timezone default was already resolved: the silent fallback had been replaced by a fail-closed helper that throws on missing data. The remaining four were real and fixed together: a navigation link missing the prefetch guard that protects single-use refresh tokens, a discarded database-fetch error that silently skipped an email, an unguarded email send, and cancel-path email failures that only logged to the console. The last of these now also reports to error monitoring, since the monitoring SDK was initialised server-side but never explicitly called in any catch block.
+
+### H1i: making a silent inconsistency visible
+The most careful change of the session. On reschedule, after the new lesson is created, the old lesson's video meeting is cleaned up. If that cleanup failed, the route logged a critical message but still returned success, leaving an orphaned meeting and a stale link visible only in the logs.
+
+The decision was deliberately not to fail the request. The reschedule itself succeeded, and failing it would mislead the user and risk a retry that double-books. Instead I added a column that flags the affected row when cleanup fails, converting a log-only inconsistency into a queryable one that an admin view or a future cleanup pass can find. The one case the flag cannot capture, a zero-row update where nothing was matched, stays log-only by necessity and is documented as such.
+
+### A note on non-bugs
+Two reported issues turned out not to be defects. An invoice-reminder cron flagged for showing the wrong month and a malformed greeting was correct on inspection: the month arithmetic derives the previous month with proper year rollover, and a null name falls back to a sensible default rather than an empty salutation. A report of duplicate booking confirmations resolved to a test-data artifact, a teacher account and a student account sharing one inbox, where the single teacher notification and single student confirmation arrive together. Real accounts with distinct addresses each receive one email. Recording these as verified non-bugs is as valuable as fixing real ones. It stops the same false trail being walked again.
+
+---
+
+## Session 132 - 06 June 2026 - Booking calendar reliability and admin dashboard hardening
+
+### What was built
+- Hardened the student booking availability fetch: bounded retry (immediate plus 400ms and 800ms back-off) with an AbortController, and an r.ok check so a transient non-2xx response no longer silently renders a blank week. After retries are exhausted it surfaces a real error in brand red instead of an empty grid.
+- Fixed the blank Sunday column in the student booking calendar for positive-offset timezones. weekStart is now formatted in the student timezone instead of UTC, so the server's seven-day window aligns with the client's Monday to Sunday columns. Lifted getLocalDateKey into a shared timezone util and added seven regression tests covering the week-boundary keying.
+- Admin dashboard: added a dashboard-level error state so a failed query no longer shows zeros indistinguishable from a genuinely empty day, and re-anchored the "today" range to the business timezone (SAST, UTC+2) across the stat card, the Today's Classes panel, and the sidebar badge.
+- Brought the student booking page error text onto the locked brand red.
+
+### Break/Fix Log
+Issue 1: Student booking grid showed a blank week on first entry into the date and time step.
+Symptom: the availability fetch read the response body without checking r.ok, so a transient 401 from the Supabase refresh-token race rendered as an empty grid with no retry, and the swallowed failure made it look permanent.
+Fix: bounded retry plus AbortController plus an r.ok guard, with a real error surfaced after retries.
+Lesson: a swallowed non-2xx turns a transient failure into a permanent silent dead-end. Always check r.ok and surface the error.
+
+Issue 2: Sunday column always blank for positive-offset timezones.
+Cause: weekStart (browser-local Monday midnight) was formatted in UTC, which rolled positive-offset browsers back to Sunday so the server built a Sunday to Saturday window while the client displayed Monday to Sunday.
+Fix: format weekStart in the student timezone so both sides share the same Monday anchor.
+Lesson: format a local-midnight date in the same timezone it will later be keyed in, never UTC.
+
+Issue 3: Admin dashboard counters were suspected to be broken because every stat showed zero.
+Cause: not a bug. The test dataset had no classes scheduled for today.
+Fix: none needed. Verified by booking a class for today via the admin portal, which correctly showed a count of one. Report flagging was also confirmed wired, with the pg_cron job active and deadline_at populated.
+Lesson: verify a suspected-empty counter against known non-zero data before assuming the query is broken.
+
+Issue 4: Dashboard query errors rendered as zeros, and the "today" range used UTC midnight on a SAST business view.
+Cause: none of the eight dashboard queries checked their error field, and the today range was UTC-anchored.
+Fix: a dashboard-level error state on any query error, and a SAST-anchored today range applied consistently to the card, the panel, and the sidebar badge.
+Lesson: on an operations dashboard, "query failed" and "nothing to do" must look different, and a business-day range must be anchored to the business timezone.
+
+### Session result
+Shipped four fixes to production: the booking availability race, the blank Sunday column, the admin dashboard error handling and timezone anchoring, and the booking page error-text colour. NEW154 was closed as not-a-bug after verification against real data. The student booking flow now loads reliably on first entry and displays all seven days correctly for European and South African users. A live read of the bug log showed NEW71 already resolved in an earlier session, and surfaced the admin booking calendar showing all hours rather than teacher availability (NEW55) as the next candidate for a following session, alongside the invoice reminder cron month and greeting bug.
+
+---
+
 ## Session 131 - 06 June 2026 - Live messages outage: jsdom serverless fix, send-handler hardening, admin bubble parity
 
 ### What was built

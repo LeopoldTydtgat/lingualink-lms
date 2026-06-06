@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface Teacher {
@@ -84,6 +84,11 @@ export default function BookingFlowClient({ teachers, students }: Props) {
   const [studentSearch, setStudentSearch] = useState('')
   const [checkingAvailability, setCheckingAvailability] = useState(false)
   const [availabilityWarning, setAvailabilityWarning] = useState(false)
+  // Advisory annotation data for the Step 4 time dropdown (additive — does not gate).
+  // null = unknown / not yet loaded → annotate nothing. A non-null Set = loaded:
+  // any hour NOT in the Set is outside the teacher's set availability. An empty Set
+  // is valid (teacher has no availability that day → all hours annotated unavailable).
+  const [availableTimes, setAvailableTimes] = useState<Set<string> | null>(null)
 
   const timeSlots = generateTimeSlots()
 
@@ -96,6 +101,52 @@ export default function BookingFlowClient({ teachers, students }: Props) {
     ? selectedStudent.training.total_hours - selectedStudent.training.hours_consumed
     : 0
   const hoursAfterBooking = hoursRemaining - hoursRequested
+
+  // Annotate the Step 4 time dropdown with the teacher's set availability for the
+  // chosen date. ADDITIVE / ADVISORY ONLY — never blocks: handleContinue and the
+  // "Proceed anyway" banner remain the backstop. Any failure clears to null so
+  // nothing is greyed and the existing banner stays the real gate.
+  useEffect(() => {
+    const teacher = selectedTeacher
+    if (!teacher?.id || !teacher.timezone || !selectedDate) {
+      setAvailableTimes(null)
+      return
+    }
+
+    const teacherTz = teacher.timezone
+    const teacherId = teacher.id
+    const controller = new AbortController()
+    setAvailableTimes(null)
+
+    async function loadAvailability() {
+      try {
+        const res = await fetch(
+          `/api/student/availability?teacherId=${teacherId}&weekStart=${selectedDate}&timezone=${encodeURIComponent(teacherTz)}`,
+          { signal: controller.signal }
+        )
+        if (!res.ok) {
+          setAvailableTimes(null)
+          return
+        }
+        const data = await res.json()
+        const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[selectedDate] ?? []
+        const times = new Set<string>()
+        for (const slot of slotsForDate) {
+          if (slot.available) times.add(slotLocalTime(slot.startIso, teacherTz))
+        }
+        setAvailableTimes(times)
+      } catch (err) {
+        // Our own abort: ignore silently (a newer run is taking over).
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        // Any other failure fails safe to "no annotation" — banner stays the gate.
+        setAvailableTimes(null)
+      }
+    }
+
+    void loadAvailability()
+
+    return () => controller.abort()
+  }, [selectedTeacher?.id, selectedTeacher?.timezone, selectedDate])
 
   async function handleContinue() {
     if (!selectedDate || !selectedTime || !selectedTeacher) return
@@ -409,9 +460,14 @@ export default function BookingFlowClient({ teachers, students }: Props) {
                 }}
               >
                 <option value="">Select time...</option>
-                {timeSlots.map((slot) => (
-                  <option key={slot} value={slot}>{slot}</option>
-                ))}
+                {timeSlots.map((slot) => {
+                  const isUnavailable = availableTimes !== null && !availableTimes.has(slot)
+                  return (
+                    <option key={slot} value={slot} style={isUnavailable ? { color: '#888888' } : undefined}>
+                      {slot}{isUnavailable ? ' (unavailable)' : ''}
+                    </option>
+                  )
+                })}
               </select>
             </div>
           </div>

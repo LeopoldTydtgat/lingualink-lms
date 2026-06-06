@@ -10,6 +10,7 @@ import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmount
 import { getBillability } from '@/lib/billing/billability'
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
+import * as Sentry from '@sentry/nextjs'
 
 // GET /api/admin/classes/[id]
 // Returns full detail for a single lesson including teacher, student, training, and report link
@@ -233,6 +234,7 @@ export async function PATCH(
       }
     } catch (emailErr) {
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
+      Sentry.captureException(emailErr)
     }
 
     revalidatePath('/upcoming-classes')
