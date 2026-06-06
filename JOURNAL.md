@@ -1,3 +1,32 @@
+## Session 131 - 06 June 2026 - Live messages outage: jsdom serverless fix, send-handler hardening, admin bubble parity
+
+### What was built
+- Created src/lib/sanitize-server.ts, a server-only HTML sanitiser built on sanitize-html (htmlparser2-based, no jsdom), mirroring the exact allowlist of the existing isomorphic-dompurify sanitiser.
+- Repointed the four server-side sanitiser callers to the new module: teacher, admin, and student message server actions, plus the support send route handler.
+- Added try/finally and a visible inline error to the teacher and student message send handlers so a failed send can no longer freeze the button on "Sending...".
+- Matched the admin message bubble colours to the teacher portal: admin sent bubble to dark charcoal, student bubble to white with a light border.
+- Shipped the previously pending latency work (direct login landing and parallelised dashboard queries) to production as part of this session's merges.
+
+### Break/Fix Log
+Issue 1: Live messages outage on all three portals.
+Symptom: every message send returned 500; the send button stuck on "Sending..." and the row never persisted; the admin messages view would not load; the support chat send failed the same way.
+Cause: the shared sanitiser imported isomorphic-dompurify, which loads jsdom on the server. The sanitiser ran inside the send server actions before the database insert, so the action threw before inserting. jsdom does not load reliably on the serverless runtime. Two earlier fix attempts were disproven by live testing: marking the package external alone, and switching the build to webpack (which confirmed-ran, with the build command override off, but only changed the error to a CommonJS/ESM interop crash deeper in jsdom's dependency tree).
+Fix: removed jsdom from the server path entirely by swapping the four server callers to a sanitize-html-based module, while leaving the client render callers on the original isomorphic library since the browser never loads jsdom. Verified live: sends work across all three portals and the support chat, with clean 200 responses.
+Lesson: server-action 500s surface in the hosting platform's runtime logs, not in error monitoring. A clean local build does not catch serverless bundling failures, since local development worked throughout. jsdom should never sit on a serverless server path.
+
+Issue 2: Send handlers could freeze indefinitely on failure.
+Symptom: the teacher and student send handlers had no try/finally and only logged a returned error to the console, so any thrown exception left the sending state stuck and the button frozen with no feedback to the user.
+Fix: wrapped both handlers in try/finally so the sending state always resets, and added a brand-red inline error message on failure. The optimistic update logic and the send arguments were left unchanged.
+Lesson: any async action that locks a button must reset it in a finally block, not only on the known success and error paths.
+
+Issue 3: Admin message bubbles did not match the other portals.
+Symptom: the admin sent bubble used a lighter slate than the teacher portal, and student messages in the admin view were rendered in brand orange.
+Fix: aligned both to the teacher portal scheme. Student bubble alignment was intentionally left on the right, since the admin view is a three-party read-only thread.
+
+### Session result
+A critical live outage that blocked all messaging across the platform is resolved. The root cause was a fragile server-side dependency rather than application logic, and the durable fix was to remove that dependency from the server path rather than patch around it. Alongside the outage fix, the send handlers were hardened so a future failure degrades gracefully instead of freezing, the admin message styling was brought into line with the rest of the platform, and previously pending latency improvements were shipped. The messaging subsystem is now both working and more resilient than before.
+---
+
 ## Session 130 - 03 June 2026 - Lingueo-style active states and message thread polish
 
 ### What was built
