@@ -15,7 +15,7 @@ export default async function PastClassesPage() {
     .from('students')
     .select('id, full_name, timezone')
     .eq('auth_user_id', user.id)
-    .single();
+    .maybeSingle();
 
   if (!student) redirect('/student/login');
 
