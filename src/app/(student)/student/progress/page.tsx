@@ -14,7 +14,7 @@ export default async function ProgressPage() {
     .from('students')
     .select('id, full_name, timezone')
     .eq('auth_user_id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!student) redirect('/student/login')
 
@@ -25,13 +25,14 @@ export default async function ProgressPage() {
     .eq('student_id', student.id)
     .order('start_date', { ascending: false })
     .limit(1)
-    .single()
+    .maybeSingle()
 
   // Get all completed and student_no_show lessons (these consume hours and appear in history)
   const { data: completedLessons } = await supabase
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, status, teacher_id')
     .eq('student_id', student.id)
+    // Hours-consumed set: lessons that drew down the student's balance (completed + student_no_show only). Intentionally inline and distinct from STUDENT_PAST_LESSON_STATUSES — this is a billing-semantics set; see billability.ts.
     .in('status', ['completed', 'student_no_show'])
     .order('scheduled_at', { ascending: false })
 

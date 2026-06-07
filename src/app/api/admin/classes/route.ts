@@ -12,6 +12,7 @@ import {
 } from '@/lib/email/templates'
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
+import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -82,9 +83,9 @@ export async function GET(request: NextRequest) {
   } else if (status === 'completed') {
     query = query.eq('status', 'completed')
   } else if (status === 'cancelled') {
-    query = query.in('status', ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+    query = query.in('status', CANCELLED_STATUSES)
   } else if (status === 'no_show') {
-    query = query.in('status', ['student_no_show', 'teacher_no_show'])
+    query = query.in('status', NO_SHOW_STATUSES)
   } else if (status === 'flagged') {
     query = query.eq('status', 'flagged')
   }

@@ -133,3 +133,32 @@ export const SETTLED_LESSON_STATUSES: readonly LessonStatus[] =
 // SETTLED_LESSON_STATUSES instead).
 export const MONTH_BILLING_PREFILTER_STATUSES: readonly LessonStatus[] =
   SETTLED_LESSON_STATUSES.filter((s) => s !== 'teacher_no_show')
+
+// Active + cancelled lessons — everything EXCEPT completed and the two no-show statuses.
+// Derived so it can't drift from ALL_LESSON_STATUSES: a new status added to the DB CHECK
+// flows in automatically unless it is 'completed' or a no-show.
+// Consumed by list views that show upcoming classes alongside their cancellations
+// (teacher upcoming-classes, student my-classes). Equals the 4-member hand-rolled set
+// ['scheduled','cancelled','cancelled_by_student','cancelled_by_teacher'] today.
+export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
+  ALL_LESSON_STATUSES.filter((s) => s !== 'completed' && !NO_SHOW_STATUSES.includes(s))
+
+// Student-visible history statuses: settled lessons with ALL cancellations removed
+// (completed + both no-shows). This EXCLUDES every cancellation by deliberate product
+// decision (BUG_LOG NEW61 / S134) — students do not see cancelled classes in their
+// history; the refund is visible in the hours log instead. Derived from CANCELLED_STATUSES
+// so a future cancellation status is automatically excluded too. DO NOT add cancellations
+// to this set to "complete" it — the omission is intentional. Equals
+// ['completed','student_no_show','teacher_no_show'] today.
+export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
+  SETTLED_LESSON_STATUSES.filter((s) => !CANCELLED_STATUSES.includes(s))
+
+// Build a PostgREST .not('status','in', ...) / .in-string filter argument from a status set.
+// PostgREST's STRING-shorthand "in" takes a quoted, comma-joined, parenthesised list — e.g.
+// ("a","b","c") — NOT a JS array, so .not('status','in', ...) sites cannot consume a constant
+// the way .in(col, array) can. This bridges them to the canonical sets (CANCELLED_STATUSES etc.)
+// so the excluded list can't silently drift from billability.ts. Fed CANCELLED_STATUSES it
+// yields ("cancelled","cancelled_by_student","cancelled_by_teacher").
+export function toPostgrestInList(statuses: readonly string[]): string {
+  return `(${statuses.map((s) => `"${s}"`).join(',')})`
+}
