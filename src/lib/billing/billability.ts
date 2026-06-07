@@ -152,3 +152,13 @@ export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
 // ['completed','student_no_show','teacher_no_show'] today.
 export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
   SETTLED_LESSON_STATUSES.filter((s) => !CANCELLED_STATUSES.includes(s))
+
+// Build a PostgREST .not('status','in', ...) / .in-string filter argument from a status set.
+// PostgREST's STRING-shorthand "in" takes a quoted, comma-joined, parenthesised list — e.g.
+// ("a","b","c") — NOT a JS array, so .not('status','in', ...) sites cannot consume a constant
+// the way .in(col, array) can. This bridges them to the canonical sets (CANCELLED_STATUSES etc.)
+// so the excluded list can't silently drift from billability.ts. Fed CANCELLED_STATUSES it
+// yields ("cancelled","cancelled_by_student","cancelled_by_teacher").
+export function toPostgrestInList(statuses: readonly string[]): string {
+  return `(${statuses.map((s) => `"${s}"`).join(',')})`
+}
