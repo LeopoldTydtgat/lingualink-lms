@@ -142,3 +142,13 @@ export const MONTH_BILLING_PREFILTER_STATUSES: readonly LessonStatus[] =
 // ['scheduled','cancelled','cancelled_by_student','cancelled_by_teacher'] today.
 export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
   ALL_LESSON_STATUSES.filter((s) => s !== 'completed' && !NO_SHOW_STATUSES.includes(s))
+
+// Student-visible history statuses: settled lessons with ALL cancellations removed
+// (completed + both no-shows). This EXCLUDES every cancellation by deliberate product
+// decision (BUG_LOG NEW61 / S134) — students do not see cancelled classes in their
+// history; the refund is visible in the hours log instead. Derived from CANCELLED_STATUSES
+// so a future cancellation status is automatically excluded too. DO NOT add cancellations
+// to this set to "complete" it — the omission is intentional. Equals
+// ['completed','student_no_show','teacher_no_show'] today.
+export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
+  SETTLED_LESSON_STATUSES.filter((s) => !CANCELLED_STATUSES.includes(s))
