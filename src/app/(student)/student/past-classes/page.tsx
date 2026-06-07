@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import PastClassesClient from './PastClassesClient';
 import { requireTz } from '@/lib/time/requireTz';
+import { STUDENT_PAST_LESSON_STATUSES } from '@/lib/billing/billability';
 
 export default async function PastClassesPage() {
   const supabase = await createClient();
@@ -39,7 +40,7 @@ export default async function PastClassesPage() {
       )
     `)
     .eq('student_id', student.id)
-    .in('status', ['completed', 'student_no_show', 'teacher_no_show'])
+    .in('status', STUDENT_PAST_LESSON_STATUSES)
     .order('scheduled_at', { ascending: false });
 
   // Fetch all reviews this student has already submitted
