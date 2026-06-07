@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { CheckCircle } from 'lucide-react'
-import { getBillability } from '@/lib/billing/billability'
+import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -374,7 +374,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     let query = supabase
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
-      .in('status', ['completed', 'student_no_show', 'teacher_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+      .in('status', SETTLED_LESSON_STATUSES)
       .order('scheduled_at', { ascending: false })
 
     if (sbFilterStudent) query = query.eq('student_id', sbFilterStudent)
@@ -414,7 +414,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
       .in('student_id', studentIds)
-      .in('status', ['completed', 'student_no_show', 'teacher_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+      .in('status', SETTLED_LESSON_STATUSES)
       .order('scheduled_at', { ascending: false })
 
     if (cbFilterDateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', cbFilterDateFrom)
