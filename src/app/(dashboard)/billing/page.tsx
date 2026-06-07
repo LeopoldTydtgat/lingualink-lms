@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import BillingClient from './BillingClient'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
 
 type LessonRow = {
   id: string
@@ -103,7 +104,7 @@ export default async function BillingPage() {
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, status, cancelled_at, students(full_name)')
     .eq('teacher_id', user.id)
-    .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+    .in('status', MONTH_BILLING_PREFILTER_STATUSES)
     .order('scheduled_at', { ascending: true })
 
   const lessonsByMonth: Record<string, LessonRow[]> = {}
