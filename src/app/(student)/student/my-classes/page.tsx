@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
 
@@ -41,7 +42,7 @@ export default async function MyClassesPage() {
     `)
     .eq('student_id', student.id)
     .gte('scheduled_at', new Date().toISOString())
-    .in('status', ['scheduled', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+    .in('status', ACTIVE_AND_CANCELLED_STATUSES)
     .order('scheduled_at', { ascending: true })
 
   // Supabase returns joins as arrays — flatten to single objects
