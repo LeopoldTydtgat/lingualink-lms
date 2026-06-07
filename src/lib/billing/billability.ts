@@ -133,3 +133,12 @@ export const SETTLED_LESSON_STATUSES: readonly LessonStatus[] =
 // SETTLED_LESSON_STATUSES instead).
 export const MONTH_BILLING_PREFILTER_STATUSES: readonly LessonStatus[] =
   SETTLED_LESSON_STATUSES.filter((s) => s !== 'teacher_no_show')
+
+// Active + cancelled lessons — everything EXCEPT completed and the two no-show statuses.
+// Derived so it can't drift from ALL_LESSON_STATUSES: a new status added to the DB CHECK
+// flows in automatically unless it is 'completed' or a no-show.
+// Consumed by list views that show upcoming classes alongside their cancellations
+// (teacher upcoming-classes, student my-classes). Equals the 4-member hand-rolled set
+// ['scheduled','cancelled','cancelled_by_student','cancelled_by_teacher'] today.
+export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
+  ALL_LESSON_STATUSES.filter((s) => s !== 'completed' && !NO_SHOW_STATUSES.includes(s))
