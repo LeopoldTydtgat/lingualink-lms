@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import DashboardClient from './DashboardClient'
-import { isCancelledStatus } from '@/lib/billing/billability'
+import { isCancelledStatus, CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 // Never use toISOString() for local date construction.
@@ -188,7 +188,7 @@ export default async function AdminDashboardPage() {
       .gt('scheduled_at', nowStr)
       .lte('scheduled_at', in24hStr)
       .is('teams_join_url', null)
-      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")'),
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES)),
   ])
 
   // ── error detection ───────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ export default async function AdminDashboardPage() {
       .select('id', { count: 'exact', head: true })
       .in('student_id', zeroIds)
       .gt('scheduled_at', nowStr)
-      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")')
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
     zeroBalanceWithClassesCount = count ?? 0
   }
 
