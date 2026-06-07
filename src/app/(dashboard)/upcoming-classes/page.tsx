@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import { redirect } from 'next/navigation'
 import UpcomingClassesClient from './UpcomingClassesClient'
 
@@ -34,7 +35,7 @@ export default async function UpcomingClassesPage() {
         )
       `)
       .eq('teacher_id', user.id)
-      .in('status', ['scheduled', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+      .in('status', ACTIVE_AND_CANCELLED_STATUSES)
       .gte('scheduled_at', new Date().toISOString())
       .order('scheduled_at', { ascending: true }),
   ])

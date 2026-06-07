@@ -101,6 +101,7 @@ export default async function DashboardLayout({
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startUtc)
       .lt('scheduled_at', endUtc)
+      // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
       .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
 
     for (const lesson of monthLessons ?? []) {
