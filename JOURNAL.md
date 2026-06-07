@@ -1,3 +1,27 @@
+## Session 134 - 07 June 2026 - Reschedule email gating and Sentry symmetry
+
+### What was built
+- NEW89: the admin class-edit PATCH now sends the "rescheduled" email only when the class time actually changed. Both the student and teacher email blocks are gated on timeChanged instead of needsGraphUpdate.
+- Duration-only edits now send no email. The change is still visible in the portal via the hours log and the class card.
+- Teacher-only swaps now send no email either. This was a product decision: the student keeps the same time and join link, the class still shows in their portal, and the swap is communicated separately by the admin.
+- The Teams meeting still resyncs on duration and teacher changes (the Graph update block is unchanged and still fires on time, duration, or teacher changes).
+- Added Sentry.captureException to both reschedule email catch blocks in the admin PATCH handler, closing the asymmetry left over from S133 where only the cancel catches reported to Sentry.
+
+### Break/Fix Log
+1. Reschedule email fired on edits where nothing time-related changed
+   - Symptom: a duration-only admin edit sent the student a "your class has been rescheduled" email with no real time change. A teacher-only swap did the same.
+   - Cause: both email blocks were gated on needsGraphUpdate, which is true for time, duration, OR teacher changes. The old-time argument was a timeChanged ternary, so the email rendered an unchanged time under "rescheduled" wording.
+   - Fix: gated both email sends on timeChanged. Collapsed the now-redundant old-time ternary to existing.scheduled_at since both sends are inside the timeChanged branch.
+   - Lesson: an email trigger and the Graph-sync trigger are not the same condition. Resyncing the meeting and notifying the user are separate decisions and need separate gates.
+2. Sentry asymmetry in the admin PATCH handler
+   - Symptom: cancel email failures reported to Sentry but reschedule email failures only logged to the console.
+   - Cause: the S133 hardening added captureException to the cancel catches but not the reschedule catches in the same file.
+   - Fix: added bare Sentry.captureException(emailErr) to both reschedule catches, matching the established cancel-catch pattern.
+   - Lesson: when hardening a file, sweep every catch of the same class, not just the ones tied to the current bug.
+
+### Session result
+Closed the cancel/refund decision set worked through in S133. Four of the five entries needed no code and were closed as intentional in the BUG_LOG (admin cancel blocked on non-scheduled status, student Past Classes excluding all cancellations, and teacher cancel always refunding). The one real fix, NEW89, grew in scope once the live PATCH handler showed both duration-only and teacher-only edits hit the same email path. After confirming the no-notify rule for teacher swaps, both were collapsed under a single timeChanged gate rather than two separate suppressions. Also closed the leftover Sentry asymmetry from S133. Two commits on dev, pending merge to main.
+
 ## Session 133 - 06 June 2026 - Admin booking availability annotation, cancel path hardening and H1i orphan column
 
 ### Branch reconciliation
