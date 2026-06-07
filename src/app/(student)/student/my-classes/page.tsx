@@ -16,7 +16,7 @@ export default async function MyClassesPage() {
     .from('students')
     .select('id, timezone, profile_completed, profile_banner_dismissed')
     .eq('auth_user_id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!student) redirect('/student/login')
 
