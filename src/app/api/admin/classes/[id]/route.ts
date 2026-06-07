@@ -458,6 +458,12 @@ export async function PATCH(
   const newScheduledAt = scheduledAtUtc ?? existing.scheduled_at
   const newDuration = (fields.duration_minutes as number | undefined) ?? existing.duration_minutes
   const needsGraphUpdate = timeChanged || durationChanged || teacherChanged
+  // The reschedule email fires ONLY when the class time actually changed. needsGraphUpdate
+  // also covers duration and teacher changes (the Teams meeting must resync for those), but
+  // neither should email: the template says "has been rescheduled", which misreads when the
+  // time is unchanged. Duration-only changes are visible in-portal (hours log + class card);
+  // teacher-only swaps are silent by product decision (Shannon notifies the student directly,
+  // and the class still shows in their portal with the same time and join link).
 
   if (needsGraphUpdate) {
     if (existing.teams_meeting_id) {
@@ -510,14 +516,14 @@ export async function PATCH(
     }
   }
 
-  if (needsGraphUpdate) {
+  if (timeChanged) {
     if (!studentEmail) {
       console.warn('Reschedule email skipped: student has no email', { lesson_id: id })
     } else {
       try {
         const emailBody = studentRescheduledEmailContent(
           teacherName,
-          timeChanged ? existing.scheduled_at : null,
+          existing.scheduled_at,
           newScheduledAt,
           newDuration,
           studentTz
@@ -536,18 +542,19 @@ export async function PATCH(
         })
       } catch (emailErr) {
         console.error('[Email] Reschedule email failed — lesson still updated:', emailErr)
+        Sentry.captureException(emailErr)
       }
     }
   }
 
-  if (needsGraphUpdate) {
+  if (timeChanged) {
     if (!teacherEmail) {
       console.warn('Reschedule email skipped: teacher has no email', { lesson_id: id })
     } else {
       try {
         const emailBody = studentRescheduledEmailContent(
           studentName,
-          timeChanged ? existing.scheduled_at : null,
+          existing.scheduled_at,
           newScheduledAt,
           newDuration,
           teacherTz
@@ -566,6 +573,7 @@ export async function PATCH(
         })
       } catch (emailErr) {
         console.error('CRITICAL: [Email] Teacher reschedule email failed — lesson still updated:', emailErr)
+        Sentry.captureException(emailErr)
       }
     }
   }
