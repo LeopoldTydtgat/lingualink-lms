@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localTimeToUtcMs } from '@/lib/availability'
+import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string; timezone: string }
@@ -267,7 +268,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startStr)
       .lte('scheduled_at', endStr)
-      .not('status', 'in', '("cancelled","cancelled_by_student","cancelled_by_teacher")')
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
 
     if (data) {
       setClasses(
