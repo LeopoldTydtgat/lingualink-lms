@@ -1,3 +1,27 @@
+## 2026-06-09 - UI/UX polish: empty states, brand buttons, zero-hours handling
+
+Presentational pass across the teacher and student portals. No schema changes, no auth/billing logic changes; one display-only data read added (student my-classes page). tsc clean throughout.
+
+Teacher portal
+- upcoming-classes/UpcomingClassesClient.tsx: replaced "No upcoming classes / Enjoy the break!" with a guided empty state - muted calendar icon, "No upcoming classes yet", subline pointing to availability, filled-orange "Update your availability" primary (-> /schedule), plus an admin-only outline "+ Add a class" button (gated on profile.role === 'admin', -> /admin/classes/new).
+
+Student portal
+- my-classes/MyClassesClient.tsx + page.tsx:
+  - Empty state rebuilt to match the teacher portal (borderless, muted calendar icon, "No upcoming classes yet").
+  - De-duplicated the book button: the top-right "+ Book a Class" header button now shows only when upcoming classes exist, so exactly one book button appears in every state.
+  - Three-branch empty state on hours balance: (a) hours remaining -> filled-orange "Book a Class" + meta line "{hours} remaining, training ends {date}"; (b) zero hours -> "You've used all your hours" + filled-orange "Contact us" (mailto); (c) null / no training row -> falls back to "Book a Class" with no meta line (never falsely locks out a paying student).
+  - Plumbed hoursRemaining + trainingEndDate from page.tsx, mirroring the student layout's trainings derivation (sync comment added so the two cannot drift).
+- account/AccountClient.tsx:
+  - Section action buttons (Upload Photo, Save Changes, "Need more hours? Contact us", etc.) converted from orange-outline to filled-orange with hover-darken, matching the teacher portal. Secondaries paired with a primary stay outline.
+  - Hours & Training banner: added a distinct zero-hours state ("You have no hours remaining. Contact admin to purchase more hours...") in red/danger styling, separate from the existing amber "< 2 hours" low warning (which still fires for 0 < x < 2).
+- components/student/layout/StudentRightPanel.tsx: zero hours now renders as "0 hours" instead of "0h" (read as the word "oh").
+
+Brand pattern: filled-orange primaries via inline style { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' } on the shared shadcn Button (auto hover -> #e67300). Inline-style colours only, never dynamically constructed Tailwind classes.
+
+Investigated, read-only, no change: booking-flow availability/slot logic. Confirmed correct - student vs teacher calendars reconcile once general-weekly + Day-to-Day union and timezone are accounted for (no UTC leak); consecutive-slot validation is sound on client and server. Visible greyed "Unavailable" slots are actually free-but-cannot-start-here, not blocked. Queued for a dedicated calendar session: visual polish on the student booking grid + fixing the overloaded/mislabelled grey state (UX clarity, not logic).
+
+---
+
 ## Session 136 - 07 June 2026 - Enum cluster non-billing half (Groups D/E/F) + BUG_LOG close-out
 
 ### What was built
