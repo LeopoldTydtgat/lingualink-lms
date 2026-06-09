@@ -2,9 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
+import { CalendarDays, Plus } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { isCancelledStatus } from '@/lib/billing/billability'
+import { Button } from '@/components/ui/button'
 
 type Student = {
   id: string
@@ -450,9 +453,30 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       )}
 
       {days.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <p className="text-lg">No upcoming classes.</p>
-          <p className="text-sm mt-1">Enjoy the break!</p>
+        <div className="flex flex-col items-center text-center py-16">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+            <CalendarDays size={30} className="text-muted-foreground" />
+          </div>
+          <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
+            Your booked classes will appear here. Keep your availability up to date so students can book you.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Button asChild style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}>
+              <Link href="/schedule" prefetch={false}>
+                <CalendarDays />
+                Update your availability
+              </Link>
+            </Button>
+            {profile.role === 'admin' && (
+              <Button asChild variant="outline">
+                <Link href="/admin/classes/new" prefetch={false}>
+                  <Plus />
+                  Add a class
+                </Link>
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-8">

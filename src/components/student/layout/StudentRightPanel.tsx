@@ -36,6 +36,7 @@ function formatCountdown(secondsUntil: number): string {
 }
 
 function formatHours(hours: number): string {
+  if (hours === 0) return '0 hours' // bold "0h" reads as the word "oh"
   const h = Math.floor(hours)
   const m = Math.round((hours - h) * 60)
   if (m === 0) return `${h}h`
