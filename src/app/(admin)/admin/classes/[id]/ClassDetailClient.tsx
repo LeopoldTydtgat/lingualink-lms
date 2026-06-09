@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { BLOCKED_STATUSES, isCancelledStatus } from '@/lib/billing/billability'
 
 interface LessonDetail {
   id: string
@@ -77,7 +77,7 @@ export default function ClassDetailClient({ lesson }: Props) {
 
   const statusMeta = getStatusMeta(lesson.status)
   const isCancellable = ['scheduled'].includes(lesson.status)
-  const isCancelled = ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher'].includes(lesson.status)
+  const isCancelled = isCancelledStatus(lesson.status)
 
   async function handleDelete() {
     setDeleting(true)

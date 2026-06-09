@@ -7,7 +7,7 @@ import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentResc
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
-import { getBillability } from '@/lib/billing/billability'
+import { getBillability, isCancelledStatus } from '@/lib/billing/billability'
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 import * as Sentry from '@sentry/nextjs'
@@ -635,8 +635,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
   }
 
-  const cancelledStatuses = ['cancelled', 'cancelled_by_student', 'cancelled_by_teacher']
-  if (!cancelledStatuses.includes(lesson.status)) {
+  if (!isCancelledStatus(lesson.status)) {
     return NextResponse.json({ error: 'Only cancelled classes can be deleted. Please cancel the class first.' }, { status: 422 })
   }
 
