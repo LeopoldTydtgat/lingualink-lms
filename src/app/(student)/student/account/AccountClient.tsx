@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
 import TimezoneSelect from '@/components/TimezoneSelect'
 import LanguageSelect from '@/components/LanguageSelect'
+import { Button } from '@/components/ui/button'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -144,12 +145,6 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   const [showCurrentPassword, setShowCurrentPassword] = useState(false)
   const [showNewPassword, setShowNewPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-
-  // Button hover states
-  const [uploadHovered, setUploadHovered] = useState(false)
-  const [generalSaveHovered, setGeneralSaveHovered] = useState(false)
-  const [learningSaveHovered, setLearningSaveHovered] = useState(false)
-  const [passwordHovered, setPasswordHovered] = useState(false)
 
   // ── Photo upload ────────────────────────────────────────────────────────────
 
@@ -351,26 +346,13 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
               style={{ display: 'none' }}
               onChange={handlePhotoChange}
             />
-            <button
+            <Button
               onClick={() => fileInputRef.current?.click()}
               disabled={photoUploading}
-              onMouseEnter={() => setUploadHovered(true)}
-              onMouseLeave={() => setUploadHovered(false)}
-              style={{
-                padding: '8px 16px',
-                backgroundColor: (uploadHovered && !photoUploading) ? '#FF8303' : '#ffffff',
-                color: (uploadHovered && !photoUploading) ? '#ffffff' : '#FF8303',
-                border: '1.5px solid #FF8303',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: photoUploading ? 'not-allowed' : 'pointer',
-                opacity: photoUploading ? 0.7 : 1,
-                transition: 'background-color 0.18s ease, color 0.18s ease',
-              }}
+              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
             >
               {photoUploading ? 'Uploading…' : 'Upload Photo'}
-            </button>
+            </Button>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
               JPG, PNG or WebP — max 2MB
             </p>
@@ -420,26 +402,13 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button
+          <Button
             onClick={handleSaveGeneral}
             disabled={generalSaving}
-            onMouseEnter={() => setGeneralSaveHovered(true)}
-            onMouseLeave={() => setGeneralSaveHovered(false)}
-            style={{
-              padding: '9px 20px',
-              backgroundColor: (generalSaveHovered && !generalSaving) ? '#FF8303' : '#ffffff',
-              color: (generalSaveHovered && !generalSaving) ? '#ffffff' : '#FF8303',
-              border: '1.5px solid #FF8303',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: generalSaving ? 'not-allowed' : 'pointer',
-              opacity: generalSaving ? 0.7 : 1,
-              transition: 'background-color 0.18s ease, color 0.18s ease',
-            }}
+            style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
           >
             {generalSaving ? 'Saving…' : 'Save Changes'}
-          </button>
+          </Button>
           {generalSaved && (
             <span style={{ fontSize: '13px', color: '#16a34a', fontWeight: '500' }}>✓ Saved</span>
           )}
@@ -494,26 +463,13 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button
+          <Button
             onClick={handleSaveLearning}
             disabled={learningSaving}
-            onMouseEnter={() => setLearningSaveHovered(true)}
-            onMouseLeave={() => setLearningSaveHovered(false)}
-            style={{
-              padding: '9px 20px',
-              backgroundColor: (learningSaveHovered && !learningSaving) ? '#FF8303' : '#ffffff',
-              color: (learningSaveHovered && !learningSaving) ? '#ffffff' : '#FF8303',
-              border: '1.5px solid #FF8303',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: learningSaving ? 'not-allowed' : 'pointer',
-              opacity: learningSaving ? 0.7 : 1,
-              transition: 'background-color 0.18s ease, color 0.18s ease',
-            }}
+            style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
           >
             {learningSaving ? 'Saving…' : 'Save Changes'}
-          </button>
+          </Button>
           {learningSaved && (
             <span style={{ fontSize: '13px', color: '#16a34a', fontWeight: '500' }}>✓ Saved</span>
           )}
@@ -615,8 +571,23 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             </div>
           </div>
 
+          {/* Zero hours warning — danger styling to escalate from the amber low warning */}
+          {hoursRemaining(activeTraining) <= 0 && (
+            <div style={{
+              backgroundColor: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              fontSize: '13px',
+              color: '#dc2626',
+            }}>
+              ⚠️ You have no hours remaining. Contact admin to purchase more hours to keep learning.
+            </div>
+          )}
+
           {/* Low hours warning */}
-          {hoursRemaining(activeTraining) < 2 && (
+          {hoursRemaining(activeTraining) > 0 && hoursRemaining(activeTraining) < 2 && (
             <div style={{
               backgroundColor: '#fef3c7',
               border: '1px solid #fcd34d',
@@ -630,22 +601,11 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             </div>
           )}
 
-          <a
-            href="mailto:support@lingualinkonline.com"
-            style={{
-              display: 'inline-block',
-              padding: '9px 20px',
-              backgroundColor: '#f3f4f6',
-              color: '#374151',
-              border: '1px solid #e5e7eb',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              textDecoration: 'none',
-            }}
-          >
-            Need more hours? Contact us →
-          </a>
+          <Button asChild style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}>
+            <a href="mailto:support@lingualinkonline.com">
+              Need more hours? Contact us →
+            </a>
+          </Button>
         </div>
       )}
 
@@ -773,26 +733,13 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button
+            <Button
               onClick={handleChangePassword}
               disabled={passwordSaving}
-              onMouseEnter={() => setPasswordHovered(true)}
-              onMouseLeave={() => setPasswordHovered(false)}
-              style={{
-                padding: '9px 20px',
-                backgroundColor: (passwordHovered && !passwordSaving) ? '#FF8303' : '#ffffff',
-                color: (passwordHovered && !passwordSaving) ? '#ffffff' : '#FF8303',
-                border: '1.5px solid #FF8303',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: passwordSaving ? 'not-allowed' : 'pointer',
-                opacity: passwordSaving ? 0.7 : 1,
-                transition: 'background-color 0.18s ease, color 0.18s ease',
-              }}
+              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
             >
               {passwordSaving ? 'Saving…' : 'Update Password'}
-            </button>
+            </Button>
             {passwordSaved && (
               <span style={{ fontSize: '13px', color: '#16a34a', fontWeight: '500' }}>✓ Password updated</span>
             )}

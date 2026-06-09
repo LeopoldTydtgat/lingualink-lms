@@ -53,6 +53,26 @@ export default async function MyClassesPage() {
       : lesson.teacher,
   }))
 
+  // Hours/end-date for the empty-state meta line. Mirrors the trainings derivation in
+  // src/app/(student)/student/layout.tsx (right panel "Hours Remaining" card) — the two
+  // must stay in sync so these numbers can never disagree with the panel. One deliberate
+  // difference: a missing training row is passed as null (the layout collapses it to 0)
+  // so the client can fall back to the Book-a-Class variant instead of falsely telling
+  // the student they are out of hours.
+  const { data: training } = await supabase
+    .from('trainings')
+    .select('total_hours, hours_consumed, end_date')
+    .eq('student_id', student.id)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const hoursRemaining = training
+    ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
+    : null
+  const trainingEndDate = training?.end_date ?? null
+
   // Find the most recent completed lesson to pull its feedback
   // This becomes the "About This Class" recap on the next class card
   const { data: lastLesson } = await supabase
@@ -82,6 +102,8 @@ export default async function MyClassesPage() {
       studentTimezone={requireTz(student.timezone, 'my-classes:student')}
       profileCompleted={student.profile_completed ?? false}
       bannerDismissed={student.profile_banner_dismissed ?? false}
+      hoursRemaining={hoursRemaining}
+      trainingEndDate={trainingEndDate}
     />
   )
 }
