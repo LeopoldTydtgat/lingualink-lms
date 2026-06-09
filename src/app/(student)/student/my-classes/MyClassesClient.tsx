@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   User,
+  CalendarDays,
   ChevronDown,
   ChevronUp,
   Video,
@@ -14,6 +16,7 @@ import {
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
 import { isCancelledStatus, BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { Button } from '@/components/ui/button'
 
 interface Teacher {
   id: string
@@ -41,6 +44,8 @@ interface MyClassesClientProps {
   studentTimezone: string
   profileCompleted: boolean
   bannerDismissed: boolean
+  hoursRemaining: number | null // null = no active training record (NOT the same as 0)
+  trainingEndDate: string | null
 }
 
 // Format a date for display — uses Intl with explicit timezone, safe on client
@@ -71,6 +76,25 @@ function getLocalDateKey(isoString: string, timezone: string): string {
     day: '2-digit',
     timeZone: timezone,
   }).format(new Date(isoString)) // en-CA gives YYYY-MM-DD format
+}
+
+// Hours + end-date formatting for the empty-state meta line. Replicated from
+// src/components/student/layout/StudentRightPanel.tsx (not exported there) — keep the
+// two in sync so the empty state always reads the same as the right panel.
+function formatHours(hours: number): string {
+  if (hours === 0) return '0 hours' // bold "0h" reads as the word "oh"
+  const h = Math.floor(hours)
+  const m = Math.round((hours - h) * 60)
+  if (m === 0) return `${h}h`
+  return `${h}h ${m}min`
+}
+
+function formatEndDate(isoDate: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(isoDate))
 }
 
 function formatCountdown(secondsUntil: number): string {
@@ -107,6 +131,8 @@ export default function MyClassesClient({
   studentTimezone,
   profileCompleted,
   bannerDismissed,
+  hoursRemaining,
+  trainingEndDate,
 }: MyClassesClientProps) {
   const router = useRouter()
 
@@ -120,7 +146,6 @@ export default function MyClassesClient({
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [bookHovered, setBookHovered] = useState(false)
-  const [noClassBookHovered, setNoClassBookHovered] = useState(false)
 
   useEffect(() => {
     const currentNow = Date.now()
@@ -288,28 +313,30 @@ export default function MyClassesClient({
             {scheduledCount} upcoming {scheduledCount === 1 ? 'class' : 'classes'}
           </p>
         </div>
-        <button
-          onClick={() => router.push('/student/book')}
-          onMouseEnter={() => setBookHovered(true)}
-          onMouseLeave={() => setBookHovered(false)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '10px 18px',
-            backgroundColor: bookHovered ? '#FF8303' : '#ffffff',
-            color: bookHovered ? '#ffffff' : '#FF8303',
-            border: '1.5px solid #FF8303',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            transition: 'background-color 0.18s ease, color 0.18s ease',
-          }}
-        >
-          <Plus size={16} />
-          Book a Class
-        </button>
+        {nextLesson && (
+          <button
+            onClick={() => router.push('/student/book')}
+            onMouseEnter={() => setBookHovered(true)}
+            onMouseLeave={() => setBookHovered(false)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '10px 18px',
+              backgroundColor: bookHovered ? '#FF8303' : '#ffffff',
+              color: bookHovered ? '#ffffff' : '#FF8303',
+              border: '1.5px solid #FF8303',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'background-color 0.18s ease, color 0.18s ease',
+            }}
+          >
+            <Plus size={16} />
+            Book a Class
+          </button>
+        )}
       </div>
 
       {/* Cancel error banner */}
@@ -578,37 +605,48 @@ export default function MyClassesClient({
             </div>
           )}
         </div>
-      ) : (
-        /* No upcoming classes state */
-        <div style={{
-          backgroundColor: '#ffffff',
-          border: '1px solid #E0DFDC',
-          borderRadius: '12px',
-          padding: '40px 24px',
-          textAlign: 'center',
-          marginBottom: '28px',
-        }}>
-          <p style={{ fontSize: '15px', color: '#6b7280', marginBottom: '16px' }}>
-            You have no upcoming classes.
+      ) : hoursRemaining != null && hoursRemaining <= 0 ? (
+        /* No upcoming classes + zero hours — contact variant. Only shown when the
+           balance is KNOWN to be zero; missing data falls through to Book a Class. */
+        <div className="flex flex-col items-center text-center py-16">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+            <CalendarDays size={30} className="text-muted-foreground" />
+          </div>
+          <h2 className="mt-4 text-lg font-semibold text-gray-900">You&apos;ve used all your hours</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
+            You have no hours left to book. Contact us to add more and keep learning.
           </p>
-          <button
-            onClick={() => router.push('/student/book')}
-            onMouseEnter={() => setNoClassBookHovered(true)}
-            onMouseLeave={() => setNoClassBookHovered(false)}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: noClassBookHovered ? '#FF8303' : '#ffffff',
-              color: noClassBookHovered ? '#ffffff' : '#FF8303',
-              border: '1.5px solid #FF8303',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'background-color 0.18s ease, color 0.18s ease',
-            }}
-          >
-            Book Your Next Class
-          </button>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {/* Same contact mechanism as the My Account "Need more hours?" button */}
+            <Button asChild style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}>
+              <a href="mailto:support@lingualinkonline.com">Contact us</a>
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* No upcoming classes state — also the fallback when hoursRemaining is null
+           (no training record): never show the contact variant on missing data. */
+        <div className="flex flex-col items-center text-center py-16">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+            <CalendarDays size={30} className="text-muted-foreground" />
+          </div>
+          <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
+            Book a time with your teacher to keep your training on track.
+          </p>
+          {mounted && hoursRemaining != null && hoursRemaining > 0 && trainingEndDate && (
+            <p className="mt-3 text-[13px] text-muted-foreground">
+              {formatHours(hoursRemaining)} remaining · training ends {formatEndDate(trainingEndDate)}
+            </p>
+          )}
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Button asChild style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}>
+              <Link href="/student/book" prefetch={false}>
+                <Plus />
+                Book a Class
+              </Link>
+            </Button>
+          </div>
         </div>
       )}
 
