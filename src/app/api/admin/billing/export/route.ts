@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
-import { getBillability } from '@/lib/billing/billability'
+import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import {
   recomputeInvoiceAmountsForTeacher,
@@ -138,7 +138,7 @@ export async function GET(req: NextRequest) {
     let lessonsQuery = supabase
       .from('lessons')
       .select('id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at')
-      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+      .in('status', MONTH_BILLING_PREFILTER_STATUSES)
 
     if (teacherId) lessonsQuery = lessonsQuery.eq('teacher_id', teacherId)
     if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
