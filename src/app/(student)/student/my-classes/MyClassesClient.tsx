@@ -383,14 +383,14 @@ export default function MyClassesClient({
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
 
             {/* Teacher photo */}
-            <div style={{ flexShrink: 0 }}>
+            <div style={{ flexShrink: 0, width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', border: '2px solid #E0DFDC' }}>
               {nextLesson.teacher?.photo_url ? (
                 <Image
                   src={nextLesson.teacher.photo_url}
                   alt={nextLesson.teacher.full_name}
                   width={56}
                   height={56}
-                  style={{ borderRadius: '50%', objectFit: 'cover', border: '2px solid #E0DFDC' }}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
                 <div style={{
@@ -398,7 +398,6 @@ export default function MyClassesClient({
                   height: '56px',
                   borderRadius: '50%',
                   backgroundColor: '#f3f4f6',
-                  border: '2px solid #E0DFDC',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -750,14 +749,14 @@ export default function MyClassesClient({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
 
                           {/* Teacher photo */}
-                          <div style={{ flexShrink: 0 }}>
+                          <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #E0DFDC' }}>
                             {lesson.teacher?.photo_url ? (
                               <Image
                                 src={lesson.teacher.photo_url}
                                 alt={lesson.teacher.full_name}
                                 width={36}
                                 height={36}
-                                style={{ borderRadius: '50%', objectFit: 'cover', border: '1px solid #E0DFDC' }}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                               />
                             ) : (
                               <div style={{
@@ -765,7 +764,6 @@ export default function MyClassesClient({
                                 height: '36px',
                                 borderRadius: '50%',
                                 backgroundColor: '#f3f4f6',
-                                border: '1px solid #E0DFDC',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -965,14 +963,14 @@ export default function MyClassesClient({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
 
                         {/* Teacher photo */}
-                        <div style={{ flexShrink: 0 }}>
+                        <div style={{ flexShrink: 0, width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #E0DFDC' }}>
                           {lesson.teacher?.photo_url ? (
                             <Image
                               src={lesson.teacher.photo_url}
                               alt={lesson.teacher.full_name}
                               width={36}
                               height={36}
-                              style={{ borderRadius: '50%', objectFit: 'cover', border: '1px solid #E0DFDC' }}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             />
                           ) : (
                             <div style={{
@@ -980,7 +978,6 @@ export default function MyClassesClient({
                               height: '36px',
                               borderRadius: '50%',
                               backgroundColor: '#f3f4f6',
-                              border: '1px solid #E0DFDC',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',

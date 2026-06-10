@@ -31,18 +31,23 @@ export default function StudentTopHeader({
         </span>
         <Link href="/student/account" prefetch={false} style={{ display: 'flex' }}>
           {photoUrl ? (
-            <Image
-              src={photoUrl}
-              alt={studentName}
-              width={36}
-              height={36}
-              style={{
-                borderRadius: '50%',
-                objectFit: 'cover',
-                border: '2px solid rgba(255,255,255,0.6)',
-                cursor: 'pointer',
-              }}
-            />
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              overflow: 'hidden',
+              flexShrink: 0,
+              border: '2px solid rgba(255,255,255,0.6)',
+              cursor: 'pointer',
+            }}>
+              <Image
+                src={photoUrl}
+                alt={studentName}
+                width={36}
+                height={36}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            </div>
           ) : (
             <div
               style={{

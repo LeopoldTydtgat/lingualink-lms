@@ -1,3 +1,22 @@
+## Session 137 - 10 June 2026 - Student booking flow redesign
+
+### What was built
+- Fixed the booking calendar legend mislabel: slots that could not start a full-length class were labelled Unavailable. Non-bookable slots are now hidden entirely and the legend corrected.
+- Redesigned the student booking date and time step from a seven-column slot grid to a day picker: week strip with availability dots, first open day auto-selected, times grouped into Morning, Afternoon and Evening, inline selection summary.
+- Selected time pill now shows its full range (for example 10:00 to 11:00) and spans two grid tracks; starts inside the selected window are hidden while selected; the Confirm step now shows the full time range instead of only the start time.
+- Widened the booking flow wrapper from 680px to 1000px.
+- Fixed avatar distortion across the app: audited all 37 avatar render sites, found 6 distortion-prone (bare Next.js Image without a fixed CSS box renders portrait photos as ovals), converted all 6 to the fixed-size overflow-hidden wrapper pattern (booking teacher step, booking confirm step, three my-classes sites, student portal header).
+
+### Break/Fix Log
+1. **Booking calendar greyed slots labelled Unavailable.** Symptom: slots that a teacher had marked free were shown greyed and labelled Unavailable when the student could not start a full-length class from that slot. Cause: the label described slots where a full-length class could not start, not true unavailability. Fix: hide non-bookable slots, correct the legend. Lesson: a technically correct UI that reads wrong is still a bug; the label is part of the contract.
+2. **First hide attempt collapsed the selected highlight to a single cell.** Symptom: hiding non-bookable slots worked correctly for unselected states but collapsed a 60 or 90 minute selection highlight to one cell. Cause: interior cells of a selection are not valid starts, so the naive hide removed them. Fix: hide only slots that are neither bookable starts nor part of the active selection. Lesson: the full-file review caught a regression a clean diff and type check would not have surfaced.
+3. **One teacher's profile photo rendered as a squashed oval.** Symptom: one teacher's photo appeared as a squashed oval in the booking flow while another's looked fine. Cause: a bare Next.js Image with width and height props but no fixed CSS box can render with height auto, so a portrait source distorts while a square source survives by luck. Fix: fixed-size round overflow-hidden wrapper with the image stretched to fill, applied at every distortion-prone site found by a full app audit. Lesson: when one instance of a pattern breaks, audit the whole codebase for the pattern before fixing; the audit found five more sites.
+
+### Session result
+The student booking flow went from a confusing seven-column grid to a world-class day picker in one session, shipped across seven reviewed commits, with the slot logic untouched and verified sound throughout. Avatar rendering is now shape-proof for any current or future photo upload.
+
+---
+
 ## 2026-06-09 - UI/UX polish: empty states, brand buttons, zero-hours handling
 
 Presentational pass across the teacher and student portals. No schema changes, no auth/billing logic changes; one display-only data read added (student my-classes page). tsc clean throughout.
