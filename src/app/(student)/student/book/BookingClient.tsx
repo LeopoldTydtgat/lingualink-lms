@@ -78,20 +78,6 @@ function formatSlotTime(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
-// Format full date+time for confirmation screen
-function formatConfirmDateTime(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
-
 // Get day-of-week (0=Sun, 1=Mon ... 6=Sat) for a date in a given timezone
 function getDayOfWeek(date: Date, timezone: string): number {
   const dayStr = new Intl.DateTimeFormat('en-US', {
@@ -790,11 +776,15 @@ function StepDateTime({
                                 fontWeight: '500',
                                 textAlign: 'center',
                                 cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                                gridColumn: isSelected ? 'span 2' : 'auto',
                                 backgroundColor: isSelected ? '#FF8303' : '#FFF0DC',
                                 color: isSelected ? '#ffffff' : '#FF8303',
                               }}
                             >
-                              {formatSlotTime(slot.startIso, studentTimezone)}
+                              {isSelected
+                                ? `${formatSlotTime(slot.startIso, studentTimezone)} – ${timeFormatter.format(new Date(startMs + durationMinutes * 60000))}`
+                                : formatSlotTime(slot.startIso, studentTimezone)}
                             </button>
                           )
                         })}
@@ -1108,7 +1098,7 @@ export default function BookingClient({
   }
 
   return (
-    <div style={{ maxWidth: '680px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
       {/* Page header */}
       <div style={{ marginBottom: '8px' }}>
         <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>
