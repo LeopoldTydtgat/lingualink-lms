@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2 } from 'lucide-react'
 import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ function StepDateTime({
   teacherId: string
   studentTimezone: string
   durationMinutes: number
-  onSelect: (isoString: string) => void
+  onSelect: (isoString: string | null) => void
   selectedStartIso: string | null
 }) {
   const slotsNeeded = durationMinutes / 30
@@ -404,6 +404,7 @@ function StepDateTime({
   const [slots, setSlots] = useState<Record<string, Slot[]>>({}) // keyed by YYYY-MM-DD
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedDay, setSelectedDay] = useState<string | null>(null) // a YYYY-MM-DD dateKey
 
   // Fetch availability slots from the API whenever week or teacher changes.
   //
@@ -495,9 +496,6 @@ function StepDateTime({
     weekDays.push(d)
   }
 
-  // Pre-compute the selected booking window so slot rendering can highlight the full range
-  const selectedStartMs = selectedStartIso ? new Date(selectedStartIso).getTime() : null
-
   // Check if a slot at index `slotIndex` within a day can be the start of a booking.
   // Requires slotsNeeded consecutive 30-minute slots that are all available AND
   // actually adjacent in time (no gaps — teacher might have non-contiguous availability).
@@ -512,6 +510,71 @@ function StepDateTime({
     }
     return true
   }
+
+  // A day can be picked iff it isn't past and a booking of the chosen
+  // duration can start somewhere in it.
+  const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
+  const selectableDayKeys: string[] = []
+  for (const day of weekDays) {
+    const dateKey = getLocalDateKey(day, studentTimezone)
+    const daySlots = slots[dateKey] ?? []
+    if (day >= todayStart && daySlots.some((_, i) => isBookableStart(daySlots, i))) {
+      selectableDayKeys.push(dateKey)
+    }
+  }
+
+  // The active day is derived, never synced via an effect: keep the student's
+  // pick while it stays selectable, otherwise fall back to the first open day.
+  // This auto-selects on load and re-defaults after week/duration changes.
+  const activeDayKey =
+    selectedDay !== null && selectableDayKeys.includes(selectedDay)
+      ? selectedDay
+      : selectableDayKeys[0] ?? null
+  const activeDay =
+    activeDayKey !== null
+      ? weekDays.find((d) => getLocalDateKey(d, studentTimezone) === activeDayKey)
+      : undefined
+
+  // Bookable START slots of the active day, grouped by part of day. The hour
+  // comes from a formatter pinned to the student's timezone — Date.getHours()
+  // is browser-local and wrong for a student in another timezone.
+  const hourFormatter = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    hour12: false,
+    timeZone: studentTimezone,
+  })
+  const activeDaySlots = activeDayKey !== null ? slots[activeDayKey] ?? [] : []
+  const morningStarts: Slot[] = []
+  const afternoonStarts: Slot[] = []
+  const eveningStarts: Slot[] = []
+  activeDaySlots.forEach((slot, i) => {
+    if (!isBookableStart(activeDaySlots, i)) return
+    const hour = Number(hourFormatter.format(new Date(slot.startIso)))
+    if (hour < 12) morningStarts.push(slot)
+    else if (hour < 17) afternoonStarts.push(slot)
+    else eveningStarts.push(slot)
+  })
+  const partsOfDay = [
+    { label: 'Morning', starts: morningStarts },
+    { label: 'Afternoon', starts: afternoonStarts },
+    { label: 'Evening', starts: eveningStarts },
+  ]
+
+  const longDayFormatter = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: studentTimezone,
+  })
+  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: studentTimezone,
+  })
+  const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
+  const selectedEnd =
+    selectedStart !== null ? new Date(selectedStart.getTime() + durationMinutes * 60000) : null
 
   const goBack = () => {
     const prev = new Date(weekStart)
@@ -605,113 +668,167 @@ function StepDateTime({
       )}
 
       {!loading && !error && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
-          {weekDays.map((day) => {
-            const dateKey = getLocalDateKey(day, studentTimezone)
-            const daySlots = slots[dateKey] ?? []
-            const isPast = day < new Date(new Date().setHours(0, 0, 0, 0))
-            const hasBookable = daySlots.some((s, i) => !isPast && isBookableStart(daySlots, i))
+        <>
+          {/* Week strip — pick a day */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+            {weekDays.map((day) => {
+              const dateKey = getLocalDateKey(day, studentTimezone)
+              const selectable = selectableDayKeys.includes(dateKey)
+              const isActive = selectable && dateKey === activeDayKey
 
-            return (
-              <div key={dateKey}>
-                {/* Day header */}
-                <div
+              return (
+                <button
+                  key={dateKey}
+                  disabled={!selectable}
+                  onClick={() => {
+                    if (selectable && dateKey !== activeDayKey) {
+                      setSelectedDay(dateKey)
+                      onSelect(null) // a time picked on the previous day no longer applies
+                    }
+                  }}
                   style={{
+                    borderRadius: '10px',
+                    padding: '9px 2px',
                     textAlign: 'center',
-                    marginBottom: '6px',
-                    padding: '6px 4px',
-                    borderRadius: '6px',
-                    backgroundColor: isPast ? '#f9fafb' : '#F6C5B8',
+                    border: '1px solid',
+                    borderColor: selectable && !isActive ? '#E0DFDC' : 'transparent',
+                    backgroundColor: isActive ? '#FF8303' : selectable ? '#ffffff' : '#fafafa',
+                    cursor: selectable ? 'pointer' : 'default',
                   }}
                 >
                   <p
                     style={{
-                      fontSize: '11px',
-                      fontWeight: '600',
-                      color: isPast ? '#d1d5db' : '#5C1F0A',
+                      fontSize: '10px',
+                      fontWeight: '500',
                       textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      color: isActive ? '#ffe7cf' : selectable ? '#6b7280' : '#d1d5db',
                     }}
                   >
                     {formatDayLabel(day, studentTimezone).split(' ')[0]}
                   </p>
-                  <p style={{ fontSize: '13px', fontWeight: '700', color: isPast ? '#d1d5db' : '#5C1F0A' }}>
-                  {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
+                  <p
+                    style={{
+                      fontSize: '15px',
+                      fontWeight: '500',
+                      color: isActive ? '#ffffff' : selectable ? '#111827' : '#d1d5db',
+                    }}
+                  >
+                    {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
                   </p>
-                </div>
-
-                {/* Slots */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {!hasBookable && !isPast && (
+                  {selectable && (
                     <div
                       style={{
-                        height: '32px',
-                        borderRadius: '4px',
-                        backgroundColor: '#f9fafb',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        width: '5px',
+                        height: '5px',
+                        borderRadius: '50%',
+                        backgroundColor: isActive ? '#ffffff' : '#FF8303',
+                        margin: '4px auto 0',
                       }}
-                    >
-                      <span style={{ fontSize: '10px', color: '#d1d5db' }}>—</span>
-                    </div>
+                    />
                   )}
-                  {daySlots.map((slot, i) => {
-                    const canBook = !isPast && isBookableStart(daySlots, i)
-                    const slotStartMs = new Date(slot.startIso).getTime()
-                    const isSelected = selectedStartMs !== null &&
-                      slotStartMs >= selectedStartMs &&
-                      slotStartMs < selectedStartMs + durationMinutes * 60 * 1000
+                </button>
+              )
+            })}
+          </div>
 
-                    // Hide slots that can't start a class — but keep showing
-                    // the interior cells of an in-progress selection so the
-                    // full 60/90-min block stays highlighted.
-                    if (!canBook && !isSelected) return null
+          {/* Times for the active day */}
+          <div style={{ marginTop: '24px' }}>
+            {activeDayKey !== null && activeDay ? (
+              <>
+                <p style={{ fontSize: '15px', fontWeight: '500', color: '#111827', marginBottom: '16px' }}>
+                  {longDayFormatter.format(activeDay)}
+                </p>
 
-                    return (
-                      <button
-                        key={slot.startIso}
-                        onClick={() => canBook && onSelect(slot.startIso)}
-                        disabled={!canBook}
+                {partsOfDay
+                  .filter((part) => part.starts.length > 0)
+                  .map((part) => (
+                    <div key={part.label}>
+                      <p
                         style={{
-                          padding: '5px 2px',
-                          borderRadius: '4px',
-                          border: '1px solid',
-                          borderColor: isSelected ? '#FF8303' : canBook ? '#E0DFDC' : 'transparent',
-                          backgroundColor: isSelected
-                            ? '#FF8303'
-                            : canBook
-                            ? '#FFF0DC'
-                            : '#f3f4f6',
-                          color: isSelected ? '#ffffff' : canBook ? '#FF8303' : '#d1d5db',
                           fontSize: '11px',
-                          fontWeight: '600',
-                          cursor: canBook ? 'pointer' : 'default',
-                          textAlign: 'center',
-                          width: '100%',
+                          fontWeight: '500',
+                          color: '#9ca3af',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          marginBottom: '8px',
                         }}
                       >
-                        {formatSlotTime(slot.startIso, studentTimezone)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
+                        {part.label}
+                      </p>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(68px, 1fr))',
+                          gap: '8px',
+                          marginBottom: '18px',
+                        }}
+                      >
+                        {part.starts.map((slot) => {
+                          const isSelected = slot.startIso === selectedStartIso
+                          return (
+                            <button
+                              key={slot.startIso}
+                              onClick={() => onSelect(slot.startIso)}
+                              style={{
+                                padding: '10px 2px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                fontSize: '12px',
+                                fontWeight: '500',
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                                backgroundColor: isSelected ? '#FF8303' : '#FFF0DC',
+                                color: isSelected ? '#ffffff' : '#FF8303',
+                              }}
+                            >
+                              {formatSlotTime(slot.startIso, studentTimezone)}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#FFF0DC', border: '1px solid #E0DFDC' }} />
-          <span style={{ fontSize: '12px', color: '#6b7280' }}>Available</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#FF8303' }} />
-          <span style={{ fontSize: '12px', color: '#6b7280' }}>Selected</span>
-        </div>
-      </div>
+                {selectedStart !== null &&
+                  selectedEnd !== null &&
+                  getLocalDateKey(selectedStart, studentTimezone) === activeDayKey && (
+                    <div
+                      style={{
+                        marginTop: '20px',
+                        backgroundColor: '#FFF7ED',
+                        border: '1px solid #FFE0C0',
+                        borderRadius: '10px',
+                        padding: '12px 16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                      }}
+                    >
+                      <CheckCircle2 size={18} color="#FF8303" style={{ flexShrink: 0 }} />
+                      <p style={{ fontSize: '13px', color: '#5C1F0A' }}>
+                        <span style={{ fontWeight: '500' }}>
+                          {longDayFormatter.format(selectedStart)} · {timeFormatter.format(selectedStart)} – {timeFormatter.format(selectedEnd)}
+                        </span>
+                        {' · '}
+                        {durationMinutes} minutes
+                      </p>
+                    </div>
+                  )}
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+                <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
+                  No openings this week.
+                </p>
+                <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+                  Use the arrow above to check the next week.
+                </p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
