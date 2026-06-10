@@ -198,13 +198,15 @@ function StepTeacher({
               }}
             >
               {teacher.photo_url ? (
-                <Image
-                  src={teacher.photo_url}
-                  alt={teacher.full_name}
-                  width={48}
-                  height={48}
-                  style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-                />
+                <div style={{ width: '48px', height: '48px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                  <Image
+                    src={teacher.photo_url}
+                    alt={teacher.full_name}
+                    width={48}
+                    height={48}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                </div>
               ) : (
                 <div
                   style={{
@@ -902,13 +904,15 @@ function StepConfirm({
           {/* Teacher */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
             {teacher.photo_url ? (
-              <Image
-                src={teacher.photo_url}
-                alt={teacher.full_name}
-                width={44}
-                height={44}
-                style={{ borderRadius: '50%', objectFit: 'cover' }}
-              />
+              <div style={{ width: '44px', height: '44px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <Image
+                  src={teacher.photo_url}
+                  alt={teacher.full_name}
+                  width={44}
+                  height={44}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              </div>
             ) : (
               <div
                 style={{
