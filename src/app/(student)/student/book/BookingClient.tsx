@@ -766,6 +766,18 @@ function StepDateTime({
                       >
                         {part.starts.map((slot) => {
                           const isSelected = slot.startIso === selectedStartIso
+                          // Hide starts strictly inside the selected window —
+                          // the selected start renders as the span pill, and
+                          // the slot exactly at the window end still renders.
+                          const startMs = new Date(slot.startIso).getTime()
+                          const selMs =
+                            selectedStartIso !== null ? new Date(selectedStartIso).getTime() : null
+                          const isInsideSelection =
+                            selMs !== null &&
+                            startMs > selMs &&
+                            startMs < selMs + durationMinutes * 60000
+                          if (isInsideSelection) return null
+
                           return (
                             <button
                               key={slot.startIso}
@@ -855,6 +867,22 @@ function StepConfirm({
   const hoursUsed = durationMinutes / 60
   const hoursAfter = hoursRemaining - hoursUsed
 
+  const start = new Date(startIso)
+  const end = new Date(start.getTime() + durationMinutes * 60000)
+  const dateFormatter = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: studentTimezone,
+  })
+  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: studentTimezone,
+  })
+
   return (
     <div>
       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
@@ -914,7 +942,7 @@ function StepConfirm({
 
           {/* Details rows */}
           {[
-            { label: 'Date & Time', value: formatConfirmDateTime(startIso, studentTimezone) },
+            { label: 'Date & Time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
             { label: 'Duration', value: formatHours(durationMinutes / 60) },
             { label: 'Hours deducted', value: formatHours(hoursUsed) },
             { label: 'Remaining after booking', value: formatHours(hoursAfter) },
