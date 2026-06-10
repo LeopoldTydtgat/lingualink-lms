@@ -610,6 +610,7 @@ function StepDateTime({
             const dateKey = getLocalDateKey(day, studentTimezone)
             const daySlots = slots[dateKey] ?? []
             const isPast = day < new Date(new Date().setHours(0, 0, 0, 0))
+            const hasBookable = daySlots.some((s, i) => !isPast && isBookableStart(daySlots, i))
 
             return (
               <div key={dateKey}>
@@ -640,7 +641,7 @@ function StepDateTime({
 
                 {/* Slots */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {daySlots.length === 0 && !isPast && (
+                  {!hasBookable && !isPast && (
                     <div
                       style={{
                         height: '32px',
@@ -661,8 +662,10 @@ function StepDateTime({
                       slotStartMs >= selectedStartMs &&
                       slotStartMs < selectedStartMs + durationMinutes * 60 * 1000
 
-                    // Don't render unavailable slots that also can't be booked
-                    if (!slot.available && !canBook) return null
+                    // Hide slots that can't start a class — but keep showing
+                    // the interior cells of an in-progress selection so the
+                    // full 60/90-min block stays highlighted.
+                    if (!canBook && !isSelected) return null
 
                     return (
                       <button
@@ -707,10 +710,6 @@ function StepDateTime({
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#FF8303' }} />
           <span style={{ fontSize: '12px', color: '#6b7280' }}>Selected</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', borderRadius: '2px', backgroundColor: '#f3f4f6' }} />
-          <span style={{ fontSize: '12px', color: '#6b7280' }}>Unavailable</span>
         </div>
       </div>
     </div>
