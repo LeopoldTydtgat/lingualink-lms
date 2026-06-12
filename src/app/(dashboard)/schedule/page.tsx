@@ -14,7 +14,7 @@ export default async function SchedulePage() {
     .from('profiles')
     .select('id, full_name, role, timezone')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!profile) return (
     <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
@@ -23,9 +23,9 @@ export default async function SchedulePage() {
   // Fetch existing availability for this teacher
   const { data: availability } = await supabase
     .from('availability')
-    .select('*')
+    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available')
     .eq('teacher_id', profile.id)
-    .order('created_at', { ascending: true })
+    .order('start_at', { ascending: true })
 
   return (
     <ScheduleClient
