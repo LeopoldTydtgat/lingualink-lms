@@ -19,7 +19,7 @@ export async function DELETE(
     .from('availability')
     .select('teacher_id')
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (fetchError || !record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
