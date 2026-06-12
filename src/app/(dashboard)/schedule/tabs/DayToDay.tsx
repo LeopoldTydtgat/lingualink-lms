@@ -318,6 +318,29 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id])
 
+  // Refetch on focus/visibility to heal the Realtime teacher-reassignment gap: when a
+  // class is reassigned away from this teacher, the previous teacher's calendar gets no
+  // postgres_changes event (its teacher_id no longer matches the subscription filter), so
+  // the stale block lingers until a manual refresh. BOTH listeners are needed: switching
+  // browser tabs fires visibilitychange but not window focus; alt-tabbing back to the
+  // window fires focus. A double-fire double-fetch is harmless (idempotent GET).
+  useEffect(() => {
+    function handler() {
+      const range = visibleRangeRef.current
+      if (range) fetchClassesForRange(range.start, range.end)
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') handler()
+    }
+    window.addEventListener('focus', handler)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', handler)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart])
 
   const generalBlocks = useMemo(
@@ -494,6 +517,17 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     }
   }, [drag])
 
+  // Live warning when an unavailable drag overlaps booked classes. Derived from
+  // dragPreview only; the commit handler is untouched and never blocks a save.
+  // Half-open overlap test (strict <): a block ending 10:00 and a class starting 10:00
+  // do not overlap. Clears automatically when dragPreview goes null (mouseup/Esc/mode).
+  const dragClassOverlapCount = useMemo(() => {
+    if (!dragPreview || mode !== 'unavailable') return 0
+    return classBlocksList.filter(
+      b => b.dayIdx === dragPreview.dayIdx && dragPreview.startMin < b.endMin && dragPreview.endMin > b.startMin
+    ).length
+  }, [dragPreview, mode, classBlocksList])
+
   const nowMin = now.getHours() * 60 + now.getMinutes()
   const nowPx = (nowMin >= START_HOUR * 60 && nowMin <= END_HOUR * 60 + 30)
     ? pxFromMin(nowMin)
@@ -503,6 +537,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     setDrag(null)
     isDraggingRef.current = false
     setWeekStart(addDays(weekStart, delta))
+  }
+
+  function goToToday() {
+    setDrag(null)
+    isDraggingRef.current = false
+    setWeekStart(getMondayWeekStart(new Date()))
   }
 
   return (
@@ -583,6 +623,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </p>
       )}
 
+      {dragClassOverlapCount > 0 && (
+        <p style={{ fontSize: '13px', color: '#92400E', marginBottom: '8px', padding: '8px 12px', backgroundColor: '#FFF6E6', borderRadius: '6px', border: '1px solid #FFB942' }}>
+          This selection overlaps {dragClassOverlapCount} booked class{dragClassOverlapCount === 1 ? '' : 'es'}. Booked classes are not cancelled by unavailability.
+        </p>
+      )}
+
       {/* Legend */}
       <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {[
@@ -600,17 +646,27 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             <span style={{ fontSize: '12px', color: '#6B7280' }}>{item.label}</span>
           </div>
         ))}
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#6B7280' }}>All times in {profile.timezone}</span>
       </div>
 
       {/* Week navigation */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', padding: '0 4px' }}>
-        <button
-          onClick={() => gotoWeek(-7)}
-          aria-label="Previous week"
-          style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
-        >
-          ←
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={() => gotoWeek(-7)}
+            aria-label="Previous week"
+            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+          >
+            ←
+          </button>
+          <button
+            onClick={goToToday}
+            disabled={todayIdx >= 0}
+            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: todayIdx >= 0 ? 'default' : 'pointer', opacity: todayIdx >= 0 ? 0.5 : 1 }}
+          >
+            Today
+          </button>
+        </div>
         <span style={{ fontSize: '15px', fontWeight: '600', color: '#374151' }}>{formatWeekLabel(weekStart)}</span>
         <button
           onClick={() => gotoWeek(7)}
@@ -690,7 +746,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   justifyContent: 'flex-end',
                   fontSize: '11px',
                   color: '#9CA3AF',
-                  borderTop: '1px solid #E5E7EB',
+                  borderTop: onTheHour ? '1px solid #E9EAEC' : '1px solid #F4F5F6',
                 }}>
                   {onTheHour ? formatHourLabel(Math.floor(min / 60)) : ''}
                 </div>
@@ -882,7 +938,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       ? 'rgba(220,252,231,0.85)'
                       : 'repeating-linear-gradient(45deg, rgba(220,38,38,0.16) 0 6px, rgba(220,38,38,0.04) 6px 12px)',
                     border: `1px dashed ${mode === 'available' ? '#16A34A' : '#DC2626'}`,
-                    borderRadius: '4px',
+                    borderRadius: '6px',
                     pointerEvents: 'none',
                     zIndex: 4,
                     display: 'flex',
