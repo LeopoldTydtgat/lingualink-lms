@@ -28,11 +28,16 @@ export async function POST(request: NextRequest) {
       { teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available },
       { onConflict: 'teacher_id,day_of_week,start_time,end_time' }
     )
-    .select()
-    .single()
+    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available')
+    .maybeSingle()
 
   if (error) {
     console.error('[POST /api/teacher/availability]', error)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
+
+  if (!data) {
+    console.error('[POST /api/teacher/availability] upsert returned no row')
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
 
