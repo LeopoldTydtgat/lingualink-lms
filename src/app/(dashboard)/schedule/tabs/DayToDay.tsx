@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localTimeToUtcMs } from '@/lib/availability'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
+import { getMondayWeekStart, addDays, getWeekDays, formatWeekLabel } from '@/lib/utils/week'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string; timezone: string }
@@ -26,7 +27,8 @@ const START_HOUR = 5
 const END_HOUR = 23
 const SLOT_COUNT = 38                              // 05:00 → 23:30 in 30-min slots
 const GRID_HEIGHT = SLOT_COUNT * SLOT_HEIGHT       // 836px
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+// Monday-first; index-aligned with getWeekDays(weekStart) — DAY_LABELS[i] labels weekDays[i].
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function pad(n: number): string {
@@ -48,19 +50,6 @@ function localIsoToUtcIso(localIso: string, timezone: string): string {
   const [datePart, timePart] = localIso.split('T')
   const [hh, mm] = timePart.split(':')
   return new Date(localTimeToUtcMs(datePart, `${hh}:${mm}`, timezone)).toISOString()
-}
-
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d)
-  r.setDate(r.getDate() + n)
-  return r
-}
-
-function getWeekStart(d: Date): Date {
-  const r = new Date(d)
-  r.setHours(0, 0, 0, 0)
-  r.setDate(r.getDate() - r.getDay())  // Sunday-first
-  return r
 }
 
 function startOfDayLocal(d: Date): number {
@@ -100,19 +89,6 @@ function formatTime12(min: number): string {
 
 function timeRangeLabel12(startMin: number, endMin: number): string {
   return `${formatTime12(startMin)} - ${formatTime12(endMin)}`
-}
-
-function weekLabel(weekStart: Date): string {
-  const end = addDays(weekStart, 6)
-  const sM = MONTHS_SHORT[weekStart.getMonth()]
-  const eM = MONTHS_SHORT[end.getMonth()]
-  if (weekStart.getFullYear() !== end.getFullYear()) {
-    return `${sM} ${weekStart.getDate()}, ${weekStart.getFullYear()} – ${eM} ${end.getDate()}, ${end.getFullYear()}`
-  }
-  if (weekStart.getMonth() !== end.getMonth()) {
-    return `${sM} ${weekStart.getDate()} – ${eM} ${end.getDate()}, ${weekStart.getFullYear()}`
-  }
-  return `${sM} ${weekStart.getDate()} – ${end.getDate()}, ${weekStart.getFullYear()}`
 }
 
 // Merge consecutive general slots (e.g. Mon 06:00-06:30 + 06:30-07:00) into single
@@ -204,7 +180,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [classes, setClasses] = useState<ClassEvent[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
-  const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()))
+  const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(new Date()))
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [exportMsg, setExportMsg] = useState('')
   const [actionError, setActionError] = useState('')
@@ -315,10 +291,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id])
 
-  const weekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
-    [weekStart]
-  )
+  const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart])
 
   const generalBlocks = useMemo(
     () => expandGeneralSlots(availability.filter(a => a.type === 'general'), weekStart),
@@ -590,7 +563,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         >
           ←
         </button>
-        <span style={{ fontSize: '15px', fontWeight: '600', color: '#374151' }}>{weekLabel(weekStart)}</span>
+        <span style={{ fontSize: '15px', fontWeight: '600', color: '#374151' }}>{formatWeekLabel(weekStart)}</span>
         <button
           onClick={() => gotoWeek(7)}
           aria-label="Next week"
