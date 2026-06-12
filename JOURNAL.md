@@ -1,3 +1,25 @@
+## Session 138 - 12 June 2026 - Teacher schedule hardening and Monday-first conversion
+
+### What was built
+- src/app/(dashboard)/schedule/page.tsx: profiles lookup migrated to maybeSingle; availability query moved from select('*') to an explicit nine column list; ordering switched to start_at
+- src/app/api/teacher/availability/route.ts: upsert select migrated to maybeSingle with a null guard; response uses the same explicit column list
+- src/app/api/teacher/availability/[id]/route.ts: ownership lookup migrated to maybeSingle
+- src/lib/utils/week.ts and week.test.ts: new Monday-first week math library (getMondayWeekStart, addDays, getWeekDays, formatWeekLabel), 27 tests, locale pinned month names. Full suite now 77 tests (the real pre-existing baseline was 50, not the 43 carried in older notes)
+- src/app/(dashboard)/schedule/tabs/GeneralAvailability.tsx: visual redesign per the signed off mock. Corrected help text (old copy claimed orange = available while blocks rendered grey-blue), live "Offering per week" hours counter, 24 hour labels, restyled blocks and add/erase drag previews, palette gridlines. Engine verified byte identical by the reviewer
+- src/app/(dashboard)/schedule/tabs/DayToDay.tsx: Sunday-first to Monday-first conversion consuming the new lib, DAY_LABELS reordered in the same commit, local week helpers deleted. Geometry only; the visual pass is next
+
+Also this session: read only scoping audit of the schedule feature, read only booking integrity audit of all three lesson write paths, live DB confirmation that the no_teacher_overlap GiST exclusion constraint exists on lessons (double booking is impossible at the database level on every path), and signed off mocks for all three schedule tabs (Direction A colours, collision aware wash labels, custom holiday range picker).
+
+### Break/Fix Log
+Issue 1: Commit batch bundling. Symptom: d8571a1 contained the maybeSingle migration for two files plus the column list change under a message describing only the column lists, and the DayToDay conversion was briefly uncommitted. Cause: add/commit pairs queued across several chat turns ran as one batch with no git status between them. Fix: forward only; bf802e2, 6e59702 and 3518f5d carry the remainder, no history rewrite. Lesson: run git status between queued commit pairs.
+Issue 2: LF rewrite of a CRLF file. Symptom: a full file rewrite of DayToDay.tsx produced LF endings and a 767 line snapshot diff. Cause: the Write tool defaults to LF. Fix: unix2dos, re-diff (87 real lines), tsc and tests re-run on the final bytes. Lesson: full file rewrites must preserve CRLF and be verified against a pre edit snapshot diff.
+Issue 3: Wrong date fixture in the task brief. Symptom: the brief asserted Thu 1 Jan 2026 maps to Mon 28 Dec 2025, but 28 Dec 2025 is a Sunday. Cause: weekday stated from memory. Fix: caught by calculation during implementation; tests assert 29 Dec 2025. Lesson: verify date fixtures by computation before asserting them.
+
+### Session result
+Schedule feature hardened and converted: maybeSingle and explicit column lists across page and routes, a tested Monday-first week library, General Availability redesigned with a live weekly hours counter and corrected copy, and Day to Day converted to Monday-first with both paths browser verified (the Mon to Fri weekly wash renders in columns one to five, and a test block dragged onto Sunday 14 June saved to Sunday and deleted cleanly). Booking integrity confirmed at the database level. Six commits pushed to dev. Next session: BUG_LOG encoding fix and reconcile, then the Day to Day visual pass (collision aware labels, Today button, focus refetch) and the Holidays rebuild with its write path timezone fix.
+
+---
+
 ## Session 137 - 10 June 2026 - Student booking flow redesign
 
 ### What was built
