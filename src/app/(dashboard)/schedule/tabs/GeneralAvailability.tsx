@@ -36,22 +36,17 @@ function endTimeString(hour: number, minute: number): string {
 }
 
 function formatHourLabel(hour: number): string {
-  if (hour === 0) return '12am'
-  if (hour < 12) return `${hour}am`
-  if (hour === 12) return '12pm'
-  return `${hour - 12}pm`
+  return `${String(hour).padStart(2, '0')}:00`
 }
 
-function formatTime12(min: number): string {
+function formatTime24(min: number): string {
   const h = Math.floor(min / 60)
   const m = min % 60
-  const period = h < 12 ? 'am' : 'pm'
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-  return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-function timeRangeLabel12(startMin: number, endMin: number): string {
-  return `${formatTime12(startMin)} - ${formatTime12(endMin)}`
+function timeRangeLabel24(startMin: number, endMin: number): string {
+  return `${formatTime24(startMin)} – ${formatTime24(endMin)}`
 }
 
 function isSlotActive(records: AvailabilityRecord[], dayName: string, hour: number, minute: number): boolean {
@@ -98,6 +93,14 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   const [saveError, setSaveError] = useState('')
   const [dragPreview, setDragPreview] = useState<Set<string>>(new Set())
 
+  const weeklyHours = useMemo(() => {
+    const committed = generalSlots.filter(a => !a.id.startsWith('temp-'))
+    const totalMinutes = committed.length * 30
+    const hours = Math.floor(totalMinutes / 60)
+    const minutes = totalMinutes % 60
+    return { hours, minutes }
+  }, [generalSlots])
+
   const runMap = useMemo(() => {
     const map = new Map<string, { isRunStart: boolean; runLength: number }>()
     for (const day of DAYS) {
@@ -120,7 +123,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   }, [generalSlots])
 
   // For each contiguous run of preview slots per day, maps the topmost slot key to its
-  // "9am - 11:30am" label so the preview overlay can show it only on the first cell.
+  // "09:00 – 11:30" label so the preview overlay can show it only on the first cell.
   const dragPreviewRuns = useMemo(() => {
     const labels = new Map<string, string>()
     for (const day of DAYS) {
@@ -140,7 +143,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         while (runEnd + 1 < indexed.length && indexed[runEnd + 1].idx === indexed[runEnd].idx + 1) runEnd++
         const { hour: sH, minute: sM } = SLOTS[indexed[runStart].idx]
         const { hour: eH, minute: eM } = SLOTS[indexed[runEnd].idx]
-        labels.set(indexed[runStart].key, timeRangeLabel12(sH * 60 + sM, eH * 60 + eM + 30))
+        labels.set(indexed[runStart].key, timeRangeLabel24(sH * 60 + sM, eH * 60 + eM + 30))
         runStart = runEnd + 1
       }
     }
@@ -379,8 +382,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-gray-800">General Availability</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Set your recurring weekly availability. These slots will appear on your Day to Day calendar.
-          Click or click and drag to select multiple slots. Orange = available.
+          Set your recurring weekly availability. These slots appear on your Day to Day calendar and to students when booking. Click or drag to add slots; click or drag existing slots to erase them.
         </p>
       </div>
 
@@ -390,15 +392,24 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         </p>
       )}
 
-      <div ref={scrollRef} className="overflow-x-auto select-none thin-scroll" style={{ maxHeight: '600px', overflowY: 'auto', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #9CA3AF' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+        <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 14px', textAlign: 'right' }}>
+          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3 }}>Offering per week</div>
+          <div style={{ fontSize: '16px', fontWeight: 500, color: '#0F172A', lineHeight: 1.3 }}>
+            {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
+          </div>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="overflow-x-auto select-none thin-scroll" style={{ maxHeight: '600px', overflowY: 'auto', backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #E0DFDC' }}>
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
-              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', boxShadow: 'inset 0 -1px 0 #6B7280', borderRight: '1px solid #D1D5DB' }} />
+              <th style={{ width: '64px', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', boxShadow: 'inset 0 -1px 0 #E0DFDC', borderRight: '1px solid #F1F1F0' }} />
               {DAYS.map(day => (
                 <th
                   key={day}
-                  style={{ padding: '12px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '600', color: '#2C2C2A', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', boxShadow: 'inset 0 -1px 0 #6B7280', borderRight: '1px solid #E5E7EB' }}
+                  style={{ padding: '12px 4px', textAlign: 'center', fontSize: '13px', fontWeight: '500', color: '#111111', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#ffffff', boxShadow: 'inset 0 -1px 0 #E0DFDC', borderRight: '1px solid #F1F1F0' }}
                 >
                   {day.slice(0, 3)}
                 </th>
@@ -407,14 +418,13 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           </thead>
           <tbody>
             {SLOTS.map(({ hour, minute }) => (
-              <tr key={`${hour}-${minute}`} style={{ borderTop: '1px solid #E5E7EB' }}>
-                {/* Only show the label on the hour, not on the :30 row — keeps it clean */}
-                <td style={{ padding: '1px 12px 1px 8px', textAlign: 'right', fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap', borderRight: '1px solid #D1D5DB', borderLeft: '1px solid #D1D5DB', backgroundColor: '#ffffff', height: 30, boxSizing: 'border-box' }}>
+              <tr key={`${hour}-${minute}`} style={{ borderTop: minute === 0 ? '1px solid #E9EAEC' : '1px solid #F4F5F6' }}>
+                <td style={{ padding: '1px 12px 1px 8px', textAlign: 'right', fontSize: '11px', color: '#9ca3af', whiteSpace: 'nowrap', borderRight: '1px solid #F1F1F0', borderLeft: '1px solid #F1F1F0', backgroundColor: '#ffffff', height: 30, boxSizing: 'border-box' }}>
                   {minute === 0 ? formatHourLabel(hour) : null}
                 </td>
                 {DAYS.map(day => {
                   return (
-                    <td key={day} style={{ padding: 0, borderRight: '1px solid #D1D5DB', position: 'relative', height: 30, boxSizing: 'border-box' }}>
+                    <td key={day} style={{ padding: 0, borderRight: '1px solid #F1F1F0', position: 'relative', height: 30, boxSizing: 'border-box' }}>
                       <button
                         onMouseDown={() => handleSlotMouseDown(day, hour, minute)}
                         onMouseEnter={() => handleSlotMouseEnter(day, hour, minute)}
@@ -439,16 +449,20 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                             position: 'absolute',
                             top: -1, left: 0, right: 0,
                             height: heightPx + 1,
-                            backgroundColor: '#F1F5F9',
-                            border: '1px solid #E2E8F0',
-                            borderRadius: '4px',
-                            padding: '4px 6px',
+                            backgroundColor: '#EDF2F7',
+                            border: '1px solid #C9D4E2',
+                            borderRadius: '6px',
+                            padding: '5px 7px',
                             pointerEvents: 'none',
                             zIndex: 1,
                             overflow: 'hidden',
                           }}>
-                            <div style={{ fontSize: '10px', color: '#1F2937', lineHeight: 1.2 }}>{timeRangeLabel12(hour * 60 + minute, endSlot.hour * 60 + endSlot.minute)}</div>
-                            <div style={{ fontSize: '11px', color: '#1F2937', fontWeight: 500, lineHeight: 1.3, marginTop: '2px' }}>Weekly availability</div>
+                            <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#475569', lineHeight: 1.2 }}>
+                              {timeRangeLabel24(hour * 60 + minute, endSlot.hour * 60 + endSlot.minute)}
+                            </div>
+                            {meta.runLength >= 2 && (
+                              <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3, marginTop: '2px' }}>Weekly availability</div>
+                            )}
                           </div>
                         )
                       })()}
@@ -457,29 +471,57 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                         if (!dragPreview.has(slotKey)) return null
                         const isAddPreview = dragMode.current === 'on'
                         const label = dragPreviewRuns.get(slotKey)
-                        return (
-                          <div style={{
-                            position: 'absolute',
-                            top: -1, left: 0, right: 0,
-                            height: 29,
-                            backgroundColor: isAddPreview ? '#F1F5F9' : 'transparent',
-                            backgroundImage: isAddPreview
-                              ? undefined
-                              : 'repeating-linear-gradient(45deg, rgba(220,38,38,0.18) 0 4px, transparent 4px 8px)',
-                            border: isAddPreview
-                              ? '1px solid #E2E8F0'
-                              : '1px dashed rgba(220, 38, 38, 0.5)',
-                            borderRadius: '4px',
-                            pointerEvents: 'none',
-                            zIndex: 2,
-                            overflow: 'hidden',
-                            padding: label ? '2px 4px' : undefined,
-                          }}>
-                            {label && (
-                              <div style={{ fontSize: '10px', color: '#6B7280', lineHeight: 1.2, pointerEvents: 'none' }}>{label}</div>
-                            )}
-                          </div>
-                        )
+                        if (isAddPreview) {
+                          const slotIdx = SLOTS.findIndex(s => s.hour === hour && s.minute === minute)
+                          const nextSlotKey = slotIdx >= 0 && slotIdx < SLOTS.length - 1
+                            ? `${day}-${SLOTS[slotIdx + 1].hour}-${SLOTS[slotIdx + 1].minute}`
+                            : null
+                          const isMultiSlot = label !== undefined && nextSlotKey !== null && dragPreview.has(nextSlotKey)
+                          return (
+                            <div style={{
+                              position: 'absolute',
+                              top: -1, left: 0, right: 0,
+                              height: 29,
+                              backgroundColor: '#DCFCE7',
+                              border: '1px dashed #16A34A',
+                              borderRadius: '6px',
+                              pointerEvents: 'none',
+                              zIndex: 2,
+                              overflow: 'hidden',
+                              padding: label ? '2px 4px' : undefined,
+                            }}>
+                              {label && (
+                                isMultiSlot ? (
+                                  <>
+                                    <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#15803D', lineHeight: 1.2 }}>Adding</div>
+                                    <div style={{ fontSize: '11px', color: '#16A34A', lineHeight: 1.2 }}>{label}</div>
+                                  </>
+                                ) : (
+                                  <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#15803D', lineHeight: 1.2 }}>Adding · {label}</div>
+                                )
+                              )}
+                            </div>
+                          )
+                        } else {
+                          return (
+                            <div style={{
+                              position: 'absolute',
+                              top: -1, left: 0, right: 0,
+                              height: 29,
+                              background: 'repeating-linear-gradient(45deg, rgba(220,38,38,0.16) 0 6px, rgba(220,38,38,0.04) 6px 12px)',
+                              border: '1px dashed #DC2626',
+                              borderRadius: '6px',
+                              pointerEvents: 'none',
+                              zIndex: 2,
+                              overflow: 'hidden',
+                              padding: label ? '2px 4px' : undefined,
+                            }}>
+                              {label && (
+                                <div style={{ fontSize: '11px', fontWeight: 500, color: '#B91C1C', lineHeight: 1.2 }}>Erasing · {label}</div>
+                              )}
+                            </div>
+                          )
+                        }
                       })()}
                     </td>
                   )
