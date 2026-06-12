@@ -69,26 +69,11 @@ function formatTime(min: number): string {
 }
 
 function formatHourLabel(hour: number): string {
-  if (hour === 0) return '12am'
-  if (hour < 12) return `${hour}am`
-  if (hour === 12) return '12pm'
-  return `${hour - 12}pm`
+  return `${pad(hour)}:00`
 }
 
 function timeRangeLabel(startMin: number, endMin: number): string {
-  return `${formatTime(startMin)} - ${formatTime(endMin)}`
-}
-
-function formatTime12(min: number): string {
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  const period = h < 12 ? 'am' : 'pm'
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
-  return m === 0 ? `${h12}${period}` : `${h12}:${String(m).padStart(2, '0')}${period}`
-}
-
-function timeRangeLabel12(startMin: number, endMin: number): string {
-  return `${formatTime12(startMin)} - ${formatTime12(endMin)}`
+  return `${formatTime(startMin)} \u2013 ${formatTime(endMin)}`
 }
 
 // Merge consecutive general slots (e.g. Mon 06:00-06:30 + 06:30-07:00) into single
@@ -170,6 +155,48 @@ function expandClassBlocks(classes: ClassEvent[], weekStart: Date): ClassBlock[]
     blocks.push({ dayIdx, startMin, endMin: startMin + c.duration_minutes, studentName: c.student_name })
   }
   return blocks
+}
+
+// Find where a weekly-availability run can show its label without being covered by
+// same-day specific blocks or classes. Works in minutes clamped to the visible grid
+// window; SLOT_HEIGHT is 30px per 30 min, so 1 minute = 1 pixel. The first gap of
+// >= 56 min fits the two-line label, else the first gap of >= 28 min fits a single
+// line, else the run renders unlabelled (the legend is the backstop).
+function computeWashLabel(
+  run: { startMin: number; endMin: number },
+  overlays: Array<{ startMin: number; endMin: number }>
+): { offsetMin: number; twoLine: boolean } | null {
+  const visStart = Math.max(run.startMin, START_HOUR * 60)
+  const visEnd = Math.min(run.endMin, END_HOUR * 60 + 30)
+
+  const clamped = overlays
+    .map(o => ({ start: Math.max(o.startMin, visStart), end: Math.min(o.endMin, visEnd) }))
+    .filter(o => o.end > o.start)
+    .sort((a, b) => a.start - b.start)
+
+  const merged: Array<{ start: number; end: number }> = []
+  for (const o of clamped) {
+    const last = merged[merged.length - 1]
+    if (last && o.start <= last.end) {
+      last.end = Math.max(last.end, o.end)
+    } else {
+      merged.push({ start: o.start, end: o.end })
+    }
+  }
+
+  const gaps: Array<{ start: number; end: number }> = []
+  let cursor = visStart
+  for (const o of merged) {
+    if (o.start > cursor) gaps.push({ start: cursor, end: o.start })
+    cursor = o.end
+  }
+  if (cursor < visEnd) gaps.push({ start: cursor, end: visEnd })
+
+  const twoLineGap = gaps.find(g => g.end - g.start >= 56)
+  if (twoLineGap) return { offsetMin: twoLineGap.start - run.startMin, twoLine: true }
+  const oneLineGap = gaps.find(g => g.end - g.start >= 28)
+  if (oneLineGap) return { offsetMin: oneLineGap.start - run.startMin, twoLine: false }
+  return null
 }
 
 export default function DayToDay({ profile, availability, onAvailabilityChange }: Props) {
@@ -315,6 +342,27 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     () => expandClassBlocks(classes, weekStart),
     [classes, weekStart]
   )
+
+  // Wash label placement per weekly run, keyed `${dayIdx}-${index within that day}` to
+  // match the render-time filter order. dragPreview is deliberately not an input:
+  // labels must not move mid-drag.
+  const washLabels = useMemo(() => {
+    const map = new Map<string, { offsetMin: number; twoLine: boolean }>()
+    for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+      const overlays = [
+        ...greenBlocks.filter(b => b.dayIdx === dayIdx),
+        ...redBlocks.filter(b => b.dayIdx === dayIdx),
+        ...classBlocksList.filter(b => b.dayIdx === dayIdx),
+      ].map(b => ({ startMin: b.startMin, endMin: b.endMin }))
+      generalBlocks
+        .filter(b => b.dayIdx === dayIdx)
+        .forEach((b, i) => {
+          const label = computeWashLabel(b, overlays)
+          if (label) map.set(`${dayIdx}-${i}`, label)
+        })
+    }
+    return map
+  }, [generalBlocks, greenBlocks, redBlocks, classBlocksList])
 
   // Today's column index, or -1 if today is outside the visible week.
   const todayIdx = useMemo(() => {
@@ -539,9 +587,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {[
           { color: '#FF8303', label: 'Booked class' },
-          { color: '#C5E8C9', border: '#8FBF94', label: 'Available (specific)' },
-          { color: '#F1F5F9', border: '#E2E8F0', label: 'Weekly availability' },
-          { color: '#ECC4C4', border: '#C99090', label: 'Unavailable' },
+          { color: '#DCFCE7', border: '#16A34A', label: 'Available (specific)' },
+          { color: '#EDF2F7', border: '#C9D4E2', label: 'Weekly availability' },
+          { color: '#FEE2E2', border: '#DC2626', label: 'Unavailable' },
         ].map(item => (
           <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <div style={{
@@ -581,7 +629,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           background: '#ffffff',
           borderRadius: '8px',
           padding: '0',
-          border: '1px solid #9CA3AF',
+          border: '1px solid #E0DFDC',
           cursor: mode ? 'crosshair' : 'default',
           maxHeight: '700px',
           overflowY: 'auto',
@@ -593,8 +641,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           <div style={{
             position: 'sticky', top: 0, zIndex: 10,
             backgroundColor: '#ffffff',
-            borderBottom: '1px solid #6B7280',
-            borderRight: '1px solid #D1D5DB',
+            borderBottom: '1px solid #E0DFDC',
+            borderRight: '1px solid #F1F1F0',
             borderTopLeftRadius: '8px',
             minHeight: '54px',
           }} />
@@ -605,19 +653,19 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             return (
               <div key={`h-${i}`} style={{
                 position: 'sticky', top: 0, zIndex: 10,
-                backgroundColor: isHeaderToday ? '#F6C5B8' : '#ffffff',
-                boxShadow: isHeaderToday ? 'inset 0 -3px 0 #A8533F' : undefined,
-                borderBottom: isHeaderToday ? undefined : '1px solid #6B7280',
-                borderRight: '1px solid #E5E7EB',
+                backgroundColor: '#ffffff',
+                boxShadow: isHeaderToday ? 'inset 0 -3px 0 #FF8303' : undefined,
+                borderBottom: isHeaderToday ? undefined : '1px solid #E0DFDC',
+                borderRight: '1px solid #F1F1F0',
                 textAlign: 'center',
                 padding: '10px 4px',
-                color: isHeaderToday ? '#5C1F0A' : '#2C2C2A',
+                color: isHeaderToday ? '#FF8303' : '#2C2C2A',
                 fontWeight: 600,
                 fontSize: '13px',
                 lineHeight: 1.2,
               }}>
                 <div>{DAY_LABELS[i]}</div>
-                <div style={{ fontSize: '11px', fontWeight: 500, color: isHeaderToday ? undefined : '#5F5E5A', opacity: isHeaderToday ? 0.8 : undefined }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: isHeaderToday ? '#FF8303' : '#5F5E5A' }}>
                   {MONTHS_SHORT[d.getMonth()]} {d.getDate()}
                 </div>
               </div>
@@ -625,7 +673,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           })}
 
           {/* Time gutter */}
-          <div style={{ gridRow: 2, gridColumn: 1, position: 'relative', height: GRID_HEIGHT, backgroundColor: '#ffffff', borderRight: '1px solid #D1D5DB' }}>
+          <div style={{ gridRow: 2, gridColumn: 1, position: 'relative', height: GRID_HEIGHT, backgroundColor: '#ffffff', borderRight: '1px solid #F1F1F0' }}>
             {Array.from({ length: SLOT_COUNT }, (_, slotIdx) => {
               const min = (START_HOUR * 60) + slotIdx * 30
               const onTheHour = (slotIdx % 2) === 0
@@ -641,7 +689,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   alignItems: 'center',
                   justifyContent: 'flex-end',
                   fontSize: '11px',
-                  color: '#4B5563',
+                  color: '#9CA3AF',
                   borderTop: '1px solid #E5E7EB',
                 }}>
                   {onTheHour ? formatHourLabel(Math.floor(min / 60)) : ''}
@@ -656,7 +704,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 width: 0, height: 0,
                 borderTop: '5px solid transparent',
                 borderBottom: '5px solid transparent',
-                borderLeft: '7px solid #DC2626',
+                borderLeft: '7px solid #FD5602',
                 pointerEvents: 'none',
                 zIndex: 6,
               }} />
@@ -672,7 +720,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 gridColumn: dayIdx + 2,
                 position: 'relative',
                 height: GRID_HEIGHT,
-                borderRight: '1px solid #E5E7EB',
+                borderRight: '1px solid #F1F1F0',
                 backgroundColor: 'transparent',
               }}>
                 {/* Slot cells (38) — drag interaction + past-slot fade */}
@@ -692,7 +740,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         left: 0,
                         right: 0,
                         height: SLOT_HEIGHT,
-                        borderTop: onTheHour ? '1px solid #E5E7EB' : '1px solid #E5E7EB',
+                        borderTop: onTheHour ? '1px solid #E9EAEC' : '1px solid #F4F5F6',
                         backgroundColor: cellBg,
                         zIndex: 0,
                       }}
@@ -700,21 +748,34 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   )
                 })}
 
-                {/* Layer 0: weekly recurring (orange tint, non-interactive) */}
+                {/* Layer 0: weekly recurring wash (non-interactive) */}
                 {generalBlocks.filter(b => b.dayIdx === dayIdx).map((b, i) => {
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  const label = washLabels.get(`${dayIdx}-${i}`)
+                  const labelTop = label ? pxFromMin(b.startMin + label.offsetMin) - pxFromMin(b.startMin) : 0
                   return (
                     <div key={`g-${i}`} style={{
                       position: 'absolute',
                       top, left: 0, right: 0, height,
-                      backgroundColor: '#F1F5F9',
-                      border: '1px solid #E2E8F0',
-                      borderRadius: '4px',
+                      backgroundColor: '#EDF2F7',
+                      border: '1px solid #C9D4E2',
+                      borderRadius: '6px',
                       pointerEvents: 'none',
                       zIndex: 1,
-                    }} />
+                    }}>
+                      {label && (label.twoLine ? (
+                        <div style={{ position: 'absolute', top: labelTop, left: 0, right: 0, padding: '5px 7px', overflow: 'hidden' }}>
+                          <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#475569', lineHeight: 1.2 }}>Weekly availability</div>
+                          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3, marginTop: '2px' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                        </div>
+                      ) : (
+                        <div style={{ position: 'absolute', top: labelTop, left: 0, right: 0, padding: '5px 7px', overflow: 'hidden', fontSize: '11.5px', fontWeight: 500, color: '#475569', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                          Weekly availability
+                        </div>
+                      ))}
+                    </div>
                   )
                 })}
 
@@ -730,10 +791,10 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#C5E8C9',
-                        border: '1px solid #8FBF94',
-                        borderRadius: '4px',
-                        color: '#2F5D33',
+                        backgroundColor: '#DCFCE7',
+                        border: '1px solid #16A34A',
+                        borderRadius: '6px',
+                        color: '#15803D',
                         fontSize: '11px',
                         padding: '2px 4px',
                         cursor: 'pointer',
@@ -742,7 +803,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         lineHeight: 1.2,
                       }}
                     >
-                      {timeRangeLabel12(b.startMin, b.endMin)}
+                      {timeRangeLabel(b.startMin, b.endMin)}
                     </div>
                   )
                 })}
@@ -759,10 +820,10 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#ECC4C4',
-                        border: '1px solid #C99090',
-                        borderRadius: '4px',
-                        color: '#7F1D1D',
+                        backgroundColor: '#FEE2E2',
+                        border: '1px solid #DC2626',
+                        borderRadius: '6px',
+                        color: '#B91C1C',
                         fontSize: '11px',
                         padding: '2px 4px',
                         cursor: 'pointer',
@@ -771,7 +832,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         lineHeight: 1.2,
                       }}
                     >
-                      {timeRangeLabel12(b.startMin, b.endMin)}
+                      {timeRangeLabel(b.startMin, b.endMin)}
                     </div>
                   )
                 })}
@@ -787,7 +848,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       top, left: '2px', right: '2px', height,
                       backgroundColor: '#FF8303',
                       border: '1px solid rgba(255, 131, 3, 0.55)',
-                      borderRadius: '4px',
+                      borderRadius: '6px',
                       color: '#ffffff',
                       fontSize: '11px',
                       padding: '2px 4px',
@@ -796,8 +857,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       overflow: 'hidden',
                       lineHeight: 1.2,
                     }}>
-                      <div>{timeRangeLabel12(b.startMin, b.endMin)}</div>
-                      <div style={{ fontWeight: 600 }}>{b.studentName}</div>
+                      {height < 60 ? (
+                        <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {`${b.studentName} \u00B7 ${timeRangeLabel(b.startMin, b.endMin)}`}
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ color: '#FFE3C4' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ color: '#ffffff', fontWeight: 600 }}>{b.studentName}</div>
+                        </>
+                      )}
                     </div>
                   )
                 })}
@@ -809,31 +878,32 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                     top: dragPreview.topPx,
                     height: dragPreview.heightPx,
                     left: '2px', right: '2px',
-                    backgroundColor: mode === 'available' ? 'rgba(22,163,74,0.4)' : 'rgba(220,38,38,0.4)',
-                    border: `1px solid ${mode === 'available' ? '#15803D' : '#B91C1C'}`,
+                    background: mode === 'available'
+                      ? 'rgba(220,252,231,0.85)'
+                      : 'repeating-linear-gradient(45deg, rgba(220,38,38,0.16) 0 6px, rgba(220,38,38,0.04) 6px 12px)',
+                    border: `1px dashed ${mode === 'available' ? '#16A34A' : '#DC2626'}`,
                     borderRadius: '4px',
                     pointerEvents: 'none',
                     zIndex: 4,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: '#ffffff',
+                    color: mode === 'available' ? '#15803D' : '#B91C1C',
                     fontSize: '12px',
                     fontWeight: 600,
-                    textShadow: '0 1px 2px rgba(0,0,0,0.4)',
                   }}>
-                    {timeRangeLabel12(dragPreview.startMin, dragPreview.endMin)}
+                    {timeRangeLabel(dragPreview.startMin, dragPreview.endMin)}
                   </div>
                 )}
 
-                {/* Now indicator (red line, today only) */}
+                {/* Now indicator (today only) */}
                 {isToday && nowPx !== null && (
                   <div style={{
                     position: 'absolute',
                     top: nowPx - 1,
                     left: 0, right: 0,
                     height: '2px',
-                    backgroundColor: '#DC2626',
+                    backgroundColor: '#FD5602',
                     pointerEvents: 'none',
                     zIndex: 5,
                   }} />
