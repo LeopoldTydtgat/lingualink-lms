@@ -1,12 +1,10 @@
 /**
  * Monday-first week math on browser-local Date objects.
  *
- * Foundation for the Sunday-first → Monday-first calendar conversion. This
- * module is standalone for now — nothing imports it yet. When the conversion
- * lands it replaces the per-component helpers in
- * src/app/(dashboard)/schedule/tabs/DayToDay.tsx (getWeekStart / addDays /
- * weekLabel) and aligns with the Monday-first getWeekStart already used by
- * src/app/(student)/student/book/BookingClient.tsx.
+ * Foundation for the Sunday-first → Monday-first calendar conversion.
+ * Consumed by src/app/(dashboard)/schedule/tabs/DayToDay.tsx.
+ * BookingClient.tsx still carries its own local Monday-first helpers
+ * (consolidation candidate, parked).
  *
  * Scope contract: every function operates on the browser-local calendar,
  * replicating the existing calendars' local-time semantics exactly — only
