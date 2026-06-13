@@ -909,7 +909,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
                   return (
-                    <div key={`cl-${i}`} style={{
+                    <div key={`cl-${i}`} title={b.studentName} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
                       backgroundColor: '#FF8303',
@@ -923,15 +923,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       overflow: 'hidden',
                       lineHeight: 1.2,
                     }}>
-                      {height < 60 ? (
-                        <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {`${b.studentName} \u00B7 ${timeRangeLabel(b.startMin, b.endMin)}`}
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ color: '#FFE3C4' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
-                          <div style={{ color: '#ffffff', fontWeight: 600 }}>{b.studentName}</div>
-                        </>
+                      <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
+                      {height >= 44 && (
+                        <div style={{ color: '#FFE3C4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
                       )}
                     </div>
                   )
