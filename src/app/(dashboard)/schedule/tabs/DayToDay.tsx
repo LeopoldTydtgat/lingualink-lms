@@ -264,7 +264,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     visibleRangeRef.current = visibleRange
   }, [visibleRange])
 
-  async function fetchClassesForRange(startStr: string, endStr: string) {
+  async function fetchClassesInRange(startStr: string, endStr: string): Promise<ClassEvent[]> {
     const { data } = await supabase
       .from('lessons')
       .select(`id, scheduled_at, duration_minutes, students ( full_name )`)
@@ -273,19 +273,21 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       .lte('scheduled_at', endStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
 
-    if (data) {
-      setClasses(
-        data.map((c: any) => {
-          const student = Array.isArray(c.students) ? c.students[0] : c.students
-          return {
-            id: c.id,
-            scheduled_at: c.scheduled_at,
-            duration_minutes: c.duration_minutes,
-            student_name: student?.full_name ?? 'Unknown student',
-          }
-        })
-      )
-    }
+    if (!data) return []
+    return data.map((c: any) => {
+      const student = Array.isArray(c.students) ? c.students[0] : c.students
+      return {
+        id: c.id,
+        scheduled_at: c.scheduled_at,
+        duration_minutes: c.duration_minutes,
+        student_name: student?.full_name ?? 'Unknown student',
+      }
+    })
+  }
+
+  async function fetchClassesForRange(startStr: string, endStr: string) {
+    const data = await fetchClassesInRange(startStr, endStr)
+    setClasses(data)
   }
 
   // Refetch classes when the visible week changes.
@@ -471,9 +473,15 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     setPendingDelete(null)
   }
 
-  function exportToCalendar() {
-    if (classes.length === 0) {
-      setExportMsg('No classes this week to export')
+  async function exportMonthToCalendar() {
+    const ref = weekStart
+    const year = ref.getFullYear()
+    const month = ref.getMonth()
+    const monthStartStr = `${year}-${pad(month + 1)}-01T00:00:00`
+    const monthEndStr = `${toLocalDateStr(new Date(year, month + 1, 1))}T00:00:00`
+    const monthClasses = await fetchClassesInRange(monthStartStr, monthEndStr)
+    if (monthClasses.length === 0) {
+      setExportMsg('No classes this month to export')
       setTimeout(() => setExportMsg(''), 3000)
       return
     }
@@ -482,7 +490,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       'VERSION:2.0',
       'PRODID:-//LinguaLink Online//Teacher Portal//EN',
     ]
-    classes.forEach(c => {
+    monthClasses.forEach(c => {
       const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString()
       lines.push(
         'BEGIN:VEVENT',
@@ -499,7 +507,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `lingualink-classes-${toLocalDateStr(weekStart)}.ics`
+    a.download = `lingualink-classes-${year}-${pad(month + 1)}.ics`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -594,7 +602,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </span>
 
         <button
-          onClick={exportToCalendar}
+          onClick={exportMonthToCalendar}
           style={{
             marginLeft: 'auto',
             padding: '8px 16px',
@@ -607,9 +615,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             cursor: 'pointer',
           }}
         >
-          Export to Calendar
+          Export Month
         </button>
       </div>
+
+      <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', textAlign: 'right' }}>Exports all your classes for {MONTHS_SHORT[weekStart.getMonth()]} {weekStart.getFullYear()}</p>
 
       {exportMsg && (
         <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px', textAlign: 'right' }}>
@@ -899,7 +909,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
                   return (
-                    <div key={`cl-${i}`} style={{
+                    <div key={`cl-${i}`} title={b.studentName} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
                       backgroundColor: '#FF8303',
@@ -913,15 +923,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       overflow: 'hidden',
                       lineHeight: 1.2,
                     }}>
-                      {height < 60 ? (
-                        <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {`${b.studentName} \u00B7 ${timeRangeLabel(b.startMin, b.endMin)}`}
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ color: '#FFE3C4' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
-                          <div style={{ color: '#ffffff', fontWeight: 600 }}>{b.studentName}</div>
-                        </>
+                      <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
+                      {height >= 44 && (
+                        <div style={{ color: '#FFE3C4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
                       )}
                     </div>
                   )
