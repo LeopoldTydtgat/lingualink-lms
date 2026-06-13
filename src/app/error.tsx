@@ -17,6 +17,23 @@
 
 import { useEffect } from "react";
 
+const CHUNK_RELOAD_KEY = "ll_chunk_reload";
+
+function isChunkLoadError(err: unknown): boolean {
+  if (!err) return false;
+  const e = err as { name?: string; message?: string };
+  const name = e.name ?? "";
+  const msg = e.message ?? "";
+  return (
+    name === "ChunkLoadError" ||
+    /Loading chunk [\d]+ failed/i.test(msg) ||
+    /Loading CSS chunk/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /failed to fetch dynamically imported module/i.test(msg) ||
+    /importing a module script failed/i.test(msg)
+  );
+}
+
 export default function Error({
   error,
   reset,
@@ -25,6 +42,20 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
+    if (isChunkLoadError(error)) {
+      let alreadyReloaded = false;
+      try { alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === "1"; } catch {}
+      if (!alreadyReloaded) {
+        try { sessionStorage.setItem(CHUNK_RELOAD_KEY, "1"); } catch {}
+        window.location.reload();
+        return;
+      }
+    } else {
+      // Not a chunk error - clear any stale reload flag so a future chunk error
+      // gets its one reload attempt.
+      try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch {}
+    }
+
     // Log for debugging. `digest` is Next.js's server-error correlation id.
     console.error("Route error:", error);
 
@@ -54,7 +85,7 @@ export default function Error({
         keeps happening, please contact us.
       </p>
       <button
-        onClick={reset}
+        onClick={() => window.location.reload()}
         style={{
           backgroundColor: "#FF8303",
           color: "#ffffff",
