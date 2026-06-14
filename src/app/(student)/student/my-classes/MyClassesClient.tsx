@@ -125,6 +125,16 @@ function isWithin24Hours(isoString: string, now: number): boolean {
   return getSecondsUntil(isoString, now) < 86400
 }
 
+// Maps the cancelled_by value to a student-facing label (student is the viewer here).
+function cancelledByLabel(cancelledBy: string): string {
+  switch (cancelledBy) {
+    case 'teacher': return 'Cancelled by your teacher'
+    case 'student': return 'Cancelled by you'
+    case 'admin': return 'Cancelled by admin'
+    default: return 'Cancelled'
+  }
+}
+
 export default function MyClassesClient({
   lessons,
   lastFeedback,
@@ -671,7 +681,7 @@ export default function MyClassesClient({
 
                         {isCancelled && lesson.cancelled_by && (
                           <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                            Cancelled by {lesson.cancelled_by}
+                            {cancelledByLabel(lesson.cancelled_by)}
                           </p>
                         )}
                       </div>
@@ -837,7 +847,7 @@ export default function MyClassesClient({
 
                       {isCancelled && lesson.cancelled_by && (
                         <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                          Cancelled by {lesson.cancelled_by}
+                          {cancelledByLabel(lesson.cancelled_by)}
                         </p>
                       )}
                     </div>
