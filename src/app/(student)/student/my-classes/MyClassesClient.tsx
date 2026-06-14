@@ -181,11 +181,8 @@ export default function MyClassesClient({
   const nextLesson = lessons.find((l) => l.status === 'scheduled') ?? null
   const nextLessonJoinable = mounted && nextLesson != null && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now, nextLesson.status)
 
-  // Upcoming list: all scheduled lessons except the next one
-  const upcomingLessons = lessons.filter((l) => {
-    if (nextLesson && l.id === nextLesson.id) return false
-    return l.status === 'scheduled'
-  })
+  // Upcoming list: all scheduled lessons
+  const upcomingLessons = lessons.filter((l) => l.status === 'scheduled')
 
   // Cancelled lessons for the separate collapsed section
   const cancelledLessons = lessons
@@ -360,251 +357,7 @@ export default function MyClassesClient({
         </div>
       )}
 
-      {/* ── Next class card ── */}
-      {nextLesson ? (
-        <div style={{
-          backgroundColor: '#ffffff',
-          border: '1px solid #E0DFDC',
-          borderRadius: '12px',
-          padding: '24px',
-          marginBottom: '28px',
-        }}>
-          <p style={{
-            fontSize: '11px',
-            fontWeight: '600',
-            color: '#FF8303',
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: '16px',
-          }}>
-            Next Class
-          </p>
-
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
-
-            {/* Teacher photo */}
-            <div style={{ flexShrink: 0, width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', border: '2px solid #E0DFDC' }}>
-              {nextLesson.teacher?.photo_url ? (
-                <Image
-                  src={nextLesson.teacher.photo_url}
-                  alt={nextLesson.teacher.full_name}
-                  width={56}
-                  height={56}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                <div style={{
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '50%',
-                  backgroundColor: '#f3f4f6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <User size={24} color="#9ca3af" />
-                </div>
-              )}
-            </div>
-
-            {/* Class details */}
-            <div style={{ flex: 1 }}>
-              <p style={{ fontSize: '17px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
-                {nextLesson.teacher?.full_name ?? 'Teacher'}
-              </p>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '2px' }}>
-                {mounted ? formatDate(nextLesson.scheduled_at, studentTimezone) : ''}
-              </p>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '16px' }}>
-                {mounted ? formatTime(nextLesson.scheduled_at, studentTimezone) : ''} · {nextLesson.duration_minutes} min
-              </p>
-
-              {/* Countdown */}
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                backgroundColor: '#fff7ed',
-                borderRadius: '8px',
-                padding: '8px 16px',
-                marginBottom: '16px',
-              }}>
-                <div style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: '#FF8303',
-                }} />
-                <span style={{
-                  fontSize: '22px',
-                  fontWeight: '700',
-                  color: '#FF8303',
-                  fontVariantNumeric: 'tabular-nums',
-                }}>
-                  {mounted ? formatCountdown(getSecondsUntil(nextLesson.scheduled_at, now)) : '--:--:--'}
-                </span>
-              </div>
-
-              {/* Join button */}
-              <div style={{ marginBottom: '16px' }}>
-                {nextLesson.teams_join_url && !BLOCKED_STATUSES.includes(nextLesson.status) ? (
-                  <a
-                    href={nextLessonJoinable ? nextLesson.teams_join_url : undefined}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '10px 20px',
-                      backgroundColor: nextLessonJoinable ? '#111827' : '#E0DFDC',
-                      color: nextLessonJoinable ? '#ffffff' : '#9ca3af',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      textDecoration: 'none',
-                      cursor: nextLessonJoinable ? 'pointer' : 'default',
-                      pointerEvents: nextLessonJoinable ? 'auto' : 'none',
-                    }}
-                  >
-                    <Video size={16} />
-                    {nextLessonJoinable ? 'Join Class' : 'Join Class (available 10 min before)'}
-                  </a>
-                ) : (
-                  <span style={{ fontSize: '13px', color: '#9ca3af' }}>
-                    Meeting link not yet available
-                  </span>
-                )}
-              </div>
-
-              {/* Reschedule and Cancel */}
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button
-                  onClick={() => router.push(`/student/book?reschedule=${nextLesson.id}`)}
-                  disabled={mounted && isWithin24Hours(nextLesson.scheduled_at, now)}
-                  title={
-                    mounted && isWithin24Hours(nextLesson.scheduled_at, now)
-                      ? 'Reschedule not available within 24 hours of class'
-                      : ''
-                  }
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    backgroundColor: 'transparent',
-                    border: '1px solid #E0DFDC',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    color: mounted && isWithin24Hours(nextLesson.scheduled_at, now) ? '#9ca3af' : '#4b5563',
-                    cursor: mounted && isWithin24Hours(nextLesson.scheduled_at, now) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <RefreshCw size={13} />
-                  Reschedule
-                </button>
-
-                <button
-                  onClick={() =>
-                    mounted && handleCancel(nextLesson.id, isWithin24Hours(nextLesson.scheduled_at, now))
-                  }
-                  disabled={cancellingId === nextLesson.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    padding: '7px 14px',
-                    backgroundColor: 'transparent',
-                    border: '1px solid #E0DFDC',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    color: '#4b5563',
-                    cursor: cancellingId === nextLesson.id ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  <XCircle size={13} />
-                  {cancellingId === nextLesson.id ? 'Cancelling...' : 'Cancel'}
-                </button>
-              </div>
-
-              {/* 24-hour cancel warning — shown before confirming */}
-              {showCancelWarning === nextLesson.id && (
-                <div style={{
-                  marginTop: '12px',
-                  padding: '14px 16px',
-                  backgroundColor: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  borderRadius: '8px',
-                }}>
-                  <p style={{ fontSize: '13px', fontWeight: '600', color: '#dc2626', marginBottom: '4px' }}>
-                    Warning
-                  </p>
-                  <p style={{ fontSize: '13px', color: '#dc2626', marginBottom: '12px' }}>
-                    Cancelling within 24 hours means your hours will not be refunded. Are you sure?
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => handleCancel(nextLesson.id, true)}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: '#dc2626',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Yes, cancel
-                    </button>
-                    <button
-                      onClick={() => setShowCancelWarning(null)}
-                      style={{
-                        padding: '6px 14px',
-                        backgroundColor: 'transparent',
-                        border: '1px solid #E0DFDC',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        color: '#4b5563',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Go back
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* About This Class — recap from previous lesson's report */}
-          {lastFeedback && (
-            <div style={{
-              marginTop: '20px',
-              paddingTop: '20px',
-              borderTop: '1px solid #E0DFDC',
-            }}>
-              <p style={{
-                fontSize: '12px',
-                fontWeight: '600',
-                color: '#9ca3af',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                marginBottom: '8px',
-              }}>
-                About This Class
-              </p>
-              <p style={{ fontSize: '14px', color: '#4b5563', lineHeight: '1.6' }}>
-                {lastFeedback}
-              </p>
-            </div>
-          )}
-        </div>
-      ) : hoursRemaining != null && hoursRemaining <= 0 ? (
+      {!nextLesson && (hoursRemaining != null && hoursRemaining <= 0 ? (
         /* No upcoming classes + zero hours — contact variant. Only shown when the
            balance is KNOWN to be zero; missing data falls through to Book a Class. */
         <div className="flex flex-col items-center text-center py-16">
@@ -647,7 +400,7 @@ export default function MyClassesClient({
             </Button>
           </div>
         </div>
-      )}
+      ))}
 
       {/* ── Upcoming and cancelled classes list ── */}
       {(upcomingLessons.length > 0 || cancelledLessons.length > 0) && (
@@ -733,6 +486,7 @@ export default function MyClassesClient({
                   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
                   const secondsUntil = mounted ? getSecondsUntil(lesson.scheduled_at, now) : 0
                   const isLast = i === dayLessons.length - 1
+                  const isNext = nextLesson != null && lesson.id === nextLesson.id
 
                   return (
                     <div key={lesson.id}>
