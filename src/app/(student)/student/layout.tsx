@@ -135,6 +135,7 @@ export default async function StudentDashboardLayout({
             studentId={student.id}
             nextLesson={nextLesson ?? null}
             hoursRemaining={hoursRemaining}
+            totalHours={training?.total_hours ?? 0}
             trainingEndDate={training?.end_date ?? null}
             assignedExercises={assignedCount ?? 0}
             completedExercises={completedCount ?? 0}
