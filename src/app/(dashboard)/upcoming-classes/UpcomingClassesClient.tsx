@@ -165,6 +165,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
   const isCancelled = isCancelledStatus(cls.status)
+  const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
   const showJoinButton = minutesUntilStart <= 10 && !classEnded && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
@@ -208,13 +209,13 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
             onMouseEnter={e => (e.currentTarget.style.color = '#FF8303')}
             onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
           >
-            <p className="font-semibold">{cls.student.full_name}</p>
+            <p className="font-semibold" style={isCancelled ? { textDecoration: 'line-through' } : undefined}>{cls.student.full_name}</p>
           </a>
           <p className="text-sm text-gray-500">
             {mounted
               ? isCancelled
-                ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}`
-                : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)}`
+                ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
+                : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
               : ''}
           </p>
           {isCancelled && cls.cancelled_by && (
@@ -226,7 +227,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
 
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
-            ? <span style={{ color: '#FD5602', fontWeight: 600 }}>Cancelled</span>
+            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '4px' }}>Cancelled</span>
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
