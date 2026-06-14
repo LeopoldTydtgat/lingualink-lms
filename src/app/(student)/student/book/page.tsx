@@ -19,10 +19,14 @@ export default async function BookPage({
   // Get student record
   const { data: student } = await supabase
     .from('students')
-    .select('id, timezone')
+    .select('id, timezone, profile_completed')
     .eq('auth_user_id', user.id)
     .single()
   if (!student) redirect('/student/login')
+
+  if (student.profile_completed !== true) {
+    redirect('/student/account?confirm_tz=1')
+  }
 
   // Get active training
   const { data: training } = await supabase
