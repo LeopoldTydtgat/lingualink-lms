@@ -921,12 +921,10 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       cursor: 'default',
                       zIndex: 3,
                       overflow: 'hidden',
-                      lineHeight: 1.2,
+                      lineHeight: 1.1,
                     }}>
                       <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
-                      {height >= 44 && (
-                        <div style={{ color: '#FFE3C4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
-                      )}
+                      <div style={{ color: '#FFE3C4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
                     </div>
                   )
                 })}
