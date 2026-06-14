@@ -1,3 +1,74 @@
+## Session 141 - 14 June 2026 - Two-portal class-card and right-panel redesign, plus a teacher-portal 404 fix
+
+### What was built
+
+- Removed the standalone "Next class" hero card on the student My Classes page and routed the next class into the existing upcoming list as its first row, emphasised with a NEXT pill and a 3px orange left-border. This eliminated the triple-countdown problem where the same countdown appeared in the hero, the list, and the right panel at once.
+- Flipped the student upcomingLessons derivation to include the next lesson instead of excluding it, and added a per-row isNext flag to drive the emphasis.
+- Applied matching NEXT-pill and 3px orange left-border emphasis to the teacher Upcoming Classes page, deriving the next class as the first item of the already-sorted list and threading a nextId prop through DayGroup to ClassCard as a required prop, which let the type checker guarantee every call site was wired and caught a third ClassCard usage in the cancelled section.
+- Polished the teacher class card: appended duration to the time line (now reads 08:00 - 08:30 - 30 min), converted the cancelled status from plain red text into a coloured pill, struck through cancelled student names, and kept cancelled cards faded.
+- Added an orange hours-used progress bar to the student right panel Hours Remaining card, threading total hours from the layout into the panel, so the balance reads visually as a bar plus "used of total" rather than a bare number.
+- Brought the student right panel Next Class card up to the teacher panel standard by adding a date and time line and a "with teacher name" line beneath the live countdown, joining the teacher profile into the layout next-lesson query and flattening the nested result.
+- Unified both right panels on the same live countdown treatment: upgraded the teacher panel static "Next class in 21h 22m 21s" line to a big bold live HH:MM:SS hero countdown matching the student panel, made it days-aware so a far-future class shows days rather than piling up hours, and preserved the "starting now" and "class has ended" states.
+
+### Break/Fix Log
+
+Issue 1: Clicking a student name on the teacher Upcoming Classes page returned a 404.
+Symptom: The URL /students/{uuid} rendered "Page not found" for a student who clearly exists.
+Cause: The card linked using the student primary key, but the target page at (dashboard)/students/[id] is keyed on a training id, not a student id. A valid student UUID matched no training, so the page called notFound().
+Fix: Carried training_id through the lessons query and the mapped class object, added it to the Class type, and changed the link to target the training id.
+Lesson: A valid-looking UUID that 404s is usually an entity mismatch (linking one id, querying another), not a missing route or an access-control problem. Listing the route files first disproved "missing route" and pointed straight at the query.
+
+Issue 2 (logged as NEW165, not fixed this session): Clicking "Back to home" on the 404 page logs the user out and forces re-login.
+Symptom: The branded 404 page's button drops the session and lands on the login screen.
+Cause: Read-only tracing confirmed the 404 page itself is not at fault; its button is a correct client-side link to the root. The session drop happens downstream when the root route renders, so the suspect is the root redirect logic and how the proxy handles a cold document load.
+Fix: Deferred. Logged with the trace finding for a focused session, since anything in the session and redirect layer carries cascade risk and warrants its own slice.
+Lesson: A symptom that looks like a stray cosmetic bug can sit on the auth layer. Trace before fixing, and do not assume an unrelated fix will clear it.
+
+### Session result
+
+A focused redesign session that lifted the student My Classes page and both right panels to match the teacher portal, so the two portals now read as one product. The student hero card was removed in favour of an emphasised first row, both class cards gained consistent NEXT-pill and duration treatment, the student panel gained an hours progress bar and a fuller Next Class card, and both panels were unified on a single big live countdown style. Along the way a real teacher-portal 404 was diagnosed and fixed (a student-id versus training-id link mismatch), and a separate session-drop bug surfaced by the 404 page was traced and logged as NEW165 for a dedicated session rather than fixed blind. Every change shipped as its own verified commit with the engine fenced off from the presentation work, and nothing touched the live booking, cancellation, or Teams wiring.
+
+---
+
+## Session 139 - 13 June 2026 - Day to Day visual pass, month export, and stale-deploy recovery
+
+### What was built
+
+- Restyled the teacher Day to Day calendar to the signed-off Direction A design: slate weekly-availability wash, green specific-available blocks, shared red for unavailable and holiday, solid orange booked classes, 24-hour times throughout, and an orange underline accent for today replacing the old salmon header.
+- Built a collision-aware label engine for the weekly-availability wash so the "Weekly availability" label and its time range relocate into the first vertical gap not covered by a class, specific block, or holiday, and omit entirely when no gap fits. The label never overlaps another block and never jumps mid-drag.
+- Added a Today button beside the week navigation arrows, disabled while the current week is in view.
+- Added a per-teacher timezone label ("All times in <profile timezone>") to the calendar so each teacher sees which timezone their schedule is displayed in.
+- Added a live warning when a teacher drags an unavailability block over a booked class, clarifying that booked classes are not cancelled automatically by unavailability.
+- Added a refetch-on-focus and refetch-on-visibility effect to heal a known real-time gap: when a class is reassigned away from a teacher, that teacher's previous calendar no longer receives a change event, so the stale block now clears when the window regains focus.
+- Reworked the Export to Calendar feature into Export Month: it now exports the teacher's entire visible calendar month of classes as an .ics file (named by month), not just the visible week, with a helper line stating which month will be exported. A shared fetch helper was extracted so the week grid and the month export run an identical, single-source query.
+- Reformatted booked-class blocks to a two-line layout matching the reference calendar: the student name on the first line and the 24-hour time range on the second, degrading gracefully to name-only in single-slot blocks, with the full name available on hover. The "Class with" prefix was dropped from the on-calendar block so the student full name, including surname, is visible, which matters because several students share first names. The prefix is retained in the exported .ics description where it reads naturally.
+- Hardened the application error boundaries against stale deployments: when a browser tab held open across a deploy hits a missing JavaScript chunk, both the route-level and root error boundaries now detect the chunk-load failure and perform one guarded full reload to fetch the new build, with a session flag preventing reload loops and a reload-based retry button as the fallback. This removes a "Something went wrong" dead-end that affected any user with a tab open during a release.
+
+### Break/Fix Log
+
+Issue 1: Booked-class calendar blocks were unreadable.
+Symptom: A booked class rendered as a truncated single line (for example "Leopold Tydtgat ...") that conveyed neither a clear name nor a time, worse than the third-party calendar it replaces.
+Cause: The block used a height-based single-line fallback with a middle-dot separator that ran out of horizontal room in a narrow day column.
+Fix: Replaced it with a name-first two-line layout (name, then 24-hour time range) that shows the time only when the block is tall enough, and removed the redundant "Class with" prefix so the surname is visible. Full name is exposed via the block's hover title.
+Lesson: A calendar block has very little width; lead with the single most identifying field (the full name) and let secondary detail drop out gracefully by height rather than truncating the important field.
+
+Issue 2: Users were stranded on an error screen after a deployment.
+Symptom: A teacher whose browser tab was open from before a release was redirected to login on idle, the page failed to load its (now-replaced) JavaScript chunks, and the error boundary showed "Something went wrong" with a "Try again" button that did not recover, because it only re-rendered and re-requested the same missing chunk.
+Cause: After a deploy, old chunk filenames no longer exist on the server; a stale tab requesting them throws a chunk-load error that the error boundary caught but could not resolve by re-rendering.
+Fix: Both error boundaries now detect a chunk-load failure and perform a single guarded full page reload (which fetches the current build), guarded by a session flag against reload loops, with the fallback retry button also performing a full reload.
+Lesson: In a continuously deployed app, a stale client is a normal event, not an exception; error boundaries must recover from missing chunks with a reload rather than a re-render.
+
+Issue 3: Month export could surface a stale week on a query error.
+Symptom: Refactoring the class fetch into a shared helper changed the failure behaviour so that a hard query error clears the grid to empty rather than retaining previously shown classes.
+Cause: The shared helper returns an empty array on a null response, and the week path now sets state directly from it.
+Fix: Accepted as a safe, fail-closed behaviour: on a genuine query error the grid shows empty rather than stale classes from a previously viewed week, and an empty week (the common case) already returned empty. Logged for the record.
+Lesson: When extracting a shared data helper, decide deliberately what the error case should display; showing nothing is usually safer than showing stale data on a schedule view.
+
+### Session result
+
+I gave the teacher Day to Day calendar a full visual pass to the signed-off design, including a collision-aware label engine, a Today button, a per-teacher timezone label, an unavailability-over-class warning, and a focus-based refetch that heals a real-time reassignment gap. I reworked the calendar export to cover the whole month rather than a single week, and reformatted booked-class blocks to a clean two-line name-and-time layout that keeps the student surname visible. Separately, I hardened both error boundaries to recover automatically from the stale-chunk failure that previously stranded users on an error screen after a deploy. Seven commits were made and pushed to the dev branch across the session; the calendar work was verified in the browser on multiple block sizes and the month export was confirmed by importing the generated file. All seven commits are ready to merge to main.
+
+---
 ## Session 138 - 12 June 2026 - Teacher schedule hardening and Monday-first conversion
 
 ### What was built
