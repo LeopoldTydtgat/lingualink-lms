@@ -65,6 +65,7 @@ type Props = {
   isAdmin: boolean
   currentUserId: string
   assignments: Assignment[]
+  assignedTeacherNames: string[]
 }
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
@@ -91,6 +92,7 @@ export default function StudentDetailClient({
   pastLessons,
   reports,
   assignments,
+  assignedTeacherNames,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('General Info')
@@ -175,8 +177,8 @@ export default function StudentDetailClient({
               <p className="font-medium capitalize text-gray-900">{training.status}</p>
             </div>
             <div>
-              <p className="text-gray-500">Assigned Teacher</p>
-              <p className="font-medium text-gray-900">{training.profiles?.full_name ?? '—'}</p>
+              <p className="text-gray-500">Assigned Teachers</p>
+              <p className="font-medium text-gray-900">{assignedTeacherNames.length ? assignedTeacherNames.join(', ') : '—'}</p>
             </div>
             <div>
               <p className="text-gray-500">Student Level (self-assessed)</p>
