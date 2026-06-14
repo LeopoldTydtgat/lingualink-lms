@@ -495,6 +495,7 @@ export default function MyClassesClient({
                           backgroundColor: '#ffffff',
                           border: '1px solid #E0DFDC',
                           borderTop: 'none',
+                          borderLeft: isNext && !isCancelled ? '3px solid #FF8303' : '1px solid #E0DFDC',
                           borderRadius: isLast ? '0 0 8px 8px' : '0',
                           padding: '14px 16px',
                           opacity: isCancelled ? 0.6 : 1,
@@ -537,6 +538,19 @@ export default function MyClassesClient({
                               }}>
                                 {lesson.teacher?.full_name ?? 'Teacher'}
                               </span>
+                              {isNext && !isCancelled && (
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: '700',
+                                  letterSpacing: '0.06em',
+                                  padding: '2px 8px',
+                                  backgroundColor: '#FF8303',
+                                  color: '#ffffff',
+                                  borderRadius: '4px',
+                                }}>
+                                  NEXT
+                                </span>
+                              )}
                               {isCancelled && (
                                 <span style={{
                                   fontSize: '11px',
