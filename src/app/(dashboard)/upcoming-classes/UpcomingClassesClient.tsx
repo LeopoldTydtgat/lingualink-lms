@@ -17,6 +17,7 @@ type Student = {
 
 type Class = {
   id: string
+  training_id: string
   starts_at: string
   ends_at: string
   status: string
@@ -201,7 +202,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
 
         <div className="flex-1 min-w-0">
           <a
-            href={`/students/${cls.student.id}`}
+            href={`/students/${cls.training_id}`}
             onClick={e => e.stopPropagation()}
             style={{ color: 'inherit', textDecoration: 'none' }}
             onMouseEnter={e => (e.currentTarget.style.color = '#FF8303')}

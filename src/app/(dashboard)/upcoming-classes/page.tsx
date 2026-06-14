@@ -21,6 +21,7 @@ export default async function UpcomingClassesPage() {
       .from('lessons')
       .select(`
         id,
+        training_id,
         scheduled_at,
         duration_minutes,
         status,
@@ -50,6 +51,7 @@ export default async function UpcomingClassesPage() {
     const endsAt = new Date(scheduledAt.getTime() + l.duration_minutes * 60 * 1000)
     return {
       id: l.id,
+      training_id: l.training_id,
       starts_at: l.scheduled_at,
       ends_at: endsAt.toISOString(),
       status: l.status,
