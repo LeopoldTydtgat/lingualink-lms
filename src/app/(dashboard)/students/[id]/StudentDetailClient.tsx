@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 type Student = {
   id: string
@@ -261,17 +260,6 @@ export default function StudentDetailClient({
               </p>
             </div>
             <div className="flex gap-2">
-              {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) && new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000 > Date.now() && (
-                <a
-                  href={lesson.teams_join_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-3 py-1 rounded text-white"
-                  style={{ backgroundColor: '#FF8303' }}
-                >
-                  Join
-                </a>
-              )}
               <span
                 className="text-xs px-2 py-1 rounded-full border capitalize"
                 style={
