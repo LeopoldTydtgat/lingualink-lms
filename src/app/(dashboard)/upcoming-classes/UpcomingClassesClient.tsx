@@ -159,13 +159,14 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
   )
 }
 
-function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean }) {
+function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
   const [expanded, setExpanded] = useState(false)
   const now = Date.now()
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
   const isCancelled = isCancelledStatus(cls.status)
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
+  const isNext = mounted && cls.id === nextId && !isCancelled
   const showJoinButton = minutesUntilStart <= 10 && !classEnded && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
@@ -178,7 +179,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   return (
     <div
       className="rounded-xl bg-white shadow-md overflow-hidden"
-      style={{ border: '2px solid #d1d5db', opacity: isCancelled ? 0.6 : undefined }}
+      style={{ border: '2px solid #d1d5db', borderLeft: isNext ? '3px solid #FF8303' : '2px solid #d1d5db', opacity: isCancelled ? 0.6 : undefined }}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -209,7 +210,14 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
             onMouseEnter={e => (e.currentTarget.style.color = '#FF8303')}
             onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
           >
-            <p className="font-semibold" style={isCancelled ? { textDecoration: 'line-through' } : undefined}>{cls.student.full_name}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <p className="font-semibold" style={isCancelled ? { textDecoration: 'line-through' } : undefined}>{cls.student.full_name}</p>
+              {isNext && (
+                <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
+                  NEXT
+                </span>
+              )}
+            </div>
           </a>
           <p className="text-sm text-gray-500">
             {mounted
@@ -268,7 +276,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted }: { cls: Class
   )
 }
 
-function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean }) {
+function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
   const [open, setOpen] = useState(true)
   const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
 
@@ -290,7 +298,7 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted }: 
       {open && (
         <div className="space-y-2">
           {classes.map(cls => (
-            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
+            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
           ))}
         </div>
       )}
@@ -329,6 +337,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     })
   const grouped = groupByDay(upcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
+  const nextId = upcomingClasses.length > 0 ? upcomingClasses[0].id : null
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
   const [rescheduleMessage, setRescheduleMessage] = useState('')
@@ -483,7 +492,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       ) : (
         <div className="space-y-8">
           {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
+            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
           ))}
         </div>
       )}
@@ -503,7 +512,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           {cancelledSectionExpanded && (
             <div className="space-y-2">
               {cancelledClasses.map(cls => (
-                <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} />
+                <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />
               ))}
             </div>
           )}
