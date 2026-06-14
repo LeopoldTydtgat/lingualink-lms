@@ -36,14 +36,15 @@ type RightPanelProps = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatCountdown(totalSeconds: number): string {
-  if (totalSeconds <= 0) return '00:00:00'
-  const hours = Math.floor(totalSeconds / 3600)
+  if (totalSeconds <= 0) return 'Now'
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
-  if (hours > 0) {
-    return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
+  if (days > 0) {
+    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
   }
-  return `${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
 // Format: "Thu 09 Apr, 10:00 – 11:00"
@@ -133,16 +134,16 @@ export default function RightPanel({
             <p className="text-sm text-gray-500">No upcoming classes</p>
           ) : (
             <>
-              {/* Countdown — "Next class in 28m 45s" style */}
-              <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">
-                {mounted && secondsUntil !== null
-                  ? classEnded
-                    ? 'Class has ended'
-                    : secondsUntil <= 0
-                      ? 'Class is starting now'
-                      : `Next class in ${formatCountdown(secondsUntil)}`
-                  : 'Next class in –'}
-              </p>
+              {/* Countdown — big bold live HH:MM:SS hero, matches student panel */}
+              {mounted && secondsUntil !== null && classEnded ? (
+                <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class has ended</p>
+              ) : mounted && secondsUntil !== null && secondsUntil <= 0 ? (
+                <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class is starting now</p>
+              ) : (
+                <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums', lineHeight: '1.2', marginBottom: '4px' }}>
+                  {mounted && secondsUntil !== null ? formatCountdown(secondsUntil) : '--:--:--'}
+                </p>
+              )}
 
               {/* Date and time range */}
               <p className="text-xs text-gray-500 mb-0.5">
