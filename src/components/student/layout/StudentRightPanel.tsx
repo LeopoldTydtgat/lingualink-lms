@@ -16,6 +16,7 @@ interface NextLesson {
 interface StudentRightPanelProps {
   studentId: string
   nextLesson: NextLesson | null
+  teacherName: string | null
   hoursRemaining: number
   totalHours: number
   trainingEndDate: string | null
@@ -52,6 +53,11 @@ function formatEndDate(isoDate: string): string {
   }).format(new Date(isoDate))
 }
 
+function formatDateTime(isoString: string): string {
+  const d = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoString))
+  return d
+}
+
 function isJoinable(isoString: string, status: string, durationMinutes: number, now: number): boolean {
   if (BLOCKED_STATUSES.includes(status)) return false
   const startMs = new Date(isoString).getTime()
@@ -65,6 +71,7 @@ function isJoinable(isoString: string, status: string, durationMinutes: number, 
 export default function StudentRightPanel({
   studentId: _studentId,
   nextLesson,
+  teacherName,
   hoursRemaining,
   totalHours,
   trainingEndDate,
@@ -145,9 +152,17 @@ export default function StudentRightPanel({
                 ? formatCountdown(secondsUntilNext)
                 : '--:--:--'}
             </p>
-            <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+              {mounted ? formatDateTime(nextLesson.scheduled_at) : ''}
+            </p>
+            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '1px' }}>
               {nextLesson.duration_minutes} min class
             </p>
+            {teacherName && (
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '1px' }}>
+                with {teacherName}
+              </p>
+            )}
 
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (

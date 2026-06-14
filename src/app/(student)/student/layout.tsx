@@ -38,13 +38,27 @@ export default async function StudentDashboardLayout({
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')
   const { data: nextLesson } = await supabase
     .from('lessons')
-    .select('scheduled_at, teams_join_url, duration_minutes, status')
+    .select(`
+      scheduled_at,
+      teams_join_url,
+      duration_minutes,
+      status,
+      teacher:profiles!teacher_id (
+        full_name
+      )
+    `)
     .eq('student_id', student.id)
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
     .limit(1)
     .maybeSingle()
+
+  const nextLessonTeacherName = nextLesson
+    ? (Array.isArray((nextLesson as any).teacher)
+        ? (nextLesson as any).teacher[0]?.full_name ?? null
+        : (nextLesson as any).teacher?.full_name ?? null)
+    : null
 
   // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
   const { data: protectedLesson } = await supabase
@@ -134,6 +148,7 @@ export default async function StudentDashboardLayout({
           <StudentRightPanel
             studentId={student.id}
             nextLesson={nextLesson ?? null}
+            teacherName={nextLessonTeacherName}
             hoursRemaining={hoursRemaining}
             totalHours={training?.total_hours ?? 0}
             trainingEndDate={training?.end_date ?? null}
