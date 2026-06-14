@@ -17,6 +17,7 @@ interface StudentRightPanelProps {
   studentId: string
   nextLesson: NextLesson | null
   hoursRemaining: number
+  totalHours: number
   trainingEndDate: string | null
   assignedExercises: number
   completedExercises: number
@@ -65,6 +66,7 @@ export default function StudentRightPanel({
   studentId: _studentId,
   nextLesson,
   hoursRemaining,
+  totalHours,
   trainingEndDate,
   assignedExercises,
   completedExercises,
@@ -101,6 +103,7 @@ export default function StudentRightPanel({
     : 0
 
   const lowHours = hoursRemaining < 2
+  const hoursUsedPercent = totalHours > 0 ? Math.round(((totalHours - hoursRemaining) / totalHours) * 100) : 0
 
   return (
     <aside
@@ -216,6 +219,27 @@ export default function StudentRightPanel({
         }}>
           {formatHours(hoursRemaining)}
         </p>
+
+        <div style={{
+          height: '6px',
+          backgroundColor: '#E0DFDC',
+          borderRadius: '3px',
+          overflow: 'hidden',
+          marginTop: '8px',
+        }}>
+          <div style={{
+            height: '100%',
+            width: `${hoursUsedPercent}%`,
+            backgroundColor: '#FF8303',
+            borderRadius: '3px',
+            transition: 'width 0.3s ease',
+          }} />
+        </div>
+        {totalHours > 0 && (
+          <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
+            {formatHours(Math.max(0, totalHours - hoursRemaining))} of {formatHours(totalHours)} used
+          </p>
+        )}
 
         {lowHours && hoursRemaining > 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
