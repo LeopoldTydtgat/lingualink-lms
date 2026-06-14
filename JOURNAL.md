@@ -1,3 +1,42 @@
+## Session 139 - 13 June 2026 - Day to Day visual pass, month export, and stale-deploy recovery
+
+### What was built
+
+- Restyled the teacher Day to Day calendar to the signed-off Direction A design: slate weekly-availability wash, green specific-available blocks, shared red for unavailable and holiday, solid orange booked classes, 24-hour times throughout, and an orange underline accent for today replacing the old salmon header.
+- Built a collision-aware label engine for the weekly-availability wash so the "Weekly availability" label and its time range relocate into the first vertical gap not covered by a class, specific block, or holiday, and omit entirely when no gap fits. The label never overlaps another block and never jumps mid-drag.
+- Added a Today button beside the week navigation arrows, disabled while the current week is in view.
+- Added a per-teacher timezone label ("All times in <profile timezone>") to the calendar so each teacher sees which timezone their schedule is displayed in.
+- Added a live warning when a teacher drags an unavailability block over a booked class, clarifying that booked classes are not cancelled automatically by unavailability.
+- Added a refetch-on-focus and refetch-on-visibility effect to heal a known real-time gap: when a class is reassigned away from a teacher, that teacher's previous calendar no longer receives a change event, so the stale block now clears when the window regains focus.
+- Reworked the Export to Calendar feature into Export Month: it now exports the teacher's entire visible calendar month of classes as an .ics file (named by month), not just the visible week, with a helper line stating which month will be exported. A shared fetch helper was extracted so the week grid and the month export run an identical, single-source query.
+- Reformatted booked-class blocks to a two-line layout matching the reference calendar: the student name on the first line and the 24-hour time range on the second, degrading gracefully to name-only in single-slot blocks, with the full name available on hover. The "Class with" prefix was dropped from the on-calendar block so the student full name, including surname, is visible, which matters because several students share first names. The prefix is retained in the exported .ics description where it reads naturally.
+- Hardened the application error boundaries against stale deployments: when a browser tab held open across a deploy hits a missing JavaScript chunk, both the route-level and root error boundaries now detect the chunk-load failure and perform one guarded full reload to fetch the new build, with a session flag preventing reload loops and a reload-based retry button as the fallback. This removes a "Something went wrong" dead-end that affected any user with a tab open during a release.
+
+### Break/Fix Log
+
+Issue 1: Booked-class calendar blocks were unreadable.
+Symptom: A booked class rendered as a truncated single line (for example "Leopold Tydtgat ...") that conveyed neither a clear name nor a time, worse than the third-party calendar it replaces.
+Cause: The block used a height-based single-line fallback with a middle-dot separator that ran out of horizontal room in a narrow day column.
+Fix: Replaced it with a name-first two-line layout (name, then 24-hour time range) that shows the time only when the block is tall enough, and removed the redundant "Class with" prefix so the surname is visible. Full name is exposed via the block's hover title.
+Lesson: A calendar block has very little width; lead with the single most identifying field (the full name) and let secondary detail drop out gracefully by height rather than truncating the important field.
+
+Issue 2: Users were stranded on an error screen after a deployment.
+Symptom: A teacher whose browser tab was open from before a release was redirected to login on idle, the page failed to load its (now-replaced) JavaScript chunks, and the error boundary showed "Something went wrong" with a "Try again" button that did not recover, because it only re-rendered and re-requested the same missing chunk.
+Cause: After a deploy, old chunk filenames no longer exist on the server; a stale tab requesting them throws a chunk-load error that the error boundary caught but could not resolve by re-rendering.
+Fix: Both error boundaries now detect a chunk-load failure and perform a single guarded full page reload (which fetches the current build), guarded by a session flag against reload loops, with the fallback retry button also performing a full reload.
+Lesson: In a continuously deployed app, a stale client is a normal event, not an exception; error boundaries must recover from missing chunks with a reload rather than a re-render.
+
+Issue 3: Month export could surface a stale week on a query error.
+Symptom: Refactoring the class fetch into a shared helper changed the failure behaviour so that a hard query error clears the grid to empty rather than retaining previously shown classes.
+Cause: The shared helper returns an empty array on a null response, and the week path now sets state directly from it.
+Fix: Accepted as a safe, fail-closed behaviour: on a genuine query error the grid shows empty rather than stale classes from a previously viewed week, and an empty week (the common case) already returned empty. Logged for the record.
+Lesson: When extracting a shared data helper, decide deliberately what the error case should display; showing nothing is usually safer than showing stale data on a schedule view.
+
+### Session result
+
+I gave the teacher Day to Day calendar a full visual pass to the signed-off design, including a collision-aware label engine, a Today button, a per-teacher timezone label, an unavailability-over-class warning, and a focus-based refetch that heals a real-time reassignment gap. I reworked the calendar export to cover the whole month rather than a single week, and reformatted booked-class blocks to a clean two-line name-and-time layout that keeps the student surname visible. Separately, I hardened both error boundaries to recover automatically from the stale-chunk failure that previously stranded users on an error screen after a deploy. Seven commits were made and pushed to the dev branch across the session; the calendar work was verified in the browser on multiple block sizes and the month export was confirmed by importing the generated file. All seven commits are ready to merge to main.
+
+---
 ## Session 138 - 12 June 2026 - Teacher schedule hardening and Monday-first conversion
 
 ### What was built
