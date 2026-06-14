@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
 
     const { data: studentRow, error: studentError } = await supabase
       .from('students')
-      .select('id, full_name, email, timezone, auth_user_id')
+      .select('id, full_name, email, timezone, auth_user_id, profile_completed')
       .eq('id', studentId)
       .single()
 
@@ -145,6 +145,13 @@ export async function POST(req: NextRequest) {
 
     if (studentRow.auth_user_id !== user.id) {
       return NextResponse.json({ error: 'Unauthorised.' }, { status: 401 })
+    }
+
+    if (studentRow.profile_completed !== true) {
+      return NextResponse.json(
+        { error: 'Please confirm your timezone in My Account before booking a class.', code: 'PROFILE_INCOMPLETE' },
+        { status: 403 }
+      )
     }
 
     // ── 2b. Rate limit per student (10 bookings / 60 min, fail closed) ───────
