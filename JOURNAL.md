@@ -1,3 +1,32 @@
+## Session 142 - 14 June 2026 - Join-gate bypass removal, cancellation-label polish, and an assignment-model finding
+
+### What was built
+
+- Removed an ungated Join button from the teacher-portal student-detail page. The button rendered a live Microsoft Teams join link with only an end-of-class check and no start-side gate, so it was clickable roughly 21 hours early and opened the live meeting. Rather than add a timing gate, I removed the button entirely: a teacher joins a class from their own dashboard right panel (which is correctly gated to the 10-minute window), so a Join control on a student's record page was a misplaced duplicate. Removing it eliminates the bypass at the source instead of constraining a control that should not have been there.
+- Audited the student My Classes cancel and reschedule buttons after noticing the reschedule lock in a screenshot. Confirmed the existing behaviour is correct and matches the brief: cancel is always available (it is never gated by the clock, only briefly disabled while a request is in flight), reschedule correctly locks within 24 hours of class start, and a red no-refund warning is shown before a within-24-hour cancellation. No change was needed; this was a verification pass, not a fix.
+- Replaced raw database values leaking into the cancelled-class labels. Both portals were rendering the bare cancelled_by value, so a cancelled class showed text like Cancelled by teacher straight from the column. Added a small per-portal label helper so the wording reads naturally and in the right voice for each viewer: on the student portal a teacher cancellation reads Cancelled by your teacher and the student's own reads Cancelled by you, while on the teacher portal the same values read Cancelled by you and Cancelled by student. The two helpers share a name but carry opposite voice on purpose, since by you means a different person depending on who is looking.
+- Cleared an outstanding bug-log backlog: marked a prior fix resolved against its real commit (declining to record a session number the journal could not corroborate), and logged the new findings from this session with accurate root-cause detail rather than the original handover framing.
+
+### Break/Fix Log
+
+Issue 1: The Join button on the teacher-portal student-detail page opened a live Teams link about 21 hours before class.
+Symptom: On the Next Classes tab of a student's record, the Join button was visible and functional for classes far in the future; clicking it opened the live meeting.
+Cause: The button's render condition checked that the class had not yet ended but never checked that the class was within the 10-minute join window. Every other join surface in the app (both right panels and the teacher Upcoming Classes list) includes that start-side check; this one surface had hand-rolled the condition and dropped it.
+Fix: Removed the Join button and its now-unused status import from the page. The teacher's correctly-gated join path on their own dashboard is unaffected, and the underlying Teams link field was left untouched (a consumer was removed, not the data). A cross-surface audit confirmed the other three join surfaces gate correctly at both ends.
+Lesson: When the same control appears on several screens, each copy can carry its own logic; fixing one does not fix the others, and a control that does not belong on a surface is better removed than gated.
+
+Issue 2 (logged, NOT fixed this session): The Assigned Teacher field on the teacher-portal student-detail page was empty, which on investigation proved to be an assignment-model split rather than a display bug.
+Symptom: A student's record showed a blank Assigned Teacher even though every lesson in the training had a named teacher.
+Cause: A live data check showed the training-level teacher column was null for newer trainings while older seeded rows had it set. The admin Create and Edit Student forms assign teachers as a list, writing to a join table, while the student-detail page and its access gate read a single teacher column on the training row. Nothing bridges the two, so the single column stays empty. This is a long-standing duplicated relationship that has now produced a visible bug. The business model is one regular teacher per student with a substitute only when the regular is unavailable, so a list with a designated primary is the correct shape.
+Fix: Deferred and logged with a recommended direction (make the page and access gate read the list the admin already populates, rather than maintaining two sources of truth). A related access-control question was logged alongside it: the gate currently admits only the single primary teacher, which both locks out all non-admin teachers while the column is null and would lock out substitute teachers once it is populated. Both deferred to a focused session because they touch an access gate on a student-data surface.
+Lesson: A cosmetic-looking empty field can be the visible end of a data-model problem. Verifying the live database before writing code turned a presumed one-line display fix into a correctly-scoped architectural item, and avoided a backfill that would have masked a recurring cause.
+
+### Session result
+
+A bug-fix and verification session working through end-of-session findings from the previous redesign. Three issues were examined: a Join-gate bypass on the teacher-portal student-detail page, which was a genuine business-rule violation and was fixed by removing the misplaced button; the student cancel and reschedule controls, which were audited after a screenshot raised a question and confirmed already correct against the brief; and a set of raw database labels surfacing in cancelled-class rows, which were given proper per-portal wording. A fourth thread, the empty Assigned Teacher field, was investigated against live data and turned out to be a duplicated teacher-assignment relationship rather than the display bug it first appeared to be, so it was logged with a clear fix direction and a paired access-control question for a dedicated session rather than rushed. Two fixes shipped as their own verified commits with the booking, cancellation, and Teams wiring fenced off throughout; the bug log was reconciled and the new findings recorded with verified root causes.
+
+---
+
 ## Session 141 - 14 June 2026 - Two-portal class-card and right-panel redesign, plus a teacher-portal 404 fix
 
 ### What was built
