@@ -1,3 +1,35 @@
+## Session 141 - 14 June 2026 - Two-portal class-card and right-panel redesign, plus a teacher-portal 404 fix
+
+### What was built
+
+- Removed the standalone "Next class" hero card on the student My Classes page and routed the next class into the existing upcoming list as its first row, emphasised with a NEXT pill and a 3px orange left-border. This eliminated the triple-countdown problem where the same countdown appeared in the hero, the list, and the right panel at once.
+- Flipped the student upcomingLessons derivation to include the next lesson instead of excluding it, and added a per-row isNext flag to drive the emphasis.
+- Applied matching NEXT-pill and 3px orange left-border emphasis to the teacher Upcoming Classes page, deriving the next class as the first item of the already-sorted list and threading a nextId prop through DayGroup to ClassCard as a required prop, which let the type checker guarantee every call site was wired and caught a third ClassCard usage in the cancelled section.
+- Polished the teacher class card: appended duration to the time line (now reads 08:00 - 08:30 - 30 min), converted the cancelled status from plain red text into a coloured pill, struck through cancelled student names, and kept cancelled cards faded.
+- Added an orange hours-used progress bar to the student right panel Hours Remaining card, threading total hours from the layout into the panel, so the balance reads visually as a bar plus "used of total" rather than a bare number.
+- Brought the student right panel Next Class card up to the teacher panel standard by adding a date and time line and a "with teacher name" line beneath the live countdown, joining the teacher profile into the layout next-lesson query and flattening the nested result.
+- Unified both right panels on the same live countdown treatment: upgraded the teacher panel static "Next class in 21h 22m 21s" line to a big bold live HH:MM:SS hero countdown matching the student panel, made it days-aware so a far-future class shows days rather than piling up hours, and preserved the "starting now" and "class has ended" states.
+
+### Break/Fix Log
+
+Issue 1: Clicking a student name on the teacher Upcoming Classes page returned a 404.
+Symptom: The URL /students/{uuid} rendered "Page not found" for a student who clearly exists.
+Cause: The card linked using the student primary key, but the target page at (dashboard)/students/[id] is keyed on a training id, not a student id. A valid student UUID matched no training, so the page called notFound().
+Fix: Carried training_id through the lessons query and the mapped class object, added it to the Class type, and changed the link to target the training id.
+Lesson: A valid-looking UUID that 404s is usually an entity mismatch (linking one id, querying another), not a missing route or an access-control problem. Listing the route files first disproved "missing route" and pointed straight at the query.
+
+Issue 2 (logged as NEW165, not fixed this session): Clicking "Back to home" on the 404 page logs the user out and forces re-login.
+Symptom: The branded 404 page's button drops the session and lands on the login screen.
+Cause: Read-only tracing confirmed the 404 page itself is not at fault; its button is a correct client-side link to the root. The session drop happens downstream when the root route renders, so the suspect is the root redirect logic and how the proxy handles a cold document load.
+Fix: Deferred. Logged with the trace finding for a focused session, since anything in the session and redirect layer carries cascade risk and warrants its own slice.
+Lesson: A symptom that looks like a stray cosmetic bug can sit on the auth layer. Trace before fixing, and do not assume an unrelated fix will clear it.
+
+### Session result
+
+A focused redesign session that lifted the student My Classes page and both right panels to match the teacher portal, so the two portals now read as one product. The student hero card was removed in favour of an emphasised first row, both class cards gained consistent NEXT-pill and duration treatment, the student panel gained an hours progress bar and a fuller Next Class card, and both panels were unified on a single big live countdown style. Along the way a real teacher-portal 404 was diagnosed and fixed (a student-id versus training-id link mismatch), and a separate session-drop bug surfaced by the 404 page was traced and logged as NEW165 for a dedicated session rather than fixed blind. Every change shipped as its own verified commit with the engine fenced off from the presentation work, and nothing touched the live booking, cancellation, or Teams wiring.
+
+---
+
 ## Session 139 - 13 June 2026 - Day to Day visual pass, month export, and stale-deploy recovery
 
 ### What was built
