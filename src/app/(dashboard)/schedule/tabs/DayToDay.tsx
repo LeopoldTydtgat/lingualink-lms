@@ -132,6 +132,27 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date): S
     if (!r.start_at || !r.end_at) continue
     const start = new Date(r.start_at)
     const end = new Date(r.end_at)
+
+    // Holidays are always whole-day and may span multiple calendar days. Emit a
+    // full-column block for every visible-week day whose local midnight falls within
+    // the holiday's [start_at, end_at] date span (inclusive of both end days). We
+    // iterate the week's 7 day-indices and test span membership rather than keying off
+    // the start day, so a holiday that began in a previous week still paints all of its
+    // covered days in this week. start/end-of-day extent matches the existing clamped
+    // full-column block (startMin 0 → endMin 24*60). 'specific' blocks keep their
+    // original single-day, real-minute placement below.
+    if (r.type === 'holiday') {
+      const spanStartSod = startOfDayLocal(start)
+      const spanEndSod = startOfDayLocal(end)
+      for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+        const dayMid = startOfDayLocal(addDays(weekStart, dayIdx))
+        if (dayMid >= spanStartSod && dayMid <= spanEndSod) {
+          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id })
+        }
+      }
+      continue
+    }
+
     const startSod = startOfDayLocal(start)
     const dayIdx = Math.floor((startSod - wsMid) / 86_400_000)
     if (dayIdx < 0 || dayIdx > 6) continue
