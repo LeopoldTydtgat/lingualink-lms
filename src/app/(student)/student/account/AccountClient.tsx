@@ -126,7 +126,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   // General info
   const [timezone, setTimezone] = useState(student.timezone ?? '')
   useEffect(() => {
-    if (timezone === '') {
+    if (timezone === '' || mustConfirmTz) {
       try {
         const detected = Intl.DateTimeFormat().resolvedOptions().timeZone
         if (detected) setTimezone(detected)
