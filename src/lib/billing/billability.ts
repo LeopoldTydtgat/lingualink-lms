@@ -91,6 +91,35 @@ export function getProjectedAmount(input: BillabilityInput): number {
   return getBillability(input).amount
 }
 
+/**
+ * How much a single lesson should contribute to a teacher's PROJECTED monthly
+ * total, given the current instant.
+ *
+ * The projection must tell the same truth as realised billing:
+ *  - FUTURE 'scheduled' lesson  -> full projected amount (it will happen).
+ *  - PAST 'scheduled' lesson     -> 0. An unreported past class is overdue;
+ *    business rule is "no report = no pay", so it must not inflate projection.
+ *    Once reported, its status changes away from 'scheduled' and the branch
+ *    below governs it.
+ *  - Any SETTLED status (completed / no-show / cancelled) -> the realised
+ *    billable amount from getBillability (single source of truth for the math).
+ *
+ * `nowMs` is the current time in epoch milliseconds (Date.now()-style). It is
+ * passed in rather than read here so the function stays pure and testable.
+ * The comparison is instant-vs-instant (UTC scheduledAt vs nowMs) — no local
+ * date construction, no toISOString.
+ */
+export function projectedContribution(
+  input: BillabilityInput,
+  nowMs: number
+): number {
+  if (input.status === 'scheduled') {
+    const isFuture = new Date(input.scheduledAt).getTime() > nowMs
+    return isFuture ? getProjectedAmount(input) : 0
+  }
+  return getBillability(input).amount
+}
+
 export const CANCELLED_STATUSES: readonly string[] = [
   'cancelled',
   'cancelled_by_student',
