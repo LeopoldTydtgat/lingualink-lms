@@ -47,9 +47,12 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         self_assessed_level,
         timezone
       ),
-      profiles!trainings_teacher_id_fkey (
-        id,
-        full_name
+      training_teachers (
+        teacher_id,
+        profiles (
+          id,
+          full_name
+        )
       )
     `)
     .eq('id', id)
@@ -59,8 +62,17 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
   if (error || !training) notFound()
 
-  // Non-admin teachers can only view their own trainings
-  if (!isAdmin && training.teacher_id !== user.id) notFound()
+  // Assigned teachers come from the training_teachers list (regular teacher plus any substitutes).
+  // Flatten the nested join: each row has teacher_id, and profiles may arrive as object or array.
+  type TeacherJoinRow = { teacher_id: string; profiles: { id: string; full_name: string } | { id: string; full_name: string }[] | null }
+  const teacherRows = (Array.isArray(training.training_teachers) ? training.training_teachers : []) as TeacherJoinRow[]
+  const assignedTeacherIds = teacherRows.map(r => r.teacher_id)
+  const assignedTeacherNames = teacherRows
+    .map(r => (Array.isArray(r.profiles) ? r.profiles[0]?.full_name : r.profiles?.full_name))
+    .filter((n): n is string => Boolean(n))
+
+  // Non-admin teachers can only view a training they are assigned to (regular or substitute).
+  if (!isAdmin && !assignedTeacherIds.includes(user.id)) notFound()
 
   // Fetch all lessons for this training
   const { data: lessons } = await adminClient
@@ -141,6 +153,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       isAdmin={isAdmin}
       currentUserId={user.id}
       assignments={assignments}
+      assignedTeacherNames={assignedTeacherNames}
     />
   )
 }

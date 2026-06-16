@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useRef, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -480,6 +480,8 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   // All profile table writes go through /api/profile to bypass RLS.
   const supabase = createClient()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const mustConfirmTz = searchParams.get('confirm_tz') === '1'
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [activeTab, setActiveTab] = useState('general')
@@ -491,6 +493,18 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   // General Info state
   const [fullName, setFullName] = useState(profile.full_name ?? '')
   const [timezone, setTimezone] = useState(profile.timezone ?? '')
+  useEffect(() => {
+    if (timezone === '' || mustConfirmTz) {
+      try {
+        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone
+        if (detected) setTimezone(detected)
+      } catch {
+        // detection unavailable — leave as-is; user picks manually
+      }
+    }
+    // run once on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [photoUrl, setPhotoUrl] = useState(profile.photo_url ?? '')
 
   // Professional Info state
@@ -640,6 +654,24 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
   return (
     <div style={{ padding: '32px', maxWidth: '800px' }}>
+
+      {/* Timezone confirmation banner — shown when redirected from a time-sensitive page with ?confirm_tz=1 */}
+      {mustConfirmTz && (
+        <div style={{
+          backgroundColor: '#FFF7ED',
+          borderLeft: '4px solid #FF8303',
+          borderRadius: '8px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+        }}>
+          <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600, color: '#111827' }}>
+            Confirm your timezone
+          </p>
+          <p style={{ margin: 0, fontSize: '14px', color: '#374151', lineHeight: 1.6 }}>
+            We&apos;ve set your timezone to your best guess. Please check it&apos;s correct below and click Save Changes — your class times depend on it.
+          </p>
+        </div>
+      )}
 
       {/* Page header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

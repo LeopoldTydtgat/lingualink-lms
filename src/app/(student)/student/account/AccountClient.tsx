@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
@@ -113,6 +114,8 @@ const sectionTitleStyle: React.CSSProperties = {
 export default function AccountClient({ student, activeTraining, allTrainings }: Props) {
   const supabase = createClient() // kept for password-change auth operations only
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const searchParams = useSearchParams()
+  const mustConfirmTz = searchParams.get('confirm_tz') === '1'
 
   // Profile photo
   const [photoUrl, setPhotoUrl] = useState<string | null>(student.photo_url)
@@ -122,6 +125,18 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
 
   // General info
   const [timezone, setTimezone] = useState(student.timezone ?? '')
+  useEffect(() => {
+    if (timezone === '' || mustConfirmTz) {
+      try {
+        const detected = Intl.DateTimeFormat().resolvedOptions().timeZone
+        if (detected) setTimezone(detected)
+      } catch {
+        // detection unavailable — leave as-is; user picks manually
+      }
+    }
+    // run once on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [languagePref, setLanguagePref] = useState(student.language_preference ?? '')
   const [generalSaving, setGeneralSaving] = useState(false)
   const [generalSaved, setGeneralSaved] = useState(false)
@@ -290,6 +305,24 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
 
   return (
     <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+
+      {/* Timezone confirmation banner — shown when redirected from booking with ?confirm_tz=1 */}
+      {mustConfirmTz && (
+        <div style={{
+          backgroundColor: '#FFF7ED',
+          borderLeft: '4px solid #FF8303',
+          borderRadius: '8px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+        }}>
+          <p style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: '600', color: '#111827' }}>
+            Confirm your timezone to start booking
+          </p>
+          <p style={{ margin: 0, fontSize: '14px', color: '#374151', lineHeight: 1.6 }}>
+            We've set your timezone to your best guess. Please check it's correct below and click Save Changes — your class times depend on it. You'll be able to book a class right after.
+          </p>
+        </div>
+      )}
 
       {/* Page title */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>

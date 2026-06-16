@@ -132,6 +132,34 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date): S
     if (!r.start_at || !r.end_at) continue
     const start = new Date(r.start_at)
     const end = new Date(r.end_at)
+
+    // Holidays are always whole-day and may span multiple calendar days. Emit a
+    // full-column block for every visible-week day whose local midnight falls within
+    // the holiday's [start_at, end_at] date span (inclusive of both end days). We
+    // iterate the week's 7 day-indices and test span membership rather than keying off
+    // the start day, so a holiday that began in a previous week still paints all of its
+    // covered days in this week. start/end-of-day extent matches the existing clamped
+    // full-column block (startMin 0 → endMin 24*60). 'specific' blocks keep their
+    // original single-day, real-minute placement below.
+    if (r.type === 'holiday') {
+      // NEW174: a holiday is a span of calendar DATES, not an instant. Derive the
+      // start/end day from the stored date portion (YYYY-MM-DD) built in the LOCAL
+      // frame, so a UTC-pinned end like 2026-10-06T23:59:59+00 is not pushed to the
+      // next day when localised in a UTC+ zone. Never localise the stored instant
+      // (new Date(r.start_at)) for holiday span bounds.
+      const [sy, sm, sd] = r.start_at.split('T')[0].split('-').map(Number)
+      const [ey, em, ed] = r.end_at.split('T')[0].split('-').map(Number)
+      const spanStartSod = new Date(sy, sm - 1, sd).getTime()
+      const spanEndSod = new Date(ey, em - 1, ed).getTime()
+      for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+        const dayMid = startOfDayLocal(addDays(weekStart, dayIdx))
+        if (dayMid >= spanStartSod && dayMid <= spanEndSod) {
+          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id })
+        }
+      }
+      continue
+    }
+
     const startSod = startOfDayLocal(start)
     const dayIdx = Math.floor((startSod - wsMid) / 86_400_000)
     if (dayIdx < 0 || dayIdx > 6) continue
