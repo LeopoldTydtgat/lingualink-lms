@@ -20,6 +20,10 @@ export default async function MyClassesPage() {
 
   if (!student) redirect('/student/login')
 
+  if (student.profile_completed !== true) {
+    redirect('/student/account?confirm_tz=1')
+  }
+
   // Fetch upcoming lessons (scheduled + cancelled) with teacher info
   const { data: rawLessons } = await supabase
     .from('lessons')
