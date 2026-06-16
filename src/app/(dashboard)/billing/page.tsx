@@ -41,7 +41,7 @@ export default async function BillingPage() {
 
   if (!billingInfo?.timezone) {
     return (
-      <div className="p-8 text-gray-500">Your account is missing a timezone. Please contact admin to set it before billing can be displayed.</div>
+      <div className="p-8 text-gray-500">Your timezone isn&apos;t set, so billing can&apos;t be displayed yet. Please set it in My Account, or contact admin if you need help.</div>
     )
   }
   const tz = billingInfo.timezone
