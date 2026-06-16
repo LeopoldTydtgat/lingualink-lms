@@ -17,11 +17,15 @@ export default async function PastClassDetailPage({
   // Get student record
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, timezone')
+    .select('id, full_name, timezone, profile_completed')
     .eq('auth_user_id', user.id)
     .single();
 
   if (!student) redirect('/student/login');
+
+  if (student.profile_completed !== true) {
+    redirect('/student/account?confirm_tz=1');
+  }
 
   // Fetch the lesson — confirm it belongs to this student
   const { data: lesson } = await supabase
