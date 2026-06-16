@@ -12,13 +12,17 @@ export default async function SchedulePage() {
   // Get the teacher's profile so we know their role and id
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, role, timezone')
+    .select('id, full_name, role, timezone, profile_completed')
     .eq('id', user.id)
     .maybeSingle()
 
   if (!profile) return (
     <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
   )
+
+  if (profile.profile_completed !== true) {
+    redirect('/account?confirm_tz=1')
+  }
 
   // Fetch existing availability for this teacher
   const { data: availability } = await supabase
