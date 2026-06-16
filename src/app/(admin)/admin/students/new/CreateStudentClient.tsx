@@ -86,7 +86,7 @@ type FormData = {
 const EMPTY_FORM: FormData = {
   first_name: '', last_name: '', email: '', temp_password: '',
   date_of_birth: '', phone: '',
-  timezone: 'Europe/Paris', language_preference: '',
+  timezone: '', language_preference: '',
   status: 'current', customer_number: '',
   is_private: true, company_id: '', academic_advisor_id: '',
   assigned_teacher_ids: [],
@@ -306,6 +306,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
           <Field label="Timezone">
             <select className={selectClass} value={form.timezone}
               onChange={(e) => set('timezone', e.target.value)}>
+              <option value="">— Select timezone —</option>
               {TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>{tz}</option>
               ))}

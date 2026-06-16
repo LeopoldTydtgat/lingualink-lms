@@ -94,7 +94,7 @@ type FormData = {
 
 const EMPTY_FORM: FormData = {
   first_name: '', last_name: '', email: '', temp_password: '',
-  timezone: 'Africa/Johannesburg', account_types: ['teacher'],
+  timezone: '', account_types: ['teacher'],
   status: 'current', contract_start: '', orientation_date: '',
   observed_lesson_date: '', title: '', date_of_birth: '', gender: '',
   nationality: '', phone: '', street_address: '', area_code: '', city: '',
@@ -160,6 +160,7 @@ export default function CreateTeacherClient() {
     if (!form.last_name.trim()) return setError('Last name is required.')
     if (!form.email.trim()) return setError('Email is required.')
     if (!form.temp_password.trim()) return setError('Temporary password is required.')
+    if (!form.timezone) return setError('Timezone is required.')
     if (form.account_types.length === 0) return setError('At least one account type is required.')
 
     setSaving(true)
@@ -280,6 +281,7 @@ export default function CreateTeacherClient() {
           <Field label="Timezone">
             <select className={selectClass} value={form.timezone}
               onChange={(e) => set('timezone', e.target.value)}>
+              <option value="">— Select timezone —</option>
               {TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>{tz}</option>
               ))}

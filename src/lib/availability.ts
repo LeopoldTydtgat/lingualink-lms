@@ -57,7 +57,21 @@ export async function isSlotAvailable(
   }
   const teacherTimezone = teacherProfile.timezone
 
-  const dateStr = scheduledAtUtc.slice(0, 10) // YYYY-MM-DD in UTC
+  const dateStr = scheduledAtUtc.slice(0, 10) // YYYY-MM-DD in UTC; only used to scope UTC-stored 'specific' overrides
+
+  // NEW175 (addresses M5, S81/S91): the teacher's general availability and holidays are
+  // expressed in the teacher's LOCAL calendar (local weekday, local dates). A booking
+  // instant's UTC date can land on a different calendar day near UTC midnight for teachers
+  // far from UTC (e.g. Tokyo, New York), so keying off the UTC date silently mismatched.
+  // Derive the teacher-local calendar date of the requested instant and key the general
+  // weekday, the general slot build, and holiday blocking off THAT, so this gate agrees
+  // with the displayed booking calendar. Timed 'specific' overrides stay exact-instant.
+  const localDateStr = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: teacherTimezone,
+  }).format(new Date(scheduledAtUtc))
 
   const { data: availabilityData } = await adminClient
     .from('availability')
@@ -68,14 +82,35 @@ export async function isSlotAvailable(
   const generalRecords = records.filter((r) => r.type === 'general')
   const overrideRecords = records.filter((r) => r.type !== 'general' && r.start_at && r.end_at)
 
-  const date = new Date(dateStr + 'T00:00:00.000Z')
+  // NEW174: holidays block whole calendar DATES, compared by the stored date portion
+  // (YYYY-MM-DD), never by the localised instant - this mirrors the student availability
+  // grid so the booking gate and the displayed calendar agree. Timed 'specific'
+  // unavailability still blocks by exact instant below. LOAD-BEARING: the date-portion
+  // match only works because Holidays.tsx saves offset-less date strings stored as UTC; if
+  // that save path is changed to send true UTC instants, holidays shift a day - update all readers.
+  const holidayBlockedDates = new Set<string>()
+  for (const r of overrideRecords) {
+    if (r.type !== 'holiday' || r.is_available) continue
+    let d = r.start_at!.split('T')[0]
+    const endDate = r.end_at!.split('T')[0]
+    while (d <= endDate) {
+      holidayBlockedDates.add(d)
+      const [yy, mm, dd] = d.split('-').map(Number)
+      const next = new Date(yy, mm - 1, dd + 1)
+      d = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+    }
+  }
+
+  // A bare calendar date's weekday is timezone-independent, so derive it from the
+  // teacher-local date string (NEW175).
+  const date = new Date(localDateStr + 'T00:00:00.000Z')
   const dayOfWeek = date.getUTCDay()
 
   // Build available slots from general weekly records for this day
   const slots: { startIso: string; available: boolean }[] = generalRecords
     .filter((r) => r.day_of_week === dayOfWeek && r.start_time && r.end_time)
     .map((r) => ({
-      startIso: new Date(localTimeToUtcMs(dateStr, r.start_time!, teacherTimezone)).toISOString(),
+      startIso: new Date(localTimeToUtcMs(localDateStr, r.start_time!, teacherTimezone)).toISOString(),
       available: true,
     }))
 
@@ -93,8 +128,9 @@ export async function isSlotAvailable(
     }
   }
 
-  // Apply is_available=false blocking overrides (specific + holiday)
-  const blockOverrides = overrideRecords.filter((o) => !o.is_available)
+  // Apply is_available=false blocking overrides (timed 'specific' only).
+  // Holidays are excluded here - handled as whole calendar dates below (NEW174).
+  const blockOverrides = overrideRecords.filter((o) => !o.is_available && o.type !== 'holiday')
   for (const slot of slots) {
     if (!slot.available) continue
     const slotStart = new Date(slot.startIso).getTime()
@@ -105,6 +141,12 @@ export async function isSlotAvailable(
         break
       }
     }
+  }
+
+  // NEW174 + NEW175: if the requested instant falls on a teacher-local holiday date,
+  // block the whole day (holiday wins).
+  if (holidayBlockedDates.has(localDateStr)) {
+    for (const slot of slots) slot.available = false
   }
 
   // Every 30-min segment of the requested duration must map to an available slot

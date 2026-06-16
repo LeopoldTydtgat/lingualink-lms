@@ -116,6 +116,16 @@ function Countdown({ startsAt }: { startsAt: string }) {
   return <span className="font-mono text-sm" style={{ color: '#FF8303' }}>{timeLeft}</span>
 }
 
+// Maps the cancelled_by value to a teacher-facing label (teacher is the viewer here).
+function cancelledByLabel(cancelledBy: string): string {
+  switch (cancelledBy) {
+    case 'teacher': return 'Cancelled by you'
+    case 'student': return 'Cancelled by student'
+    case 'admin': return 'Cancelled by admin'
+    default: return 'Cancelled'
+  }
+}
+
 function ChevronIcon({ rotated }: { rotated: boolean }) {
   return (
     <svg
@@ -228,7 +238,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
           </p>
           {isCancelled && cls.cancelled_by && (
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
-              Cancelled by {cls.cancelled_by}
+              {cancelledByLabel(cls.cancelled_by)}
             </p>
           )}
         </div>
