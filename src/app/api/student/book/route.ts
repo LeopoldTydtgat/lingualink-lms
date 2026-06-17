@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
+import { createPendingReport } from '@/lib/reports/createPendingReport'
 
 // ── Email content builders ────────────────────────────────────────────────────
 
@@ -561,6 +562,19 @@ export async function POST(req: NextRequest) {
           lesson_id: rescheduleId,
         })
       }
+    }
+
+    // ── 6b. Create the paired pending report row (NEW178) ─────────────────────
+    // Every lesson gets a 'pending' report the teacher later completes via
+    // complete_report_atomic. Non-blocking: the booking must still succeed if
+    // this write fails, so we log and continue.
+    const classEndsAtIso = new Date(new Date(scheduledAt).getTime() + durationMinutes * 60 * 1000).toISOString()
+    const { error: pendingReportError } = await createPendingReport(adminClient, newLesson.id, teacherId, classEndsAtIso)
+    if (pendingReportError) {
+      console.error('[NEW178] pending report create failed (student book):', {
+        lesson_id: newLesson.id,
+        error: pendingReportError,
+      })
     }
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────

@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
-import { getBillability, getProjectedAmount } from '@/lib/billing/billability'
+import { getBillability, projectedContribution } from '@/lib/billing/billability'
 import LeftNav from '@/components/layout/LeftNav'
 import TopHeader from '@/components/layout/TopHeader'
 import RightPanel from '@/components/layout/RightPanel'
@@ -104,8 +104,14 @@ export default async function DashboardLayout({
       // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
       .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
 
+    const nowMs = now.getTime()
+
     for (const lesson of monthLessons ?? []) {
-      if (lesson.status !== 'scheduled') {
+      const settled = lesson.status !== 'scheduled'
+
+      // Realised earnings so far this month: only settled lessons that are
+      // actually billable to the teacher.
+      if (settled) {
         const bill = getBillability({
           status: lesson.status,
           scheduledAt: lesson.scheduled_at,
@@ -116,14 +122,23 @@ export default async function DashboardLayout({
         })
         if (bill.billableToTeacher) currentAmount += bill.amount
       }
-      projectedAmount += getProjectedAmount({
-        status: lesson.status,
-        scheduledAt: lesson.scheduled_at,
-        cancelledAt: lesson.cancelled_at,
-        cancellationPolicy: null,
-        hourlyRate,
-        durationMinutes: lesson.duration_minutes,
-      })
+
+      // Projected month total. projectedContribution encodes the rule:
+      // a FUTURE scheduled lesson counts at full pay; a PAST scheduled lesson
+      // (overdue, unreported — "no report = no pay") counts ZERO; a settled
+      // lesson counts its realised billable amount. This is the NEW178 fix:
+      // an unreported past class no longer inflates the projection.
+      projectedAmount += projectedContribution(
+        {
+          status: lesson.status,
+          scheduledAt: lesson.scheduled_at,
+          cancelledAt: lesson.cancelled_at,
+          cancellationPolicy: null,
+          hourlyRate,
+          durationMinutes: lesson.duration_minutes,
+        },
+        nowMs
+      )
     }
   } else {
     console.error('CRITICAL: teacher timezone is null - billing widget degraded to zero, portal preserved', { teacher_id: profile.id })

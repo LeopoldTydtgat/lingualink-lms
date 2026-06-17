@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getBillability, getProjectedAmount, isCancelledStatus, BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { getBillability, getProjectedAmount, projectedContribution, isCancelledStatus, BLOCKED_STATUSES } from '@/lib/billing/billability'
 
 /**
  * Tests for src/lib/billing/billability.ts — the source of truth for "is this
@@ -249,5 +249,56 @@ describe('BLOCKED_STATUSES', () => {
       'student_no_show',
       'teacher_no_show',
     ])
+  })
+})
+
+describe('projectedContribution — the teacher projected-total rule', () => {
+  const HOUR = 60 * 60 * 1000
+  const nowMs = new Date('2026-06-16T12:00:00Z').getTime()
+
+  it('future scheduled lesson: contributes full projected pay', () => {
+    const futureAt = new Date(nowMs + 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'scheduled', scheduledAt: futureAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(20)
+  })
+
+  it('past scheduled lesson (overdue, unreported): contributes ZERO', () => {
+    const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'scheduled', scheduledAt: pastAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(0)
+  })
+
+  it('completed lesson: contributes the realised billable amount regardless of time', () => {
+    const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'completed', scheduledAt: pastAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(20)
+  })
+
+  it('teacher no-show: contributes zero', () => {
+    const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'teacher_no_show', scheduledAt: pastAt }),
+      nowMs
+    )
+    expect(amt).toBe(0)
+  })
+
+  it('student cancellation <24hr: contributes full pay (teacher protected)', () => {
+    const scheduledAt = new Date(nowMs - 48 * HOUR).toISOString()
+    const cancelledAt = new Date(nowMs - 48 * HOUR + 23 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'cancelled_by_student', scheduledAt, cancelledAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(20)
   })
 })
