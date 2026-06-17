@@ -229,10 +229,36 @@ export async function PATCH(
     }
 
     if ((body.status === 'former' || body.status === 'on_hold') && current.auth_user_id) {
+      // Archiving must remove ALL access, not just current sessions. signOut
+      // alone leaves the password valid, so a former student could log straight
+      // back in. Ban the auth user first (locks login), then kill live sessions
+      // — so sessions die only after the login is already locked. The ban is
+      // lifted again when status returns to 'current' below.
+      try {
+        await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: '876000h' })
+      } catch (banError) {
+        // The ban is the security-critical half: if it throws, the login is NOT
+        // locked. Hard-fail with 500 rather than returning success — otherwise we
+        // re-open the exact hole this block closes (a former student logging back
+        // in). The admin retries; the status is already written so re-running is
+        // idempotent. signOut below is skipped, but is moot until the ban lands.
+        console.error('[archive student] ban failed:', banError)
+        return NextResponse.json(
+          { error: 'Failed to revoke student access. Please retry.' },
+          { status: 500 }
+        )
+      }
       try {
         await adminClient.auth.admin.signOut(current.auth_user_id, 'global')
-      } catch (e) {
-        console.error('[archive student] signOut failed:', e)
+      } catch (signOutError) {
+        console.error('[archive student] signOut failed:', signOutError)
+      }
+    } else if (body.status === 'current' && current.auth_user_id) {
+      // Reinstating a student must restore login by lifting any prior ban.
+      try {
+        await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: 'none' })
+      } catch (unbanError) {
+        console.error('[reactivate student] unban failed:', unbanError)
       }
     }
 
