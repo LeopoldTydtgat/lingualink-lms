@@ -166,10 +166,36 @@ export async function PATCH(
     }
 
     if (body.status === 'former' || body.status === 'on_hold') {
+      // Archiving must remove ALL access, not just current sessions. signOut
+      // alone leaves the password valid, so a former teacher could log straight
+      // back in. Ban the auth user first (locks login), then kill live sessions
+      // — so sessions die only after the login is already locked. The ban is
+      // lifted again when status returns to 'current' below.
+      try {
+        await adminClient.auth.admin.updateUserById(id, { ban_duration: '876000h' })
+      } catch (banError) {
+        // The ban is the security-critical half: if it throws, the login is NOT
+        // locked. Hard-fail with 500 rather than returning success — otherwise we
+        // re-open the exact hole this block closes (a former teacher logging back
+        // in). The admin retries; the profile is already 'former' so re-running is
+        // idempotent. signOut below is skipped, but is moot until the ban lands.
+        console.error('[archive teacher] ban failed:', banError)
+        return NextResponse.json(
+          { error: 'Failed to revoke teacher access. Please retry.' },
+          { status: 500 }
+        )
+      }
       try {
         await adminClient.auth.admin.signOut(id, 'global')
       } catch (signOutError) {
         console.error('[archive teacher] signOut failed:', signOutError)
+      }
+    } else if (body.status === 'current') {
+      // Reinstating a teacher must restore login by lifting any prior ban.
+      try {
+        await adminClient.auth.admin.updateUserById(id, { ban_duration: 'none' })
+      } catch (unbanError) {
+        console.error('[reactivate teacher] unban failed:', unbanError)
       }
     }
 
