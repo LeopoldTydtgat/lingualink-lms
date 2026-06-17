@@ -13,6 +13,7 @@ import {
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
+import { createPendingReport } from '@/lib/reports/createPendingReport'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -338,6 +339,17 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+  }
+
+  // NEW178: create the paired 'pending' report row the teacher later completes
+  // via complete_report_atomic. Non-blocking: a failure must not stop the 201.
+  const classEndsAtIso = new Date(new Date(scheduledAtUtc).getTime() + duration_minutes * 60 * 1000).toISOString()
+  const { error: pendingReportError } = await createPendingReport(adminClient, lesson.id, teacher_id, classEndsAtIso)
+  if (pendingReportError) {
+    console.error('[NEW178] pending report create failed (admin create):', {
+      lesson_id: lesson.id,
+      error: pendingReportError,
+    })
   }
 
   // Send confirmation emails to teacher and student
