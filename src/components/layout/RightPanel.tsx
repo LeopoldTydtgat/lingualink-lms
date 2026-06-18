@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
-import { BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { isLessonJoinable } from '@/lib/billing/joinable'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,6 +81,8 @@ export default function RightPanel({
   const router = useRouter()
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [now, setNow] = useState(0)
+  const [joinHovered, setJoinHovered] = useState(false)
 
   const panelRef = useRef<HTMLElement>(null)
 
@@ -95,6 +97,7 @@ export default function RightPanel({
 
   useEffect(() => {
     setMounted(true)
+    setNow(Date.now())
 
     if (!nextLesson) {
       setSecondsUntil(null)
@@ -107,6 +110,7 @@ export default function RightPanel({
     setSecondsUntil(calc())
 
     const timer = setInterval(() => {
+      setNow(Date.now())
       setSecondsUntil(calc())
     }, 1000)
 
@@ -117,7 +121,7 @@ export default function RightPanel({
     ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
     : null
   const classEnded = classEndTime ? Date.now() > classEndTime : false
-  const isJoinable = mounted && secondsUntil !== null && secondsUntil <= 10 * 60 && !classEnded && nextLesson != null && !BLOCKED_STATUSES.includes(nextLesson.status)
+  const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
   return (
     <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#FFFCF8' }}>
@@ -166,18 +170,41 @@ export default function RightPanel({
                 See Training
               </Button>
 
-              {/* Join Class — only appears 10 minutes before class */}
-              {isJoinable && nextLesson.teams_join_url && (
+              {/* Join Class — always visible; greyed until 10 min before start, gone at end */}
+              {nextLesson.teams_join_url ? (
                 <a
-                  href={nextLesson.teams_join_url}
+                  href={isJoinable ? nextLesson.teams_join_url : undefined}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                  style={{ backgroundColor: '#111827' }}
+                  onMouseEnter={() => setJoinHovered(true)}
+                  onMouseLeave={() => setJoinHovered(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    width: '100%',
+                    padding: '8px 12px',
+                    backgroundColor: isJoinable ? (joinHovered ? '#FF8303' : '#ffffff') : '#E0DFDC',
+                    color: isJoinable ? (joinHovered ? '#ffffff' : '#FF8303') : '#9ca3af',
+                    border: isJoinable ? '1.5px solid #FF8303' : 'none',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    textAlign: 'center',
+                    textDecoration: 'none',
+                    cursor: isJoinable ? 'pointer' : 'default',
+                    pointerEvents: isJoinable ? 'auto' : 'none',
+                    transition: 'background-color 0.18s ease, color 0.18s ease',
+                  }}
                 >
                   <Video size={14} />
                   Join Class
                 </a>
+              ) : (
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                  Link not yet available
+                </span>
               )}
             </>
           )}
