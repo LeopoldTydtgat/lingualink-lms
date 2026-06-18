@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { UpdateStudentSchema } from '@/lib/validation/schemas'
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -44,6 +45,14 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await req.json()
+
+    const parsed = UpdateStudentSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid request data.', details: parsed.error.flatten() },
+        { status: 400 }
+      )
+    }
 
     const cookieStore = await cookies()
     const supabase = createServerClient(

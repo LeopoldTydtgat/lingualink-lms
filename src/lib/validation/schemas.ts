@@ -147,6 +147,80 @@ export const CreateStudentSchema = z.object({
 
 export type CreateStudentInput = z.infer<typeof CreateStudentSchema>
 
+// ─── Update Teacher ───────────────────────────────────────────────────────────
+
+export const UpdateTeacherSchema = z.object({
+  full_name: z.string().min(1).max(100).optional(),
+  timezone: z.string().min(1).max(100).optional(),
+  account_types: z.array(z.enum(ACCOUNT_TYPES)).min(1).optional(),
+  status: z.enum(PROFILE_STATUS).optional(),
+  role: z.enum(['teacher', 'admin']).optional(),
+  teacher_type: z.enum(['teacher', 'teacher_exam']).optional(),
+  contract_start: dateString,
+  orientation_date: dateString,
+  observed_lesson_date: dateString,
+  date_of_birth: dateString,
+  follow_up_date: dateString,
+  title: z.string().max(10).optional().nullable(),
+  gender: z.string().max(50).optional().nullable(),
+  nationality: z.string().max(100).optional().nullable(),
+  phone: z.string().max(30).optional().nullable(),
+  street_address: z.string().max(200).optional().nullable(),
+  area_code: z.string().max(20).optional().nullable(),
+  city: z.string().max(100).optional().nullable(),
+  paypal_email: optionalEmail,
+  iban: z.string().max(50).optional().nullable(),
+  bic: z.string().max(50).optional().nullable(),
+  vat_required: z.boolean().optional(),
+  tax_number: z.string().max(100).optional().nullable(),
+  hourly_rate: z.number().positive().max(10_000).optional().nullable(),
+  currency: z.enum(['EUR', 'GBP', 'USD']).optional(),
+  native_languages: z.array(z.string().max(100)).optional(),
+  teaching_languages: z.array(z.string().max(100)).optional(),
+  specialties: z.string().max(1000).optional().nullable(),
+  bio: z.string().max(2000).optional().nullable(),
+  quote: z.string().max(500).optional().nullable(),
+  video_url: optionalUrl,
+  admin_notes: z.string().max(10_000).optional().nullable(),
+  follow_up_reason: z.string().max(1000).optional().nullable(),
+  // Tolerated: sent by clients but not written by the route.
+  preferred_payment_type: z.string().max(50).optional().nullable(),
+  is_active: z.boolean().optional(),
+})
+
+export type UpdateTeacherInput = z.infer<typeof UpdateTeacherSchema>
+
+// ─── Update Student ───────────────────────────────────────────────────────────
+
+export const UpdateStudentSchema = z.object({
+  full_name: z.string().min(1).max(100).optional(),
+  timezone: z.string().min(1).max(100).optional(),
+  status: z.enum(PROFILE_STATUS).optional(),
+  date_of_birth: dateString,
+  end_date: dateString,
+  phone: z.string().max(30).optional().nullable(),
+  language_preference: z.string().max(100).optional().nullable(),
+  customer_number: z.string().max(50).optional().nullable(),
+  is_private: z.boolean().optional(),
+  company_id: optionalUuid,
+  academic_advisor_id: optionalUuid,
+  training_id: optionalUuid,
+  native_language: z.string().max(100).optional().nullable(),
+  learning_language: z.string().max(100).optional().nullable(),
+  current_fluency_level: z.enum(CEFR_LEVELS).optional().nullable(),
+  self_assessed_level: z.enum(CEFR_LEVELS).optional().nullable(),
+  learning_goals: z.string().max(2000).optional().nullable(),
+  interests: z.string().max(1000).optional().nullable(),
+  cancellation_policy: z.enum(CANCELLATION_POLICY).optional(),
+  admin_notes: z.string().max(10_000).optional().nullable(),
+  teacher_notes: z.string().max(5000).optional().nullable(),
+  assigned_teacher_ids: z.array(uuid).optional(),
+  package_name: z.string().min(1).max(100).optional(),
+  total_hours: z.number().positive().max(500).multipleOf(0.5).optional(),
+})
+
+export type UpdateStudentInput = z.infer<typeof UpdateStudentSchema>
+
 // ─── Hours adjustment ─────────────────────────────────────────────────────────
 
 export const HoursAdjustmentSchema = z.object({
