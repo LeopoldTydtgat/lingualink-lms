@@ -631,7 +631,7 @@ export default function MyClassesClient({
                             borderRadius: '6px',
                           }}>
                             <p style={{ fontSize: '13px', color: '#dc2626', marginBottom: '8px' }}>
-                              Cancelling within 24 hours means your hours will not be refunded. Are you sure?
+                              This class starts in less than 24 hours. If you cancel now, you will lose your class credit. Continue?
                             </p>
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
