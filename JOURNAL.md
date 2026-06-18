@@ -1,3 +1,34 @@
+## Session 149 - 18 June 2026 - Audit log integrity and a linter false-positive sweep
+
+### What was built
+- Fixed phantom audit rows in the admin teacher update flow. Three fields accepted by the update schema but never persisted by the route (is_active, video_url, preferred_payment_type) were being recorded as changes in the teacher history log, so archiving a teacher logged an is_active change that never touched the database. Added the three to the history diff skip list so the audit log records only fields the route actually writes.
+- Resolved a class of linter errors introduced by a dependency bump. The react-hooks ESLint plugin moved to v7 (via eslint-config-next 16.2.6) and its recommended preset now includes the React Compiler rule set, including a purity rule that treats an async Server Component's once-per-request render as a client render. It flagged request-time date and random calls as impure-in-render across four server-side files. Added a scoped ESLint override disabling that one rule for exactly those four files, enumerated by path so the suppression cannot silently widen.
+
+### Break/Fix Log
+
+Issue 1: Teacher history log diverged from the database.
+Symptom: archiving a teacher wrote an is_active true to false row to the history log while the column stayed true.
+Cause: the diff iterated the validated request data, not the payload actually written, and these three fields pass validation but are absent from the write.
+Fix: added the three fields to the skip list.
+Lesson: an audit log is only trustworthy if it diffs what was persisted, not what was submitted.
+
+Issue 2: Hoisting the impure call did not clear the purity rule.
+Symptom: moving the date call to a single const at the top of the function just relocated the error to the new line.
+Cause: the rule fires on the call site anywhere in the render function body, not on where the result is used; the hoist also shadowed an existing variable of the same name in the billing block.
+Fix: reverted the hoist and disabled the rule at the config layer for the affected server files instead.
+Lesson: confirm what a lint rule actually targets before assuming a refactor will satisfy it.
+
+Issue 3: A path-based override would have hit a client component.
+Symptom: the obvious fix of disabling the rule for everything under the app directory would have caught a client component living there.
+Cause: the app directory mixes server and client files, and the rule fires legitimately on client components where a date call in render really can produce unstable output.
+Fix: enumerated the four server files by exact path rather than globbing, and verified the rule still fires on the client components afterward.
+Lesson: scope a suppression to exactly what is provably a false positive, and prove it did not leak.
+
+### Session result
+Two bugs resolved and pushed, both fixed at the correct layer with the root cause documented rather than patched over. The teacher history log now reflects only persisted changes. The linter false positives on the four server components are suppressed in a single scoped override that cannot widen on its own, while the same rule remains active on the client components where it catches real risk. Three client-side instances of the purity rule were identified as genuine candidates and left in place for separate assessment, and the wider rule surface introduced by the plugin bump was recorded for post-launch triage rather than dismissed.
+
+---
+
 ## Session 148 - 18 June 2026 - Security verification pass: closing flagged exposures on live evidence
 
 ### What was built
