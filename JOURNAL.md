@@ -1,3 +1,44 @@
+## Session 150 - 18 June 2026 - Consolidating the Join Class control into one shared rule
+
+### What was built
+- Created a single shared helper, isLessonJoinable, as the one source of truth for whether a class's Join Class button can be used. The rule is simple and lives in one place: a class is joinable only within the ten minutes before its start time, through to its end time, and never when its status is cancelled, completed, or a no-show. The helper is covered by unit tests for every boundary, including the exact start of the window, the exact end instant, the moment after end, and each blocked status.
+- Replaced five separate hand-written copies of this check with imports of the shared helper. The Join logic had been independently re-implemented across the student right panel, the teacher right panel, the student class-reminder modal, the teacher Upcoming Classes list, and the student My Classes page. Each copy had drifted slightly from the others, which is the same defect that produced the frozen Join button fixed in the prior session, and the same class of bug that has recurred across several files over the project's history.
+- Rebuilt the teacher right panel's Join button to match the student right panel exactly. The teacher's only Join button previously lived buried inside an expanded class card and was hidden until it became active. It is now always visible in the right panel, greyed out when the class is too far away, lit when joinable, and gone at end time, so the teacher has one obvious place to join with no hunting.
+- Fixed the student reminder modal so it reliably closes itself at class end. The modal previously had no per-second clock, so once a class started nothing re-rendered it and it could linger on screen past the class end with its Join button still showing.
+- Removed the redundant in-card Join button and a wasteful per-second timer from the teacher Upcoming Classes list, and removed dead Join code and its orphaned imports from the student My Classes page.
+- Reworded the student twenty-four-hour cancellation warning to state plainly that the class starts in less than twenty-four hours and that cancelling now forfeits the class credit.
+
+### Break/Fix Log
+
+Issue 1: The Join Class rule was duplicated across five surfaces and had drifted.
+Symptom: the same "is this class joinable now" decision was written by hand in five different files, and they did not agree. One surface used a smaller status block list than the others, one had no time gate on its button at all, and the surfaces disagreed at the exact end instant.
+Cause: each surface grew its own copy of the check independently, with no shared definition of the window or the blocked statuses.
+Fix: extracted one helper, isLessonJoinable, with a single definition of the ten-minute window, the end boundary, and the six-status block list, covered by tests, and imported it into all five surfaces.
+Lesson: a rule that decides a business-critical action must be defined once and imported, not re-typed wherever it is needed, or the copies drift and reintroduce bugs already fixed elsewhere.
+
+Issue 2: The teacher's Join button was hard to reach at the moment it mattered.
+Symptom: the teacher's only Join button was inside an expanded class card and hidden until the class was joinable, so a teacher near class time had to find and expand the right card to join.
+Cause: the teacher surface had copied a per-card pattern rather than the always-visible right-panel pattern the student side already used.
+Fix: rebuilt the teacher right panel to show an always-visible Join button, greyed until ten minutes before start and lit through to end, identical to the student right panel, and removed the buried in-card button.
+Lesson: a time-critical control belongs in one fixed, always-visible place, not hidden behind a click that the user has to remember to make.
+
+Issue 3: The reminder modal could stay open past class end with Join still showing.
+Symptom: once a class started, the modal stopped re-rendering and its end check never fired, so the modal and its Join button could remain on screen after the class had ended.
+Cause: the modal had no per-second clock, and its data poll stopped matching the lesson once it started, so nothing triggered the end check.
+Fix: added a per-second clock that drives both the Join button and the end check off the shared helper, so the modal closes itself within a second of class end.
+Lesson: a component whose display depends on the passage of time needs its own clock; relying on an unrelated poll to trigger re-evaluation leaves gaps.
+
+Issue 4: A per-second timer ran on every Upcoming Classes card for no useful purpose.
+Symptom: every class card on the teacher Upcoming Classes list, including cancelled ones, ran a one-second timer that re-rendered the card while changing nothing visible.
+Cause: once the in-card Join button was removed, the timer's only remaining consumer was a twenty-four-hour threshold on the reschedule button, which does not need second-resolution updates, and the visible countdown was already driven by a separate self-contained component.
+Fix: removed the per-card timer and computed the reschedule threshold once at render; a reschedule already refreshes the page, which recomputes it.
+Lesson: a per-second timer is only justified when something visible changes each second; watching a once-a-day boundary with one does needless work.
+
+### Session result
+The Join Class control is now governed by one shared, tested rule used across all five surfaces, ending a recurring class of drift bugs by removing every hand-written copy. The teacher right panel now matches the student right panel exactly, giving the teacher a single always-visible place to join, and the reminder modal now closes itself reliably at class end. Two of the changed surfaces had their business-critical Join gate independently confirmed by full-file review, and the teacher right panel was confirmed to be the sole, self-sufficient Join path before the redundant in-card button was removed. A wasteful per-second timer was retired from the Upcoming Classes list as part of the same pass. The student cancellation warning was also reworded for clarity. Every change was committed separately, each verified against the file on disk rather than a tool summary, and the shared helper's tests remained green throughout.
+
+---
+
 ## Session 149 - 18 June 2026 - Audit log integrity and a linter false-positive sweep
 
 ### What was built
