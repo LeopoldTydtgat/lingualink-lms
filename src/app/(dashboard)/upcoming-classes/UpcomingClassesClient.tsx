@@ -171,24 +171,11 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
 
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
   const [expanded, setExpanded] = useState(false)
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [])
-  const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
-  const classEnded = now > new Date(cls.ends_at).getTime()
+  const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
   const isNext = mounted && cls.id === nextId && !isCancelled
-  const showJoinButton = minutesUntilStart <= 10 && !classEnded && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
-
-  function handleJoinClass() {
-    if (cls.teams_link) {
-      window.open(cls.teams_link, '_blank')
-    }
-  }
 
   return (
     <div
@@ -267,15 +254,6 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {showJoinButton && cls.teams_link && (
-              <button
-                onClick={handleJoinClass}
-                className="px-4 py-2 text-white text-sm font-semibold rounded-lg transition-colors"
-                style={{ backgroundColor: '#1f2937' }}
-              >
-                Join Class
-              </button>
-            )}
             {showReschedule && (
               <ActionButton label="Reschedule" onClick={() => onReschedule(cls)} />
             )}
