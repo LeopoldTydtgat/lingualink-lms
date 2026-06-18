@@ -1,3 +1,116 @@
+## Session 150 - 18 June 2026 - Consolidating the Join Class control into one shared rule
+
+### What was built
+- Created a single shared helper, isLessonJoinable, as the one source of truth for whether a class's Join Class button can be used. The rule is simple and lives in one place: a class is joinable only within the ten minutes before its start time, through to its end time, and never when its status is cancelled, completed, or a no-show. The helper is covered by unit tests for every boundary, including the exact start of the window, the exact end instant, the moment after end, and each blocked status.
+- Replaced five separate hand-written copies of this check with imports of the shared helper. The Join logic had been independently re-implemented across the student right panel, the teacher right panel, the student class-reminder modal, the teacher Upcoming Classes list, and the student My Classes page. Each copy had drifted slightly from the others, which is the same defect that produced the frozen Join button fixed in the prior session, and the same class of bug that has recurred across several files over the project's history.
+- Rebuilt the teacher right panel's Join button to match the student right panel exactly. The teacher's only Join button previously lived buried inside an expanded class card and was hidden until it became active. It is now always visible in the right panel, greyed out when the class is too far away, lit when joinable, and gone at end time, so the teacher has one obvious place to join with no hunting.
+- Fixed the student reminder modal so it reliably closes itself at class end. The modal previously had no per-second clock, so once a class started nothing re-rendered it and it could linger on screen past the class end with its Join button still showing.
+- Removed the redundant in-card Join button and a wasteful per-second timer from the teacher Upcoming Classes list, and removed dead Join code and its orphaned imports from the student My Classes page.
+- Reworded the student twenty-four-hour cancellation warning to state plainly that the class starts in less than twenty-four hours and that cancelling now forfeits the class credit.
+
+### Break/Fix Log
+
+Issue 1: The Join Class rule was duplicated across five surfaces and had drifted.
+Symptom: the same "is this class joinable now" decision was written by hand in five different files, and they did not agree. One surface used a smaller status block list than the others, one had no time gate on its button at all, and the surfaces disagreed at the exact end instant.
+Cause: each surface grew its own copy of the check independently, with no shared definition of the window or the blocked statuses.
+Fix: extracted one helper, isLessonJoinable, with a single definition of the ten-minute window, the end boundary, and the six-status block list, covered by tests, and imported it into all five surfaces.
+Lesson: a rule that decides a business-critical action must be defined once and imported, not re-typed wherever it is needed, or the copies drift and reintroduce bugs already fixed elsewhere.
+
+Issue 2: The teacher's Join button was hard to reach at the moment it mattered.
+Symptom: the teacher's only Join button was inside an expanded class card and hidden until the class was joinable, so a teacher near class time had to find and expand the right card to join.
+Cause: the teacher surface had copied a per-card pattern rather than the always-visible right-panel pattern the student side already used.
+Fix: rebuilt the teacher right panel to show an always-visible Join button, greyed until ten minutes before start and lit through to end, identical to the student right panel, and removed the buried in-card button.
+Lesson: a time-critical control belongs in one fixed, always-visible place, not hidden behind a click that the user has to remember to make.
+
+Issue 3: The reminder modal could stay open past class end with Join still showing.
+Symptom: once a class started, the modal stopped re-rendering and its end check never fired, so the modal and its Join button could remain on screen after the class had ended.
+Cause: the modal had no per-second clock, and its data poll stopped matching the lesson once it started, so nothing triggered the end check.
+Fix: added a per-second clock that drives both the Join button and the end check off the shared helper, so the modal closes itself within a second of class end.
+Lesson: a component whose display depends on the passage of time needs its own clock; relying on an unrelated poll to trigger re-evaluation leaves gaps.
+
+Issue 4: A per-second timer ran on every Upcoming Classes card for no useful purpose.
+Symptom: every class card on the teacher Upcoming Classes list, including cancelled ones, ran a one-second timer that re-rendered the card while changing nothing visible.
+Cause: once the in-card Join button was removed, the timer's only remaining consumer was a twenty-four-hour threshold on the reschedule button, which does not need second-resolution updates, and the visible countdown was already driven by a separate self-contained component.
+Fix: removed the per-card timer and computed the reschedule threshold once at render; a reschedule already refreshes the page, which recomputes it.
+Lesson: a per-second timer is only justified when something visible changes each second; watching a once-a-day boundary with one does needless work.
+
+### Session result
+The Join Class control is now governed by one shared, tested rule used across all five surfaces, ending a recurring class of drift bugs by removing every hand-written copy. The teacher right panel now matches the student right panel exactly, giving the teacher a single always-visible place to join, and the reminder modal now closes itself reliably at class end. Two of the changed surfaces had their business-critical Join gate independently confirmed by full-file review, and the teacher right panel was confirmed to be the sole, self-sufficient Join path before the redundant in-card button was removed. A wasteful per-second timer was retired from the Upcoming Classes list as part of the same pass. The student cancellation warning was also reworded for clarity. Every change was committed separately, each verified against the file on disk rather than a tool summary, and the shared helper's tests remained green throughout.
+
+---
+
+## Session 149 - 18 June 2026 - Audit log integrity and a linter false-positive sweep
+
+### What was built
+- Fixed phantom audit rows in the admin teacher update flow. Three fields accepted by the update schema but never persisted by the route (is_active, video_url, preferred_payment_type) were being recorded as changes in the teacher history log, so archiving a teacher logged an is_active change that never touched the database. Added the three to the history diff skip list so the audit log records only fields the route actually writes.
+- Resolved a class of linter errors introduced by a dependency bump. The react-hooks ESLint plugin moved to v7 (via eslint-config-next 16.2.6) and its recommended preset now includes the React Compiler rule set, including a purity rule that treats an async Server Component's once-per-request render as a client render. It flagged request-time date and random calls as impure-in-render across four server-side files. Added a scoped ESLint override disabling that one rule for exactly those four files, enumerated by path so the suppression cannot silently widen.
+
+### Break/Fix Log
+
+Issue 1: Teacher history log diverged from the database.
+Symptom: archiving a teacher wrote an is_active true to false row to the history log while the column stayed true.
+Cause: the diff iterated the validated request data, not the payload actually written, and these three fields pass validation but are absent from the write.
+Fix: added the three fields to the skip list.
+Lesson: an audit log is only trustworthy if it diffs what was persisted, not what was submitted.
+
+Issue 2: Hoisting the impure call did not clear the purity rule.
+Symptom: moving the date call to a single const at the top of the function just relocated the error to the new line.
+Cause: the rule fires on the call site anywhere in the render function body, not on where the result is used; the hoist also shadowed an existing variable of the same name in the billing block.
+Fix: reverted the hoist and disabled the rule at the config layer for the affected server files instead.
+Lesson: confirm what a lint rule actually targets before assuming a refactor will satisfy it.
+
+Issue 3: A path-based override would have hit a client component.
+Symptom: the obvious fix of disabling the rule for everything under the app directory would have caught a client component living there.
+Cause: the app directory mixes server and client files, and the rule fires legitimately on client components where a date call in render really can produce unstable output.
+Fix: enumerated the four server files by exact path rather than globbing, and verified the rule still fires on the client components afterward.
+Lesson: scope a suppression to exactly what is provably a false positive, and prove it did not leak.
+
+### Session result
+Two bugs resolved and pushed, both fixed at the correct layer with the root cause documented rather than patched over. The teacher history log now reflects only persisted changes. The linter false positives on the four server components are suppressed in a single scoped override that cannot widen on its own, while the same rule remains active on the client components where it catches real risk. Three client-side instances of the purity rule were identified as genuine candidates and left in place for separate assessment, and the wider rule surface introduced by the plugin bump was recorded for post-launch triage rather than dismissed.
+
+---
+
+## Session 148 - 18 June 2026 - Security verification pass: closing flagged exposures on live evidence
+
+### What was built
+- No production behaviour change other than a single read narrowing. This was primarily a verification session: three items flagged as potential security exposures were each investigated against the live database and live code, and each was confirmed safe and closed without a change, on evidence rather than assumption.
+- Confirmed the teacher history log is not readable by non-admins. The table stores changed values in plaintext, including pay rate and follow-up fields, and was flagged because its safety rests entirely on its access policy. Verified live that row-level security is actually enabled on the table, that its single policy gates every operation through an admin check, that the admin-check function keys off the caller's own identity and so cannot be forged, and that the one code path reading the table sits behind the admin layout gate. Closed as not a bug.
+- Confirmed a wide execute grant on the overdue-report flagging function is harmless. The function carries the same broad grant that made a separate report function a real hole last session, and had been parked as low risk. Reading the live function confirmed it takes no arguments, only moves already-overdue reports from pending to flagged, never writes a paid status, and is idempotent, so the wide grant gives an attacker nothing of value. Stays low, confirmed.
+- Resolved a product question on the impersonation note, the free-text note a teacher writes when the wrong person attends a class. It was flagged because the authoring teacher can read it back. The client confirmed it is written on the shared post-class report and is meant to be visible like the rest of that report, so no separation is wanted. Closed as not a bug, no change.
+- Shipped the one code change of the session: replaced a select-all on the teacher edit fetch with an explicit column list, so the route no longer selects columns that the logged-in role has had revoked, in line with the house rule against select-all on tables with column-level revokes. This required also annotating the single-row return type, because the data client is untyped and an explicit column list otherwise breaks the history-diff indexing further down the route.
+- Logged a new low-priority item found during review: several fields that the edit schema accepts but the edit route never writes still generate history-log rows for changes that are never persisted, so the audit log can diverge from the database on those fields.
+
+### Break/Fix Log
+
+Issue 1: A table holding plaintext pay data was flagged as possibly readable by non-admins.
+Symptom: an access-control review flagged that the teacher history log stores changed values in plaintext, including pay rate, and carries a broad grant to the logged-in role, so whether a non-admin can read it depends entirely on its row-level policy.
+Cause: not a defect. The investigation was to confirm the policy actually holds, since a broad grant with a weak or disabled policy would have been a real exposure.
+Fix: no change. Verified on the live database in order: row-level security is genuinely enabled on the table, not merely defined; the single policy applies to all operations and gates them through the admin-check function; that function checks the caller's own identity, so it cannot be forged and returns false for the anonymous role; and the only code that reads the table is the admin history view, which sits behind the admin layout gate that redirects any non-admin. Both the policy layer and the application layer independently deny non-admin reads. Closed as not a bug.
+Lesson: a policy showing up in the catalogue does not mean row-level security is switched on, and the deciding fact is the enabled flag, not the presence of a policy. Equally, an admin segment in a route path is a folder name, not an authorisation check; the real gate is the server-side identity check, which here was confirmed present at both layers.
+
+Issue 2: A wide execute grant on a report function, matching one that was a real hole last session.
+Symptom: the overdue-report flagging function carries execute to the public and logged-in roles, the same wide grant that made a separate report function exploitable in the previous session, and had been parked as low risk without confirmation.
+Cause: not a defect, but the parking needed verifying rather than trusting.
+Fix: no change. Read the live function definition. It takes no arguments, so there is no caller-controlled input to abuse; its body only moves reports that are already past their deadline from pending to flagged; flagged withholds pay rather than granting it, so the direction is safe; and it is idempotent. Unlike the function that was a genuine hole, it has neither a caller-supplied identifier nor a pay-positive write, which were the two properties that made that one dangerous. The worst an attacker achieves is flagging a just-overdue report a few minutes before the scheduled job would. Confirmed low, closed.
+Lesson: a wide grant is only dangerous in combination. Absent caller-controlled input and absent a write that moves money in the user's favour, an open execute grant on a function buys an attacker nothing. The severity comes from the combination of properties, not the grant alone.
+
+Issue 3: A sensitive-looking note field readable by its author.
+Symptom: an access review flagged that a teacher can read back the impersonation note on their own report, raising the question of whether that note was meant to be admin-internal.
+Cause: not a technical defect; an unresolved product question about intended visibility.
+Fix: no change. Confirmed the intended behaviour with the client rather than guessing at a secure default. The note is written by the teacher on the post-class report, and the post-class report is deliberately shared with admin and other teachers as the teaching record. The client confirmed there is no reason to carve this one field out of the shared report, so the author seeing their own note is intended. Closed as not a bug.
+Lesson: confirm product intent before tightening access, because the more locked-down option is not automatically the correct one. A field that looks sensitive in isolation can be intended as part of a shared record, and only the owner of the requirement can settle that.
+
+Issue 4: A select-all on a table with revoked columns.
+Symptom: the teacher edit route fetched the current row with a select-all, on a table where two columns have had their read grant revoked from the logged-in role, violating the house rule against select-all on such tables.
+Cause: a baseline select-all that predated the column revokes from a previous session.
+Fix: replaced the select-all with an explicit list of every column the edit schema can change, verified against the schema so no field drops from the history diff and verified against the live table so no listed column is missing. Changing the select forced a second change: the data client is untyped, so under select-all the fetched row was loosely typed and indexed freely by the history diff, but an explicit column list produces a structured type with no string index, which broke that indexing. Annotated the single-row return as a generic record to restore the indexing with no runtime effect, leaving the diff logic itself untouched. A code review confirmed the list is complete, every column exists on the live table, the row is consumed only by the diff, and the change is type-level and fewer-columns-over-the-wire only, with no functional change.
+Lesson: narrowing a select on an untyped data client changes the inferred row type from loose to structured, which can break downstream code that indexed the loose type by string key. The type annotation is the necessary cost of the correctness win, and the safe move is to verify the column list against both the schema and the live table before shipping, since a missing column would log a wrong history entry rather than fail outright.
+
+### Session result
+A verification-led session about a month before go-live, spent confirming whether three flagged items were real exposures rather than adding code. The discipline throughout was to read the live database and live code before deciding anything, and in every case that reading settled the question on evidence. The teacher history log, flagged for holding plaintext pay data under a broad grant, was confirmed safe at two independent layers, its row-level policy and its admin route gate, and closed without change. A wide execute grant on the overdue-report function, matching one that had been a genuine hole the session before, was confirmed harmless once the live function showed it had neither caller-controlled input nor a pay-positive write, the two properties that had made the earlier function exploitable. A note field that looked sensitive was resolved by confirming the intended behaviour with the client rather than imposing a stricter default, and closed as working as intended. The single code change was a small but real correctness fix, replacing a select-all on a table with revoked columns with an explicit list, which also required a type annotation because the data client is untyped and an explicit list otherwise broke the history-diff indexing; it was reviewed before being committed and pushed. A latent inconsistency found during that review, where the edit route logs history for fields it never writes, was recorded for a later session. The through-line was knowing when not to change code: three of the four items closed correctly with no change at all, on confirmed live evidence rather than assumption.
+
+---
+
 ## Session 147 - 18 June 2026 - Archive access revocation and admin PATCH input validation
 
 ### What was built

@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Video, X } from 'lucide-react'
-import { BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { isLessonJoinable } from '@/lib/billing/joinable'
 
 interface UpcomingLesson {
   id: string
@@ -59,6 +59,7 @@ function formatDate(isoString: string): string {
 
 export default function ClassReminderModal({ studentId }: ClassReminderModalProps) {
   const [lesson, setLesson] = useState<UpcomingLesson | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const supabase = createClient()
 
   const checkForUpcoming = useCallback(async () => {
@@ -109,6 +110,11 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
     return () => clearInterval(interval)
   }, [checkForUpcoming])
 
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [])
+
   function handleDismiss() {
     if (lesson) addDismissed(lesson.id)
     setLesson(null)
@@ -117,7 +123,7 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
   if (!lesson) return null
 
   const lessonEndTime = new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
-  if (lessonEndTime <= Date.now()) return null
+  if (now > lessonEndTime) return null
 
   return (
     <>
@@ -241,7 +247,7 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
 
         {/* Buttons */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {lesson.teams_join_url && !BLOCKED_STATUSES.includes(lesson.status) ? (
+          {lesson.teams_join_url && isLessonJoinable(lesson.scheduled_at, lesson.duration_minutes, lesson.status, now) ? (
             <a
               href={lesson.teams_join_url}
               target="_blank"

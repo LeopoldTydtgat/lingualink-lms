@@ -9,13 +9,10 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
-  Video,
-  RefreshCw,
-  XCircle,
   Plus,
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
-import { isCancelledStatus, BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { isCancelledStatus } from '@/lib/billing/billability'
 import { Button } from '@/components/ui/button'
 
 interface Teacher {
@@ -114,13 +111,6 @@ function getSecondsUntil(isoString: string, now: number): number {
   return Math.max(0, Math.floor((new Date(isoString).getTime() - now) / 1000))
 }
 
-function isJoinable(isoString: string, durationMinutes: number, now: number, status: string): boolean {
-  if (BLOCKED_STATUSES.includes(status)) return false
-  const endTime = new Date(isoString).getTime() + durationMinutes * 60 * 1000
-  if (endTime <= now) return false
-  return getSecondsUntil(isoString, now) <= 600
-}
-
 function isWithin24Hours(isoString: string, now: number): boolean {
   return getSecondsUntil(isoString, now) < 86400
 }
@@ -189,7 +179,6 @@ export default function MyClassesClient({
 
   // First scheduled lesson gets the prominent next class card
   const nextLesson = lessons.find((l) => l.status === 'scheduled') ?? null
-  const nextLessonJoinable = mounted && nextLesson != null && isJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, now, nextLesson.status)
 
   // Upcoming list: all scheduled lessons
   const upcomingLessons = lessons.filter((l) => l.status === 'scheduled')
@@ -642,7 +631,7 @@ export default function MyClassesClient({
                             borderRadius: '6px',
                           }}>
                             <p style={{ fontSize: '13px', color: '#dc2626', marginBottom: '8px' }}>
-                              Cancelling within 24 hours means your hours will not be refunded. Are you sure?
+                              This class starts in less than 24 hours. If you cancel now, you will lose your class credit. Continue?
                             </p>
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button

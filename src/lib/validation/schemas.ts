@@ -15,17 +15,6 @@ const dateString = z.preprocess(
     .nullable()
 )
 
-// Accepts a valid http/https URL or empty string/null
-const optionalUrl = z
-  .preprocess(
-    (val) => (val === '' ? null : val),
-    z
-      .string()
-      .url('Must be a valid URL starting with http:// or https://')
-      .optional()
-      .nullable()
-  )
-
 // Accepts a valid email or empty string/null (used for optional email fields like paypal_email)
 const optionalEmail = z
   .preprocess(
@@ -84,7 +73,6 @@ export const CreateTeacherSchema = z.object({
 
   // Profile/public fields
   bio: z.string().max(2000).optional().nullable(),
-  video_url: optionalUrl,
   street_address: z.string().max(200).optional().nullable(),
   area_code: z.string().max(20).optional().nullable(),
   city: z.string().max(100).optional().nullable(),
@@ -180,7 +168,6 @@ export const UpdateTeacherSchema = z.object({
   specialties: z.string().max(1000).optional().nullable(),
   bio: z.string().max(2000).optional().nullable(),
   quote: z.string().max(500).optional().nullable(),
-  video_url: optionalUrl,
   admin_notes: z.string().max(10_000).optional().nullable(),
   follow_up_reason: z.string().max(1000).optional().nullable(),
   // Tolerated: sent by clients but not written by the route.
