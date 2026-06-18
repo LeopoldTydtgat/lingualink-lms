@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { BLOCKED_STATUSES } from '@/lib/billing/billability'
+import { isLessonJoinable } from '@/lib/billing/joinable'
 
 interface NextLesson {
   scheduled_at: string
@@ -57,16 +57,6 @@ function formatDateTime(isoString: string): string {
   const d = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoString))
   return d
 }
-
-function isJoinable(isoString: string, status: string, durationMinutes: number, now: number): boolean {
-  if (BLOCKED_STATUSES.includes(status)) return false
-  const startMs = new Date(isoString).getTime()
-  const endMs = startMs + durationMinutes * 60 * 1000
-  if (now > endMs) return false
-  const secondsUntil = Math.max(0, Math.floor((startMs - now) / 1000))
-  return secondsUntil <= 600 // 10 minutes
-}
-
 
 export default function StudentRightPanel({
   studentId: _studentId,
@@ -167,7 +157,7 @@ export default function StudentRightPanel({
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (
                 <a
-                  href={mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                  href={mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                     ? nextLesson.teams_join_url
                     : undefined}
                   target="_blank"
@@ -177,13 +167,13 @@ export default function StudentRightPanel({
                   style={{
                     display: 'block',
                     padding: '7px 12px',
-                    backgroundColor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                    backgroundColor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                       ? (joinHovered ? '#FF8303' : '#ffffff')
                       : '#E0DFDC',
-                    color: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                    color: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                       ? (joinHovered ? '#ffffff' : '#FF8303')
                       : '#9ca3af',
-                    border: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                    border: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                       ? '1.5px solid #FF8303'
                       : 'none',
                     borderRadius: '6px',
@@ -191,10 +181,10 @@ export default function StudentRightPanel({
                     fontWeight: '600',
                     textAlign: 'center',
                     textDecoration: 'none',
-                    cursor: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                    cursor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                       ? 'pointer'
                       : 'default',
-                    pointerEvents: mounted && isJoinable(nextLesson.scheduled_at, nextLesson.status, nextLesson.duration_minutes, now)
+                    pointerEvents: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
                       ? 'auto'
                       : 'none',
                     transition: 'background-color 0.18s ease, color 0.18s ease',
