@@ -103,31 +103,31 @@ export async function PATCH(
       package_name,
       total_hours,
       end_date,
-    } = body
+    } = parsed.data
 
     // Explicit allowlist — never spread the body. Excludes id, auth_user_id,
     // created_at, is_active, profile_completed and anything else the client
     // is not allowed to set.
     const studentUpdate: Record<string, unknown> = {
-      full_name:             body.full_name,
-      timezone:              body.timezone,
-      status:                body.status,
-      date_of_birth:         body.date_of_birth         ?? null,
-      phone:                 body.phone                 ?? null,
-      language_preference:   body.language_preference   ?? null,
-      customer_number:       body.customer_number       ?? null,
-      is_private:            body.is_private            ?? true,
-      company_id:            body.company_id            ?? null,
-      academic_advisor_id:   body.academic_advisor_id   ?? null,
-      native_language:       body.native_language       ?? null,
-      learning_language:     body.learning_language     ?? null,
-      current_fluency_level: body.current_fluency_level ?? null,
-      self_assessed_level:   body.self_assessed_level   ?? null,
-      learning_goals:        body.learning_goals        ?? null,
-      interests:             body.interests             ?? null,
-      cancellation_policy:   body.cancellation_policy,
-      admin_notes:           body.admin_notes           ?? null,
-      teacher_notes:         body.teacher_notes         ?? null,
+      full_name:             parsed.data.full_name,
+      timezone:              parsed.data.timezone,
+      status:                parsed.data.status,
+      date_of_birth:         parsed.data.date_of_birth         ?? null,
+      phone:                 parsed.data.phone                 ?? null,
+      language_preference:   parsed.data.language_preference   ?? null,
+      customer_number:       parsed.data.customer_number       ?? null,
+      is_private:            parsed.data.is_private            ?? true,
+      company_id:            parsed.data.company_id            ?? null,
+      academic_advisor_id:   parsed.data.academic_advisor_id   ?? null,
+      native_language:       parsed.data.native_language       ?? null,
+      learning_language:     parsed.data.learning_language     ?? null,
+      current_fluency_level: parsed.data.current_fluency_level ?? null,
+      self_assessed_level:   parsed.data.self_assessed_level   ?? null,
+      learning_goals:        parsed.data.learning_goals        ?? null,
+      interests:             parsed.data.interests             ?? null,
+      cancellation_policy:   parsed.data.cancellation_policy,
+      admin_notes:           parsed.data.admin_notes           ?? null,
+      teacher_notes:         parsed.data.teacher_notes         ?? null,
       updated_at:            new Date().toISOString(),
     }
 
@@ -237,7 +237,7 @@ export async function PATCH(
       }
     }
 
-    if ((body.status === 'former' || body.status === 'on_hold') && current.auth_user_id) {
+    if ((parsed.data.status === 'former' || parsed.data.status === 'on_hold') && current.auth_user_id) {
       // Archiving must remove ALL access, not just current sessions. signOut
       // alone leaves the password valid, so a former student could log straight
       // back in. Ban the auth user first (locks login), then kill live sessions
@@ -262,7 +262,7 @@ export async function PATCH(
       } catch (signOutError) {
         console.error('[archive student] signOut failed:', signOutError)
       }
-    } else if (body.status === 'current' && current.auth_user_id) {
+    } else if (parsed.data.status === 'current' && current.auth_user_id) {
       // Reinstating a student must restore login by lifting any prior ban.
       try {
         await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: 'none' })
