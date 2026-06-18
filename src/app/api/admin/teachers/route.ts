@@ -174,7 +174,6 @@ export async function POST(req: NextRequest) {
         native_languages: data.native_languages ?? [],
         specialties: data.specialties ?? null,
         quote: data.quote ?? null,
-        video_url: data.video_url ?? null,
         profile_completed: false,
       })
 
