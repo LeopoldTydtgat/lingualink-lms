@@ -171,7 +171,11 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
 
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
   const [expanded, setExpanded] = useState(false)
-  const now = Date.now()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - now) / 1000 / 60
   const classEnded = now > new Date(cls.ends_at).getTime()
   const isCancelled = isCancelledStatus(cls.status)
