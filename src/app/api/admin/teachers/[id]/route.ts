@@ -89,7 +89,7 @@ export async function PATCH(
 
     const { data: current, error: fetchError } = await adminClient
       .from('profiles')
-      .select('id, full_name, timezone, account_types, status, role, teacher_type, contract_start, orientation_date, observed_lesson_date, date_of_birth, follow_up_date, title, gender, nationality, phone, street_address, area_code, city, paypal_email, iban, bic, vat_required, tax_number, hourly_rate, currency, native_languages, teaching_languages, specialties, bio, quote, video_url, admin_notes, follow_up_reason, preferred_payment_type, is_active')
+      .select('id, full_name, timezone, account_types, status, role, teacher_type, contract_start, orientation_date, observed_lesson_date, date_of_birth, follow_up_date, title, gender, nationality, phone, street_address, area_code, city, paypal_email, iban, bic, vat_required, tax_number, hourly_rate, currency, native_languages, teaching_languages, specialties, bio, quote, admin_notes, follow_up_reason, preferred_payment_type, is_active')
       .eq('id', id)
       .single<Record<string, unknown>>()
 
@@ -104,7 +104,6 @@ export async function PATCH(
       // Accepted by UpdateTeacherSchema but intentionally NOT in updatePayload —
       // these are never written by this route, so they must not generate history rows.
       'is_active',
-      'video_url',
       'preferred_payment_type',
     ]
     const historyEntries = Object.entries(parsed.data)
