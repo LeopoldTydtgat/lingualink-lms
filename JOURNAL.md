@@ -1,3 +1,50 @@
+## Session 147 - 18 June 2026 - Archive access revocation and admin PATCH input validation
+
+### What was built
+- Closed an auth hole in the teacher archive flow: archiving a teacher (status former or on_hold) now bans the auth login as well as ending live sessions, so a former teacher can no longer log back in with a still-valid password. The ban is lifted automatically when the teacher is reinstated to current. The ban call hard-fails with a 500 if it errors, rather than reporting success, so the access revocation can never silently no-op.
+- Mirrored the same archive ban and reactivate-unban logic into the student archive flow, using the student auth user id indirection (students reference the auth user via a separate column, not the table primary key) on every auth admin call.
+- Fixed three queries that referenced a non-existent class_id column on the reports table. The reports foreign key to lessons is lesson_id; class_id was being used in two purge-path deletes (teacher and student) and in a live admin read on the student detail page. The deletes silently removed nothing and relied on a cascade to clean up; the read returned an empty reports list. All three now use lesson_id.
+- Revoked column-level select grants on the admin-only follow-up fields (follow_up_date and follow_up_reason) from the authenticated role, on both the profiles and students tables. These fields are admin-only by the brief but were readable by any teacher or student query. The fix was applied in the Supabase SQL editor and captured as a migration so the repo matches the live database.
+- Added request-body validation to both admin PATCH routes (teacher and student), which previously trusted the entire request body unvalidated while the create routes were fully validated. Two new update schemas validate every field that is present while tolerating the partial payloads the edit and archive screens send.
+- Wired the validated, coerced data through to the writes and the archive status decision, so the routes consume the validated result rather than the raw body.
+
+### Break/Fix Log
+
+Issue 1: Archiving a teacher or student did not actually stop them logging in.
+Symptom: setting a teacher or student to former or on_hold ended their active sessions but left their password valid, so they could log straight back in.
+Cause: the archive path called signOut only. signOut revokes sessions but does not invalidate the password.
+Fix: ban the auth user (a long ban duration) before calling signOut, so login is locked before sessions are killed, and lift the ban when status returns to current. The ban is treated as the security-critical step and hard-fails the request if it throws. Records survive the archive intact; only login is revoked, and reinstating restores it.
+Lesson: ending a session is not the same as revoking access. If the requirement is that a departed user cannot get back in, the password itself must be disabled, and the security-critical half of that must fail loud rather than fall through to a success response.
+
+Issue 2: A column-name error in the reports queries.
+Symptom: the admin student detail page returned an empty reports list, and two account-purge paths appeared to delete report rows but did not.
+Cause: the queries filtered and selected class_id on the reports table, which has no such column. Its foreign key to lessons is lesson_id. The deletes matched zero rows and a cascade on the later lesson delete happened to clean up regardless; the read errored on the unknown column.
+Fix: point all three references at the real lesson_id column. Investigation found three instances across two files, not the one the handover described, and confirmed that the separate student_reviews table legitimately has its own class_id which must not be touched.
+Lesson: a wrong column name can hide behind a cascade that does the cleanup anyway, so the symptom only shows on the read path. Audit for every instance of the pattern before fixing, and confirm which tables genuinely own a similarly named column so the correct ones are left alone.
+
+Issue 3: Admin-only follow-up fields were readable by teachers and students.
+Symptom: an RLS review flagged that follow_up_date and follow_up_reason carried a column-level select grant to the authenticated role, contradicting the brief, which treats follow-up fields as admin-only.
+Cause: a baseline column-level grant to authenticated that was never revoked.
+Fix: confirmed the grant against the live schema first (it was real, and present on both profiles and students, not only one table), then revoked select on those two columns from authenticated in the SQL editor and captured the change as a migration. Verified against the live grants afterward that the authenticated role no longer appears for those columns. Confirmed no teacher or student code path reads those columns, so nothing breaks.
+Lesson: a flagged grant is a claim to verify against the live database before acting, and the verification can widen the fix (here, the same leak existed on a second table the review had not covered). Schema changes go through the SQL editor and are captured as a migration so the repo never drifts from live.
+
+Issue 4: Both admin PATCH routes trusted the request body unvalidated.
+Symptom: the edit and archive endpoints wrote whatever arrived, with no validation, while the matching create endpoints validated fully. A malformed or omitted status would write to the row and silently no-op the archive ban logic.
+Cause: the update routes had no schema and parsed nothing; only the create routes did.
+Fix: added two update schemas where every field is optional but every present field is validated against the same value rules and enums as create, then gated each PATCH on a parse that returns a clean error on bad input. The schemas were built against the actual payloads the four live screens send, so the partial archive payloads and the full edit payloads both pass.
+Lesson: validating input on create but not on update leaves the update path as the unguarded door. The validation has to accept the real partial payloads the screens send, so it must be built from what the clients actually post, not from an assumption about a full object.
+
+Issue 5: The validation result was discarded.
+Symptom: after adding validation, the routes still read the raw body, throwing away the validation's cleanup (empty strings coerced to null on date fields) and making the archive status decision off raw input.
+Cause: the parse was added as a gate only; the route logic still referenced the original body.
+Fix: switched the writes, the history diff, and the archive status decision to read the validated, coerced result. Confirmed against the validation library that the validated object contains only the keys actually sent, so no behaviour changed for any real screen payload, with the only effect being a safety net against malformed non-screen callers.
+Lesson: a validation step that is parsed but then ignored is only half wired. The validated, coerced data should feed the writes and any security decision, not sit unused beside the raw input.
+
+### Session result
+A focused session in active bug-fixing mode roughly a month before go-live, hardening the admin account-management routes. The headline work closed a real access hole on both the teacher and student archive flows, where ending a session had been mistaken for revoking access, and brought the admin edit and archive endpoints up to the same input-validation standard as the create endpoints, then wired that validation through to the writes and the access decision. Alongside it, a column-name error that was breaking an admin read and quietly relying on a cascade was corrected in every place it appeared, and an admin-only field exposure was confirmed against the live database and revoked on both affected tables. A recurring theme was that reading the live code and schema repeatedly overturned the starting assumptions: the reported orphaned-records issue was really a missing login ban, a single-instance column bug was three instances including a live read, and a two-column grant leak was four columns across two tables. Every change that touched authentication or the money path was reviewed by both the code-review and RLS-audit passes before it was committed, and every schema change was captured as a migration so the repository stays in step with the live database. Six commits, all pushed.
+
+---
+
 ## Session 146 - 17 June 2026 - Report lifecycle: a pending report per class, guarded against early completion
 ### What was built
 - src/lib/reports/createPendingReport.ts: a shared helper that creates the class report row at the moment a class is booked, rather than leaving it to be created later. It writes the report in a pending state with a completion deadline set to twelve hours after the class ends, and is written as an idempotent upsert keyed on the lesson, so a retry or a double-call can never create a duplicate report.
