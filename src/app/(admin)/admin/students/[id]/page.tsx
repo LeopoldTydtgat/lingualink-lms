@@ -125,7 +125,7 @@ export default async function StudentDetailPage({
         happened,
         feedback,
         created_at,
-        class_id,
+        lesson_id,
         lessons!inner (
           id,
           scheduled_at,
@@ -134,7 +134,7 @@ export default async function StudentDetailPage({
           )
         )
       `)
-      .in('class_id', lessonIds)
+      .in('lesson_id', lessonIds)
       .order('created_at', { ascending: false })
       .limit(50)
 
@@ -148,7 +148,7 @@ export default async function StudentDetailPage({
         happened: r.happened,
         feedback: r.feedback,
         created_at: r.created_at,
-        class_id: r.class_id,
+        class_id: r.lesson_id,
         lesson_scheduled_at: lesson?.scheduled_at ?? null,
         teacher_name: teacherProfile?.full_name ?? null,
       }

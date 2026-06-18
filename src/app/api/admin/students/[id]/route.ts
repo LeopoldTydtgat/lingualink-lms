@@ -357,7 +357,7 @@ export async function DELETE(
 
     // 3e. Delete reports for these lessons
     if (lessonIds.length > 0) {
-      await adminClient.from('reports').delete().in('class_id', lessonIds)
+      await adminClient.from('reports').delete().in('lesson_id', lessonIds)
     }
 
     // 3f. Delete lessons
