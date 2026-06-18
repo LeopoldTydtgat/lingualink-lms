@@ -97,7 +97,16 @@ export async function PATCH(
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
-    const SKIP_FIELDS = ['admin_notes', 'updated_at', 'created_at']
+    const SKIP_FIELDS = [
+      'admin_notes',
+      'updated_at',
+      'created_at',
+      // Accepted by UpdateTeacherSchema but intentionally NOT in updatePayload —
+      // these are never written by this route, so they must not generate history rows.
+      'is_active',
+      'video_url',
+      'preferred_payment_type',
+    ]
     const historyEntries = Object.entries(parsed.data)
       .filter(([key]) => !SKIP_FIELDS.includes(key))
       .filter(([key, newVal]) => {
