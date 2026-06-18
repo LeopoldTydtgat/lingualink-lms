@@ -330,7 +330,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       const res = await fetch(`/api/admin/teachers/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'former', is_active: false }),
+        body: JSON.stringify({ status: 'former' }),
       })
       if (!res.ok) throw new Error('Failed to archive teacher.')
       setShowArchiveDialog(false)
