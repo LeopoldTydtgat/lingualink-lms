@@ -306,7 +306,7 @@ export async function DELETE(
       await adminClient.from('assignments').delete().in('lesson_id', lessonIds)
 
       // 3f. Delete reports
-      await adminClient.from('reports').delete().in('class_id', lessonIds)
+      await adminClient.from('reports').delete().in('lesson_id', lessonIds)
     }
 
     // 3g. Delete invoices
