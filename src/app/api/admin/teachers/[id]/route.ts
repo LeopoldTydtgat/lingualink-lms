@@ -98,7 +98,7 @@ export async function PATCH(
     }
 
     const SKIP_FIELDS = ['admin_notes', 'updated_at', 'created_at']
-    const historyEntries = Object.entries(body)
+    const historyEntries = Object.entries(parsed.data)
       .filter(([key]) => !SKIP_FIELDS.includes(key))
       .filter(([key, newVal]) => {
         const oldVal = current[key]
@@ -116,38 +116,38 @@ export async function PATCH(
     // Build an explicit payload so unknown keys from the request body never
     // reach PostgREST — a single unrecognised column aborts the entire update.
     const updatePayload = {
-      full_name:             body.full_name,
-      timezone:              body.timezone,
-      account_types:         body.account_types,
-      status:                body.status,
-      role:                  body.role,
-      teacher_type:          body.teacher_type,
-      contract_start:        body.contract_start        ?? null,
-      orientation_date:      body.orientation_date      ?? null,
-      observed_lesson_date:  body.observed_lesson_date  ?? null,
-      title:                 body.title                 ?? null,
-      date_of_birth:         body.date_of_birth         ?? null,
-      gender:                body.gender                ?? null,
-      nationality:           body.nationality           ?? null,
-      phone:                 body.phone                 ?? null,
-      street_address:        body.street_address        ?? null,
-      area_code:             body.area_code             ?? null,
-      city:                  body.city                  ?? null,
-      paypal_email:          body.paypal_email          ?? null,
-      iban:                  body.iban                  ?? null,
-      bic:                   body.bic                   ?? null,
-      vat_required:          body.vat_required          ?? false,
-      tax_number:            body.tax_number            ?? null,
-      hourly_rate:           body.hourly_rate           ?? null,
-      currency:              body.currency              ?? 'EUR',
-      native_languages:      body.native_languages      ?? [],
-      teaching_languages:    body.teaching_languages    ?? [],
-      specialties:           body.specialties           ?? null,
-      bio:                   body.bio                   ?? null,
-      quote:                 body.quote                 ?? null,
-      admin_notes:           body.admin_notes           ?? null,
-      follow_up_date:        body.follow_up_date        ?? null,
-      follow_up_reason:      body.follow_up_reason      ?? null,
+      full_name:             parsed.data.full_name,
+      timezone:              parsed.data.timezone,
+      account_types:         parsed.data.account_types,
+      status:                parsed.data.status,
+      role:                  parsed.data.role,
+      teacher_type:          parsed.data.teacher_type,
+      contract_start:        parsed.data.contract_start        ?? null,
+      orientation_date:      parsed.data.orientation_date      ?? null,
+      observed_lesson_date:  parsed.data.observed_lesson_date  ?? null,
+      title:                 parsed.data.title                 ?? null,
+      date_of_birth:         parsed.data.date_of_birth         ?? null,
+      gender:                parsed.data.gender                ?? null,
+      nationality:           parsed.data.nationality           ?? null,
+      phone:                 parsed.data.phone                 ?? null,
+      street_address:        parsed.data.street_address        ?? null,
+      area_code:             parsed.data.area_code             ?? null,
+      city:                  parsed.data.city                  ?? null,
+      paypal_email:          parsed.data.paypal_email          ?? null,
+      iban:                  parsed.data.iban                  ?? null,
+      bic:                   parsed.data.bic                   ?? null,
+      vat_required:          parsed.data.vat_required          ?? false,
+      tax_number:            parsed.data.tax_number            ?? null,
+      hourly_rate:           parsed.data.hourly_rate           ?? null,
+      currency:              parsed.data.currency              ?? 'EUR',
+      native_languages:      parsed.data.native_languages      ?? [],
+      teaching_languages:    parsed.data.teaching_languages    ?? [],
+      specialties:           parsed.data.specialties           ?? null,
+      bio:                   parsed.data.bio                   ?? null,
+      quote:                 parsed.data.quote                 ?? null,
+      admin_notes:           parsed.data.admin_notes           ?? null,
+      follow_up_date:        parsed.data.follow_up_date        ?? null,
+      follow_up_reason:      parsed.data.follow_up_reason      ?? null,
       updated_at:            new Date().toISOString(),
     }
 
@@ -174,7 +174,7 @@ export async function PATCH(
       }
     }
 
-    if (body.status === 'former' || body.status === 'on_hold') {
+    if (parsed.data.status === 'former' || parsed.data.status === 'on_hold') {
       // Archiving must remove ALL access, not just current sessions. signOut
       // alone leaves the password valid, so a former teacher could log straight
       // back in. Ban the auth user first (locks login), then kill live sessions
@@ -199,7 +199,7 @@ export async function PATCH(
       } catch (signOutError) {
         console.error('[archive teacher] signOut failed:', signOutError)
       }
-    } else if (body.status === 'current') {
+    } else if (parsed.data.status === 'current') {
       // Reinstating a teacher must restore login by lifting any prior ban.
       try {
         await adminClient.auth.admin.updateUserById(id, { ban_duration: 'none' })
