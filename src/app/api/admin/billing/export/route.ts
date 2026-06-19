@@ -266,6 +266,10 @@ export async function GET(req: NextRequest) {
 
   // ── 4. Company Billing Report ─────────────────────────────────────────────────────────
   else if (type === 'company_billing') {
+    // cancellation_policy and hourly_rate have column-level REVOKEs on `authenticated` —
+    // must read them via the admin client. The role check above has already gated this branch.
+    const adminClient = createAdminClient()
+
     let companiesQuery = supabase
       .from('companies')
       .select('id, name')
@@ -275,14 +279,14 @@ export async function GET(req: NextRequest) {
 
     const { data: companies } = await companiesQuery
 
-    const { data: companyStudents } = await supabase
+    const { data: companyStudents } = await adminClient
       .from('students')
       .select('id, full_name, company_id, cancellation_policy')
       .not('company_id', 'is', null)
 
     const studentIds = (companyStudents || []).map(s => s.id)
 
-    let lessonsQuery = supabase
+    let lessonsQuery = adminClient
       .from('lessons')
       .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
