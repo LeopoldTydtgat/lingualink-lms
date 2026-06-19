@@ -76,11 +76,12 @@ export async function PATCH(req: NextRequest) {
     if (invoice) {
       const { data: teacher } = await adminClient
         .from('profiles')
-        .select('full_name, email')
+        .select('full_name, email, currency')
         .eq('id', invoice.teacher_id)
         .single()
 
       if (teacher?.email) {
+        const paidSymbol = teacher.currency === 'USD' ? '$' : teacher.currency === 'GBP' ? '£' : '€'
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacher.email,
@@ -92,7 +93,7 @@ export async function PATCH(req: NextRequest) {
             bodyHtml: `
               <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
                 Your invoice for <strong>${formatMonthName(invoice.billing_month)}</strong> has been processed and payment of
-                <strong>€${Number(invoice.amount_eur ?? 0).toFixed(2)}</strong> will be transferred to your account within the agreed timeframe.
+                <strong>${paidSymbol}${Number(invoice.amount_eur ?? 0).toFixed(2)}</strong> will be transferred to your account within the agreed timeframe.
               </p>
             `,
             contactEmail: 'teachers@lingualinkonline.com',
