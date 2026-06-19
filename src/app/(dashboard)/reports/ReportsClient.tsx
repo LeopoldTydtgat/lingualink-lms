@@ -47,7 +47,11 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   )
 
   const completedReports = reports.filter(
-    r => r.status === 'completed' || r.status === 'flagged'
+    r => r.status === 'completed'
+  )
+
+  const missedReports = reports.filter(
+    r => r.status === 'flagged'
   )
 
   const filteredCompleted = completedReports.filter(r =>
@@ -119,6 +123,34 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
           </div>
         )}
       </section>
+
+      {missedReports.length > 0 && (
+        <>
+          <div style={{ borderTop: '1px solid #E0DFDC', marginTop: '24px', marginBottom: '24px' }} />
+
+          {/* Missed reports */}
+          <section>
+            <div className="flex items-center gap-3 mb-4">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ width: '3px', height: '16px', backgroundColor: '#dc2626', borderRadius: '2px', flexShrink: 0 }} />
+                <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Missed Reports</h2>
+              </div>
+              <span
+                className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+              >
+                {missedReports.length}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {missedReports.map(report => (
+                <MissedReportCard key={report.id} report={report} />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
     </div>
   )
@@ -275,6 +307,65 @@ function CompletedReportCard({
             {reopening ? 'Reopening...' : 'Reopen'}
           </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+// --- Missed report card ---
+function MissedReportCard({
+  report,
+}: {
+  report: Report
+}) {
+  const lesson = report.lesson
+  const student = lesson?.student
+
+  return (
+    <div
+      className="rounded-xl p-4 flex items-center justify-between"
+      style={{ backgroundColor: '#fff5f5', border: '0.5px solid #fecaca' }}
+    >
+      <div className="flex items-center gap-4">
+        {student?.photo_url ? (
+          <img
+            src={student.photo_url}
+            alt={student.full_name}
+            className="w-10 h-10 rounded-full object-cover"
+          />
+        ) : (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
+            style={{ backgroundColor: 'rgba(220,38,38,0.12)', color: '#dc2626' }}
+          >
+            {student?.full_name?.charAt(0) ?? '?'}
+          </div>
+        )}
+        <div>
+          <p className="font-semibold text-gray-900">
+            {student?.full_name ?? 'Unknown student'}
+          </p>
+          <p className="text-sm text-gray-500">
+            {lesson?.scheduled_at
+              ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
+              : 'Unknown time'}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span
+          className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+          style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+        >
+          Missed — payment forfeited
+        </span>
+        <a
+          href={`/reports/${report.id}`}
+          className="text-sm text-gray-500 hover:text-gray-700 underline"
+        >
+          View
+        </a>
       </div>
     </div>
   )
