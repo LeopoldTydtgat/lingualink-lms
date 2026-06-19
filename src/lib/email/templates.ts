@@ -188,6 +188,22 @@ export function teacherCancellationEmailContent(
   `
 }
 
+export function teacherReportForfeitedEmailContent(
+  studentName: string,
+  scheduledAt: string,
+  teacherTimezone: string
+): string {
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      The 12-hour window to submit your report for your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime} has now closed.
+    </p>
+    <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">
+      As the report was not submitted in time, payment for this class has been forfeited in line with our reporting policy.
+    </p>
+  `
+}
+
 // ─── Student email content builders ───────────────────────────────────────────
 
 export function studentBookingConfirmationEmailContent(

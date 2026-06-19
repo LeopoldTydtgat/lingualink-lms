@@ -67,7 +67,11 @@ function getEffectiveStatus(lesson: LiveLesson): string {
   const end = start + lesson.duration_minutes * 60 * 1000
   const now = Date.now()
   if (now >= start && now < end) return 'In Progress'
-  if (now >= end) return 'Completed'
+  // Past its end time but DB status is still 'scheduled' (the terminal statuses —
+  // completed / no-show / cancelled — were all handled above): the class ended with
+  // no report submitted. Surface that as 'Awaiting report', never 'Completed' — on a
+  // pay-oversight view, calling an unreported class "Completed" would be a lie.
+  if (now >= end) return 'Awaiting report'
   return 'Upcoming'
 }
 
@@ -75,6 +79,7 @@ const STATUS_STYLES: Record<string, { bg: string; color: string }> = {
   Upcoming:     { bg: '#dbeafe', color: '#1e40af' },
   'In Progress':{ bg: '#dcfce7', color: '#166534' },
   Completed:    { bg: '#f3f4f6', color: '#374151' },
+  'Awaiting report': { bg: '#ffedd5', color: '#9a3412' },
   'No-Show':    { bg: '#fef3c7', color: '#92400e' },
   Cancelled:    { bg: '#fee2e2', color: '#991b1b' },
 }

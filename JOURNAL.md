@@ -1,3 +1,68 @@
+## Session 152 - 19 June 2026 - Overdue-report lifecycle
+
+### What was built
+- Rewrote the report-overdue cron so it now does real work: for any class whose 12-hour reporting window has passed with no submitted report, it flags the report and emails the teacher a forfeiture notice. Previously the cron only set a "seen" flag and sent nothing.
+- The flag write is race-safe (conditional update on status, with an affected-row check) so a report completed or reopened in the same window is never clobbered, and a reopened report is never re-flagged.
+- The forfeiture email is best-effort and isolated: if the email provider fails, the flag still stands, so the pay decision never depends on email delivery.
+- Added a new forfeiture email template: prose only, no call to action, stating plainly that the window closed and payment for the class is forfeited.
+- Split the teacher reports page into three sections instead of two: Pending, Completed, and a new Missed section. Missed classes show a red "Missed - payment forfeited" badge with no action button, and the section only appears when there is something in it.
+- Fixed the admin dashboard so a past class that was never reported now reads "Awaiting report" in a distinct amber, instead of being mislabelled "Completed".
+- Removed the old disabled auto-complete-lessons cron: its route file, its schedule entry, and its middleware allowlist entry, so the allowlist now matches the live cron set exactly.
+
+### Break/Fix Log
+
+Issue 1: Past classes with no report sat as scheduled forever.
+Symptom: a class could end and the teacher never report, and nothing flagged it or told the client to chase or withhold pay.
+Cause: the report-overdue cron only set a processed flag; it never changed report status or sent an email. The status that would mark a class overdue was never written by anything.
+Fix: the cron now flags the report and emails the teacher, with the flag write guarded against races and reopened reports.
+Lesson: a cron named for a job does not mean it does that job. Reading the actual body showed it sent nothing despite its name.
+
+Issue 2: The admin dashboard called unreported past classes "Completed".
+Symptom: a class past its end time with no report showed a grey "Completed" badge on the dashboard, reading as done and fine.
+Cause: a fallback branch returned "Completed" for any past-end lesson still in scheduled status.
+Fix: that branch now returns "Awaiting report" in a distinct colour. Genuinely completed classes are unaffected because their real status is checked first.
+Lesson: on a money-oversight view, a convenient default label can quietly assert something untrue.
+
+### Session result
+Verified the whole report lifecycle against live code and the live database before changing anything, which corrected a stale brief: the pending-report-at-booking step and the pay logic were already correct, so the real work was the overdue end of the lifecycle, not the billing calculation. Shipped in four reviewed commits, with the two money-path changes passing both an automated code review and an RLS audit. Two cron schedule changes that need a hosting plan upgrade were deferred to go-live and logged separately.
+
+---
+
+## Session 151 - 19 June 2026 - Billing data integrity: false-completed lessons corrected
+
+### What was built
+- Investigated a reported billing anomaly: the teacher right panel showed a current-month amount while the dashboard showed no upcoming classes.
+- Traced the anomaly to two distinct causes: six lessons incorrectly stored as 'completed' with no submitted report, and a legitimate under-24-hour cancellation charge being counted correctly by the billing widget.
+- Corrected the data-integrity issue with a scoped, double-guarded UPDATE targeting the six lesson IDs explicitly, resetting their status from 'completed' to 'scheduled'. A full pre-change backup was taken to a separate table. Verified afterwards that both affected trainings' remaining-hours balances were unchanged, confirming the status correction touched no balance.
+- Confirmed the billing widget is correct: the current-month figure accurately reflects a valid cancellation fee and required no code change.
+- Identified a related display mislabel on the admin dashboard where lessons past their end time but with no submitted report are shown as "Completed"; deferred into the planned overdue-report lifecycle work rather than patching in isolation.
+- Logged all findings, root causes, and decisions to the private backlog.
+
+### Break/Fix Log
+
+Issue 1: Six lessons stored as status 'completed' with no submitted report.
+Symptom: teacher billing showed income for classes that were never confirmed.
+Cause: a previously-disabled auto-complete cron (turned off earlier for exactly this reason) had stamped these six rows as completed by end-time alone, before it was disabled. The billing logic was correct and was faithfully counting them; the data was wrong.
+Fix: a scoped, double-guarded UPDATE (six explicit lesson IDs, only where still 'completed') reset them to 'scheduled'. Full pre-change backup taken to a separate table. Verified afterwards that the six are now 'scheduled' and that the two affected trainings' remaining-hours balances were unchanged, confirming the status change touched no balance.
+Lesson: time passing is not proof a class happened. A class is only billable once the teacher confirms it via a report. End-time alone must never drive a paid status.
+
+Issue 2: The reported billing figure was not actually a bug.
+Symptom: the current-month amount looked wrong given there were no upcoming classes.
+Cause: the figure was a legitimate under-24-hour cancellation. A test student cancelled a class roughly 17 hours before it started, and the teacher is owed that session under the under-24-hour rule. The billing widget applied this correctly.
+Fix: none required. Investigated end-to-end and confirmed correct. Recorded in the backlog so it is not re-investigated as a bug in future.
+Lesson: on the money path, confirm against the live data row by row before concluding anything is broken. The number was right; the surprise was only in how it combined with the cancelled-class display.
+
+Issue 3: Admin dashboard mislabels a past, unreported class as "Completed".
+Symptom: a scheduled class whose end-time has passed but has no report shows a "Completed" badge on the admin dashboard.
+Cause: the dashboard status helper falls through to a clock-based branch for still-scheduled lessons, labelling any past-end one "Completed". It is display-only -- the real database status is checked first, and billing reads the database, not this label.
+Fix: deferred by decision. This is being folded into the larger overdue-report lifecycle work rather than patched as an isolated one-word change, so the dashboard, reports list, and admin pending count can all represent "ended but unreported" consistently in one coherent piece of work.
+Lesson: prefer one correct, coherent fix over a quick patch that would need redoing when the related feature is built.
+
+### Session result
+The reported billing anomaly resolved into two distinct findings: a genuine data-integrity issue (six falsely-completed lessons, now corrected with a verified backup and no balance impact) and a non-bug (a correct under-24-hour cancellation charge). A related display mislabel on the admin dashboard was identified and deliberately deferred into the planned overdue-report work. No application code changed this session; the work was a careful read-only investigation and a single scoped data correction on the highest-stakes part of the system, plus thorough backlog logging.
+
+---
+
 ## Session 150 - 18 June 2026 - Consolidating the Join Class control into one shared rule
 
 ### What was built
