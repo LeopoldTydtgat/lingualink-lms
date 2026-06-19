@@ -22,7 +22,7 @@ export default async function StudentMessagesPage() {
     .from('training_teachers')
     .select(`
       teacher_id,
-      profiles!inner(id, full_name, email, photo_url, role)
+      profiles!inner(id, full_name, photo_url, role)
     `)
     .in(
       'training_id',
@@ -36,7 +36,7 @@ export default async function StudentMessagesPage() {
 
   // Flatten and deduplicate assigned teachers
   const seenIds = new Set<string>()
-  const assignedTeachers: { id: string; full_name: string; email: string; photo_url: string | null; role: string }[] = []
+  const assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string }[] = []
 
   for (const row of trainingTeachers ?? []) {
     const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
@@ -57,7 +57,6 @@ export default async function StudentMessagesPage() {
   const contactMap = new Map<string, {
     id: string
     name: string
-    email: string
     photo_url: string | null
     type: string
     latestMessage: typeof allMessages extends (infer T)[] | null ? T : never
@@ -75,7 +74,6 @@ export default async function StudentMessagesPage() {
       contactMap.set(contactId, {
         id: teacher.id,
         name: teacher.full_name,
-        email: teacher.email,
         photo_url: teacher.photo_url,
         type: teacher.role === 'admin' ? 'admin' : 'teacher',
         latestMessage: msg,

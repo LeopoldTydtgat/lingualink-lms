@@ -24,10 +24,6 @@
     {
       "path": "/api/cron/training-ending-soon",
       "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/auto-complete-lessons",
-      "schedule": "0 9 * * *"
     }
   ]
 }
