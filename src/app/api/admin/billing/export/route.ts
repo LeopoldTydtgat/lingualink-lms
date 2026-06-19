@@ -210,7 +210,7 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed', 'Currency']
+    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate', 'Total Owed', 'Currency']
     const rows = Object.values(earningsMap).map(e => [
       e.teacherName,
       e.teacherEmail,
