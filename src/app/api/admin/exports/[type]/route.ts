@@ -191,15 +191,15 @@ export async function GET(
             ? supabase.from('reports').select('lesson_id, did_class_happen, no_show_type').in('lesson_id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? adminClient.from('profiles').select('id, full_name, hourly_rate').in('id', tIds)
+            ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', tIds)
             : { data: [] },
         ])
 
         const reportMap: Record<string, any> = {}
         reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
 
-        const profileMap: Record<string, { name: string; rate: number }> = {}
-        profileRes.data?.forEach((p: any) => { profileMap[p.id] = { name: p.full_name, rate: Number(p.hourly_rate ?? 0) } })
+        const profileMap: Record<string, { name: string; rate: number; currency: string }> = {}
+        profileRes.data?.forEach((p: any) => { profileMap[p.id] = { name: p.full_name, rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
         // Group by teacher × month
         type EarningKey = string
@@ -210,6 +210,7 @@ export async function GET(
           studentNoShows: number
           totalMinutes: number
           rate: number
+          currency: string
           billableAmount: number
           invoiceUploaded: string
         }> = {}
@@ -239,6 +240,7 @@ export async function GET(
               studentNoShows: 0,
               totalMinutes: 0,
               rate: profile?.rate ?? 0,
+              currency: profile?.currency ?? 'EUR',
               billableAmount: 0,
               invoiceUploaded: '',
             }
@@ -264,8 +266,9 @@ export async function GET(
           'Classes Taken': s.classesTaken,
           'Student No-Shows': s.studentNoShows,
           'Total Hours': (s.totalMinutes / 60).toFixed(2),
-          'Hourly Rate (€)': s.rate.toFixed(2),
-          'Total Owed (€)': s.billableAmount.toFixed(2),
+          'Hourly Rate': s.rate.toFixed(2),
+          'Total Owed': s.billableAmount.toFixed(2),
+          'Currency': s.currency,
           'Invoice Status': invoiceMap[key] ?? 'not uploaded',
         }))
 
