@@ -32,7 +32,6 @@ interface Contact {
   id: string
   type: string
   name: string
-  email: string
   photo_url: string | null
   latestMessage: Message | null
   unreadCount: number
@@ -41,7 +40,6 @@ interface Contact {
 interface Teacher {
   id: string
   full_name: string
-  email: string
   photo_url: string | null
   role: string
 }
@@ -308,7 +306,6 @@ export default function StudentMessagesClient({
         id: teacher.id,
         type: teacher.role === 'admin' ? 'admin' : 'teacher',
         name: teacher.full_name,
-        email: teacher.email,
         photo_url: teacher.photo_url,
         latestMessage: null,
         unreadCount: 0,
