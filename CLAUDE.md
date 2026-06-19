@@ -137,6 +137,7 @@ SENTRY_DSN
 - **Fail-safe fallbacks: action-prompting UI defaults to the prompting state on null** (`?? false` to show a banner, not `?? true`).
 - **Every factual claim about code, schema, or state must cite its source: file:line read this session, or actual tool/command output. Uncited claims must be prefixed `UNVERIFIED:`. 'I have not read X — paste it' is a correct, acceptable answer. Never fabricate to fill a gap.**
 - **Before editing any file, OUTPUT the grep'd list of downstream consumers and, for each, state why it is unaffected. Do not merely assert consumers were considered — show the list.**
+- **Never trust a tool's on-screen rendering of file contents — verify against the file on disk.** Edit-tool diffs and terminal echoes can drop, scramble, or merge characters (and can render clean UTF-8 as mojibake). After any edit, and before any commit, read the real bytes from disk (PowerShell `Get-Content -Raw`, or a byte/char-code dump for line-ending-sensitive files) and confirm the actual content. A passing `tsc`/test plus a clean-looking diff is not enough — confirm the file itself.
 
 ## Known issues (as of April 2026)
 
