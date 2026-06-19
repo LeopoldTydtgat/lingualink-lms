@@ -444,7 +444,9 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const monthOptions = getMonthOptions(invoices)
 
   // ── Student billing totals ─────────────────────────────────────────────────
-  const sbBillableTotal = sbLessons.reduce((sum, l) => {
+  // Grouped by currency (pounds and euros must never be summed into one number)
+  const sbTotalsByCurrency: Record<string, number> = {}
+  for (const l of sbLessons) {
     const bill = getBillability({
       status: l.status,
       scheduledAt: l.scheduled_at,
@@ -453,8 +455,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       hourlyRate: l.hourlyRate,
       durationMinutes: l.duration_minutes,
     })
-    return bill.billableToTeacher ? sum + bill.amount : sum
-  }, 0)
+    if (bill.billableToTeacher) {
+      const cur = l.teacherCurrency ?? 'EUR'
+      sbTotalsByCurrency[cur] = (sbTotalsByCurrency[cur] ?? 0) + bill.amount
+    }
+  }
+  const sbTotalDisplay = Object.entries(sbTotalsByCurrency)
+    .map(([cur, amt]) => `${currencySymbol(cur)}${amt.toFixed(2)}`)
+    .join(' + ') || '€0.00'
 
   // ── Company billing: group by company then student ─────────────────────────
   const cbByCompany: Record<string, { companyName: string; lessons: LessonRow[] }> = {}
@@ -826,7 +834,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 </div>
                 <div>
                   <p className="text-xs text-gray-400">Billable total</p>
-                  <p className="text-lg font-semibold text-gray-900">€{sbBillableTotal.toFixed(2)}</p>
+                  <p className="text-lg font-semibold text-gray-900">{sbTotalDisplay}</p>
                 </div>
               </div>
 

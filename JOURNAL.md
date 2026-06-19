@@ -1,3 +1,34 @@
+## Session 153 - 19 June 2026 - Student email privacy, multi-currency billing, and B2B under-billing fix
+
+### What was built
+- Removed assigned-teacher and admin email addresses from the student messages page. The emails were fetched and carried in props but never rendered, so they leaked to the student browser for no functional reason. Dropped the email field from the profiles join and the contacts build in the page, and from the Contact and Teacher interfaces in the client component. The student's own email was deliberately retained. Message send and receive run on IDs only, and email notifications resolve the recipient address server-side via the admin client, so neither path was affected.
+- Made four billing surfaces respect each teacher's currency setting. The platform supports paying teachers in EUR, GBP, or USD per their profile, with no currency conversion - the stored amount is rate times hours in the teacher's own currency. Four sites hardcoded the euro sign over that number, which would display incorrectly for any non-euro teacher. Fixed the invoice-paid email, the admin student-billing total, and two CSV exports. The student-billing total previously summed amounts across a student's teachers into one euro figure even when those teachers used different currencies; it now groups by currency and renders each separately when mixed.
+- Fixed silent under-billing in the company billing CSV export. Two queries read column-level restricted fields through the user-scoped client, which returns null silently under the admin role. This caused the export to under-report amounts and drop late-cancellation charges with no visible error. Moved both queries to the admin client, mirroring an existing working pattern in the same file.
+
+### Break/Fix Log
+Issue 1
+- Symptom: A handover brief listed a teacher-email privacy leak as a confirmed bug requiring removal, citing client confirmation.
+- Cause: The brief and the bug log contradicted each other - one line called it a confirmed requirement, another called it an open product question. The confirmation had never actually been verified.
+- Fix: Confirmed the product decision directly, then audited the page and its client component before removing anything. The audit proved the email was never rendered, so removal was safe and broke no messaging.
+- Lesson: When a brief asserts a decision as confirmed, verify it against ground truth before acting. A bug log that contradicts itself is a signal to stop and check, not to pick the more convenient line.
+
+Issue 2
+- Symptom: A bug log entry described a currency display bug as a simple pound-to-euro swap.
+- Cause: The entry was written before anyone confirmed that multi-currency was a deliberate feature. The pound symbol the client saw was the feature working, driven by a test teacher set to GBP.
+- Fix: Audited the whole currency surface before any edit. Found the symbol logic was already correct and dynamic, and the real bug was four sites hardcoding euro over a currency-aware number. Corrected those four rather than removing the feature.
+- Lesson: A field or value existing in code does not mean it is a bug. Auditing the data flow first prevented deleting a feature the business asked for.
+
+Issue 3
+- Symptom: The company billing export silently under-reported amounts and omitted late-cancellation charges.
+- Cause: Two queries read restricted columns through the user-scoped client, which returns null silently under the admin role rather than raising an error. The amount fell to zero and the late-cancellation flag never triggered.
+- Fix: Moved both queries to the admin client, which is the correct path for reading restricted columns and matches an existing precedent in the same file. The fix changed no billing logic, only which client read the data.
+- Lesson: A silent null from a permission boundary is more dangerous than an error, because the output looks valid. A failed export that returns an empty file is indistinguishable from a genuinely empty one unless errors are surfaced.
+
+### Session result
+Shipped three fixes across two sessions of accumulated billing and privacy work, each reviewed by both the code review and database audit subagents before commit. The student messages page no longer exposes teacher contact details to students. Multi-currency billing now displays correctly for any teacher currency across the invoice email, both CSV exports, and the admin student-billing total, with mixed-currency totals shown per currency rather than summed into a meaningless figure. The company billing export now reads its restricted columns correctly and bills the right amount. Two new items were logged for future sessions: a file-wide absence of error handling in the export route that can mask a failed export as an empty one, and a note that the company billing queries now rely solely on their in-query filters for scope. Three commits pushed to origin/dev.
+
+---
+
 ## Session 152 - 19 June 2026 - Overdue-report lifecycle
 
 ### What was built

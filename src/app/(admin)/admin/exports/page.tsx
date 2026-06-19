@@ -57,7 +57,7 @@ const EXPORTS: ExportDef[] = [
     title: 'Teacher Earnings Summary',
     description: 'Monthly earnings per teacher — classes taken, no-shows, hours, rate, and total owed.',
     filters: ['from', 'to', 'teacher'],
-    columns: ['Teacher', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate (€)', 'Total Owed (€)', 'Invoice Status'],
+    columns: ['Teacher', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate', 'Total Owed', 'Currency', 'Invoice Status'],
   },
   {
     type: 'student-hours',
