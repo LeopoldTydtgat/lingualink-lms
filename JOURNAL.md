@@ -1,3 +1,33 @@
+## Session 152 - 19 June 2026 - Overdue-report lifecycle
+
+### What was built
+- Rewrote the report-overdue cron so it now does real work: for any class whose 12-hour reporting window has passed with no submitted report, it flags the report and emails the teacher a forfeiture notice. Previously the cron only set a "seen" flag and sent nothing.
+- The flag write is race-safe (conditional update on status, with an affected-row check) so a report completed or reopened in the same window is never clobbered, and a reopened report is never re-flagged.
+- The forfeiture email is best-effort and isolated: if the email provider fails, the flag still stands, so the pay decision never depends on email delivery.
+- Added a new forfeiture email template: prose only, no call to action, stating plainly that the window closed and payment for the class is forfeited.
+- Split the teacher reports page into three sections instead of two: Pending, Completed, and a new Missed section. Missed classes show a red "Missed - payment forfeited" badge with no action button, and the section only appears when there is something in it.
+- Fixed the admin dashboard so a past class that was never reported now reads "Awaiting report" in a distinct amber, instead of being mislabelled "Completed".
+- Removed the old disabled auto-complete-lessons cron: its route file, its schedule entry, and its middleware allowlist entry, so the allowlist now matches the live cron set exactly.
+
+### Break/Fix Log
+
+Issue 1: Past classes with no report sat as scheduled forever.
+Symptom: a class could end and the teacher never report, and nothing flagged it or told the client to chase or withhold pay.
+Cause: the report-overdue cron only set a processed flag; it never changed report status or sent an email. The status that would mark a class overdue was never written by anything.
+Fix: the cron now flags the report and emails the teacher, with the flag write guarded against races and reopened reports.
+Lesson: a cron named for a job does not mean it does that job. Reading the actual body showed it sent nothing despite its name.
+
+Issue 2: The admin dashboard called unreported past classes "Completed".
+Symptom: a class past its end time with no report showed a grey "Completed" badge on the dashboard, reading as done and fine.
+Cause: a fallback branch returned "Completed" for any past-end lesson still in scheduled status.
+Fix: that branch now returns "Awaiting report" in a distinct colour. Genuinely completed classes are unaffected because their real status is checked first.
+Lesson: on a money-oversight view, a convenient default label can quietly assert something untrue.
+
+### Session result
+Verified the whole report lifecycle against live code and the live database before changing anything, which corrected a stale brief: the pending-report-at-booking step and the pay logic were already correct, so the real work was the overdue end of the lifecycle, not the billing calculation. Shipped in four reviewed commits, with the two money-path changes passing both an automated code review and an RLS audit. Two cron schedule changes that need a hosting plan upgrade were deferred to go-live and logged separately.
+
+---
+
 ## Session 151 - 19 June 2026 - Billing data integrity: false-completed lessons corrected
 
 ### What was built
