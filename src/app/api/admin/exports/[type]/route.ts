@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability } from '@/lib/billing/billability'
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 
 // ─── CSV helper ───────────────────────────────────────────────────────────────
 
@@ -112,6 +113,9 @@ export async function GET(
           supabase.from('students').select('id, full_name, company_id').in('id', studentIds),
           supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
         ])
+        if (teacherRes.error) throw teacherRes.error
+        if (studentRes.error) throw studentRes.error
+        if (reportRes.error) throw reportRes.error
 
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
@@ -123,6 +127,7 @@ export async function GET(
         const companyRes = companyIds.length > 0
           ? await supabase.from('companies').select('id, name').in('id', companyIds)
           : { data: [] }
+        if ('error' in companyRes && companyRes.error) throw companyRes.error
         const companyMap: Record<string, string> = {}
         companyRes.data?.forEach((c: any) => { companyMap[c.id] = c.name })
 
@@ -194,6 +199,8 @@ export async function GET(
             ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', tIds)
             : { data: [] },
         ])
+        if ('error' in reportRes && reportRes.error) throw reportRes.error
+        if ('error' in profileRes && profileRes.error) throw profileRes.error
 
         const reportMap: Record<string, any> = {}
         reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
@@ -254,6 +261,7 @@ export async function GET(
 
         // Fetch invoice upload status per teacher/month
         const invoiceRes = await supabase.from('invoices').select('teacher_id, billing_month, status')
+        if (invoiceRes.error) throw invoiceRes.error
         const invoiceMap: Record<string, string> = {}
         invoiceRes.data?.forEach((inv: any) => {
           const ym = (inv.billing_month as string).slice(0, 7)
@@ -295,6 +303,7 @@ export async function GET(
         const studentRes = sIds.length > 0
           ? await supabase.from('students').select('id, full_name, company_id').in('id', sIds)
           : { data: [] }
+        if ('error' in studentRes && studentRes.error) throw studentRes.error
 
         const sMap: Record<string, { name: string; companyId: string | null }> = {}
         studentRes.data?.forEach((s: any) => { sMap[s.id] = { name: s.full_name, companyId: s.company_id } })
@@ -303,6 +312,7 @@ export async function GET(
         const cRes = cIds.length > 0
           ? await supabase.from('companies').select('id, name').in('id', cIds)
           : { data: [] }
+        if ('error' in cRes && cRes.error) throw cRes.error
         const cMap: Record<string, string> = {}
         cRes.data?.forEach((c: any) => { cMap[c.id] = c.name })
 
@@ -353,6 +363,7 @@ export async function GET(
 
         const cIds = [...new Set((students ?? []).map((s: any) => s.company_id).filter(Boolean))] as string[]
         const cRes = await supabase.from('companies').select('id, name').in('id', cIds)
+        if (cRes.error) throw cRes.error
         const cMap: Record<string, string> = {}
         cRes.data?.forEach((c: any) => { cMap[c.id] = c.name })
 
@@ -431,6 +442,8 @@ export async function GET(
             ? supabase.from('profiles').select('id, full_name').in('id', tIds)
             : { data: [] },
         ])
+        if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
+        if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
 
         const lessonMap: Record<string, { studentId: string; scheduledAt: string }> = {}
         lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at } })
@@ -444,6 +457,7 @@ export async function GET(
         const studentRes2 = filteredSIds.length > 0
           ? await supabase.from('students').select('id, full_name').in('id', filteredSIds)
           : { data: [] }
+        if ('error' in studentRes2 && studentRes2.error) throw studentRes2.error
         const studentMap: Record<string, string> = {}
         studentRes2.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
@@ -503,6 +517,8 @@ export async function GET(
             ? supabase.from('profiles').select('id, full_name').in('id', tIds)
             : { data: [] },
         ])
+        if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
+        if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
 
         const lessonMap: Record<string, { studentId: string; scheduledAt: string }> = {}
         lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at } })
@@ -514,6 +530,7 @@ export async function GET(
         const studentRes = sIds.length > 0
           ? await supabase.from('students').select('id, full_name').in('id', sIds)
           : { data: [] }
+        if ('error' in studentRes && studentRes.error) throw studentRes.error
         const studentMap: Record<string, string> = {}
         studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
@@ -548,6 +565,7 @@ export async function GET(
     }
   } catch (err: any) {
     console.error(`Export error [${type}]:`, err)
+    Sentry.captureException(err)
     return NextResponse.json({ error: err.message ?? 'Export failed' }, { status: 500 })
   }
 

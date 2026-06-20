@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
+import * as Sentry from '@sentry/nextjs'
 import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import {
@@ -74,6 +75,8 @@ export async function GET(req: NextRequest) {
   let csv = ''
   let filename = 'export.csv'
 
+  try {
+
   // ── 1. Teacher Invoice Summary ────────────────────────────────────────────────────────
   if (type === 'teacher_invoices') {
     // Refresh amount_eur before export so the CSV matches the admin Billing
@@ -102,7 +105,8 @@ export async function GET(req: NextRequest) {
     if (teacherId) query = query.eq('teacher_id', teacherId)
     if (month) query = query.eq('billing_month', month)
 
-    const { data: invoices } = await query
+    const { data: invoices, error: invoicesErr } = await query
+    if (invoicesErr) throw invoicesErr
 
     const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', 'Uploaded At', 'Paid At']
     const rows = (invoices || []).map(inv => {
@@ -129,11 +133,12 @@ export async function GET(req: NextRequest) {
     // hourly_rate has a column-level REVOKE on `authenticated` — must use the
     // admin client. Role check above has already gated access to this branch.
     const adminClient = createAdminClient()
-    const { data: teachers } = await adminClient
+    const { data: teachers, error: teachersErr } = await adminClient
       .from('profiles')
       .select('id, full_name, email, hourly_rate, timezone, currency')
       .in('role', ['teacher', 'admin'])
       .order('full_name')
+    if (teachersErr) throw teachersErr
 
     let lessonsQuery = supabase
       .from('lessons')
@@ -144,7 +149,8 @@ export async function GET(req: NextRequest) {
     if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
     if (dateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', dateTo)
 
-    const { data: lessons } = await lessonsQuery
+    const { data: lessons, error: lessonsErr } = await lessonsQuery
+    if (lessonsErr) throw lessonsErr
 
     // Group lessons by teacher × month (in the teacher's local timezone)
     const earningsMap: Record<string, {
@@ -237,11 +243,13 @@ export async function GET(req: NextRequest) {
     if (studentId) studentsQuery = studentsQuery.eq('id', studentId)
     if (companyId) studentsQuery = studentsQuery.eq('company_id', companyId)
 
-    const { data: students } = await studentsQuery
+    const { data: students, error: studentsErr } = await studentsQuery
+    if (studentsErr) throw studentsErr
 
-    const { data: trainings } = await supabase
+    const { data: trainings, error: trainingsErr } = await supabase
       .from('trainings')
       .select('student_id, total_hours, hours_consumed, end_date, package_name')
+    if (trainingsErr) throw trainingsErr
 
     const headers = ['Student', 'Email', 'Company', 'Package', 'Total Hours', 'Hours Used', 'Hours Remaining', 'Training End Date']
     const rows = (students || []).map(s => {
@@ -277,12 +285,14 @@ export async function GET(req: NextRequest) {
 
     if (companyId) companiesQuery = companiesQuery.eq('id', companyId)
 
-    const { data: companies } = await companiesQuery
+    const { data: companies, error: companiesErr } = await companiesQuery
+    if (companiesErr) throw companiesErr
 
-    const { data: companyStudents } = await adminClient
+    const { data: companyStudents, error: companyStudentsErr } = await adminClient
       .from('students')
       .select('id, full_name, company_id, cancellation_policy')
       .not('company_id', 'is', null)
+    if (companyStudentsErr) throw companyStudentsErr
 
     const studentIds = (companyStudents || []).map(s => s.id)
 
@@ -294,7 +304,8 @@ export async function GET(req: NextRequest) {
     if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
     if (dateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', dateTo)
 
-    const { data: lessons } = await lessonsQuery
+    const { data: lessons, error: lessonsErr } = await lessonsQuery
+    if (lessonsErr) throw lessonsErr
 
     const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
     const rows: (string | number | boolean | null)[][] = []
@@ -351,7 +362,8 @@ export async function GET(req: NextRequest) {
     if (dateFrom) reportsQuery = reportsQuery.gte('created_at', dateFrom)
     if (dateTo) reportsQuery = reportsQuery.lte('created_at', dateTo)
 
-    const { data: reports } = await reportsQuery
+    const { data: reports, error: reportsErr } = await reportsQuery
+    if (reportsErr) throw reportsErr
 
     const headers = ['Student', 'Class Date', 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
     const rows = (reports || []).map(r => {
@@ -393,7 +405,8 @@ export async function GET(req: NextRequest) {
     if (dateFrom) query = query.gte('scheduled_at', dateFrom)
     if (dateTo) query = query.lte('scheduled_at', dateTo)
 
-    const { data: lessons } = await query
+    const { data: lessons, error: lessonsErr } = await query
+    if (lessonsErr) throw lessonsErr
 
     const now = Date.now()
     const headers = ['Teacher', 'Student', 'Class Date & Time', 'Duration (min)', 'Status', 'Hours Since Class']
@@ -418,6 +431,12 @@ export async function GET(req: NextRequest) {
 
   else {
     return NextResponse.json({ error: 'Unknown export type' }, { status: 400 })
+  }
+
+  } catch (err: any) {
+    console.error(`Export error [${type}]:`, err)
+    Sentry.captureException(err)
+    return NextResponse.json({ error: err.message ?? 'Export failed' }, { status: 500 })
   }
 
   return new NextResponse(csv, {
