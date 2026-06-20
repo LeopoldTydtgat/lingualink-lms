@@ -42,3 +42,4 @@ next-env.d.ts
 
 COMMIT_MSG.tmp
 HANDOVER.md
+.claude/settings.local.json
