@@ -8,6 +8,7 @@ import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
+import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { sendMessage, markMessagesAsRead } from './actions'
@@ -322,7 +323,7 @@ export default function StudentMessagesClient({
     if (!file) return
 
     if (file.size > 10 * 1024 * 1024) {
-      alert('File must be under 10MB.')
+      toast.error('File must be under 10MB.', { duration: 6000 })
       e.target.value = ''
       return
     }
@@ -335,7 +336,7 @@ export default function StudentMessagesClient({
     const json = await res.json()
 
     if (!res.ok) {
-      alert(json.error ?? 'Upload failed.')
+      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
     } else {
       setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
     }
