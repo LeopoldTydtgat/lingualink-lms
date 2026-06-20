@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Save, AlertCircle, CheckCircle2, Mail, Clock, FileText, CreditCard, AlertTriangle, Ban } from 'lucide-react'
+import { Save, Mail, Clock, FileText, CreditCard, AlertTriangle, Ban } from 'lucide-react'
+import { toast } from 'sonner'
 
 // Shape of the settings object we receive from the API
 interface SettingsValues {
@@ -37,19 +38,13 @@ export default function SettingsClient({ initialSettings }: Props) {
   })
 
   const [saving, setSaving] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle')
-  const [errorMessage, setErrorMessage] = useState('')
 
   function handleChange(key: keyof SettingsValues, value: string) {
     setValues(prev => ({ ...prev, [key]: value }))
-    // Clear any previous save status when the user starts editing
-    if (saveStatus !== 'idle') setSaveStatus('idle')
   }
 
   async function handleSave() {
     setSaving(true)
-    setSaveStatus('idle')
-    setErrorMessage('')
 
     try {
       const res = await fetch('/api/admin/settings', {
@@ -61,16 +56,12 @@ export default function SettingsClient({ initialSettings }: Props) {
       const data = await res.json()
 
       if (!res.ok) {
-        setErrorMessage(data.error || 'Failed to save settings')
-        setSaveStatus('error')
+        toast.error(data.error || 'Failed to save settings', { duration: 6000 })
       } else {
-        setSaveStatus('success')
-        // Auto-clear the success message after 3 seconds
-        setTimeout(() => setSaveStatus('idle'), 3000)
+        toast.success('Saved successfully.')
       }
     } catch {
-      setErrorMessage('Network error — please try again')
-      setSaveStatus('error')
+      toast.error('Network error — please try again', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -246,22 +237,6 @@ export default function SettingsClient({ initialSettings }: Props) {
 
       {/* ── Save button + inline feedback ────────────────────────────── */}
       <div className="flex items-center justify-end gap-4 pt-2">
-
-        {/* Feedback shown right beside the button so it's always visible */}
-        {saveStatus === 'success' && (
-          <div className="flex items-center gap-2 text-sm font-medium" style={{ color: '#166534' }}>
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            Saved successfully.
-          </div>
-        )}
-
-        {saveStatus === 'error' && (
-          <div className="flex items-center gap-2 text-sm font-medium" style={{ color: '#991b1b' }}>
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {errorMessage}
-          </div>
-        )}
-
         <button
           onClick={handleSave}
           disabled={saving}
