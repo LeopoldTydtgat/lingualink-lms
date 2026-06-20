@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle } from 'lucide-react'
+import { toast } from 'sonner'
 
 const TYPE_OPTIONS = [
   { value: 'b2b', label: 'B2B' },
@@ -65,16 +65,13 @@ export default function EditCompanyClient({ company }: { company: Record<string,
   })
 
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   function set(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
   async function handleSave() {
-    setError(null)
-    if (!form.name.trim()) return setError('Company name is required.')
+    if (!form.name.trim()) { toast.error('Company name is required.'); return }
 
     setSaving(true)
     try {
@@ -91,10 +88,10 @@ export default function EditCompanyClient({ company }: { company: Record<string,
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
-      setSuccess(true)
-      setTimeout(() => { router.push(`/admin/companies/${id}`); router.refresh() }, 1500)
+      toast.success('Changes saved!')
+      setTimeout(() => { router.push(`/admin/companies/${id}`); router.refresh() }, 800)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -110,25 +107,6 @@ export default function EditCompanyClient({ company }: { company: Record<string,
         <span className="text-gray-300">/</span>
         <h1 className="text-2xl font-bold text-gray-900">Edit Company</h1>
       </div>
-
-      {success && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <CheckCircle size={16} color="#16a34a" />
-          Changes saved!
-        </div>
-      )}
-
-      {error && (
-        <div className="mb-4 px-4 py-3 rounded-lg text-sm"
-          style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-          {error}
-        </div>
-      )}
 
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
         <h2 className="font-semibold text-gray-800 text-base">Company Details</h2>
