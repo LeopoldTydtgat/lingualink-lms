@@ -84,6 +84,16 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
         height: '100vh',
       }}
     >
+      <style>{`
+        .student-nav-item { transition: background-color .18s ease; }
+        .student-nav-item:hover { background-color: rgba(0,0,0,0.04); }
+        .student-nav-icon { transition: transform .18s ease; }
+        .student-nav-item:hover .student-nav-icon { transform: translateX(2px); }
+        @media (prefers-reduced-motion: reduce) {
+          .student-nav-item, .student-nav-icon { transition: none; }
+          .student-nav-item:hover .student-nav-icon { transform: none; }
+        }
+      `}</style>
       {/* Logo area - matches the height of the orange header on the right */}
       <div
         style={{
@@ -111,6 +121,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
               key={item.href}
               href={item.href}
               prefetch={false}
+              className={!isActive ? 'student-nav-item' : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -120,14 +131,15 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 fontSize: '14px',
                 fontWeight: isActive ? '600' : '500',
                 color: isActive ? '#ffffff' : '#4b5563',
-                backgroundColor: isActive ? '#FF8303' : 'transparent',
+                backgroundColor: isActive ? '#FF8303' : undefined,
                 textDecoration: 'none',
                 borderRadius: '6px',
                 clipPath: isActive ? 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' : undefined,
               }}
             >
               <Icon
-                size={16}
+                size={18}
+                className={!isActive ? 'student-nav-icon' : undefined}
                 style={{ color: isActive ? '#ffffff' : '#9ca3af' }}
               />
               {item.label}
@@ -180,7 +192,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
             textAlign: 'left',
           }}
         >
-          <LogOut size={16} style={{ color: '#9ca3af' }} />
+          <LogOut size={18} style={{ color: '#9ca3af' }} />
           Log Out
         </button>
       </div>
