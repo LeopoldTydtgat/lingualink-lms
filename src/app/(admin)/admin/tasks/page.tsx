@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,7 +110,7 @@ export default function AdminTasksPage() {
       if (!res.ok) throw new Error('Failed to complete task')
       await fetchTasks()
     } catch (err: any) {
-      alert(err.message)
+      toast.error(err.message || 'Failed to complete task', { duration: 6000 })
     } finally {
       setCompleting(null)
     }
@@ -125,7 +126,7 @@ export default function AdminTasksPage() {
       if (!res.ok) throw new Error('Failed to reopen task')
       await fetchTasks()
     } catch (err: any) {
-      alert(err.message)
+      toast.error(err.message || 'Failed to reopen task', { duration: 6000 })
     }
   }
 
@@ -137,7 +138,7 @@ export default function AdminTasksPage() {
       if (!res.ok) throw new Error('Failed to delete task')
       await fetchTasks()
     } catch (err: any) {
-      alert(err.message)
+      toast.error(err.message || 'Failed to delete task', { duration: 6000 })
     } finally {
       setDeleting(null)
     }
