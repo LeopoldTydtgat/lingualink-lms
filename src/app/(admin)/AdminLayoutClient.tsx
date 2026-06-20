@@ -241,7 +241,7 @@ export default function AdminLayoutClient({
   )
 
   const panelWidgets = [
-    { label: 'Classes Today', value: rightPanelStats.classesTodayCount, href: '/admin/classes', alert: false },
+    { label: 'Classes Today', value: rightPanelStats.classesTodayCount, href: rightPanelStats.classesTodayCount === null ? '/admin/settings' : '/admin/classes', alert: false },
     { label: 'Pending Reports', value: rightPanelStats.pendingCount, href: '/admin/reports?filter=pending', alert: false },
     { label: 'Flagged Reports', value: rightPanelStats.flaggedCount, href: '/admin/reports?filter=flagged', alert: rightPanelStats.flaggedCount > 0 },
     { label: 'Low Hours Students', value: rightPanelStats.lowHoursCount, href: '/admin/students?filter=low_hours', alert: false },
@@ -373,7 +373,11 @@ export default function AdminLayoutClient({
                 <div className="rounded-lg p-3 bg-gray-50 border border-gray-200 hover:border-orange-200 transition-colors">
                   <p className="text-xs text-gray-500">{w.label}</p>
                   <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827' }}>
-                    {w.value}
+                    {w.value === null ? (
+                      <span className="text-sm font-medium" style={{ color: '#9ca3af' }}>Set timezone</span>
+                    ) : (
+                      w.value
+                    )}
                   </p>
                 </div>
               </Link>

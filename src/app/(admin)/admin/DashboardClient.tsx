@@ -27,34 +27,39 @@ interface Props {
   activeAnnouncementText: string | null
   missingTeamsLessons: AlertLesson[]
   zeroBalanceWithClassesCount: number
-  todayLabel: string // pre-computed server-side as SAST date string
+  todayLabel: string // pre-computed server-side in the admin's own timezone
+  adminTimezone: string  // the logged-in admin's IANA timezone (falls back to 'UTC')
+  timezoneMissing: boolean // true when the admin has no timezone set; show a warning banner
   hasError: boolean  // true when any of the eight dashboard queries returned an error
 }
 
 // ── time formatting ───────────────────────────────────────────────────────────
-// Times are stored in UTC. Shannon is always in SAST (UTC+2), so we add 2h.
-// These functions are deterministic — safe in client components with SSR.
+// Times are stored in UTC. We format each in the admin's own timezone via Intl with an
+// explicit timeZone. That is deterministic: the same output on server and client, so it is
+// safe in this client component under SSR (no hydration mismatch).
 
-function toSAST(isoStr: string): Date {
-  return new Date(new Date(isoStr).getTime() + 2 * 60 * 60 * 1000)
+function fmtTime(isoStr: string, timezone: string): string {
+  if (!isoStr) return '—'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(isoStr))
 }
 
-function fmtTime(isoStr: string): string {
+function fmtDate(isoStr: string, timezone: string): string {
   if (!isoStr) return '—'
-  const d = toSAST(isoStr)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
-}
-
-function fmtDate(isoStr: string): string {
-  if (!isoStr) return '—'
-  const d = toSAST(isoStr)
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ]
-  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).formatToParts(new Date(isoStr))
+  const weekday = parts.find(p => p.type === 'weekday')?.value ?? ''
+  const day = parts.find(p => p.type === 'day')?.value ?? ''
+  const month = parts.find(p => p.type === 'month')?.value ?? ''
+  return `${weekday} ${day} ${month}`
 }
 
 // ── lesson status helpers ─────────────────────────────────────────────────────
@@ -116,6 +121,8 @@ export default function DashboardClient({
   missingTeamsLessons,
   zeroBalanceWithClassesCount,
   todayLabel,
+  adminTimezone,
+  timezoneMissing,
   hasError,
 }: Props) {
   const router = useRouter()
@@ -136,7 +143,8 @@ export default function DashboardClient({
       label: 'Classes Today',
       value: stats.classesTodayCount,
       icon: CalendarDays,
-      href: '/admin/classes',
+      // Null = timezone unset: point them to set it, not to the (un-bucketable) class list.
+      href: stats.classesTodayCount === null ? '/admin/settings' : '/admin/classes',
       alert: false,
     },
     {
@@ -204,6 +212,11 @@ export default function DashboardClient({
         </p>
       ) : (
         <>
+          {timezoneMissing && (
+            <div className="rounded-lg px-4 py-3 text-sm flex items-start gap-2" style={{ backgroundColor: '#fff7ed', color: '#9a3412', border: '1px solid #fed7aa' }}>
+              <span>Your timezone is not set. Today&apos;s classes and the date labels below need your timezone — set it in your profile to see them correctly.</span>
+            </div>
+          )}
           {/* ── active announcement banner ─────────────────────────────── */}
           {activeAnnouncementText && (
             <div
@@ -233,7 +246,13 @@ export default function DashboardClient({
                       className="text-3xl font-bold"
                       style={{ color: card.alert ? '#dc2626' : '#111827' }}
                     >
-                      {card.value}
+                      {card.value === null ? (
+                        <span className="text-base font-medium" style={{ color: '#9ca3af' }}>
+                          Set timezone
+                        </span>
+                      ) : (
+                        card.value
+                      )}
                     </p>
                   </div>
                 </Link>
@@ -251,10 +270,14 @@ export default function DashboardClient({
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
                   <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Today&apos;s Classes</h2>
                 </div>
-                <span className="text-xs text-gray-400">{todayLabel} · SAST</span>
+                <span className="text-xs text-gray-400">{todayLabel}{' · '}{adminTimezone}</span>
               </div>
 
-              {todayLessons.length === 0 ? (
+              {timezoneMissing ? (
+                <div className="flex-1 flex items-center justify-center py-12 px-6 text-sm text-gray-400 text-center">
+                  Set your timezone in your profile to see today&apos;s classes in your local time.
+                </div>
+              ) : todayLessons.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center py-12 text-sm text-gray-400">
                   No classes scheduled today.
                 </div>
@@ -270,7 +293,7 @@ export default function DashboardClient({
                       >
                         {/* Time */}
                         <span className="text-xs text-gray-500 w-10 shrink-0 font-mono tabular-nums">
-                          {fmtTime(lesson.scheduled_at)}
+                          {fmtTime(lesson.scheduled_at, adminTimezone)}
                         </span>
 
                         {/* Names + duration */}
@@ -335,8 +358,8 @@ export default function DashboardClient({
                               </span>
                             </p>
                             <p className="text-xs text-gray-400 mt-0.5">
-                              {fmtDate(report.lesson_scheduled_at)}{' '}
-                              {fmtTime(report.lesson_scheduled_at)}
+                              {fmtDate(report.lesson_scheduled_at, adminTimezone)}{' '}
+                              {fmtTime(report.lesson_scheduled_at, adminTimezone)}
                               {' · '}{report.lesson_duration} min
                             </p>
                           </div>
@@ -449,7 +472,7 @@ export default function DashboardClient({
                             <span className="text-gray-400"> · {l.student_name}</span>
                           </span>
                           <span className="text-gray-400 tabular-nums">
-                            {fmtDate(l.scheduled_at)} {fmtTime(l.scheduled_at)}
+                            {fmtDate(l.scheduled_at, adminTimezone)} {fmtTime(l.scheduled_at, adminTimezone)}
                           </span>
                         </div>
                       ))}
