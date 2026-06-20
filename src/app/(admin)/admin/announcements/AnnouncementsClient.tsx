@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface Announcement {
   id: string
@@ -79,7 +80,7 @@ export default function AnnouncementsClient({
     if (!error) {
       setAnnouncements((prev) => prev.filter((a) => a.id !== id))
     } else {
-      alert('Failed to delete announcement.')
+      toast.error('Failed to delete announcement.', { duration: 6000 })
     }
     setDeletingId(null)
   }
