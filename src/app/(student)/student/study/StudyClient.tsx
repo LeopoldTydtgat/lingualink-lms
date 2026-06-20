@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, CheckCircle, Clock, Search } from 'lucide-react'
+import { CheckCircle, Clock, Search } from 'lucide-react'
+import { EmptyStudy } from '@/components/EmptyStudy'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -174,7 +175,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
         <div>
           {assignments.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
-              <BookOpen size={40} className="mx-auto mb-3 opacity-40" />
+              <EmptyStudy />
               <p className="text-sm">No assignments yet. Your teacher will assign study sheets after your classes.</p>
             </div>
           ) : (
