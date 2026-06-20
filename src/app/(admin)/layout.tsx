@@ -4,31 +4,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import AdminLayoutClient from './AdminLayoutClient'
 import { isCancelledStatus } from '@/lib/billing/billability'
-
-// ── date helpers ──────────────────────────────────────────────────────────────
-// Never use toISOString() for local date construction.
-
-function utcTimestamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return (
-    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
-    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.000Z`
-  )
-}
-
-// Anchor "today" to SAST (UTC+2, no DST) so lessons in the 00:00–02:00 SAST window
-// — which carry previous-UTC-day timestamps — fall on the correct SAST business day.
-// SAST midnight = 00:00 SAST = 22:00 UTC the previous calendar day.
-// Matches getTodaySASTRange in admin/page.tsx exactly.
-function getTodaySASTRange() {
-  const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
-  const y = sastNow.getUTCFullYear()
-  const m = sastNow.getUTCMonth()
-  const d = sastNow.getUTCDate()
-  const start = new Date(Date.UTC(y, m, d) - 2 * 60 * 60 * 1000)
-  const end   = new Date(Date.UTC(y, m, d + 1) - 2 * 60 * 60 * 1000)
-  return { start: utcTimestamp(start), end: utcTimestamp(end) }
-}
+import { getDayRangeInTz } from '@/lib/billing/monthRange'
 
 export const metadata: Metadata = {
   title: 'LinguaLink Online - Admin Portal',
@@ -36,7 +12,7 @@ export const metadata: Metadata = {
 }
 
 export interface RightPanelStats {
-  classesTodayCount: number
+  classesTodayCount: number | null
   pendingCount: number
   flaggedCount: number
   lowHoursCount: number
@@ -57,16 +33,22 @@ export default async function AdminLayout({
 
   const { data: profile } = await adminDb
     .from('profiles')
-    .select('id, full_name, role, photo_url')
+    .select('id, full_name, role, photo_url, timezone')
     .eq('id', user.id)
     .single()
 
   if (!profile) redirect('/login?error=profile_error')
   if (profile.role !== 'admin') redirect('/dashboard')
 
+  // The viewing admin's own timezone, used for all "today" bucketing; null/empty means unset.
+  const adminTimezone = profile.timezone ?? 'UTC'
+  const timezoneMissing = !profile.timezone
+
   // ── right panel stats ─────────────────────────────────────────────────────
-  // SAST-anchored range — same convention as admin/page.tsx
-  const { start: todayStart, end: todayEnd } = getTodaySASTRange()
+  // Today range only when we have the admin's real timezone — never guess UTC, which would
+  // mis-bucket which lessons count as "today". When missing we skip the bucketed query
+  // (resolve null) and surface a null count instead.
+  const todayRange = timezoneMissing ? null : getDayRangeInTz(new Date(), adminTimezone)
 
   const [
     todayRes,
@@ -78,39 +60,41 @@ export default async function AdminLayout({
     unreadMessagesRes,
     unreadSupportRes,
   ] = await Promise.all([
-    // Classes today (excluding cancelled)
-    supabase
-      .from('lessons')
-      .select('id, status')
-      .gte('scheduled_at', todayStart)
-      .lt('scheduled_at', todayEnd),
+    // Classes today (excluding cancelled), only when a real timezone is present; else null
+    todayRange
+      ? adminDb
+          .from('lessons')
+          .select('id, status')
+          .gte('scheduled_at', todayRange.startUtc)
+          .lt('scheduled_at', todayRange.endUtc)
+      : Promise.resolve(null),
 
     // Pending reports
-    supabase
+    adminDb
       .from('reports')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending'),
 
     // Flagged reports
-    supabase
+    adminDb
       .from('reports')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'flagged'),
 
     // Active trainings — for low hours count (balance < 2h)
-    supabase
+    adminDb
       .from('trainings')
       .select('total_hours, hours_consumed')
       .eq('status', 'active'),
 
     // Invoices uploaded but not yet marked paid
-    supabase
+    adminDb
       .from('invoices')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'uploaded'),
 
     // First active announcement text (if any)
-    supabase
+    adminDb
       .from('announcements')
       .select('message')
       .eq('is_active', true)
@@ -131,9 +115,11 @@ export default async function AdminLayout({
       .is('read_at', null),
   ])
 
-  const classesTodayCount = (todayRes.data ?? []).filter(
-    (l) => !isCancelledStatus(l.status)
-  ).length
+  const classesTodayCount = timezoneMissing
+    ? null
+    : (todayRes?.data ?? []).filter(
+        (l) => !isCancelledStatus(l.status)
+      ).length
 
   const lowHoursCount = (trainingsRes.data ?? []).filter(
     (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2

@@ -1,3 +1,32 @@
+## Session 155 - 20 June 2026 - Admin Classes Today timezone-awareness and RLS-drift hardening
+
+### What was built
+- Switched the admin dashboard page to the service-role database client so its counters read past row-level security. The layout already gates admin access before the page renders, so this is safe and removes a silent-zero risk if a security policy is later tightened or a new table ships without an admin policy.
+- Added a single-day date-range helper to the shared billing date-tools file. It returns the UTC start and end of one local calendar day in any timezone, reusing the existing midnight-to-UTC logic, so all timezone day-boundary maths stays in one tested place rather than being copied into a page.
+- Made the "Classes Today" figure timezone-aware across both the dashboard card and the right-panel sidebar tile. Both now bucket today in the logged-in admin's own timezone instead of a hardcoded South Africa offset, so a future admin in another country sees the correct day. This matters now because the platform already supports granting admin rights to another teacher through the School Admin account type.
+- Made the missing-timezone case fail closed. When an admin has no timezone set, the today query is skipped entirely rather than run against a UTC guess, and both the card and the tile show a "Set timezone" prompt instead of a possibly-wrong count.
+- Moved the six right-panel stat queries to the service-role client so their counts are immune to security-policy drift, matching the dashboard.
+- Added a date and timezone review subagent that encodes the project's recurring date bug classes, and wired the project instructions to invoke it automatically on any date or timezone change.
+- Stopped tracking the machine-local editor settings file and added it to gitignore, so per-machine state never lands in the repo.
+
+### Break/Fix Log
+Issue 1
+- Symptom: The admin dashboard showed every date in a hardcoded South Africa offset, so a future admin in another timezone would see the wrong day's classes and an incorrect count of classes today.
+- Cause: Three date helpers added a fixed two-hour offset rather than using the admin's own timezone. Crucially the same value also fed the database query that decides which lessons count as today, so it produced a wrong count, not merely a wrong label.
+- Fix: Replaced the hardcoded offset with the admin's own timezone through the new day-range helper, and made the today query skip entirely when no timezone is set.
+- Lesson: A timezone value that feeds a query is on a computation path, so its fallback must fail closed and never guess UTC. A wrong timezone there changes which rows are counted, not just how a date is displayed.
+
+Issue 2
+- Symptom: After the dashboard card was fixed, the sidebar tile still used the old hardcoded offset, so two different "classes today" numbers could appear on the same screen for an admin outside South Africa.
+- Cause: The sidebar count is computed in a separate layout file that was initially left out of scope to keep the first change contained.
+- Fix: Mirrored the same timezone-aware, fail-closed logic into the layout file and its client component, so both the card and the tile read the same value.
+- Lesson: A figure shown in two places lives in two files, and both must change together or the screen contradicts itself.
+
+### Session result
+Shipped the admin "classes today" figure as fully timezone-aware and consistent between the dashboard card and the sidebar tile, failing closed with a "Set timezone" prompt when an admin has no zone set, with the underlying counts hardened against security-policy drift by moving to the service-role client. The day-boundary maths was verified by a three-timezone scratch test proving Johannesburg is unchanged while Tokyo and New York shift to the correct local day, which is provable correctness without a live foreign-admin account. Also added a date and timezone review subagent to catch future date changes automatically, and stopped tracking the machine-local editor settings file. Six commits pushed to origin/dev.
+
+---
+
 ## Session 154 - 20 June 2026 - Loud export failures, export-to-view parity, and a saner idle timeout
 
 ### What was built

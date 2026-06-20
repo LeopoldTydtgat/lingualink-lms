@@ -149,3 +149,4 @@ SENTRY_DSN
 - code-reviewer: on ANY diff touching auth, hours/billing, Microsoft Graph, `src/proxy.ts`,
   or any API write path. Also before committing any substantive logic change.
 - supabase-rls-auditor: on ANY schema, RLS, or data-access change.
+- timezone-date-auditor: on ANY change touching dates, times, timezones, month/day bucketing, calendar rendering, booking-slot math, cron/reminder timing, or billing-period boundaries. Run alongside code-reviewer on date-heavy changes.

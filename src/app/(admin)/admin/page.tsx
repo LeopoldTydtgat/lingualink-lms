@@ -1,7 +1,8 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient } from '@/lib/supabase/server'
 import DashboardClient from './DashboardClient'
 import { isCancelledStatus, CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
+import { getDayRangeInTz } from '@/lib/billing/monthRange'
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 // Never use toISOString() for local date construction.
@@ -15,29 +16,20 @@ function utcTimestamp(d: Date): string {
   )
 }
 
-// Anchor "today" to SAST (UTC+2, no DST) so lessons in the 00:00–02:00 SAST window
-// — which carry previous-UTC-day timestamps — fall on the correct SAST business day.
-// SAST midnight = 00:00 SAST = 22:00 UTC the previous calendar day.
-// Reuses the same +2h shift convention as buildSASTDateLabel and DashboardClient's toSAST.
-function getTodaySASTRange() {
-  // Shift "now" by +2h to get the current SAST instant, then read its UTC calendar fields
-  const sastNow = new Date(Date.now() + 2 * 60 * 60 * 1000)
-  const y = sastNow.getUTCFullYear()
-  const m = sastNow.getUTCMonth()
-  const d = sastNow.getUTCDate()
-  // Date.UTC(y,m,d) is SAST-calendar-midnight expressed as "00:00 UTC" (= 02:00 SAST).
-  // Subtract 2h to land on the true SAST midnight (= 22:00 UTC the previous day).
-  const start = new Date(Date.UTC(y, m, d) - 2 * 60 * 60 * 1000)
-  const end   = new Date(Date.UTC(y, m, d + 1) - 2 * 60 * 60 * 1000)
-  return { start: utcTimestamp(start), end: utcTimestamp(end) }
-}
-
-// Build a SAST (UTC+2) date label for display — computed server-side to avoid hydration mismatch
-function buildSASTDateLabel(): string {
-  const d = new Date(Date.now() + 2 * 60 * 60 * 1000)
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${days[d.getUTCDay()]} ${d.getUTCDate()} ${months[d.getUTCMonth()]}`
+// Build a 'Wed 18 Jun' style label in the given timezone (deterministic — no
+// hydration risk; Intl with an explicit timeZone yields the same output on
+// server and client).
+function buildLabelInTz(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  }).formatToParts(date)
+  const weekday = parts.find(p => p.type === 'weekday')?.value ?? ''
+  const day = parts.find(p => p.type === 'day')?.value ?? ''
+  const month = parts.find(p => p.type === 'month')?.value ?? ''
+  return `${weekday} ${day} ${month}`
 }
 
 // ── nested join flattener ─────────────────────────────────────────────────────
@@ -49,7 +41,7 @@ function flatRel<T>(val: T | T[] | null | undefined): T | null {
 
 // ── exported types (used by DashboardClient) ──────────────────────────────────
 export interface DashboardStats {
-  classesTodayCount: number
+  classesTodayCount: number | null  // null when the admin has no timezone set (today can't be bucketed)
   pendingCount: number
   flaggedCount: number
   lowHoursCount: number
@@ -88,15 +80,29 @@ export const dynamic = 'force-dynamic'
 
 // ── page ──────────────────────────────────────────────────────────────────────
 export default async function AdminDashboardPage() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
+  // Identify the logged-in admin (the admin layout has already gated access) and read their
+  // timezone, so every date/time below renders in the admin's own zone, not a hardcoded SAST
+  // offset. The service-role client below is for data; this cookie client only learns who is
+  // viewing.
+  const cookieClient = await createClient()
+  const { data: { user } } = await cookieClient.auth.getUser()
+  const { data: adminProfile } = user
+    ? await cookieClient.from('profiles').select('timezone').eq('id', user.id).maybeSingle()
+    : { data: null }
 
-  // SAST-anchored today range — applied to both the Classes Today card and Today's Classes panel
-  const { start: todayStart, end: todayEnd } = getTodaySASTRange()
+  // If the admin has no timezone set, fall back to UTC and flag it so the client shows a
+  // warning banner. Never silently guess a zone, and never block the dashboard over a
+  // missing profile field.
+  const adminTimezone = adminProfile?.timezone ?? 'UTC'
+  const timezoneMissing = !adminProfile?.timezone
+
+  const supabase = createAdminClient()
+
+  // Today range ONLY when we have the admin's real timezone. With no timezone we must not guess
+  // UTC — that would mis-bucket which lessons count as "today" (the count AND the feed), not
+  // merely mislabel display. When the timezone is missing we skip the bucketed query entirely
+  // (resolve null) and surface a "set your timezone" prompt instead (classesTodayCount = null).
+  const todayRange = timezoneMissing ? null : getDayRangeInTz(new Date(), adminTimezone)
   const now = new Date()
   const nowStr = utcTimestamp(now)
   const in24hStr = utcTimestamp(new Date(now.getTime() + 24 * 60 * 60 * 1000))
@@ -112,17 +118,20 @@ export default async function AdminDashboardPage() {
     announcementsRes,
     missingTeamsRes,
   ] = await Promise.all([
-    // Today's lessons (live classes feed) — range is SAST-anchored (UTC+2, no DST)
-    supabase
-      .from('lessons')
-      .select(`
-        id, scheduled_at, duration_minutes, status,
-        teacher:profiles!teacher_id(full_name),
-        student:students!student_id(full_name)
-      `)
-      .gte('scheduled_at', todayStart)
-      .lt('scheduled_at', todayEnd)
-      .order('scheduled_at'),
+    // Today's lessons (live classes feed) — bucketed to the admin's own local day. Runs only
+    // when a real timezone is present; otherwise resolves to null and the panel shows a prompt.
+    todayRange
+      ? supabase
+          .from('lessons')
+          .select(`
+            id, scheduled_at, duration_minutes, status,
+            teacher:profiles!teacher_id(full_name),
+            student:students!student_id(full_name)
+          `)
+          .gte('scheduled_at', todayRange.startUtc)
+          .lt('scheduled_at', todayRange.endUtc)
+          .order('scheduled_at')
+      : Promise.resolve(null),
 
     // Pending reports with teacher + lesson + student (for the pending panel)
     supabase
@@ -195,7 +204,7 @@ export default async function AdminDashboardPage() {
   // Any query error (transient failure, Hobby-plan timeout, RLS denial) must surface
   // as a dashboard-level error rather than silently rendering zeros for all stats.
   const hasError = !!(
-    todayRes.error       ||
+    todayRes?.error      ||
     pendingRes.error     ||
     flaggedRes.error     ||
     flaggedCountRes.error ||
@@ -230,7 +239,7 @@ export default async function AdminDashboardPage() {
   }
 
   // ── flatten nested joins and normalise into clean types ───────────────────
-  const todayLessons: LiveLesson[] = (todayRes.data ?? []).map((r) => ({
+  const todayLessons: LiveLesson[] = (todayRes?.data ?? []).map((r) => ({
     id: r.id,
     scheduled_at: r.scheduled_at,
     duration_minutes: r.duration_minutes,
@@ -268,9 +277,12 @@ export default async function AdminDashboardPage() {
     student_name: flatRel(r.student as any)?.full_name ?? 'Unknown',
   }))
 
-  // Classes Today stat excludes cancelled lessons
+  // Classes Today stat excludes cancelled lessons. Null when the timezone is unset: we cannot
+  // honestly bucket "today" without the admin's zone, so the card prompts them to set it.
   const stats: DashboardStats = {
-    classesTodayCount: todayLessons.filter((l) => !isCancelledStatus(l.status)).length,
+    classesTodayCount: timezoneMissing
+      ? null
+      : todayLessons.filter((l) => !isCancelledStatus(l.status)).length,
     pendingCount: pendingRes.data?.length ?? 0,
     flaggedCount: flaggedCountRes.count ?? 0,
     lowHoursCount,
@@ -286,7 +298,9 @@ export default async function AdminDashboardPage() {
       activeAnnouncementText={announcementsRes.data?.[0]?.message ?? null}
       missingTeamsLessons={missingTeamsLessons}
       zeroBalanceWithClassesCount={zeroBalanceWithClassesCount}
-      todayLabel={buildSASTDateLabel()}
+      todayLabel={buildLabelInTz(new Date(), adminTimezone)}
+      adminTimezone={adminTimezone}
+      timezoneMissing={timezoneMissing}
       hasError={hasError}
     />
   )
