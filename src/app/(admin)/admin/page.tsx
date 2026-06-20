@@ -1,5 +1,4 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createAdminClient } from '@/lib/supabase/admin'
 import DashboardClient from './DashboardClient'
 import { isCancelledStatus, CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
@@ -88,12 +87,7 @@ export const dynamic = 'force-dynamic'
 
 // ── page ──────────────────────────────────────────────────────────────────────
 export default async function AdminDashboardPage() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll(), setAll: () => {} } }
-  )
+  const supabase = createAdminClient()
 
   // SAST-anchored today range — applied to both the Classes Today card and Today's Classes panel
   const { start: todayStart, end: todayEnd } = getTodaySASTRange()
