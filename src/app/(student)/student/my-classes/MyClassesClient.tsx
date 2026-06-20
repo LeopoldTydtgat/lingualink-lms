@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   User,
-  CalendarDays,
   ChevronDown,
   ChevronUp,
   Plus,
@@ -14,6 +13,7 @@ import {
 import { cancelLessonAction } from './actions'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { Button } from '@/components/ui/button'
+import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
 
 interface Teacher {
   id: string
@@ -360,9 +360,7 @@ export default function MyClassesClient({
         /* No upcoming classes + zero hours — contact variant. Only shown when the
            balance is KNOWN to be zero; missing data falls through to Book a Class. */
         <div className="flex flex-col items-center text-center py-16">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-            <CalendarDays size={30} className="text-muted-foreground" />
-          </div>
+          <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">You&apos;ve used all your hours</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
             You have no hours left to book. Contact us to add more and keep learning.
@@ -378,9 +376,7 @@ export default function MyClassesClient({
         /* No upcoming classes state — also the fallback when hoursRemaining is null
            (no training record): never show the contact variant on missing data. */
         <div className="flex flex-col items-center text-center py-16">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-            <CalendarDays size={30} className="text-muted-foreground" />
-          </div>
+          <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
             Book a time with your teacher to keep your training on track.
