@@ -279,7 +279,7 @@ export default function AdminExportsPage() {
       const res = await fetch(`/api/admin/exports/${exportDef.type}?${params.toString()}`)
       if (!res.ok) {
         const data = await res.json()
-        throw new Error(data.error ?? 'Export failed')
+        throw new Error(data.message ?? data.error ?? 'Export failed')
       }
 
       const blob = await res.blob()

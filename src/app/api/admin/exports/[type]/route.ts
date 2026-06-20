@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability } from '@/lib/billing/billability'
+import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
@@ -196,7 +197,7 @@ export async function GET(
             ? supabase.from('reports').select('lesson_id, did_class_happen, no_show_type').in('lesson_id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', tIds)
+            ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency, timezone').in('id', tIds)
             : { data: [] },
         ])
         if ('error' in reportRes && reportRes.error) throw reportRes.error
@@ -205,8 +206,8 @@ export async function GET(
         const reportMap: Record<string, any> = {}
         reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
 
-        const profileMap: Record<string, { name: string; rate: number; currency: string }> = {}
-        profileRes.data?.forEach((p: any) => { profileMap[p.id] = { name: p.full_name, rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
+        const profileMap: Record<string, { name: string; rate: number; currency: string; timezone: string | null }> = {}
+        profileRes.data?.forEach((p: any) => { profileMap[p.id] = { name: p.full_name, rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR', timezone: p.timezone ?? null } })
 
         // Group by teacher × month
         type EarningKey = string
@@ -222,6 +223,8 @@ export async function GET(
           invoiceUploaded: string
         }> = {}
 
+        const missingTzTeachers = new Set<string>()
+
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
           const billable = getBillability({
@@ -234,10 +237,13 @@ export async function GET(
           }).billableToTeacher
           if (!billable) continue
 
-          const d = new Date(lesson.scheduled_at)
-          const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
-          const key = `${lesson.teacher_id}__${month}`
           const profile = profileMap[lesson.teacher_id]
+          if (!profile?.timezone) {
+            missingTzTeachers.add(lesson.teacher_id)
+            continue
+          }
+          const month = getMonthKeyInTz(new Date(lesson.scheduled_at), profile.timezone).slice(0, 7)
+          const key = `${lesson.teacher_id}__${month}`
 
           if (!summary[key]) {
             summary[key] = {
@@ -257,6 +263,13 @@ export async function GET(
           if (report?.no_show_type === 'student') summary[key].studentNoShows++
           summary[key].totalMinutes += lesson.duration_minutes ?? 0
           summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * (profile?.rate ?? 0)
+        }
+
+        if (missingTzTeachers.size > 0) {
+          return NextResponse.json(
+            { error: 'TIMEZONE_MISSING', message: `Cannot export earnings: ${missingTzTeachers.size} teacher(s) have no timezone set. Set their timezones before exporting.` },
+            { status: 422 }
+          )
         }
 
         // Fetch invoice upload status per teacher/month
