@@ -8,6 +8,7 @@ import { CalendarDays, Plus } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { Button } from '@/components/ui/button'
+import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
 
 type Student = {
   id: string
@@ -457,9 +458,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
 
       {days.length === 0 ? (
         <div className="flex flex-col items-center text-center py-16">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-            <CalendarDays size={30} className="text-muted-foreground" />
-          </div>
+          <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
             Your booked classes will appear here. Keep your availability up to date so students can book you.

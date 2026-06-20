@@ -123,7 +123,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
                 prefetch={false}
                 style={active ? { clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' } : undefined}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+                  'group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
                     ? 'bg-brand-orange text-white'
                     : 'text-gray-600 hover:bg-brand-grey hover:text-gray-900'
@@ -131,7 +131,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
               >
                 <Icon
                   size={18}
-                  className={cn(active ? 'text-white' : 'text-gray-400')}
+                  className={cn('transition-transform', active ? 'text-white' : 'text-gray-400 group-hover:translate-x-0.5')}
                 />
                 {item.label}
 

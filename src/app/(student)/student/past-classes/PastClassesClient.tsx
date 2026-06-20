@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { EmptyPastClasses } from '@/components/EmptyPastClasses';
 
 interface Report {
   id: string;
@@ -126,6 +127,7 @@ export default function PastClassesClient({
       {/* List */}
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-gray-400 text-sm">
+          {!search && <EmptyPastClasses />}
           {search ? 'No classes match your search.' : 'No past classes yet.'}
         </div>
       ) : (
