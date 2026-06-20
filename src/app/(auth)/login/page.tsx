@@ -8,6 +8,7 @@ import { signIn } from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { LoginLogo } from '@/components/LoginLogo'
 
 // ---------------------------------------------------------------------------
 // Login page
@@ -78,13 +79,7 @@ function LoginPageContent() {
         }}>
           <div style={{ width: '100%', maxWidth: '380px' }}>
 
-            <div style={{ marginBottom: '48px' }}>
-              <img
-                src="/lingualink-logo-clean.svg"
-                alt="Lingualink Online"
-                style={{ height: '72px', width: 'auto' }}
-              />
-            </div>
+            <LoginLogo />
 
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
