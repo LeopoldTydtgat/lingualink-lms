@@ -4,6 +4,7 @@ import { useState, useTransition, Suspense, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Eye, EyeOff } from 'lucide-react'
+import { LoginLogo } from '@/components/LoginLogo'
 import { studentLoginAction } from './actions'
 
 function StudentLoginPageContent() {
@@ -58,13 +59,7 @@ function StudentLoginPageContent() {
         }}>
           <div style={{ width: '100%', maxWidth: '380px' }}>
 
-            <div style={{ marginBottom: '48px' }}>
-              <img
-                src="/lingualink-logo-clean.svg"
-                alt="Lingualink Online"
-                style={{ height: '72px', width: 'auto' }}
-              />
-            </div>
+            <LoginLogo />
 
             <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: '0 0 32px' }}>
               Sign in
