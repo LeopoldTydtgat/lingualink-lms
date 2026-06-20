@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { DatePartInput } from '../../../_components/DatePartInput'
 
 type Company = { id: string; name: string }
@@ -128,8 +128,6 @@ export default function EditStudentClient({
 
   const [activeSection, setActiveSection] = useState<Section>('A')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   function set(field: string, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -148,12 +146,11 @@ export default function EditStudentClient({
   }
 
   async function handleSave() {
-    setError(null)
-    if (!form.first_name.trim()) return setError('First name is required.')
-    if (!form.last_name.trim()) return setError('Last name is required.')
-    if (form.assigned_teacher_ids.length === 0) return setError('At least one teacher must be assigned.')
-    if (!form.package_name.trim()) return setError('Training package name is required.')
-    if (!form.total_hours) return setError('Total hours is required.')
+    if (!form.first_name.trim()) { toast.error('First name is required.'); return }
+    if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
+    if (form.assigned_teacher_ids.length === 0) { toast.error('At least one teacher must be assigned.'); return }
+    if (!form.package_name.trim()) { toast.error('Training package name is required.'); return }
+    if (!form.total_hours) { toast.error('Total hours is required.'); return }
 
     setSaving(true)
     try {
@@ -191,10 +188,9 @@ export default function EditStudentClient({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
-      setSuccess(true)
-      setTimeout(() => setSuccess(false), 3000)
+      toast.success('Changes saved!')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -231,29 +227,6 @@ export default function EditStudentClient({
           </button>
         ))}
       </div>
-
-      {/* Success toast */}
-      {success && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <CheckCircle size={16} color="#16a34a" />
-          Changes saved!
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div
-          className="mb-4 px-4 py-3 rounded-lg text-sm"
-          style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}
-        >
-          {error}
-        </div>
-      )}
 
       {/* ── Section A: Personal Info ── */}
       {activeSection === 'A' && (
@@ -584,7 +557,7 @@ export default function EditStudentClient({
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || success}
+                disabled={saving}
                 className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
                 style={{ backgroundColor: '#FF8303' }}
               >
