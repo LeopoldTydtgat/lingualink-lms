@@ -112,6 +112,18 @@ function getMonthOptions(invoices: Invoice[]): string[] {
   return Array.from(seen).sort((a, b) => b.localeCompare(a))
 }
 
+// CSV cell escaping. Mirrors the billing/export route's escapeCSV so a
+// client-built CSV quotes and escapes identically; kept local because the
+// route helper is server-only and must not be imported into the client.
+function escapeCSV(val: unknown): string {
+  if (val === null || val === undefined) return ''
+  const str = String(val)
+  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+    return `"${str.replace(/"/g, '""')}"`
+  }
+  return str
+}
+
 // ── Server-side entity fetcher ─────────────────────────────────────────────────
 // Fetches hourly_rate (teachers) and cancellation_policy (students) via an
 // API route that uses the service role key. These fields are restricted at the
@@ -144,6 +156,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
   const [toast, setToast] = useState<string | null>(null)
+
+  // ── CSV export state (shared across all three tabs' Export buttons) ─────────
+  const [downloadingType, setDownloadingType] = useState<string | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   // ── Shared reference data ──────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<TeacherProfile[]>([])
@@ -428,9 +444,94 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, hydrateLessons])
 
   // ── CSV export helper ──────────────────────────────────────────────────────
-  const downloadCSV = (type: string, extraParams: Record<string, string> = {}) => {
-    const params = new URLSearchParams({ type, ...extraParams })
-    window.open(`/api/admin/billing/export?${params.toString()}`, '_blank')
+  // Uses fetch + blob (not window.open) so a failed export surfaces a friendly
+  // inline message instead of dumping the route's JSON error body into a new
+  // tab. Reads data.message ?? data.error so the TIMEZONE_MISSING 422 (whose
+  // human-readable text lives in `message`, alongside error:'TIMEZONE_MISSING')
+  // reaches the admin rather than the bare code.
+  const downloadCSV = async (type: string, extraParams: Record<string, string> = {}) => {
+    setDownloadingType(type)
+    setExportError(null)
+    try {
+      const params = new URLSearchParams({ type, ...extraParams })
+      const res = await fetch(`/api/admin/billing/export?${params.toString()}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.message ?? data.error ?? 'Export failed')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const disposition = res.headers.get('Content-Disposition')
+      const match = disposition?.match(/filename="(.+)"/)
+      a.download = match?.[1] ?? `${type}-export.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setExportError(err.message ?? 'Export failed')
+    } finally {
+      setDownloadingType(null)
+    }
+  }
+
+  // ── Student Billing CSV (client-side) ───────────────────────────────────────
+  // Serializes the lessons CURRENTLY on screen (sbLessons) so the exported CSV is
+  // provably identical to the table: the same getBillability call, the same
+  // per-row currency, the same status labels. Deliberately NOT a server-route
+  // export - that would recompute billing in a second place and risk drifting
+  // from the numbers the admin sees here.
+  const buildStudentBillingCSV = (): string => {
+    const headers = ['Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
+    const rows = sbLessons.map(l => {
+      const bill = getBillability({
+        status: l.status,
+        scheduledAt: l.scheduled_at,
+        cancelledAt: l.cancelled_at,
+        cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+        hourlyRate: l.hourlyRate,
+        durationMinutes: l.duration_minutes,
+      })
+      return [
+        l.studentName,
+        l.teacherName,
+        formatDateTime(l.scheduled_at),
+        l.duration_minutes,
+        getLessonStatusLabel(l.status),
+        bill.label,
+        bill.billableToTeacher ? bill.amount.toFixed(2) : '',
+        l.teacherCurrency ?? 'EUR',
+      ]
+    })
+    const lines = [headers.map(escapeCSV).join(',')]
+    for (const row of rows) lines.push(row.map(escapeCSV).join(','))
+    return lines.join('\r\n')
+  }
+
+  // Download the on-screen Student Billing rows as CSV. Client-generated blob,
+  // mirroring downloadCSV's blob/anchor download but with no network round-trip.
+  const exportStudentBillingCSV = () => {
+    if (sbLessons.length === 0) {
+      setExportError('No lessons to export - load lessons first.')
+      return
+    }
+    setExportError(null)
+    try {
+      const csv = buildStudentBillingCSV()
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `student-billing-${Date.now()}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      setExportError(err.message ?? 'Export failed')
+    }
   }
 
   // ── Filtered invoices ──────────────────────────────────────────────────────
@@ -518,6 +619,25 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
         ))}
       </div>
 
+      {/* Shared export error - rendered outside the tab sections so it stays
+          visible on whichever tab the admin triggered the export from. */}
+      {exportError && (
+        <div
+          className="mb-6 flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+        >
+          <span>{exportError}</span>
+          <button
+            onClick={() => setExportError(null)}
+            aria-label="Dismiss"
+            className="leading-none"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontSize: '16px', padding: '0 0 1px 0' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* ── TEACHER INVOICES ──────────────────────────────────────────────────── */}
       {activeTab === 'teacher_invoices' && (
         <div className="space-y-5">
@@ -586,12 +706,13 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 ...(invoiceFilterTeacher && { teacherId: invoiceFilterTeacher }),
                 ...(invoiceFilterMonth && { month: invoiceFilterMonth }),
               })}
-              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              disabled={downloadingType === 'teacher_invoices'}
+              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Export CSV
+              {downloadingType === 'teacher_invoices' ? 'Generating…' : 'Export CSV'}
             </button>
           </div>
 
@@ -805,10 +926,9 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
               {sbLoading ? 'Loading…' : 'Apply'}
             </button>
             <button
-              onClick={() => downloadCSV('student_hours', {
-                ...(sbFilterStudent && { studentId: sbFilterStudent }),
-              })}
-              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              onClick={exportStudentBillingCSV}
+              disabled={!sbLoaded || sbLessons.length === 0}
+              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -928,12 +1048,13 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                 ...(cbFilterDateFrom && { dateFrom: cbFilterDateFrom }),
                 ...(cbFilterDateTo && { dateTo: cbFilterDateTo }),
               })}
-              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              disabled={downloadingType === 'company_billing'}
+              className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              Export CSV
+              {downloadingType === 'company_billing' ? 'Generating…' : 'Export CSV'}
             </button>
           </div>
 
