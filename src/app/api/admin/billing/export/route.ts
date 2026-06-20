@@ -233,45 +233,6 @@ export async function GET(req: NextRequest) {
     filename = 'teacher-earnings.csv'
   }
 
-  // ── 3. Student Hours Usage ────────────────────────────────────────────────────────────
-  else if (type === 'student_hours') {
-    let studentsQuery = supabase
-      .from('students')
-      .select('id, full_name, email, company_id, companies(name)')
-      .order('full_name')
-
-    if (studentId) studentsQuery = studentsQuery.eq('id', studentId)
-    if (companyId) studentsQuery = studentsQuery.eq('company_id', companyId)
-
-    const { data: students, error: studentsErr } = await studentsQuery
-    if (studentsErr) throw studentsErr
-
-    const { data: trainings, error: trainingsErr } = await supabase
-      .from('trainings')
-      .select('student_id, total_hours, hours_consumed, end_date, package_name')
-    if (trainingsErr) throw trainingsErr
-
-    const headers = ['Student', 'Email', 'Company', 'Package', 'Total Hours', 'Hours Used', 'Hours Remaining', 'Training End Date']
-    const rows = (students || []).map(s => {
-      const training = (trainings || []).find(t => t.student_id === s.id)
-      const company = Array.isArray(s.companies) ? s.companies[0] : s.companies
-      const remaining = training ? (training.total_hours - training.hours_consumed) : 0
-      return [
-        s.full_name,
-        s.email,
-        company?.name || '',
-        training?.package_name || '',
-        training?.total_hours ?? 0,
-        training?.hours_consumed ?? 0,
-        remaining.toFixed(2),
-        training?.end_date || '',
-      ]
-    })
-
-    csv = toCSV(headers, rows)
-    filename = 'student-hours.csv'
-  }
-
   // ── 4. Company Billing Report ─────────────────────────────────────────────────────────
   else if (type === 'company_billing') {
     // cancellation_policy and hourly_rate have column-level REVOKEs on `authenticated` —
