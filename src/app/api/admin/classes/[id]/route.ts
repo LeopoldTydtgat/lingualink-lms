@@ -245,7 +245,10 @@ export async function PATCH(
 
   // --- RESCHEDULE / EDIT action ---
   if (existing.status !== 'scheduled') {
-    return NextResponse.json({ error: 'LESSON_NOT_EDITABLE' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'LESSON_NOT_EDITABLE', message: 'This class can no longer be edited because it is cancelled or already completed.' },
+      { status: 400 }
+    )
   }
 
   const adminClient = createAdminClient()
@@ -409,7 +412,10 @@ export async function PATCH(
         return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
       }
       if (rpcError.code === '23P01') {
-        return NextResponse.json({ error: 'SLOT_NOT_AVAILABLE' }, { status: 409 })
+        return NextResponse.json(
+          { error: 'SLOT_NOT_AVAILABLE', message: 'This slot is no longer available.' },
+          { status: 409 }
+        )
       }
       console.error('change_duration_atomic failed:', rpcError)
       return NextResponse.json({ error: 'Failed to change duration' }, { status: 500 })

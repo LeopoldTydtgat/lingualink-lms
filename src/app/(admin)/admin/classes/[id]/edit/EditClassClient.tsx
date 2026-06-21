@@ -154,7 +154,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     const data = await res.json()
 
     if (!res.ok) {
-      toast.error(data.error ?? 'Failed to save. Please try again.', { duration: 6000 })
+      toast.error(data.message ?? data.error ?? 'Failed to save. Please try again.', { duration: 6000 })
       setSaving(false)
       return
     }
