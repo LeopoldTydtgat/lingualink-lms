@@ -51,7 +51,7 @@ async function checkAdminAccess(supabase: Awaited<ReturnType<typeof createClient
     .select('account_types')
     .eq('id', user.id)
     .single()
-  const allowedRoles = ['school_admin', 'hr_admin']
+  const allowedRoles = ['school_admin']
   return profile?.account_types?.some((r: string) => allowedRoles.includes(r)) ?? false
 }
 
@@ -509,7 +509,7 @@ export async function GET(
         let query = supabase
           .from('reports')
           .select('id, lesson_id, teacher_id, status, flagged_at, deadline_at, created_at')
-          .in('status', ['pending', 'flagged'])
+          .in('status', ['pending', 'flagged', 'reopened'])
           .order('created_at', { ascending: false })
 
         if (fromTs) query = query.gte('created_at', fromTs)

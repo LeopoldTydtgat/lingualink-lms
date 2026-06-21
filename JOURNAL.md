@@ -1,3 +1,52 @@
+## Session 158 - 21 June 2026 - Admin API role hardening
+
+### What was built
+
+- Tightened authorisation on eight admin API routes so each is reachable only by a School Admin account. Removed two dormant, broader role grants that were no longer wanted, narrowing every gate to a single role (plus the existing top-level admin check where one was present).
+- The eight routes hardened: companies list, invoice-template upload, data exports, tasks list and create, single-task update, the staff-list lookup, the teacher list, and the student list.
+- Confirmed the change is strictly narrowing - no route gained access, several lost a grant that should never have applied at launch. Both review passes (a security/RLS audit and a code review) approved the change set, and the type-check passed clean.
+
+### Break/Fix Log
+
+Issue 1: Loose role grants on admin routes
+- Symptom: Several admin-only API routes accepted more roles than they should before go-live. The extra roles were dormant (no live account held them), so there was no active breach, but the gates were wider than the intended access model.
+- Cause: Earlier scaffolding had added broader role checks to routes that, by the agreed permission model, should be restricted to a single administrative role. The looseness would have become a real exposure the moment a lower-privilege account was created.
+- Fix: Replaced each route's role check with a single-role gate. Audited every call site first to confirm nothing legitimate depended on the broader grants, then verified each edit against the live file before changing it. Two of the edits required care to remove a trailing boolean operator cleanly; two others shared an identical line that had to be changed in both places.
+- Lesson: Tighten access gates before launch, not after. A grant that is harmless today because no account holds it becomes a live hole the day that account exists. Audit-first and verify-against-live-file caught two string mismatches that would otherwise have failed the edit.
+
+### Session result
+
+This session hardened the administrative surface ahead of go-live. Eight API routes that previously accepted broader role grants were narrowed to a single administrative role, closing gates that were wider than the platform's agreed permission model. The change was strictly access-narrowing, reviewed by both a security audit and a code review, and verified line-by-line against the live files before and after editing. A larger role-related feature was scoped during the session, evaluated against the pre-launch priority of getting the platform live, and deliberately deferred as additive work to be built when it is actually needed - keeping the pre-go-live surface frozen and focused on launch readiness rather than new features.
+
+---
+
+## Session 157 - 21 June 2026 - Pending-reports export fix + Teacher Coordinator role spec
+
+### What was built
+- Fixed the Billing-page pending-reports CSV export, which was reading the wrong database table and silently returning almost no rows.
+- Added reopened reports to both pending-reports exports so a report the client has reopened (awaiting teacher resubmission) now shows as outstanding.
+- Verified a client-confirmed business rule across the booking and class-management code: teachers cannot move, cancel, or book classes on a student's behalf. Confirmed no breach.
+- Confirmed the 404 "Back to home" session-drop reported earlier no longer reproduces on the live site.
+- Scoped and recorded the approved permission table for a new Teacher Coordinator role, to be built in a dedicated session.
+
+### Break/Fix Log
+Issue 1: Pending-reports export returned almost nothing.
+Symptom: the admin Billing page's pending-reports CSV listed only flagged reports, silently dropping every genuinely-pending one.
+Cause: the export queried the lessons table for a status value ('pending_report') that does not exist in the database, so it matched nothing; only the separate 'flagged' filter returned anything.
+Fix: repointed the export to query the reports table for pending and flagged statuses (the same proven source the dedicated Data Exports page already uses), then looked up lesson, teacher, and student details by id. Columns left unchanged.
+Lesson: a status string with no matching value in the database fails silently - the export ran clean and returned a near-empty file. Verify status values against the live database, not against assumptions.
+
+Issue 2: Reopened reports were invisible in the pending-reports exports.
+Symptom: a report the admin reopened (waiting on the teacher to resubmit) did not appear in either pending-reports export, though it is genuinely outstanding.
+Cause: both exports filtered for pending and flagged only, excluding the reopened status.
+Fix: added reopened to the status filter in both export routes.
+Lesson: an "outstanding work" report must include every not-yet-complete state, or it understates what is owed.
+
+### Session result
+Shipped two clean commits on the money-reporting path: the pending-reports export now reads the correct source and surfaces every outstanding report including reopened ones. Verified the teacher-permission business rule holds across booking and class management with no breach, and confirmed the 404 session-drop no longer reproduces. Recorded the approved Teacher Coordinator permission table for a dedicated build session, which also resolves the open question of who may export billing.
+
+---
+
 ## Session 156 - 21 June 2026 - Three small fixes: silent toggle, raw error codes, line-ending standard
 
 ### What was built

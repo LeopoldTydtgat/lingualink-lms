@@ -32,9 +32,7 @@ export async function GET(req: NextRequest) {
 
   const isAdmin =
     profile?.role === 'admin' ||
-    (profile?.account_types ?? []).includes('school_admin') ||
-    (profile?.account_types ?? []).includes('staff') ||
-    (profile?.account_types ?? []).includes('hr_admin')
+    (profile?.account_types ?? []).includes('school_admin')
 
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
