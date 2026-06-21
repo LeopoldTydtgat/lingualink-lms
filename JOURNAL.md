@@ -1,3 +1,22 @@
+## Session 156 - 21 June 2026 - Three small fixes: silent toggle, raw error codes, line-ending standard
+
+### What was built
+- Gave the admin announcements activate/deactivate toggle an error message on failure. The toggle had a success path with no failure path, so if the update failed the user saw nothing and the switch silently snapped back, looking like a missed click. It now shows a red error toast on failure, matching the delete button beside it.
+- Stopped a raw machine error code reaching the user on the admin class-edit screen. Trying to edit a cancelled or completed class showed the literal text "LESSON_NOT_EDITABLE" instead of a sentence. An audit across the codebase showed this was not widespread: almost every route already returns a human message alongside its code, and the screens that matter already read the message. Only this one path had two error responses missing a message and a screen reading the code directly. Added the human messages at the source so any future caller benefits, and changed the screen to prefer the message over the code.
+- Added a line-ending standard for the repository. There was no rule, so Windows and the Linux build server disagreed on how lines end, producing constant warnings and the risk of a one-line edit showing as a whole-file change. Added a .gitattributes that enforces a single standard (LF) for all text files, matching the build server.
+
+### Break/Fix Log
+Issue 1
+- Symptom: Setting up the line-ending standard, the first attempt marked the brand logo files as binary. On applying the new rule, those four logo files were rewritten with the wrong line endings and their byte size grew, shown as an opaque binary change rather than a clean conversion.
+- Cause: The logo files are SVG, which is text, not binary. Marking them binary told the tool to freeze them rather than convert them, and combined with the existing Windows setting it re-stored them with added bytes.
+- Fix: Caught it before committing by reading the change summary rather than trusting it, since a size increase is the tell that endings were added, not stripped. Confirmed the logo files themselves were still intact and valid, reset the uncommitted changes, removed the binary rule, and re-applied. The corrected rule treats the logos as the text they are, and the re-run was clean - the repository already used the standard everywhere, so nothing else needed changing.
+- Lesson: Do not mark a text format as binary in the line-ending rules, and always read the change summary before committing a bulk normalisation. A binary file growing in size is the signal that endings were added rather than removed.
+
+### Session result
+A short bug-fixing session: three separate fixes, each its own commit. Closed a silent-failure on the announcements toggle, removed a raw error code from the class-edit screen after an audit confirmed the leak was isolated to one path rather than systemic, and added a repository-wide line-ending standard. The line-ending work hit a wrong turn - the brand logos were briefly mishandled as binary - but it was caught before commit by reading the actual change rather than trusting the tool, the logos were confirmed unharmed, and the corrected rule applied cleanly to a repository that turned out to already comply. Three commits pushed.
+
+---
+
 ## Session 156 - 21 June 2026 - Sonner toast rollout across all three portals
 
 ### What was built
