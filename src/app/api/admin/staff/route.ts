@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     .eq('id', user.id)
     .single()
 
-  const allowedRoles = ['school_admin', 'staff', 'hr_admin']
+  const allowedRoles = ['school_admin']
   const hasAccess = currentProfile?.account_types?.some((r: string) => allowedRoles.includes(r))
   if (!hasAccess) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

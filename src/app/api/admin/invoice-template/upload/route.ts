@@ -23,8 +23,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
+    profile?.account_types?.includes('school_admin')
 
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

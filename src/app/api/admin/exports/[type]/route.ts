@@ -51,7 +51,7 @@ async function checkAdminAccess(supabase: Awaited<ReturnType<typeof createClient
     .select('account_types')
     .eq('id', user.id)
     .single()
-  const allowedRoles = ['school_admin', 'hr_admin']
+  const allowedRoles = ['school_admin']
   return profile?.account_types?.some((r: string) => allowedRoles.includes(r)) ?? false
 }
 
