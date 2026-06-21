@@ -15,11 +15,10 @@ import {
   Camera,
   X,
   ExternalLink,
-  CheckCircle,
-  AlertCircle,
   Eye,
 } from 'lucide-react'
 import TimezoneSelect from '@/components/TimezoneSelect'
+import { toast } from 'sonner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -194,39 +193,6 @@ function TagInput({
       <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
         Press Enter or comma to add
       </p>
-    </div>
-  )
-}
-
-// ─── Toast component ──────────────────────────────────────────────────────────
-
-function Toast({ message, type }: { message: string; type: 'success' | 'error' }) {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        bottom: '24px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        backgroundColor: type === 'success' ? '#f0fdf4' : '#fef2f2',
-        border: `1px solid ${type === 'success' ? '#86efac' : '#fca5a5'}`,
-        borderRadius: '8px',
-        padding: '12px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        fontSize: '14px',
-        color: type === 'success' ? '#166534' : '#991b1b',
-        zIndex: 1000,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-      }}
-    >
-      {type === 'success' ? (
-        <CheckCircle size={16} color="#16a34a" />
-      ) : (
-        <AlertCircle size={16} color="#dc2626" />
-      )}
-      {message}
     </div>
   )
 }
@@ -485,7 +451,6 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [activeTab, setActiveTab] = useState('general')
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [showPublicProfile, setShowPublicProfile] = useState(false)
@@ -516,11 +481,6 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
     profile.speaking_languages ?? []
   )
 
-  function showToast(message: string, type: 'success' | 'error') {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 3500)
-  }
-
   // ── Photo upload ────────────────────────────────────────────────────────────
 
   async function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -529,11 +489,11 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp']
     if (!allowedTypes.includes(file.type)) {
-      showToast('Please upload a JPG, PNG, or WebP image.', 'error')
+      toast.error('Please upload a JPG, PNG, or WebP image.', { duration: 6000 })
       return
     }
     if (file.size > 2 * 1024 * 1024) {
-      showToast('Image must be under 2MB.', 'error')
+      toast.error('Image must be under 2MB.', { duration: 6000 })
       return
     }
 
@@ -562,11 +522,11 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
       }
 
       setPhotoUrl(publicUrl)
-      showToast('Profile photo updated.', 'success')
+      toast.success('Profile photo updated.')
       router.refresh()
     } catch (err) {
       console.error('handlePhotoUpload error:', err)
-      showToast('Failed to upload photo. Please try again.', 'error')
+      toast.error('Failed to upload photo. Please try again.', { duration: 6000 })
     } finally {
       setUploadingPhoto(false)
     }
@@ -576,7 +536,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
   async function saveGeneralInfo() {
     if (!fullName.trim()) {
-      showToast('Full name is required.', 'error')
+      toast.error('Full name is required.', { duration: 6000 })
       return
     }
     setSaving(true)
@@ -593,11 +553,11 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
         const json = await res.json().catch(() => ({}))
         throw new Error(json.error ?? 'Save failed')
       }
-      showToast('General info saved.', 'success')
+      toast.success('General info saved.')
       router.refresh()
     } catch (err) {
       console.error('saveGeneralInfo error:', err)
-      showToast('Failed to save. Please try again.', 'error')
+      toast.error('Failed to save. Please try again.', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -621,11 +581,11 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
         const json = await res.json().catch(() => ({}))
         throw new Error(json.error ?? 'Save failed')
       }
-      showToast('Professional info saved.', 'success')
+      toast.success('Professional info saved.')
       router.refresh()
     } catch (err) {
       console.error('saveProfessionalInfo error:', err)
-      showToast('Failed to save. Please try again.', 'error')
+      toast.error('Failed to save. Please try again.', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -1096,9 +1056,6 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
           )}
         </div>
       )}
-
-      {/* Toast notification */}
-      {toast && <Toast message={toast.message} type={toast.type} />}
 
       {/* Public profile modal */}
       {showPublicProfile && (
