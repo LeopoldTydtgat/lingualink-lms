@@ -8,8 +8,9 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Save, CheckCircle } from 'lucide-react'
+import { ArrowLeft, Save } from 'lucide-react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 
 interface Announcement {
   id: string
@@ -65,8 +66,6 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
   const [startDate, setStartDate] = useState(toDateInputValue(announcement?.start_date ?? null))
   const [endDate, setEndDate] = useState(toDateInputValue(announcement?.end_date ?? null))
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const supabase = createClient()
@@ -83,16 +82,15 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
 
   const handleSave = async () => {
     if (!message.trim()) {
-      setError('Message is required.')
+      toast.error('Message is required.')
       return
     }
     if (needsTargetId && !targetId) {
-      setError('Please select a specific person.')
+      toast.error('Please select a specific person.')
       return
     }
 
     setSaving(true)
-    setError(null)
 
     const payload = {
       title: title.trim() || null,
@@ -123,13 +121,13 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
     }
 
     if (dbError) {
-      setError(dbError.message)
+      toast.error(dbError.message, { duration: 6000 })
       setSaving(false)
       return
     }
 
-    setSuccess(true)
-    setTimeout(() => { router.push('/admin/announcements'); router.refresh() }, 1500)
+    toast.success(isEdit ? 'Changes saved!' : 'Announcement created!')
+    setTimeout(() => { router.push('/admin/announcements'); router.refresh() }, 800)
   }
 
   return (
@@ -280,26 +278,6 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
             onChange={setIsActive}
           />
         </div>
-
-        {/* Error */}
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        {/* Success toast */}
-        {success && (
-          <div style={{
-            position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-            backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-            padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-            fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-          }}>
-            <CheckCircle size={16} color="#16a34a" />
-            {isEdit ? 'Changes saved!' : 'Announcement created!'}
-          </div>
-        )}
 
         {/* Save button */}
         <div className="pt-2">
