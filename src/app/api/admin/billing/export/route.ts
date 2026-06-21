@@ -362,7 +362,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('reports')
       .select('id, lesson_id, teacher_id, status, created_at')
-      .in('status', ['pending', 'flagged'])
+      .in('status', ['pending', 'flagged', 'reopened'])
       .order('created_at', { ascending: false })
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
