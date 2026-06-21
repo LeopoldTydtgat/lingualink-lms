@@ -1,3 +1,25 @@
+## Session 158 - 21 June 2026 - Admin API role hardening
+
+### What was built
+
+- Tightened authorisation on eight admin API routes so each is reachable only by a School Admin account. Removed two dormant, broader role grants that were no longer wanted, narrowing every gate to a single role (plus the existing top-level admin check where one was present).
+- The eight routes hardened: companies list, invoice-template upload, data exports, tasks list and create, single-task update, the staff-list lookup, the teacher list, and the student list.
+- Confirmed the change is strictly narrowing - no route gained access, several lost a grant that should never have applied at launch. Both review passes (a security/RLS audit and a code review) approved the change set, and the type-check passed clean.
+
+### Break/Fix Log
+
+Issue 1: Loose role grants on admin routes
+- Symptom: Several admin-only API routes accepted more roles than they should before go-live. The extra roles were dormant (no live account held them), so there was no active breach, but the gates were wider than the intended access model.
+- Cause: Earlier scaffolding had added broader role checks to routes that, by the agreed permission model, should be restricted to a single administrative role. The looseness would have become a real exposure the moment a lower-privilege account was created.
+- Fix: Replaced each route's role check with a single-role gate. Audited every call site first to confirm nothing legitimate depended on the broader grants, then verified each edit against the live file before changing it. Two of the edits required care to remove a trailing boolean operator cleanly; two others shared an identical line that had to be changed in both places.
+- Lesson: Tighten access gates before launch, not after. A grant that is harmless today because no account holds it becomes a live hole the day that account exists. Audit-first and verify-against-live-file caught two string mismatches that would otherwise have failed the edit.
+
+### Session result
+
+This session hardened the administrative surface ahead of go-live. Eight API routes that previously accepted broader role grants were narrowed to a single administrative role, closing gates that were wider than the platform's agreed permission model. The change was strictly access-narrowing, reviewed by both a security audit and a code review, and verified line-by-line against the live files before and after editing. A larger role-related feature was scoped during the session, evaluated against the pre-launch priority of getting the platform live, and deliberately deferred as additive work to be built when it is actually needed - keeping the pre-go-live surface frozen and focused on launch readiness rather than new features.
+
+---
+
 ## Session 157 - 21 June 2026 - Pending-reports export fix + Teacher Coordinator role spec
 
 ### What was built
