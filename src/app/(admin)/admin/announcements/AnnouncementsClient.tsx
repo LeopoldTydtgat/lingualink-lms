@@ -63,6 +63,8 @@ export default function AnnouncementsClient({
       setAnnouncements((prev) =>
         prev.map((a) => (a.id === id ? { ...a, is_active: !current } : a))
       )
+    } else {
+      toast.error('Failed to update announcement.', { duration: 6000 })
     }
     setTogglingId(null)
   }
