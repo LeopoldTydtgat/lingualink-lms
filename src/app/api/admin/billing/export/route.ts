@@ -356,33 +356,61 @@ export async function GET(req: NextRequest) {
 
   // ── 6. Pending Reports Log ────────────────────────────────────────────────────────────
   else if (type === 'pending_reports') {
+    // Pending reports live in the `reports` table — `lessons` has no
+    // 'pending_report' status. Query reports, then join lessons + names by id
+    // (mirrors /api/admin/exports/[type] pending-reports).
     let query = supabase
-      .from('lessons')
-      .select('id, scheduled_at, duration_minutes, status, teacher_id, student_id, profiles!lessons_teacher_id_fkey(full_name), students(full_name)')
-      .in('status', ['pending_report', 'flagged'])
-      .order('scheduled_at', { ascending: false })
+      .from('reports')
+      .select('id, lesson_id, teacher_id, status, created_at')
+      .in('status', ['pending', 'flagged'])
+      .order('created_at', { ascending: false })
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
-    if (dateFrom) query = query.gte('scheduled_at', dateFrom)
-    if (dateTo) query = query.lte('scheduled_at', dateTo)
+    if (dateFrom) query = query.gte('created_at', dateFrom)
+    if (dateTo) query = query.lte('created_at', dateTo)
 
-    const { data: lessons, error: lessonsErr } = await query
-    if (lessonsErr) throw lessonsErr
+    const { data: reports, error: reportsErr } = await query
+    if (reportsErr) throw reportsErr
+
+    const lessonIds = (reports || []).map((r: any) => r.lesson_id).filter(Boolean)
+    const tIds = [...new Set((reports || []).map((r: any) => r.teacher_id).filter(Boolean))]
+
+    const [lessonRes, teacherRes] = await Promise.all([
+      lessonIds.length > 0
+        ? supabase.from('lessons').select('id, student_id, scheduled_at, duration_minutes').in('id', lessonIds)
+        : { data: [] },
+      tIds.length > 0
+        ? supabase.from('profiles').select('id, full_name').in('id', tIds)
+        : { data: [] },
+    ])
+    if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
+    if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
+
+    const lessonMap: Record<string, { studentId: string; scheduledAt: string; durationMinutes: number }> = {}
+    lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at, durationMinutes: l.duration_minutes } })
+
+    const teacherMap: Record<string, string> = {}
+    teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
+
+    const studentIds = [...new Set(Object.values(lessonMap).map(l => l.studentId).filter(Boolean))] as string[]
+    const studentRes = studentIds.length > 0
+      ? await supabase.from('students').select('id, full_name').in('id', studentIds)
+      : { data: [] }
+    if ('error' in studentRes && studentRes.error) throw studentRes.error
+    const studentMap: Record<string, string> = {}
+    studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
     const now = Date.now()
     const headers = ['Teacher', 'Student', 'Class Date & Time', 'Duration (min)', 'Status', 'Hours Since Class']
-    const rows = (lessons || []).map(l => {
-      const teacher = Array.isArray(l.profiles) ? l.profiles[0] : l.profiles
-      const student = Array.isArray(l.students) ? l.students[0] : l.students
-      const classEnd = new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
-      const hoursSince = Math.max(0, Math.floor((now - classEnd) / (1000 * 60 * 60)))
+    const rows = (reports || []).map((r: any) => {
+      const lesson = lessonMap[r.lesson_id]
       return [
-        (teacher as { full_name: string } | null)?.full_name || '',
-        (student as { full_name: string } | null)?.full_name || '',
-        formatDateTimeCSV(l.scheduled_at),
-        l.duration_minutes,
-        l.status,
-        hoursSince,
+        teacherMap[r.teacher_id] ?? '',
+        lesson ? (studentMap[lesson.studentId] ?? '') : '',
+        lesson ? formatDateTimeCSV(lesson.scheduledAt) : '',
+        lesson ? lesson.durationMinutes : '',
+        r.status,
+        lesson ? Math.max(0, Math.floor((now - (new Date(lesson.scheduledAt).getTime() + lesson.durationMinutes * 60 * 1000)) / (1000 * 60 * 60))) : '',
       ]
     })
 
