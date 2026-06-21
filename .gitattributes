@@ -1,0 +1,3 @@
+# Normalise all text files to LF in the repository.
+# Prevents CRLF/LF churn between Windows checkouts and the Linux build (Vercel).
+* text=auto eol=lf
