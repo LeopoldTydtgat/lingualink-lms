@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CheckCircle } from 'lucide-react'
+import { toast } from 'sonner'
 
 interface Teacher {
   id: string
@@ -100,8 +100,6 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const [time, setTime] = useState(original.time)
   const [duration, setDuration] = useState(lesson.duration_minutes)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
   const [checkingAvailability, setCheckingAvailability] = useState(false)
   const [availabilityWarning, setAvailabilityWarning] = useState(false)
 
@@ -135,7 +133,6 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   // or from "Proceed anyway" (admin override).
   async function executeSave() {
     setSaving(true)
-    setError('')
 
     const [year, month, day] = date.split('-').map(Number)
     const [hour, minute] = time.split(':').map(Number)
@@ -157,14 +154,14 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     const data = await res.json()
 
     if (!res.ok) {
-      setError(data.error ?? 'Failed to save. Please try again.')
+      toast.error(data.error ?? 'Failed to save. Please try again.', { duration: 6000 })
       setSaving(false)
       return
     }
 
-    setSuccess(true)
     setAvailabilityWarning(false)
-    setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 1500)
+    toast.success('Changes saved!')
+    setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 800)
   }
 
   // Pre-flight: check teacher availability before saving. Fail-safe fallbacks:
@@ -319,22 +316,6 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
         </div>
 
       </div>
-
-      {error && (
-        <p style={{ fontSize: '13px', color: '#B91C1C', marginTop: '12px' }}>{error}</p>
-      )}
-
-      {success && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <CheckCircle size={16} color="#16a34a" />
-          Changes saved!
-        </div>
-      )}
 
       {/* Availability warning — shown when selected slot is outside teacher's set availability */}
       {availabilityWarning && (

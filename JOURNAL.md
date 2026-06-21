@@ -1,3 +1,20 @@
+## Session 156 - 21 June 2026 - Sonner toast rollout across all three portals
+
+### What was built
+- Added a single toast notification library (sonner) and mounted it once in the root layout, fixed to the bottom-right corner and using the portal's Inter font, so every toast looks the same everywhere. This replaces a scatter of inconsistent notification patterns built up across the three portals.
+- Replaced four blocking browser alert pop-ups with red error toasts: the admin tasks page (complete, reopen, delete failures), teacher messages and student messages (file-too-large and upload failures), and the admin announcements list (delete failure). A blocking alert freezes the page until dismissed; a toast does not.
+- Replaced eleven hand-built success and error pop-ups with toasts. Each was a block of fixed-position styling copied from file to file, every copy slightly its own thing. The pages converted: admin edit teacher, edit student, edit company, edit class, create teacher, create student, create company, settings, the announcements form, admin billing, and the teacher account page.
+- Settled one standard for the whole app: a green success toast that clears itself after about three seconds, and a red error toast that stays for six so there is time to read what went wrong.
+- Left three patterns deliberately untouched because a toast would have been worse: the student account page, which has several stacked save buttons where inline feedback beside each is clearer; the four password pages, where success is a full change of the page rather than a passing message; and the assign-sheet pop-up, where success swaps the whole panel. Also left the admin edit class availability warning as its own inline block, since it is a question the user must answer, not a result to flash and dismiss.
+
+### Break/Fix Log
+No breakage. This was a clean refactor of how existing messages are shown, not a change to what they say or when they fire. The work was split one page per commit so any single change could be checked on its own.
+
+### Session result
+Replaced fifteen separate notification patterns across the teacher, student, and admin portals with one shared toast system, mounted once and styled once. Four blocking browser alerts and eleven hand-built pop-ups are now consistent toasts on a single standard: green successes clear quickly, red errors linger long enough to read. Four patterns were deliberately left as they were, each a case where a passing toast would have been a downgrade from the inline feedback already there. The work was shipped one page per commit so every conversion could be reviewed in isolation. Sixteen commits pushed.
+
+---
+
 ## Session 155 - 20 June 2026 - Admin Classes Today timezone-awareness and RLS-drift hardening
 
 ### What was built

@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { CheckCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -155,7 +155,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   const supabase = createClient()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
-  const [toast, setToast] = useState<string | null>(null)
 
   // ── CSV export state (shared across all three tabs' Export buttons) ─────────
   const [downloadingType, setDownloadingType] = useState<string | null>(null)
@@ -327,8 +326,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     setSavingPaid(false)
     setMarkingPaidId(null)
     await loadBaseData()
-    setToast('Invoice marked as paid!')
-    setTimeout(() => setToast(null), 3000)
+    toast.success('Invoice marked as paid!')
   }
 
   // ── View invoice PDF (signed URL) ──────────────────────────────────────────
@@ -353,13 +351,11 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
     e.target.value = ''
     if (!file) return
     if (file.type !== 'application/pdf') {
-      setToast('Only PDF files are accepted.')
-      setTimeout(() => setToast(null), 3000)
+      toast.error('Only PDF files are accepted.', { duration: 6000 })
       return
     }
     if (file.size > 10 * 1024 * 1024) {
-      setToast('File must be under 10 MB.')
-      setTimeout(() => setToast(null), 3000)
+      toast.error('File must be under 10 MB.', { duration: 6000 })
       return
     }
 
@@ -373,12 +369,11 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
       // Cache-bust so freshly replaced templates load.
       setTemplateUrl(`${urlData.publicUrl}?v=${Date.now()}`)
-      setToast('Template uploaded!')
+      toast.success('Template uploaded!')
     } else {
       const body = await res.json().catch(() => ({}))
-      setToast(body.error || 'Template upload failed.')
+      toast.error(body.error || 'Template upload failed.', { duration: 6000 })
     }
-    setTimeout(() => setToast(null), 3000)
     setUploadingTemplate(false)
   }
 
@@ -583,18 +578,6 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   return (
     <div className="p-6 max-w-6xl">
       <input ref={templateInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleTemplateUpload} />
-
-      {toast && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <CheckCircle size={16} color="#16a34a" />
-          {toast}
-        </div>
-      )}
 
       {/* Page header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

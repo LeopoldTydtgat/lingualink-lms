@@ -11,6 +11,7 @@ import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { sendMessage, markMessagesAsRead } from './actions'
+import { toast } from 'sonner'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -338,7 +339,7 @@ export default function MessagesClient({
     if (!file) return
 
     if (file.size > 10 * 1024 * 1024) {
-      alert('File must be under 10MB.')
+      toast.error('File must be under 10MB.', { duration: 6000 })
       e.target.value = ''
       return
     }
@@ -351,7 +352,7 @@ export default function MessagesClient({
     const json = await res.json()
 
     if (!res.ok) {
-      alert(json.error ?? 'Upload failed.')
+      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
     } else {
       setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
     }

@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff, CheckCircle } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
 import { DatePartInput } from '../../_components/DatePartInput'
+import { toast } from 'sonner'
 
 const TIMEZONES = [
   'Africa/Johannesburg',
@@ -133,8 +134,6 @@ export default function CreateTeacherClient() {
   const router = useRouter()
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
   const [activeSection, setActiveSection] = useState<'A' | 'B'>('A')
   const [showTempPassword, setShowTempPassword] = useState(false)
 
@@ -153,15 +152,13 @@ export default function CreateTeacherClient() {
   }
 
   async function handleSubmit() {
-    setError(null)
-
     // Basic validation
-    if (!form.first_name.trim()) return setError('First name is required.')
-    if (!form.last_name.trim()) return setError('Last name is required.')
-    if (!form.email.trim()) return setError('Email is required.')
-    if (!form.temp_password.trim()) return setError('Temporary password is required.')
-    if (!form.timezone) return setError('Timezone is required.')
-    if (form.account_types.length === 0) return setError('At least one account type is required.')
+    if (!form.first_name.trim()) { toast.error('First name is required.'); return }
+    if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
+    if (!form.email.trim()) { toast.error('Email is required.'); return }
+    if (!form.temp_password.trim()) { toast.error('Temporary password is required.'); return }
+    if (!form.timezone) { toast.error('Timezone is required.'); return }
+    if (form.account_types.length === 0) { toast.error('At least one account type is required.'); return }
 
     setSaving(true)
     try {
@@ -179,10 +176,10 @@ export default function CreateTeacherClient() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to create teacher.')
 
-      setSuccess(true)
-      setTimeout(() => { router.push('/admin/teachers'); router.refresh() }, 1500)
+      toast.success('Teacher created!')
+      setTimeout(() => { router.push('/admin/teachers'); router.refresh() }, 800)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
     } finally {
       setSaving(false)
     }
@@ -217,27 +214,6 @@ export default function CreateTeacherClient() {
           </button>
         ))}
       </div>
-
-      {/* Success toast */}
-      {success && (
-        <div style={{
-          position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '14px', color: '#166534', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        }}>
-          <CheckCircle size={16} color="#16a34a" />
-          Teacher created!
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <div className="mb-4 px-4 py-3 rounded-lg text-sm"
-          style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-          {error}
-        </div>
-      )}
 
       {/* Section A */}
       {activeSection === 'A' && (
