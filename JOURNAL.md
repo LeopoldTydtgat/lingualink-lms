@@ -1,3 +1,30 @@
+## Session 157 - 21 June 2026 - Pending-reports export fix + Teacher Coordinator role spec
+
+### What was built
+- Fixed the Billing-page pending-reports CSV export, which was reading the wrong database table and silently returning almost no rows.
+- Added reopened reports to both pending-reports exports so a report the client has reopened (awaiting teacher resubmission) now shows as outstanding.
+- Verified a client-confirmed business rule across the booking and class-management code: teachers cannot move, cancel, or book classes on a student's behalf. Confirmed no breach.
+- Confirmed the 404 "Back to home" session-drop reported earlier no longer reproduces on the live site.
+- Scoped and recorded the approved permission table for a new Teacher Coordinator role, to be built in a dedicated session.
+
+### Break/Fix Log
+Issue 1: Pending-reports export returned almost nothing.
+Symptom: the admin Billing page's pending-reports CSV listed only flagged reports, silently dropping every genuinely-pending one.
+Cause: the export queried the lessons table for a status value ('pending_report') that does not exist in the database, so it matched nothing; only the separate 'flagged' filter returned anything.
+Fix: repointed the export to query the reports table for pending and flagged statuses (the same proven source the dedicated Data Exports page already uses), then looked up lesson, teacher, and student details by id. Columns left unchanged.
+Lesson: a status string with no matching value in the database fails silently - the export ran clean and returned a near-empty file. Verify status values against the live database, not against assumptions.
+
+Issue 2: Reopened reports were invisible in the pending-reports exports.
+Symptom: a report the admin reopened (waiting on the teacher to resubmit) did not appear in either pending-reports export, though it is genuinely outstanding.
+Cause: both exports filtered for pending and flagged only, excluding the reopened status.
+Fix: added reopened to the status filter in both export routes.
+Lesson: an "outstanding work" report must include every not-yet-complete state, or it understates what is owed.
+
+### Session result
+Shipped two clean commits on the money-reporting path: the pending-reports export now reads the correct source and surfaces every outstanding report including reopened ones. Verified the teacher-permission business rule holds across booking and class management with no breach, and confirmed the 404 session-drop no longer reproduces. Recorded the approved Teacher Coordinator permission table for a dedicated build session, which also resolves the open question of who may export billing.
+
+---
+
 ## Session 156 - 21 June 2026 - Three small fixes: silent toggle, raw error codes, line-ending standard
 
 ### What was built
