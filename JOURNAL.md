@@ -1,3 +1,75 @@
+## Session 162 - 22 June 2026 - Tier 1 closed: timezone gate + hours ledger PASS
+
+### What was built
+- No code changes this session. Pure go-live testing (Claude as conductor) + meta-file updates.
+- TEST_PLAN.md: J7 and J8 both marked PASS. Tier 1 (J1-J8) now complete - every launch blocker passed.
+- BUG_LOG.md: three findings logged (NEW216, NEW217) plus Teams lobby fix path reconfirmed (NEW204).
+
+### Break/Fix Log
+
+Issue 1 (J7 - timezone gate): Verified the gate before testing to rule out a false failure.
+- Symptom (anticipated): J7 is all about redirects; NEW214 is a redirect crash in proxy.ts. Risk that a J7 "fail" would actually be NEW214 in disguise.
+- Cause: code read (findstr confirm_tz / profile_completed) showed every timezone gate uses page-level redirect() in the page files (student book/my-classes/past-classes/progress; teacher schedule/upcoming-classes) - NOT proxy.ts. Different mechanism entirely.
+- Fix: none needed - confirmed J7 redirects are independent of NEW214. Column confirmed as profile_completed (checked != true).
+- Lesson: read the gate before testing the gate. The "never assume the mechanism" habit stopped us misreading a clean seam as a bug.
+
+Issue 2 (J7 result): Timezone gate holds on both portals. Disposable student (Testmax Dude) and teacher (Nia) flipped to profile_completed=false via SQL. Student: book + My Classes + Past Classes + Progress all redirect to confirm page, no crash. Teacher: dashboard + schedule redirect. Banner prefills DEVICE zone via Intl.DateTimeFormat().resolvedOptions().timeZone (both portals), ignoring stale DB value while the banner shows. Saving flips the flag true and unblocks. Both test flags restored to true post-test.
+
+Issue 3 (J8 result): Hours ledger sound, zero drift. J8.1 net-zero proven on existing ledger rows. J8.2 admin Add (+1, ref + notes saved, synced to student panel live). J8.3 admin Remove: empty-note correctly BLOCKED, proper deduct with note. J8.4 chain verified - every balance_after links correctly. J8.5 zero balance blocks booking (Contact us -> generic support@ address, correct). J8.6 under-2h shows warning, booking still allowed. Balance = total_hours - hours_consumed on trainings; tested via SQL on hours_consumed, restored to 25.00 (7.50h) after.
+
+Issue 4 (NEW216 - cosmetic): Booking confirm screen warns "After this booking you will have less than 2 hours" even when already under 2h. Number + trigger correct, only the tense is wrong. Logged, fold into the NEW207 display pass. J8.6 still PASS.
+
+Issue 5 (NEW217 - confirm-later): Student right-panel balance went stale until hard refresh - but only after an EXTERNAL raw-SQL balance change. App-driven changes (J8.2/J8.3) refreshed the panel live. May be a non-issue for production since external DB edits do not happen there. Confirm later; overlaps NEW164. Not a blocker.
+
+### Session result
+Tier 1 is complete - J1 through J8 all PASS, every launch blocker cleared. Session was clean testing only: no code touched, two cosmetic/confirm-later findings logged (NEW216, NEW217), all test data restored to baseline (Leopold 7.50h, Nia + Testmax profile_completed=true, Leopold's trainings.teacher_id still = Nia per S161 for J9/J10). Teams lobby (NEW204) reconfirmed as a Microsoft-admin settings task on the Admin@LingualinkOnline.onmicrosoft.com owner account - NOT a code change; queued as the focused start of next session with lead time before Shannon's live call. Next: Teams lobby fix first, then Tier 2 J9 (report lifecycle, ties to NEW211/212).
+
+---
+
+## Session 161 - 22 June 2026 - J6 login and role isolation (highest-stakes security journey) PASS
+
+### What was built
+- No feature work. Launch-window testing only (stop-adding-features mode). Conductor: Claude.
+- Session-open reconciliation caught two record gaps from S160's unfinished close: TEST_PLAN.md still showed J4/J5 blank and JOURNAL.md had no S159 or S160 entry. Verified against ground truth (BUG_LOG held the real S160 results: J4 link-stability and J5 refund rules both genuinely passed), then ticked J4/J5 in TEST_PLAN and wrote the missing S160 journal. S159 journal gap noted for post-launch backfill from the BUG_LOG S159 block (work itself is fully recorded there).
+- Ran TEST_PLAN.md J6 (login and role isolation) end to end across all three portals. PASS. This is the journey that had to pass before real student data loads at Section Z, because the public URLs share the same Supabase database as localhost.
+- J6.1-J6.7 click-tested: teacher login works; a teacher-only account (Nia) is redirected away from /admin; a student is blocked from both /admin and the teacher portal; a teacher sees only their own students; no hourly_rate, admin_notes or cancellation_policy is visible to a teacher; no teacher or admin email is visible to a student; no cancellation policy is visible to either.
+- J6.4 was made demonstrable rather than assumed: a live SQL change set the test student's trainings.teacher_id to Nia, after which Nia's Students page correctly showed only that student and not another teacher's students.
+- J6.8 code-verified (clicking cannot catch a field that rides along silently in an API response): the teacher and student profile routes are PATCH-only with field whitelists that exclude the sensitive columns; the teacher student-detail page selects only id, full_name, photo_url, self_assessed_level and timezone, and its on-screen Notes box reads the training's own notes, not the student's admin_notes; the teacher billing page scopes hourly_rate to the logged-in teacher's own row and relies on a database column-level REVOKE as a second layer. Error logging also scrubs all the sensitive fields.
+
+### Break/Fix Log
+- Issue 1 (NEW214, found not fixed): Symptom - a student typing /admin on localhost throws a Runtime Error at proxy.ts line 227 instead of redirecting. Cause - the role-gate redirect uses a relative URL as its localhost fallback, and NextResponse.redirect in middleware requires an absolute URL; the production branch builds an absolute URL so only localhost is affected. Reliable, not intermittent. Fix - deferred to its own focused session (proxy.ts is the highest-risk file): build an absolute URL for the localhost case on both affected lines, audit the full file first, both subagents. Lesson - access was still correctly denied, but a crash is the wrong way to deny; the earlier "sometimes login, sometimes crash" confusion was simply different URLs hitting different proxy branches.
+- Issue 2 (NEW215, found not fixed): Symptom - the admin lists a teacher as assigned to a student, but that student never appears on the teacher's own Students page. Cause - two disconnected sources of truth for "who teaches a student": the teacher Students-list page filters on trainings.teacher_id (one teacher per training), while the admin "Assigned Teachers" control and the teacher student-detail page both use a separate many-to-many link (training_teachers). The test student had a null trainings.teacher_id but two entries in the many-to-many link. Fix - deferred, audit-first: map every read of the assignment across all three portals, decide the single canonical source, and make the admin assignment UI write to whatever the teacher portal, billing and reports actually read. Lesson - structural one-to-one vs many-to-many mismatch; cannot be trivially unified, needs a deliberate decision before any code change.
+- Issue 3 (NEW213, found not fixed): Symptom - the shared login page shows a teacher-specific support email to everyone, including students. Cause - the address is hardcoded in the single shared login screen. Fix - deferred to the J13 email and contact standardisation pass. Lesson - cosmetic, not a data-isolation breach; no protected fields are exposed and access was correctly denied.
+
+### Session result
+J6, the highest-stakes journey in the plan, passed in full. Role isolation holds at every layer that can be tested: the visible pages, the page-level access checks, the API response payloads, and the database column REVOKEs. The test was made concrete rather than theoretical by assigning the test student to a teacher and confirming the isolation on screen, then proving in the route code that the three sensitive fields never leave the server for a teacher or student. Three findings were logged along the way, none of them blocking: a localhost-only proxy redirect crash (real, its own fix session), the two-sources assignment split (now confirmed across three files), and a cosmetic login-page email. Tier 1 now stands at J1-J6 PASS, with J7 (timezone gate) and J8 (hours ledger integrity) remaining. One piece of test data to remember: the test student's training is now attributed to Nia, which will show through in any later billing or report journey and is wiped at Section Z.
+
+---
+
+## Session 160 - 22 June 2026 - Tier 1 testing: J4 reschedule/teacher-swap + J5 cancel refund rules
+
+### What was built
+- No feature work. Launch-window testing only (stop-adding-features mode). Conductor: Claude.
+- Executed TEST_PLAN.md J4 (reschedule + teacher-swap link stability) and J5 (cancel + all refund rules) across student/teacher/admin portals. Both PASS.
+- J4 - the critical link-stability test: admin teacher-swap preserved the Teams join URL and teams_meeting_id identical before vs after the swap (DB-verified twice); class correctly moved off Shannon onto Nia; all three portals consistent. Student reschedule (>24h) correctly cancels-old + creates-new with a NEW link (correct per rule), balance unchanged through the reschedule.
+- J5 - all four refund paths verified with ledger checks, zero balance drift across the whole journey (started and ended at 7h 30min): student cancel <24h (red warning, no refund, balance held); student cancel >24h (green, +1.00 refund); teacher cancel (always refunded, +1.50); admin cancel (no 24h block, refund toggle default ON, +1.00).
+- Ledger integrity across J4+J5: every hours_log balance_after chained correctly with zero drift - strong early signal for J8.
+
+### Break/Fix Log
+- Issue 1 (J4 reschedule): Symptom - after a student reschedule, querying the old lesson ID showed a nulled Teams link, looking like a link-loss bug. Cause - a reschedule cancels the old row (link nulled) and creates a NEW row; the old ID is now the cancelled record. Fix - none needed, behaviour is correct; re-query by NEWEST row, never the old ID. Lesson - on any reschedule, always resolve the live class by the newest row; the old ID is debris.
+- Issue 2 (NEW212, found not fixed): Symptom - 7 of Leopold's past classes (6 May, 7 May, 8 May, 12 May, 15 Jun x2) still sit at status 'scheduled', never reported. Cause - likely pre-date the flag_overdue_reports cron, or the cron only acts within a window. Fix - deferred; the LOGIC must be proven on a fresh class at J9.5/J9.8 (the admin dashboard DID correctly show a recent debris class as "Awaiting report / overdue", which is promising). Lesson - test debris wipes at Section Z, but "what closes an un-reported past class" is a real launch question to confirm at J9.
+- Issue 3 (NEW211, found not fixed): Symptom - student right-panel Next Class card pointed at an older SQL-shifted class while the middle list correctly showed the swapped class. Cause - NOT the swap (swap display was correct everywhere); past classes left 'scheduled' with no report are still treated as "next class" candidates, and the card resolves to the earliest such class. Fix - deferred; ties to NEW212, verify together at J9 (once a past class is correctly closed, it should drop out of next-class candidacy).
+
+### Findings logged (display/polish, none blocking)
+- NEW209: teacher Next Class card shows "with Student" instead of the student name (display only; card below shows the name correctly).
+- NEW210: booking calendar last valid start slot has no hint explaining why slots stop (UX polish; the duration-aware cutoff logic is CORRECT, do not touch).
+- Two NEW-NOTEs cleared (not bugs): admin "Classes Today: 1" counter is CORRECT (counts 1 real class, excludes the cancelled one; the "1" is J3 SQL-shifted debris honestly parked on today); graph.ts "skip Graph entirely" comment is stale (a teacher swap DOES call updateTeamsMeeting to resync time, it just never regenerates the join URL).
+
+### Session result
+Two Tier 1 journeys cleared with strong results. J4 proved the single most important integration guarantee - the student's Teams link survives a teacher swap unchanged - and J5 proved every refund rule with a perfectly chained ledger and zero drift. No fixes were required; four findings were logged (two minor display, one UX polish, plus NEW211/NEW212 deferred to J9 where the report-lifecycle logic will be proven on a fresh class). Tier 1 is now J1-J5 PASS. Next session is J6 (login + role isolation) - the highest-stakes security journey, which must pass before real student data loads at Section Z because the public URLs share the live Supabase DB. Fresh-mind session was the right call.
+
+---
+
 ## Session 158 - 21 June 2026 - Admin API role hardening
 
 ### What was built
