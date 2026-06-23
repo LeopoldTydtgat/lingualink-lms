@@ -122,7 +122,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       return
     }
     if (didClassHappen && feedbackText.trim().length < 150) {
-      setError('Please provide at least 150 characters of feedback before submitting.')
+      // No setError here: the inline counter beneath the recap field already shows this
+      // message in the right place. The shared banner sits at the bottom (under Additional
+      // Details) and would misleadingly read as if Additional Details were at fault.
       return
     }
 
@@ -314,9 +316,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               ].join(' ')}
             />
             <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 1000</p>
-    {feedbackText.length < 150 && (
+    {feedbackText.trim().length < 150 && (
       <p className="text-xs text-red-500 mt-1">
-        Minimum 150 characters required ({150 - feedbackText.length} remaining)
+        Minimum 150 characters required ({150 - feedbackText.trim().length} remaining)
       </p>
     )}
           </section>
