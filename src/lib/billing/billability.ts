@@ -1,7 +1,8 @@
 // Canonical lesson-status vocabulary. Mirrors the DB CHECK on lessons.status
 // EXACTLY (scheduled, completed, cancelled, cancelled_by_student,
-// cancelled_by_teacher, student_no_show, teacher_no_show). Single source of
-// truth: any new status is added here AND to the DB CHECK in the same change.
+// cancelled_by_teacher, student_no_show, teacher_no_show, missed). Single
+// source of truth: any new status is added here AND to the DB CHECK in the
+// same change.
 // All consumer status sets below derive from this so a filter cannot silently
 // drift. NOTE: this is the `lessons` vocabulary; the legacy `classes` table
 // uses a different spelling (no_show_student/no_show_teacher) — never mix them.
@@ -13,6 +14,7 @@ export const ALL_LESSON_STATUSES = [
   'cancelled_by_teacher',
   'student_no_show',
   'teacher_no_show',
+  'missed',
 ] as const
 
 export type LessonStatus = typeof ALL_LESSON_STATUSES[number]
@@ -58,6 +60,12 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
   if (status === 'completed') return billable('Billable')
   if (status === 'student_no_show') return billable('Billable (no-show)')
   if (status === 'teacher_no_show') return notBillable('Not billable')
+  // 'missed': the class HAPPENED but the teacher blew the 12h report window, so
+  // the teacher forfeits pay (0 here). The student is still billed - student
+  // billing is hours-based and lives outside getBillability, so this 0 only
+  // zeroes the TEACHER side. Settled (not 'scheduled'), so projectedContribution
+  // routes here too (-> 0) for both past and future scheduledAt.
+  if (status === 'missed') return notBillable('Not billable (missed)')
   if (status === 'cancelled_by_teacher' || status === 'teacher_cancelled') return notBillable('Not billable')
 
   if (status === 'cancelled' || status === 'cancelled_by_student') {
@@ -163,24 +171,31 @@ export const SETTLED_LESSON_STATUSES: readonly LessonStatus[] =
 export const MONTH_BILLING_PREFILTER_STATUSES: readonly LessonStatus[] =
   SETTLED_LESSON_STATUSES.filter((s) => s !== 'teacher_no_show')
 
-// Active + cancelled lessons — everything EXCEPT completed and the two no-show statuses.
-// Derived so it can't drift from ALL_LESSON_STATUSES: a new status added to the DB CHECK
-// flows in automatically unless it is 'completed' or a no-show.
+// Active + cancelled lessons: everything EXCEPT completed, missed, and the two no-shows.
+// NOT a pure "derive and let everything new flow in" set: 'completed', the two no-shows,
+// and 'missed' are each excluded because each is a SETTLED outcome, not an active or
+// cancelled lesson. 'missed' (class happened, report window blown) is settled too, so it
+// must never appear in an "active + cancelled" list view.
 // Consumed by list views that show upcoming classes alongside their cancellations
 // (teacher upcoming-classes, student my-classes). Equals the 4-member hand-rolled set
 // ['scheduled','cancelled','cancelled_by_student','cancelled_by_teacher'] today.
 export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
-  ALL_LESSON_STATUSES.filter((s) => s !== 'completed' && !NO_SHOW_STATUSES.includes(s))
+  ALL_LESSON_STATUSES.filter(
+    (s) => s !== 'completed' && s !== 'missed' && !NO_SHOW_STATUSES.includes(s)
+  )
 
 // Student-visible history statuses: settled lessons with ALL cancellations removed
-// (completed + both no-shows). This EXCLUDES every cancellation by deliberate product
-// decision (BUG_LOG NEW61 / S134) — students do not see cancelled classes in their
-// history; the refund is visible in the hours log instead. Derived from CANCELLED_STATUSES
-// so a future cancellation status is automatically excluded too. DO NOT add cancellations
-// to this set to "complete" it — the omission is intentional. Equals
-// ['completed','student_no_show','teacher_no_show'] today.
+// (completed + both no-shows), and 'missed' removed too. This EXCLUDES every cancellation
+// by deliberate product decision (BUG_LOG NEW61 / S134): students do not see cancelled
+// classes in their history; the refund is visible in the hours log instead. Derived from
+// CANCELLED_STATUSES so a future cancellation status is automatically excluded too. DO NOT
+// add cancellations to this set to "complete" it: the omission is intentional.
+// 'missed' is excluded as a PROVISIONAL product decision (pending confirmation): a missed
+// class is an admin/teacher-pay concept, not something to surface to the student as a past
+// lesson. To let students SEE missed classes in history, drop the `s !== 'missed'` guard.
+// Equals ['completed','student_no_show','teacher_no_show'] today.
 export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
-  SETTLED_LESSON_STATUSES.filter((s) => !CANCELLED_STATUSES.includes(s))
+  SETTLED_LESSON_STATUSES.filter((s) => s !== 'missed' && !CANCELLED_STATUSES.includes(s))
 
 // Build a PostgREST .not('status','in', ...) / .in-string filter argument from a status set.
 // PostgREST's STRING-shorthand "in" takes a quoted, comma-joined, parenthesised list — e.g.
