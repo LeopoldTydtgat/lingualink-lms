@@ -18,7 +18,10 @@ import { verifyCronAuth } from '@/lib/cron-auth'
 // is disabled -- NEW178 -- so nothing silently completes it). The 'pending' report
 // row is the canonical marker of such a class, so we scan reports, not lesson
 // status. The flag + email here are the visibility/notification layer; pay is
-// withheld structurally by the lesson never leaving 'scheduled'.
+// withheld both structurally (getBillability zeroes 'missed' exactly as it zeroed
+// a past 'scheduled') and explicitly: after flagging, this cron flips the lesson
+// 'scheduled' -> 'missed' (status only; never hours/billing/student), so a settled
+// forfeit stops masquerading as a still-'scheduled' class.
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -99,6 +102,25 @@ export async function GET(request: Request) {
 
     // The flag stands from here on, regardless of what happens with the email.
     flagged++
+
+    // Settle the lesson: 'scheduled' -> 'missed'. The class happened but the
+    // report window was blown, so the lesson is now a settled forfeit. STATUS
+    // ONLY: must not touch hours_consumed, the student, or any billing field.
+    // Guarded on status='scheduled' exactly like the report flag above;
+    // .select('id') confirms the write. Zero rows => the lesson left 'scheduled'
+    // in a race (e.g. it was just completed) -> log and carry on, never error.
+    const { data: missedRows, error: missedErr } = await supabase
+      .from('lessons')
+      .update({ status: 'missed' })
+      .eq('id', lesson.id)
+      .eq('status', 'scheduled')
+      .select('id')
+
+    if (missedErr) {
+      console.error(`Failed to flip lesson ${lesson.id} to 'missed':`, missedErr)
+    } else if (!missedRows || missedRows.length === 0) {
+      console.log(`Lesson ${lesson.id} no longer 'scheduled'; 'missed' flip skipped`)
+    }
 
     // ── Notify the teacher that the reporting window was missed ──────────────
     // Best-effort only: the pay decision above must NOT depend on Resend being up,
