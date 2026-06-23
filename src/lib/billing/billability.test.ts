@@ -71,6 +71,19 @@ describe('getBillability — taken / no-show branches', () => {
   })
 })
 
+describe('getBillability - missed status', () => {
+  // 'missed' = the class happened but the teacher blew the 12h report window.
+  // Teacher forfeits pay (amount 0, billableToTeacher false). The student is
+  // still billed, but student billing is hours-based and lives outside this fn,
+  // so the 0 here only zeroes the teacher side.
+  it('missed: NOT billable to teacher, amount 0', () => {
+    const r = getBillability(input({ status: 'missed' }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.billable48hr).toBe(false)
+    expect(r.amount).toBe(0)
+  })
+})
+
 describe('getBillability — student cancellation by notice window', () => {
   // scheduledAt − cancelledAt = hoursNotice. Source uses < 24, < 48 (strict).
 
@@ -249,6 +262,29 @@ describe('BLOCKED_STATUSES', () => {
       'student_no_show',
       'teacher_no_show',
     ])
+  })
+})
+
+describe('projectedContribution - missed status (settled, never projected)', () => {
+  const HOUR = 60 * 60 * 1000
+  const nowMs = new Date('2026-06-16T12:00:00Z').getTime()
+
+  it('missed lesson in the PAST: contributes ZERO', () => {
+    const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'missed', scheduledAt: pastAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(0)
+  })
+
+  it('missed lesson with a FUTURE scheduledAt: still ZERO (settled, not scheduled)', () => {
+    const futureAt = new Date(nowMs + 48 * HOUR).toISOString()
+    const amt = projectedContribution(
+      input({ status: 'missed', scheduledAt: futureAt, durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(0)
   })
 })
 

@@ -42,8 +42,13 @@ type Props = {
 export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   const [search, setSearch] = useState('')
 
+  // Capture a single "now" so every pending check compares against the same instant
+  const now = Date.now()
+
   const pendingReports = reports.filter(
-    r => r.status === 'pending' || r.status === 'reopened'
+    r =>
+      (r.status === 'pending' || r.status === 'reopened') &&
+      hasClassStarted(r, now)
   )
 
   const completedReports = reports.filter(
@@ -369,6 +374,15 @@ function MissedReportCard({
       </div>
     </div>
   )
+}
+
+// --- Helper: has the lesson's class already started? ---
+// A pending report only surfaces once the class has begun (scheduled_at <= now).
+// No scheduled_at means the class cannot have started yet, so exclude it.
+function hasClassStarted(report: Report, now: number): boolean {
+  const scheduledAt = report.lesson?.scheduled_at
+  if (!scheduledAt) return false
+  return new Date(scheduledAt).getTime() <= now
 }
 
 // --- Helper: deadline countdown label ---
