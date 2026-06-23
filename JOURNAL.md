@@ -1,3 +1,20 @@
+## Session 164 - 23 June 2026 - Billing verification (NEW218 closed) and lobby fix logged
+
+### What was built
+- No code shipped. Working tree restored to HEAD and confirmed clean.
+
+### Break/Fix Log
+Issue 1 (NEW218): Symptom - the teacher right-panel billing widget appeared to show wrong Projected figures (EUR 165 vs an expected EUR 82.50). Cause - there was no billing bug. The original code was correct. The wrong number came from an uncommitted local change made earlier in the session that was polluting the dev server. Fix - restored the working tree to HEAD with git restore; the change was never committed, so nothing needed reverting in history. Lesson - read the actual database rows before theorising, and confirm whether a surprising number is coming from committed code or from uncommitted working-tree edits. Most of the session was spent ruling out causes that did not exist.
+
+Issue 2 (Projected verified live): Symptom - needed proof that Projected behaves to spec. Cause - prior confusion meant the rule was never demonstrated. Fix - ran a live test on Shannon's own teacher widget: baseline Projected EUR 82.50; booked a future class and Projected rose to EUR 110.00 while Current held at EUR 82.50; deleted the test class and Projected fell back to EUR 82.50. Lesson - Projected counts a future booking immediately and drops it when removed; Current only moves on a filed report or an auto-detected under-policy cancellation; a past unreported class counts zero in both until its report lands or its deadline passes.
+
+Issue 3 (NEW204 lobby, separate window): Symptom - Teams meetings still placed students in a lobby. Cause - the Microsoft default "Anonymous users and dial-in callers can start a meeting" was off, which forces anonymous joiners to wait; the per-meeting bypass setting cannot override it. Fix - set that policy to on in the Teams admin centre under the organiser account, confirmed live by joining a stored meeting link from an incognito window and going straight in. Lesson - the lobby is governed by the anonymous-start tenant policy, not the per-meeting bypass control.
+
+### Session result
+A long session that landed in the right place. The billing system was never broken; Projected and Current both behave exactly to specification, now proven with a live up-and-down test on real data. The codebase is clean at HEAD with nothing to deploy. The one genuinely open item is the report-lifecycle "Missed" state, which is J9 work and does not affect any current figure. The Teams lobby was also fixed and confirmed. Next session starts J9 fresh from a clean handover.
+
+---
+
 ## Session 162 - 22 June 2026 - Tier 1 closed: timezone gate + hours ledger PASS
 
 ### What was built
