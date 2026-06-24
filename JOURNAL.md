@@ -1,3 +1,22 @@
+## Session 168 - 24 June 2026 - J11 admin hours (PASS) + J12 exports (FAIL, B2B billing blocker found)
+
+### What was built
+- No code shipped this session. Testing-only: J11 and J12 walked against live test data, plus a purpose-built B2B test case to exercise company billing.
+- Session opened with git reconciliation: confirmed dev clean at ac96ae9, found the three S167 commits were never pushed (handover said "pushed-ready" = ready, not done), pushed them (865d910..ac96ae9). origin/dev now matches local.
+
+### Break/Fix Log
+J11 - Admin hours management UI: PASS, all four sub-journeys. Add Hours wrote a correct 'add' ledger row; Remove Hours correctly blocked an empty note and wrote a 'deduct' row; the Hours Log showed newest-first; and editing package size on the profile form logged an 'admin_adjustment' ledger row (the NEW141 product decision holding up - the step most likely to fail silently, and it passed). Every balance_after chained with no drift, all DB-confirmed. A comma-decimal package value (34,5) saved correctly as 34.50. Logged NEW226: a quick-edit for Total Hours on the Hours Log screen would save the admin clicking through four form sections to change one field.
+
+J12 - Exports match the screen: FAIL, one launch blocker. Five of six exports were correct and the figures reconciled across screens and across exports - the teacher June total of 192.50 appeared identically in teacher_invoices, teacher-earnings, and the J10 widget. The student-billing total of 288.50 added up from its rows, including admin-cancelled-within-24hr classes being billed (confirmed correct per the client: an admin cancelling on a student's behalf inside 24hr still bills the student). all-classes, pending-reports, and student-progress all read clean.
+
+The blocker is company billing (NEW224, confirming the long-flagged NEW195). To test it I built a B2B case from scratch: an existing 48hr-policy company that had never had students, a fresh B2B student attached to it (cancellation policy correctly inherited as 48hr from the company), a booked class, time-shifted to 40 hours out, then cancelled by the student. The student was correctly refunded (they were outside their own 24hr window); the cancellation was correctly flagged as billable to the company under the 48hr policy. But the amount came out as zero. The Billing-page export has an Amount column showing 0; the Data-Exports version has no amount column at all. Neither gives the client a usable invoice figure. The client confirmed the rule: B2B billing works exactly like normal student billing - the company is billed the full class fee on a late cancellation - the only difference is the window (48hr for business, 24hr for normal students). So the company here is owed the full 30-minute fee (27.50) and the export shows nothing. This under-bills B2B clients and is a launch blocker; the fix belongs with the NEW195 consolidation since it is the same two-divergent-implementations problem.
+
+Two smaller findings surfaced during the B2B setup. The company detail page's Students tab shows 0 even though the student is genuinely linked (NEW225) - a display bug isolated to that one tab, since billing and the all-classes export both read the link correctly, and latent since the Companies module was built in Session 29. And the new B2B student received no welcome email at all (inbox, spam, promotions all empty); the hypothesis to test at J13.2 is that the company link suppresses or redirects the student welcome email, which folds into the already-parked welcome-email item.
+
+### Session result
+J11 passed cleanly - admin hours management and the ledger are sound. J12 did its job and caught a real launch blocker: the company-billing exports do not produce a usable B2B invoice amount, confirming the NEW195 risk the test plan was written to find. The admin portal remains only intersection-tested feature-by-feature; the company-detail Students tab bug found this session is an example of what a dedicated admin pass would surface. No code changed, so nothing to commit beyond the meta-folder writes. Test debris (the B2B student, the cancelled class, Leopold's shifted hours) is all noted for the Section Z wipe.
+
+---
 ## Session 167 - 24 June 2026 - J10 teacher billing complete; NEW219 projection model built and signed off
 
 ### What was built
