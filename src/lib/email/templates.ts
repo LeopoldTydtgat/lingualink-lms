@@ -243,6 +243,9 @@ export function studentBookingConfirmationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
+    <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
+      The Join Class button in your portal activates 10 minutes before the class starts.
+    </p>
   `
 }
 

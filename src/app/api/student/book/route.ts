@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate } from '@/lib/email/templates'
+import { buildEmailTemplate, studentBookingConfirmationEmailContent, teacherNewBookingEmailContent } from '@/lib/email/templates'
 import { createTeamsMeeting, cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
@@ -592,7 +592,7 @@ export async function POST(req: NextRequest) {
 
     const studentBodyHtml = isReschedule
       ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
-      : bookingConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
+      : studentBookingConfirmationEmailContent(teacher.full_name, startTime.toISOString(), durationMinutes, studentTimezone)
 
     const teacherSubject = isReschedule
       ? `Lingualink Online – Class rescheduled by ${studentRow.full_name}`
@@ -600,7 +600,7 @@ export async function POST(req: NextRequest) {
 
     const teacherBodyHtml = isReschedule
       ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes)
-      : bookingNotificationTeacherEmail(studentRow.full_name, teacherDateTime, durationMinutes)
+      : teacherNewBookingEmailContent(studentRow.full_name, startTime.toISOString(), durationMinutes, teacherTimezone)
 
     await Promise.allSettled([
       resend.emails.send({
