@@ -24,9 +24,15 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
 
-          <!-- Header -->
+          <!-- Header: orange accent strip -->
           <tr>
-            <td style="background-color:#FF8303;padding:12px 0;">
+            <td height="6" style="height:6px;line-height:6px;font-size:0;background-color:#FF8303;">&nbsp;</td>
+          </tr>
+
+          <!-- Header: white logo block -->
+          <tr>
+            <td style="background-color:#FFFFFF;padding:22px;text-align:center;border-bottom:1px solid #E5E7EB;">
+              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="160" style="display:block;margin:0 auto;" />
             </td>
           </tr>
 
@@ -43,7 +49,6 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
           <!-- Footer -->
           <tr>
             <td style="padding:24px 40px;border-top:1px solid #E5E7EB;text-align:center;">
-              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
                 <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
