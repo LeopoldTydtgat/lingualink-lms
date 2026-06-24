@@ -301,13 +301,13 @@ describe('projectedContribution — the teacher projected-total rule', () => {
     expect(amt).toBe(20)
   })
 
-  it('past scheduled lesson (overdue, unreported): contributes ZERO', () => {
+  it('past scheduled lesson (ended, awaiting report): contributes full projected pay', () => {
     const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
     const amt = projectedContribution(
       input({ status: 'scheduled', scheduledAt: pastAt, durationMinutes: 60, hourlyRate: 20 }),
       nowMs
     )
-    expect(amt).toBe(0)
+    expect(amt).toBe(20)
   })
 
   it('completed lesson: contributes the realised billable amount regardless of time', () => {
