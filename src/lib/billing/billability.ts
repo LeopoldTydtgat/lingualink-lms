@@ -34,6 +34,11 @@ export interface BillabilityResult {
   billableToTeacher: boolean
   billable48hr: boolean
   amount: number
+  // What the B2B company owes for this lesson, independent of teacher pay.
+  // Equals `amount` on every teacher-billable branch; on a 24-48hr cancellation
+  // under a 48hr-policy student it is the full class fee while `amount` stays 0
+  // (company billed, teacher unpaid). Never sum across currencies.
+  companyAmount: number
   label: string
   labelColor: string
 }
@@ -45,6 +50,7 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     billableToTeacher: false,
     billable48hr: false,
     amount: 0,
+    companyAmount: 0,
     label,
     labelColor,
   })
@@ -53,6 +59,7 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     billableToTeacher: true,
     billable48hr: false,
     amount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
+    companyAmount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
     label,
     labelColor: '#16a34a',
   })
@@ -81,6 +88,8 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
         billableToTeacher: false,
         billable48hr: true,
         amount: 0,
+        // Teacher unpaid (amount 0) but the company owes the full class fee.
+        companyAmount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
         label: '48hr policy',
         labelColor: '#FF8303',
       }
