@@ -382,7 +382,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, student_id')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, student_id, teacher_id')
           .in('student_id', studentIds)
           .order('scheduled_at', { ascending: false })
 
@@ -391,6 +391,17 @@ export async function GET(
 
         const { data: lessons, error: lErr } = await lessonsQuery
         if (lErr) throw lErr
+
+        // hourly_rate has a column-level REVOKE on `authenticated` — fetch the
+        // teacher rate+currency via the admin client (role-gated above) so the
+        // company-owed Amount can be computed from getBillability's single source.
+        const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))] as string[]
+        const teacherRes = teacherIds.length > 0
+          ? await adminClient.from('profiles').select('id, hourly_rate, currency').in('id', teacherIds)
+          : { data: [] }
+        if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
+        const teacherMap: Record<string, { rate: number; currency: string }> = {}
+        teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
         const sMap: Record<string, any> = {}
         students?.forEach((s: any) => { sMap[s.id] = s })
@@ -404,7 +415,7 @@ export async function GET(
             scheduledAt: l.scheduled_at,
             cancelledAt: l.cancelled_at,
             cancellationPolicy: student?.cancellation_policy as '24hr' | '48hr' | null,
-            hourlyRate: 0,
+            hourlyRate: teacherMap[l.teacher_id]?.rate ?? 0,
             durationMinutes: l.duration_minutes ?? 0,
           })
           const billable24 = bill.billableToTeacher
@@ -419,6 +430,8 @@ export async function GET(
             'Status': l.status,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
             'Billable cancellation (48hr policy)': billable48 ? 'Yes' : 'No',
+            'Amount': bill.companyAmount,
+            'Currency': teacherMap[l.teacher_id]?.currency ?? 'EUR',
           }
         })
 

@@ -301,7 +301,7 @@ export async function GET(req: NextRequest) {
             lesson.status,
             bill.billableToTeacher ? 'Yes' : 'No',
             bill.billable48hr ? 'Yes' : 'No',
-            bill.amount,
+            bill.companyAmount,
             teacher?.currency || 'EUR',
           ])
         }
