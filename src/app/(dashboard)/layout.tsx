@@ -124,10 +124,11 @@ export default async function DashboardLayout({
       }
 
       // Projected month total. projectedContribution encodes the rule:
-      // a FUTURE scheduled lesson counts at full pay; a PAST scheduled lesson
-      // (overdue, unreported — "no report = no pay") counts ZERO; a settled
-      // lesson counts its realised billable amount. This is the NEW178 fix:
-      // an unreported past class no longer inflates the projection.
+      // a scheduled lesson — past OR future — counts at full projected pay,
+      // because a booked class is potential income from booking through the
+      // report window (filing the report does not change it). A settled lesson
+      // counts its realised billable amount, so settled non-billable outcomes
+      // (cancellations, teacher no-show, missed) count zero. (NEW219 model.)
       projectedAmount += projectedContribution(
         {
           status: lesson.status,

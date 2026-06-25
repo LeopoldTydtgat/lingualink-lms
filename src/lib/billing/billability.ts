@@ -34,6 +34,11 @@ export interface BillabilityResult {
   billableToTeacher: boolean
   billable48hr: boolean
   amount: number
+  // What the B2B company owes for this lesson, independent of teacher pay.
+  // Equals `amount` on every teacher-billable branch; on a 24-48hr cancellation
+  // under a 48hr-policy student it is the full class fee while `amount` stays 0
+  // (company billed, teacher unpaid). Never sum across currencies.
+  companyAmount: number
   label: string
   labelColor: string
 }
@@ -45,6 +50,7 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     billableToTeacher: false,
     billable48hr: false,
     amount: 0,
+    companyAmount: 0,
     label,
     labelColor,
   })
@@ -53,6 +59,7 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     billableToTeacher: true,
     billable48hr: false,
     amount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
+    companyAmount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
     label,
     labelColor: '#16a34a',
   })
@@ -81,6 +88,8 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
         billableToTeacher: false,
         billable48hr: true,
         amount: 0,
+        // Teacher unpaid (amount 0) but the company owes the full class fee.
+        companyAmount: Math.round((durationMinutes / 60) * hourlyRate * 100) / 100,
         label: '48hr policy',
         labelColor: '#FF8303',
       }
@@ -101,29 +110,32 @@ export function getProjectedAmount(input: BillabilityInput): number {
 
 /**
  * How much a single lesson should contribute to a teacher's PROJECTED monthly
- * total, given the current instant.
+ * total.
  *
- * The projection must tell the same truth as realised billing:
- *  - FUTURE 'scheduled' lesson  -> full projected amount (it will happen).
- *  - PAST 'scheduled' lesson     -> 0. An unreported past class is overdue;
- *    business rule is "no report = no pay", so it must not inflate projection.
- *    Once reported, its status changes away from 'scheduled' and the branch
- *    below governs it.
- *  - Any SETTLED status (completed / no-show / cancelled) -> the realised
- *    billable amount from getBillability (single source of truth for the math).
+ * A booked class is potential teacher income from the moment it is booked. It
+ * stays counted in the projection through the class itself AND through the
+ * report-filing window — filing the report does NOT change the projection,
+ * because the booking is the potential income, not the paperwork.
  *
- * `nowMs` is the current time in epoch milliseconds (Date.now()-style). It is
- * passed in rather than read here so the function stays pure and testable.
- * The comparison is instant-vs-instant (UTC scheduledAt vs nowMs) — no local
- * date construction, no toISOString.
+ *  - 'scheduled' lesson, PAST OR FUTURE -> full projected amount. A past class
+ *    that has ended but has no report yet is still potential income and stays
+ *    counted. The lesson only leaves the projection when its status changes to
+ *    a settled non-billable outcome: cancellation, teacher no-show, or 'missed'
+ *    (the report deadline was blown, flipping 'scheduled' -> 'missed').
+ *  - Any SETTLED status (completed / no-show / cancelled / missed) -> the
+ *    realised billable amount from getBillability (single source of truth for
+ *    the math), so settled non-billable outcomes contribute 0.
+ *
+ * `_nowMs` (epoch milliseconds) is retained in the signature because the caller
+ * in (dashboard)/layout.tsx passes it, but the rule is now time-independent so
+ * it is no longer read here. No local date construction, no toISOString.
  */
 export function projectedContribution(
   input: BillabilityInput,
-  nowMs: number
+  _nowMs: number
 ): number {
   if (input.status === 'scheduled') {
-    const isFuture = new Date(input.scheduledAt).getTime() > nowMs
-    return isFuture ? getProjectedAmount(input) : 0
+    return getProjectedAmount(input)
   }
   return getBillability(input).amount
 }

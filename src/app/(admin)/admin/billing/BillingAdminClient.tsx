@@ -1064,6 +1064,27 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                   return bill.billable48hr
                 })
 
+                // Per-currency sum of what the company owes for its 48hr-policy
+                // cancellations. Mirrors sbTotalsByCurrency: never merge currencies
+                // into one number. companyAmount comes from getBillability (single
+                // source) so this can't drift from the per-line figures below.
+                const companyOwedByCurrency: Record<string, number> = {}
+                for (const l of flags48hr) {
+                  const bill = getBillability({
+                    status: l.status,
+                    scheduledAt: l.scheduled_at,
+                    cancelledAt: l.cancelled_at,
+                    cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                    hourlyRate: l.hourlyRate,
+                    durationMinutes: l.duration_minutes,
+                  })
+                  const cur = l.teacherCurrency ?? 'EUR'
+                  companyOwedByCurrency[cur] = (companyOwedByCurrency[cur] ?? 0) + bill.companyAmount
+                }
+                const companyOwedDisplay = Object.entries(companyOwedByCurrency)
+                  .map(([cur, amt]) => `${currencySymbol(cur)}${amt.toFixed(2)}`)
+                  .join(' + ') || '€0.00'
+
                 const billableToTeacherLessons = lessons.filter(l => {
                   const bill = getBillability({
                     status: l.status,
@@ -1096,17 +1117,28 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
                     {flags48hr.length > 0 && (
                       <div className="px-5 py-3 border-b border-orange-100" style={{ backgroundColor: '#fff9f5' }}>
                         <p className="text-xs font-medium" style={{ color: '#FF8303' }}>
-                          48hr policy cancellations — Lingualink bills the company, teacher is not paid
+                          48hr policy cancellations — Lingualink bills the company, teacher is not paid · Company owes: {companyOwedDisplay}
                         </p>
                         <div className="mt-2 space-y-1">
-                          {flags48hr.map(l => (
-                            <div key={l.id} className="flex items-center gap-4 text-xs text-gray-600">
-                              <span>{l.studentName}</span>
-                              <span>{formatDateTime(l.scheduled_at)}</span>
-                              <span>{l.duration_minutes} min</span>
-                              <span className="font-medium" style={{ color: '#FF8303' }}>48hr cancellation</span>
-                            </div>
-                          ))}
+                          {flags48hr.map(l => {
+                            const bill = getBillability({
+                              status: l.status,
+                              scheduledAt: l.scheduled_at,
+                              cancelledAt: l.cancelled_at,
+                              cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
+                              hourlyRate: l.hourlyRate,
+                              durationMinutes: l.duration_minutes,
+                            })
+                            return (
+                              <div key={l.id} className="flex items-center gap-4 text-xs text-gray-600">
+                                <span>{l.studentName}</span>
+                                <span>{formatDateTime(l.scheduled_at)}</span>
+                                <span>{l.duration_minutes} min</span>
+                                <span className="font-medium" style={{ color: '#FF8303' }}>48hr cancellation</span>
+                                <span className="font-semibold" style={{ color: '#FF8303' }}>{currencySymbol(l.teacherCurrency)}{bill.companyAmount.toFixed(2)}</span>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     )}

@@ -173,6 +173,53 @@ describe('getBillability — student cancellation by notice window', () => {
   })
 })
 
+describe('getBillability — companyAmount (B2B 48hr company billing)', () => {
+  // companyAmount is what Lingualink invoices the B2B company; it is independent
+  // of teacher pay (`amount`). The 48hr policy is the ONLY branch where they
+  // diverge: teacher unpaid (amount 0) while the company owes the full class fee.
+
+  it('48hr policy, cancelled 36h before a 30-min class @ €20: teacher amount 0, company owes €10', () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 36 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled_by_student',
+      scheduledAt,
+      cancelledAt,
+      cancellationPolicy: '48hr',
+      durationMinutes: 30,
+      hourlyRate: 20,
+    }))
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(10)
+  })
+
+  it('completed 30-min class @ €20: amount and companyAmount match (both €10)', () => {
+    const r = getBillability(input({ status: 'completed', durationMinutes: 30, hourlyRate: 20 }))
+    expect(r.amount).toBe(10)
+    expect(r.companyAmount).toBe(10)
+    expect(r.amount).toBe(r.companyAmount)
+  })
+
+  it('24hr policy, cancelled 36h before: policy gate holds, company is NOT charged', () => {
+    // A 24hr-policy student outside the 24h window is billable to no one — the
+    // 48hr company-billing branch must not fire, so companyAmount stays 0.
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 36 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled_by_student',
+      scheduledAt,
+      cancelledAt,
+      cancellationPolicy: '24hr',
+      durationMinutes: 30,
+      hourlyRate: 20,
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.billable48hr).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(0)
+  })
+})
+
 describe('getBillability — amount calculation', () => {
   it('30-minute lesson @ €20: €10.00', () => {
     expect(getBillability(input({ durationMinutes: 30 })).amount).toBe(10)
@@ -301,13 +348,13 @@ describe('projectedContribution — the teacher projected-total rule', () => {
     expect(amt).toBe(20)
   })
 
-  it('past scheduled lesson (overdue, unreported): contributes ZERO', () => {
+  it('past scheduled lesson (ended, awaiting report): contributes full projected pay', () => {
     const pastAt = new Date(nowMs - 48 * HOUR).toISOString()
     const amt = projectedContribution(
       input({ status: 'scheduled', scheduledAt: pastAt, durationMinutes: 60, hourlyRate: 20 }),
       nowMs
     )
-    expect(amt).toBe(0)
+    expect(amt).toBe(20)
   })
 
   it('completed lesson: contributes the realised billable amount regardless of time', () => {

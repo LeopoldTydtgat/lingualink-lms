@@ -24,9 +24,15 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
 
-          <!-- Header -->
+          <!-- Header: orange accent strip -->
           <tr>
-            <td style="background-color:#FF8303;padding:12px 0;">
+            <td height="6" style="height:6px;line-height:6px;font-size:0;background-color:#FF8303;">&nbsp;</td>
+          </tr>
+
+          <!-- Header: white logo block -->
+          <tr>
+            <td style="background-color:#FFFFFF;padding:22px;text-align:center;border-bottom:1px solid #E5E7EB;">
+              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="160" style="display:block;margin:0 auto;" />
             </td>
           </tr>
 
@@ -43,7 +49,6 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
           <!-- Footer -->
           <tr>
             <td style="padding:24px 40px;border-top:1px solid #E5E7EB;text-align:center;">
-              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="140" style="display:block;margin:0 auto 12px;" />
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
                 <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
@@ -69,7 +74,10 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
 
 // Formats a UTC timestamp into a readable local-style string for emails.
 // We use explicit date parts to avoid any toISOString / toLocaleTimeString issues.
-function formatClassTime(isoString: string, timezone: string): string {
+// When durationMinutes is provided, the class END time (start + duration, formatted
+// in the SAME timezone) is appended as " - HH:MM", e.g. "Friday, 26 June 2026, 08:30
+// - 09:00". When it is omitted the output is start-only, exactly as before.
+function formatClassTime(isoString: string, timezone: string, durationMinutes?: number): string {
   try {
     const date = new Date(isoString)
     const formatter = new Intl.DateTimeFormat('en-GB', {
@@ -81,7 +89,20 @@ function formatClassTime(isoString: string, timezone: string): string {
       hour: '2-digit',
       minute: '2-digit',
     })
-    return formatter.format(date)
+    const start = formatter.format(date)
+
+    if (durationMinutes === undefined) return start
+
+    // Derive the end time via a second Intl formatter in the same timezone rather
+    // than doing string math on the start, so an offset/DST change between start and
+    // end is reflected correctly.
+    const endDate = new Date(date.getTime() + durationMinutes * 60000)
+    const endFormatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    return `${start} - ${endFormatter.format(endDate)}`
   } catch {
     return isoString
   }
@@ -130,7 +151,7 @@ export function teacherClassReminderEmailContent(
   hoursUntil: number
 ): string {
   const timeLabel = hoursUntil <= 1 ? 'less than one hour' : 'less than 24 hours'
-  const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
 
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
@@ -156,7 +177,7 @@ export function teacherNewBookingEmailContent(
   durationMinutes: number,
   teacherTimezone: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       A new class has been booked with <strong style="color:#FF8303;">${studentName}</strong>.
@@ -212,7 +233,7 @@ export function studentBookingConfirmationEmailContent(
   durationMinutes: number,
   studentTimezone: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class has been confirmed. Here are your details:
@@ -222,6 +243,9 @@ export function studentBookingConfirmationEmailContent(
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
       <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
     </table>
+    <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
+      The Join Class button in your portal activates 10 minutes before the class starts.
+    </p>
   `
 }
 
@@ -282,7 +306,7 @@ export function studentRescheduledEmailContent(
   durationMinutes: number,
   studentTimezone: string
 ): string {
-  const newTime = formatClassTime(newScheduledAt, studentTimezone)
+  const newTime = formatClassTime(newScheduledAt, studentTimezone, durationMinutes)
   const timeRowsHtml = oldScheduledAt
     ? `
       <tr><td style="font-size:14px;color:#6B7280;padding:4px 0;"><strong>Previous time:</strong> ${formatClassTime(oldScheduledAt, studentTimezone)}</td></tr>
@@ -308,7 +332,7 @@ export function studentClassReminderEmailContent(
   hoursUntil: number
 ): string {
   const timeLabel = hoursUntil <= 1 ? 'less than one hour' : 'less than 24 hours'
-  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${teacherName}</strong> is in ${timeLabel}.

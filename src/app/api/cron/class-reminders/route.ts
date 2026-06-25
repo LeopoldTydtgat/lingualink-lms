@@ -77,7 +77,7 @@ export async function GET(request: Request) {
           recipientFallback: 'Student',
           subject: 'Your class is in less than 24 hours',
           bodyHtml: studentClassReminderEmailContent(
-            teacher.full_name,
+            teacher.full_name ?? 'your teacher',
             lesson.scheduled_at,
             lesson.duration_minutes,
             null,
@@ -98,7 +98,7 @@ export async function GET(request: Request) {
           recipientFallback: 'Teacher',
           subject: 'Your next class is in less than 24 hours',
           bodyHtml: teacherClassReminderEmailContent(
-            student.full_name,
+            student.full_name ?? 'your student',
             lesson.scheduled_at,
             lesson.duration_minutes,
             null,
@@ -172,7 +172,7 @@ export async function GET(request: Request) {
           recipientFallback: 'Student',
           subject: 'Your class is in less than one hour',
           bodyHtml: studentClassReminderEmailContent(
-            teacher.full_name,
+            teacher.full_name ?? 'your teacher',
             lesson.scheduled_at,
             lesson.duration_minutes,
             lesson.teams_join_url,
@@ -193,7 +193,7 @@ export async function GET(request: Request) {
           recipientFallback: 'Teacher',
           subject: 'Your next class is in less than one hour',
           bodyHtml: teacherClassReminderEmailContent(
-            student.full_name,
+            student.full_name ?? 'your student',
             lesson.scheduled_at,
             lesson.duration_minutes,
             lesson.teams_join_url,
