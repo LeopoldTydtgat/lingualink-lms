@@ -1,3 +1,29 @@
+## Session 170 - 25 June 2026 - B2B 48hr Company Billing Fix (last launch blocker)
+
+### What was built
+- Fixed NEW224, the final billing launch blocker: a 48hr-policy company student who cancels in the 24-48hr window now bills the company the full class fee, while teacher pay stays zero.
+- Root cause: the single billing engine getBillability() exposed one amount field that meant teacher pay. The 48hr branch correctly returned 0 for the teacher (unpaid beyond 24hr), but both company-billing exports and the on-screen view read that same field, so the company showed zero for a cancellation the business is owed for.
+- Fix preserved the single source of truth: added a separate companyAmount field to the engine result. It equals the teacher amount on every normal billable branch, and only diverges on the 48hr-policy cancellation, where teacher stays 0 and companyAmount becomes the full fee. No billing arithmetic was duplicated anywhere.
+- Three surfaces updated to read the new field: the Billing-page CSV, the Data-Exports CSV (which previously had no amount column at all and needed an admin-client rate fetch since the rate column is access-restricted), and the on-screen Company Billing view (per-line amount plus a per-currency company-owed total, never summed across currencies).
+- Added three engine tests locking the behaviour: the 48hr case, a normal completed class where both amounts match, and a 24hr-policy student outside the window confirming the company is not charged.
+
+### Break/Fix Log
+Issue 1: Company billed zero for a 48hr-policy late cancellation.
+Symptom: Company Billing showed the cancellation flag correctly but a zero amount, on screen and in both CSV exports.
+Cause: one amount field served two questions (teacher pay and company billing); the teacher-correct zero leaked into the company figure.
+Fix: separate companyAmount on the engine result, computed by the same formula in the same place; all company surfaces read it.
+Lesson: when one value answers two business questions that can legitimately differ, split it at the source rather than patching each reader.
+
+Issue 2: One export route could never compute the figure.
+Symptom: the Data-Exports company-billing route passed a hardcoded zero rate into the engine.
+Cause: that route never fetched teacher data, since it only ever produced yes/no flags.
+Fix: added the teacher reference to its query and an access-controlled rate fetch, matching the pattern the other route already used.
+Lesson: read every consumer before assuming a shared fix reaches all of them; one path was structurally unable to produce the number.
+
+### Session result
+The last billing launch blocker is closed and proven on live data: a real B2B test cancellation now shows the correct full fee on screen and in both exports, with teacher pay untouched and both review agents clearing the change. Two non-blocking items were logged for later: the two company-billing exports list different row sets (both safe, but a single invoicing source should be chosen), and the on-screen hours figure reads oddly next to the owed amount for a pure cancellation. No launch blockers remain on the billing path.
+
+---
 ## Session 169 - 25 June 2026 - J13 Email Triggers: content checks + null-name fix
 
 ### What was built
