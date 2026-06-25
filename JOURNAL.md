@@ -1,3 +1,100 @@
+## Session 170 - 25 June 2026 - B2B 48hr Company Billing Fix (last launch blocker)
+
+### What was built
+- Fixed NEW224, the final billing launch blocker: a 48hr-policy company student who cancels in the 24-48hr window now bills the company the full class fee, while teacher pay stays zero.
+- Root cause: the single billing engine getBillability() exposed one amount field that meant teacher pay. The 48hr branch correctly returned 0 for the teacher (unpaid beyond 24hr), but both company-billing exports and the on-screen view read that same field, so the company showed zero for a cancellation the business is owed for.
+- Fix preserved the single source of truth: added a separate companyAmount field to the engine result. It equals the teacher amount on every normal billable branch, and only diverges on the 48hr-policy cancellation, where teacher stays 0 and companyAmount becomes the full fee. No billing arithmetic was duplicated anywhere.
+- Three surfaces updated to read the new field: the Billing-page CSV, the Data-Exports CSV (which previously had no amount column at all and needed an admin-client rate fetch since the rate column is access-restricted), and the on-screen Company Billing view (per-line amount plus a per-currency company-owed total, never summed across currencies).
+- Added three engine tests locking the behaviour: the 48hr case, a normal completed class where both amounts match, and a 24hr-policy student outside the window confirming the company is not charged.
+
+### Break/Fix Log
+Issue 1: Company billed zero for a 48hr-policy late cancellation.
+Symptom: Company Billing showed the cancellation flag correctly but a zero amount, on screen and in both CSV exports.
+Cause: one amount field served two questions (teacher pay and company billing); the teacher-correct zero leaked into the company figure.
+Fix: separate companyAmount on the engine result, computed by the same formula in the same place; all company surfaces read it.
+Lesson: when one value answers two business questions that can legitimately differ, split it at the source rather than patching each reader.
+
+Issue 2: One export route could never compute the figure.
+Symptom: the Data-Exports company-billing route passed a hardcoded zero rate into the engine.
+Cause: that route never fetched teacher data, since it only ever produced yes/no flags.
+Fix: added the teacher reference to its query and an access-controlled rate fetch, matching the pattern the other route already used.
+Lesson: read every consumer before assuming a shared fix reaches all of them; one path was structurally unable to produce the number.
+
+### Session result
+The last billing launch blocker is closed and proven on live data: a real B2B test cancellation now shows the correct full fee on screen and in both exports, with teacher pay untouched and both review agents clearing the change. Two non-blocking items were logged for later: the two company-billing exports list different row sets (both safe, but a single invoicing source should be chosen), and the on-screen hours figure reads oddly next to the owed amount for a pure cancellation. No launch blockers remain on the billing path.
+
+---
+## Session 169 - 25 June 2026 - J13 Email Triggers: content checks + null-name fix
+
+### What was built
+- Verified content (subject + body) of every J13.1 email by firing live in the inbox: booking confirmation (student + teacher), cancellation, reschedule (student + teacher), new message, homework assigned. All read correctly.
+- Verified content of all five cron emails by code read (firing on demand not possible on the Hobby-plan daily schedule): 24h reminder, 1h reminder, low-hours warning, training-ending-soon, report-overdue forfeiture. Subjects and bodies all correct.
+- Shipped a null-name guard on the 24h and 1h reminder email bodies (commit cfc27c1).
+- Confirmed the J13.3 invoice-reminder bug was already fixed in an earlier session; no action needed.
+- Marked J13 PASS in TEST_PLAN with J13.2 (welcome email) recorded as blocked on a client decision.
+- Logged two findings: study-sheet content gaps (files invisible to student, 0-exercise sheets never complete) and the reschedule-email straggler.
+
+### Break/Fix Log
+Issue 1 (null names in reminder bodies):
+- Symptom: the 24h and 1h reminder emails drop the other party's name into the body with no fallback. A null name in the database would render literally as "Your class with null is in less than 24 hours."
+- Cause: four call sites in the class-reminders cron route passed full_name straight into the email content builder with no nullish guard. The greetings were already protected by a recipientFallback, but the body interpolation was not.
+- Fix: added the existing nullish-coalescing convention to all four call sites. Student-facing emails fall back to "your teacher", teacher-facing emails to "your student", matching the pattern already used in the report-overdue route. One concern, one commit (cfc27c1).
+- Lesson: a fallback on the greeting does not cover names reused in the body. When auditing email templates, check every place a name is interpolated, not just the salutation.
+
+Issue 2 (invoice-reminder bug already fixed):
+- Symptom: the test plan and bug log both listed the invoice reminder as showing the current month instead of the previous one, plus an empty greeting on a null name.
+- Cause: none current. The bug was real but had been fixed in an earlier session via a previous-month date calculation and a recipientFallback on the shared template.
+- Fix: none required. A code read confirmed the previous-month label, the greeting fallback, and that no name is used in the body. Closed as already resolved.
+- Lesson: a handover or bug log can be stale. The note correctly warned "verify, don't assume" - the verification saved a redundant fix.
+
+Issue 3 (study-sheet content gaps - logged, not fixed):
+- Symptom: an admin can attach study files (PDF/Word/PPT) to a study sheet, but the student sheet view has no Files tab, so attached files are never visible to the student. Separately, an assigned sheet with zero exercises can never be marked complete, so it sits in the student's pending badge forever.
+- Cause: the student sheet view renders only Vocabulary and Exercises tabs; completion is only triggered by answering the last exercise, and there is no completion path for a sheet with no exercises (which includes every material-type sheet).
+- Fix: deferred. Both need a client product decision on what "complete" means for a no-exercise sheet, and a Files tab on the student view. Logged for a dedicated session.
+- Lesson: assignable content that the recipient cannot consume or clear is a delivery gap, not just a cosmetic one. Worth a deliberate pass.
+
+Issue 4 (reschedule emails - logged, not fixed):
+- Symptom: the reschedule emails still show the class start time only, not the full time range, and the teacher's reschedule email shows the student's name in the "Teacher" field.
+- Cause: the reschedule branch still uses old local email builders rather than the shared template. The teacher email reuses the student template because no teacher-worded reschedule builder exists.
+- Fix: deferred. Switching the branch to the shared template fixes both the range and the label in one pass, but it is tangled (needs the time-range argument and a new teacher-worded builder) and warrants its own session with a read first.
+- Lesson: noted for next session so the tangle is not re-derived.
+
+### Session result
+J13 is complete and marked PASS, with J13.2 blocked on a client decision about how new students receive their password. All email content was verified, by live firing where possible and by code read for the scheduled emails. One real fix shipped - a null-name guard on the reminder email bodies. The invoice-reminder bug listed as open turned out to be already fixed in a prior session and was closed after verification. Two findings were logged for dedicated future sessions: study-sheet content delivery gaps and the reschedule-email straggler. Email button testing remains deferred to its own session as planned.
+
+## Session 168 - 24 June 2026 - J11 admin hours (PASS) + J12 exports (FAIL, B2B billing blocker found)
+
+### What was built
+- No code shipped this session. Testing-only: J11 and J12 walked against live test data, plus a purpose-built B2B test case to exercise company billing.
+- Session opened with git reconciliation: confirmed dev clean at ac96ae9, found the three S167 commits were never pushed (handover said "pushed-ready" = ready, not done), pushed them (865d910..ac96ae9). origin/dev now matches local.
+
+### Break/Fix Log
+J11 - Admin hours management UI: PASS, all four sub-journeys. Add Hours wrote a correct 'add' ledger row; Remove Hours correctly blocked an empty note and wrote a 'deduct' row; the Hours Log showed newest-first; and editing package size on the profile form logged an 'admin_adjustment' ledger row (the NEW141 product decision holding up - the step most likely to fail silently, and it passed). Every balance_after chained with no drift, all DB-confirmed. A comma-decimal package value (34,5) saved correctly as 34.50. Logged NEW226: a quick-edit for Total Hours on the Hours Log screen would save the admin clicking through four form sections to change one field.
+
+J12 - Exports match the screen: FAIL, one launch blocker. Five of six exports were correct and the figures reconciled across screens and across exports - the teacher June total of 192.50 appeared identically in teacher_invoices, teacher-earnings, and the J10 widget. The student-billing total of 288.50 added up from its rows, including admin-cancelled-within-24hr classes being billed (confirmed correct per the client: an admin cancelling on a student's behalf inside 24hr still bills the student). all-classes, pending-reports, and student-progress all read clean.
+
+The blocker is company billing (NEW224, confirming the long-flagged NEW195). To test it I built a B2B case from scratch: an existing 48hr-policy company that had never had students, a fresh B2B student attached to it (cancellation policy correctly inherited as 48hr from the company), a booked class, time-shifted to 40 hours out, then cancelled by the student. The student was correctly refunded (they were outside their own 24hr window); the cancellation was correctly flagged as billable to the company under the 48hr policy. But the amount came out as zero. The Billing-page export has an Amount column showing 0; the Data-Exports version has no amount column at all. Neither gives the client a usable invoice figure. The client confirmed the rule: B2B billing works exactly like normal student billing - the company is billed the full class fee on a late cancellation - the only difference is the window (48hr for business, 24hr for normal students). So the company here is owed the full 30-minute fee (27.50) and the export shows nothing. This under-bills B2B clients and is a launch blocker; the fix belongs with the NEW195 consolidation since it is the same two-divergent-implementations problem.
+
+Two smaller findings surfaced during the B2B setup. The company detail page's Students tab shows 0 even though the student is genuinely linked (NEW225) - a display bug isolated to that one tab, since billing and the all-classes export both read the link correctly, and latent since the Companies module was built in Session 29. And the new B2B student received no welcome email at all (inbox, spam, promotions all empty); the hypothesis to test at J13.2 is that the company link suppresses or redirects the student welcome email, which folds into the already-parked welcome-email item.
+
+### Session result
+J11 passed cleanly - admin hours management and the ledger are sound. J12 did its job and caught a real launch blocker: the company-billing exports do not produce a usable B2B invoice amount, confirming the NEW195 risk the test plan was written to find. The admin portal remains only intersection-tested feature-by-feature; the company-detail Students tab bug found this session is an example of what a dedicated admin pass would surface. No code changed, so nothing to commit beyond the meta-folder writes. Test debris (the B2B student, the cancelled class, Leopold's shifted hours) is all noted for the Section Z wipe.
+
+---
+## Session 167 - 24 June 2026 - J10 teacher billing complete; NEW219 projection model built and signed off
+
+### What was built
+- Implemented the corrected "projected earnings" model for the teacher billing widget. A booked class now counts toward a teacher's projected monthly total from the moment of booking, through the class itself, and through the report-filing window. It only leaves the projection when the revenue genuinely dies: a cancellation within the policy window, a teacher no-show, or a missed report deadline. Previously a class that had happened but had no report yet dropped to zero in the projection, understating what the teacher was owed. The fix was a single branch in the canonical billing module: a scheduled lesson now contributes its full projected amount regardless of whether it is past or future.
+- Corrected a stale code comment in the dashboard layout that still described the old projection behaviour, so the comment no longer contradicts the shipped logic.
+
+### Break/Fix Log
+Issue 1: Projection understated teacher earnings. Symptom: a class that had taken place but whose report was not yet filed showed zero in the projected total, then appeared only after the report was submitted, which also made the projected figure rise at report time. Cause: the projection function returned zero for any past scheduled lesson, on the assumption that an unreported past class should not count. Fix: a scheduled lesson now always contributes its full projected amount; it leaves the projection only when its status changes to a settled non-billable outcome (the overdue cron flips a missed-deadline class from scheduled to missed, and missed contributes zero). Lesson: projection answers "what can the teacher still earn", so a class stays counted while that potential is alive, and filing a report moves money from projected into realised rather than creating new projected income.
+
+Issue 2: Stale comment contradicting shipped code. Symptom: the comment above the projection call in the dashboard layout still described the old "past unreported class counts zero" behaviour. Cause: the comment was written for the previous model and not updated when the logic was inverted. Fix: rewrote the comment to describe the current model. Lesson: a comment that survives a logic change becomes a future trap; update it in the same work, or in its own follow-up, before moving on.
+
+### Session result
+Worked through the full J10 teacher-billing journey across both the teacher and admin portals. Before touching anything, audited every surface that reads or sums billing and confirmed the projection concept lives only in the teacher widget, while the admin billing screens and CSV exports work in realised amounts only, which kept the change tightly scoped. Built and shipped the corrected projection model, verified it live against the client's own teacher account (projected rose by exactly the value of two past unreported classes while realised earnings stayed unchanged, so projected correctly sat above realised), and obtained explicit business sign-off on the model. Proved the billing amount formula at the database level, confirmed the admin invoice view recomputes and agrees with the widget to the cent, verified "mark as paid" freezes the figure, and confirmed multi-currency billing displays each teacher's own currency and splits a mixed-currency student total per currency rather than summing into one wrong number. All five J10 checks pass. Two commits this session, both reviewed. Separately noted a real coverage gap for a future session: the admin portal has not yet been tested feature by feature, only where it intersects an existing journey, so it needs its own dedicated testing tier before go-live.
+---
 ## Session 165 - 23 June 2026 - J9 report lifecycle complete (all 8 sub-journeys PASS)
 ### What was built
 - Committed the Missed class lifecycle from the prior session (cron flips scheduled to missed, teacher forfeits pay, student still billed) - commit ce39f2d.
