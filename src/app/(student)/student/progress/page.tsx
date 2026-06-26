@@ -70,6 +70,7 @@ export default async function ProgressPage() {
     .from('exercise_completions')
     .select('id', { count: 'exact', head: true })
     .eq('student_id', student.id)
+    .not('assignment_id', 'is', null)
 
   return (
     <ProgressClient
