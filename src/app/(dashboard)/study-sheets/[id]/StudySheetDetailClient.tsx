@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Word = {
@@ -139,15 +139,32 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
 }
 
 function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[]; sheetId: string }) {
-  // One ref per file container so the Fullscreen button can expand just that file.
   const containerRefs = useRef<(HTMLDivElement | null)[]>([])
+  const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
 
-  // Fullscreen is feature-detected at click time and no-ops on older browsers
-  // that lack the API, so there is no SSR/hydration concern and no state needed.
+  useEffect(() => {
+    function onFullscreenChange() {
+      if (!document.fullscreenElement) {
+        setFullscreenIdx(null)
+        return
+      }
+      const idx = containerRefs.current.findIndex(el => el === document.fullscreenElement)
+      setFullscreenIdx(idx === -1 ? null : idx)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
   function handleFullscreen(idx: number) {
-    const el = containerRefs.current[idx]
-    if (el && typeof el.requestFullscreen === 'function') {
-      el.requestFullscreen().catch(() => {/* ignore: e.g. user gesture lost */})
+    if (fullscreenIdx === idx) {
+      if (typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {})
+      }
+    } else {
+      const el = containerRefs.current[idx]
+      if (el && typeof el.requestFullscreen === 'function') {
+        el.requestFullscreen().catch(() => {})
+      }
     }
   }
 
@@ -159,6 +176,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
         // Same-origin proxy URL. The teacher viewer KEEPS the native PDF toolbar
         // (no #toolbar=0) so the teacher can zoom and fit while teaching.
         const fileUrl = `/api/library-file/${sheetId}/${idx}`
+        const isThisFullscreen = fullscreenIdx === idx
 
         return (
           <div
@@ -174,10 +192,10 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
                   onClick={() => handleFullscreen(idx)}
                   className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
                   style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
-                  title="View fullscreen"
+                  title={isThisFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
                 >
-                  <Maximize2 size={12} />
-                  Fullscreen
+                  {isThisFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                  {isThisFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
                 </button>
               )}
             </div>
