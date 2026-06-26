@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Maximize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Word = {
@@ -138,10 +138,76 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
   )
 }
 
+function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[]; sheetId: string }) {
+  // One ref per file container so the Fullscreen button can expand just that file.
+  const containerRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  // Fullscreen is feature-detected at click time and no-ops on older browsers
+  // that lack the API, so there is no SSR/hydration concern and no state needed.
+  function handleFullscreen(idx: number) {
+    const el = containerRefs.current[idx]
+    if (el && typeof el.requestFullscreen === 'function') {
+      el.requestFullscreen().catch(() => {/* ignore: e.g. user gesture lost */})
+    }
+  }
+
+  return (
+    <div className="mb-6 space-y-4">
+      {attachments.map((att, idx) => {
+        const isPdf = att.type === 'application/pdf'
+        const isImage = att.type.startsWith('image/')
+        // Same-origin proxy URL. The teacher viewer KEEPS the native PDF toolbar
+        // (no #toolbar=0) so the teacher can zoom and fit while teaching.
+        const fileUrl = `/api/library-file/${sheetId}/${idx}`
+
+        return (
+          <div
+            key={idx}
+            ref={el => { containerRefs.current[idx] = el }}
+            className="border border-gray-200 rounded-xl overflow-hidden bg-white"
+          >
+            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
+              {(isPdf || isImage) && (
+                <button
+                  type="button"
+                  onClick={() => handleFullscreen(idx)}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+                  style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+                  title="View fullscreen"
+                >
+                  <Maximize2 size={12} />
+                  Fullscreen
+                </button>
+              )}
+            </div>
+            {isPdf ? (
+              <iframe
+                src={fileUrl}
+                title={att.name}
+                style={{ width: '100%', height: '80vh', minHeight: '600px', border: 'none', display: 'block' }}
+              />
+            ) : isImage ? (
+              <img
+                src={fileUrl}
+                alt={att.name}
+                style={{ maxWidth: '100%', display: 'block' }}
+              />
+            ) : (
+              <div className="px-4 py-8 text-center text-sm text-gray-400">
+                Preview is not available for this file type.
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Props) {
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
-  const isMaterial = sheet.category === 'Material'
   const attachments = sheet.attachments ?? []
 
   return (
@@ -181,38 +247,8 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
       </div>
 
       {/* Material file viewer — view-only, no download */}
-      {isMaterial && attachments.length > 0 && (
-        <div className="mb-6 space-y-4">
-          {attachments.map((att, idx) => {
-            const isPdf = att.type === 'application/pdf'
-            const isImage = att.type.startsWith('image/')
-
-            return (
-              <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-                <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
-                  <span className="text-xs font-semibold text-gray-500">{att.name}</span>
-                </div>
-                {isPdf ? (
-                  <iframe
-                    src={att.url}
-                    title={att.name}
-                    style={{ width: '100%', height: '600px', border: 'none', display: 'block' }}
-                  />
-                ) : isImage ? (
-                  <img
-                    src={att.url}
-                    alt={att.name}
-                    style={{ maxWidth: '100%', display: 'block' }}
-                  />
-                ) : (
-                  <div className="px-4 py-8 text-center text-sm text-gray-400">
-                    Preview is not available for this file type.
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
+      {attachments.length > 0 && (
+        <MaterialFileViewer attachments={attachments} sheetId={sheet.id} />
       )}
 
       {/* Vocabulary table */}

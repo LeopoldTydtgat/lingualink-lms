@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight, Maximize2 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,7 +72,19 @@ function categoryBadgeStyle(category: string): React.CSSProperties {
 
 // ── Material file viewer ──────────────────────────────────────────────────────
 
-function MaterialFileViewer({ attachments }: { attachments: Attachment[] }) {
+function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[]; sheetId: string }) {
+  // One ref per file container so the Fullscreen button can expand just that file.
+  const containerRefs = useRef<(HTMLDivElement | null)[]>([])
+
+  // Fullscreen is feature-detected at click time and no-ops on older browsers
+  // that lack the API, so there is no SSR/hydration concern and no state needed.
+  function handleFullscreen(idx: number) {
+    const el = containerRefs.current[idx]
+    if (el && typeof el.requestFullscreen === 'function') {
+      el.requestFullscreen().catch(() => {/* ignore: e.g. user gesture lost */})
+    }
+  }
+
   if (attachments.length === 0) {
     return (
       <div className="mb-6 p-6 border border-gray-200 rounded-xl text-center text-sm text-gray-400">
@@ -86,21 +98,40 @@ function MaterialFileViewer({ attachments }: { attachments: Attachment[] }) {
       {attachments.map((att, idx) => {
         const isPdf = att.type === 'application/pdf'
         const isImage = att.type.startsWith('image/')
+        // Same-origin proxy URL. #toolbar=0 hides the PDF toolbar so students
+        // get no built-in download button.
+        const fileUrl = `/api/library-file/${sheetId}/${idx}`
 
         return (
-          <div key={idx} className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
-              <span className="text-xs font-semibold text-gray-500">{att.name}</span>
+          <div
+            key={idx}
+            ref={el => { containerRefs.current[idx] = el }}
+            className="border border-gray-200 rounded-xl overflow-hidden bg-white"
+          >
+            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
+              {(isPdf || isImage) && (
+                <button
+                  type="button"
+                  onClick={() => handleFullscreen(idx)}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+                  style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+                  title="View fullscreen"
+                >
+                  <Maximize2 size={12} />
+                  Fullscreen
+                </button>
+              )}
             </div>
             {isPdf ? (
               <iframe
-                src={att.url}
+                src={`${fileUrl}#toolbar=0`}
                 title={att.name}
-                style={{ width: '100%', height: '600px', border: 'none', display: 'block' }}
+                style={{ width: '100%', height: '80vh', minHeight: '600px', border: 'none', display: 'block' }}
               />
             ) : isImage ? (
               <img
-                src={att.url}
+                src={fileUrl}
                 alt={att.name}
                 style={{ maxWidth: '100%', display: 'block' }}
               />
@@ -278,7 +309,7 @@ export default function StudySheetClient({
 
       {/* File viewer — shown whenever the sheet has attachments, before the tabs */}
       {(sheet.attachments?.length ?? 0) > 0 && (
-        <MaterialFileViewer attachments={sheet.attachments ?? []} />
+        <MaterialFileViewer attachments={sheet.attachments ?? []} sheetId={sheet.id} />
       )}
 
       {/* Tab toggle */}
