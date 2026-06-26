@@ -39,6 +39,12 @@ export async function POST(req: NextRequest) {
   })
 
   if (error) {
+    // Duplicate completion (unique violation on student_id + sheet_id + assignment_id,
+    // NULLS NOT DISTINCT): this exact context — this homework, or this practice run —
+    // is already done, which is a success from the user's point of view, not a 500.
+    if (error.code === '23505') {
+      return NextResponse.json({ success: true, alreadyCompleted: true })
+    }
     console.error('exercise_completions insert error:', error)
     return NextResponse.json({ error: 'Failed to save completion' }, { status: 500 })
   }
