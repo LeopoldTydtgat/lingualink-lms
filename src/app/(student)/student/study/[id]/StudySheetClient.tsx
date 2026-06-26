@@ -140,11 +140,13 @@ export default function StudySheetClient({
   const [sessionComplete, setSessionComplete] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [markingDone, setMarkingDone] = useState(false)
+  const [markedDone, setMarkedDone] = useState(false)
+  const [markError, setMarkError] = useState('')
 
   const words: VocabWord[] = sheet.content?.words ?? []
   const currentExercise = exercises[currentExerciseIdx]
   const totalExercises = exercises.length
-  const isMaterial = sheet.category === 'Material'
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -199,10 +201,50 @@ export default function StudySheetClient({
       }
 
       setSessionComplete(true)
+      router.refresh()
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Mark the whole sheet as done — independent of the exercise flow. Works for
+  // any sheet (vocabulary, grammar, material, or zero exercises).
+  async function handleMarkAsDone() {
+    setMarkingDone(true)
+    setMarkError('')
+
+    try {
+      const res = await fetch('/api/student/exercise-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId,
+          sheetId: sheet.id,
+          assignmentId: assignmentId ?? null,
+          score: null,
+        }),
+      })
+
+      if (res.ok) {
+        setMarkedDone(true)
+        router.refresh()
+        return
+      }
+
+      // A duplicate completion is reported as a success signal, not a hard error.
+      const data = await res.json().catch(() => ({}))
+      if (data.alreadyCompleted) {
+        setMarkedDone(true)
+        router.refresh()
+      } else {
+        setMarkError(data.error ?? 'Failed to mark as done')
+      }
+    } catch (err: unknown) {
+      setMarkError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setMarkingDone(false)
     }
   }
 
@@ -234,8 +276,8 @@ export default function StudySheetClient({
         <h1 className="text-2xl font-bold text-gray-900">{sheet.title}</h1>
       </div>
 
-      {/* Material file viewer — shown only for Material sheets, before the tabs */}
-      {isMaterial && (
+      {/* File viewer — shown whenever the sheet has attachments, before the tabs */}
+      {(sheet.attachments?.length ?? 0) > 0 && (
         <MaterialFileViewer attachments={sheet.attachments ?? []} />
       )}
 
@@ -504,6 +546,28 @@ export default function StudySheetClient({
                 </button>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Mark as done — completion path independent of the exercises */}
+      {alreadyCompleted || markedDone || sessionComplete ? (
+        <div className="mt-8 p-4 rounded-xl border border-green-100 bg-green-50 flex items-center gap-3">
+          <CheckCircle size={18} className="text-green-600 flex-shrink-0" />
+          <p className="text-sm font-medium text-green-700">Completed</p>
+        </div>
+      ) : (
+        <div className="mt-8">
+          <button
+            onClick={handleMarkAsDone}
+            disabled={markingDone}
+            className="px-5 py-2.5 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: '#FF8303' }}
+          >
+            {markingDone ? 'Saving...' : 'Mark as done'}
+          </button>
+          {markError && (
+            <p className="text-sm text-red-600 mt-2">{markError}</p>
           )}
         </div>
       )}
