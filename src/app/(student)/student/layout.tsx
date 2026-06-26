@@ -89,6 +89,7 @@ export default async function StudentDashboardLayout({
     .from('exercise_completions')
     .select('*', { count: 'exact', head: true })
     .eq('student_id', student.id)
+    .not('assignment_id', 'is', null)
 
   const { count: unreadMessageCount } = await supabase
     .from('messages')
