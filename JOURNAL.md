@@ -1,3 +1,37 @@
+## Session 174 - 26 June 2026 - Student homework: completion mechanic and content-delivery design
+
+### What was built
+I designed and built the homework completion mechanic for the student study area, consolidating two sessions of work into one delivered feature.
+
+First, the product model. Homework is delivered as files and/or video links: a student opens the material in-portal, then marks the sheet as done. This completion is deliberately independent of the separate, future self-directed exercises feature, so a student's homework progress never depends on exercises existing. I settled this model before building against it.
+
+I added a uniqueness constraint to the completions table keyed on student, sheet, and assignment together, so that assigned homework and self-directed practice are recorded as distinct completions rather than colliding. With that in place, I built the completion action: a student marks an assigned sheet as done with a single action, which writes to the database, persists across navigation, removes the sheet from the pending list, and moves it into a completed section. I placed the action at the foot of the sheet so it reads naturally after the content.
+
+I also closed a state-freshness gap. After a student marked work done and navigated back to their list, the list was serving a cached copy and still showed the old count until the student visited another page. I added a cache invalidation on successful completion, so the list now reflects the new state immediately on back-navigation.
+
+On the API, the completion endpoint now treats a duplicate-completion database error as a success for the user rather than surfacing a server error, so re-marking an already-completed sheet is graceful.
+
+### Break/Fix Log
+While testing, the exercise progress indicator in the side panel appeared to increment when only homework had been completed, which looked like two separate systems leaking into each other. I traced the indicator to its data source and confirmed it is, by design, a homework-progress indicator rather than an exercise indicator, and that the client has chosen to keep its existing label. The behaviour is therefore correct. I documented this clearly in the project log to prevent a future change from "fixing" a panel that is working as intended.
+
+I scoped the larger remaining piece of this area, the in-portal file viewer, and reached a firm direction with the client. The current viewer embeds files directly from a public storage bucket, which both fails to render reliably in the browser and leaves the no-download requirement unenforced. The agreed approach moves the bucket to private and serves files through an authenticated route on our own domain, which fixes the rendering and makes the access rule genuinely enforced rather than cosmetic. I also confirmed the format scope (the platform must support documents that cannot be embedded natively and therefore need server-side conversion) and the requirement to attach external video links to a sheet. I diagnosed two related gaps in the same area: file-only materials cannot currently be assigned because the assignment selector ignores attached files, and there is no field to store links. Each of these is specified for a dedicated follow-up session.
+
+### Session result
+The homework completion mechanic is built, tested against a live account, and committed. The remaining study-area work, the secured file viewer, document conversion, and link support, is fully specified and handed to its own session, after which the end-to-end homework journey can be re-tested and signed off.
+
+---
+## Session 172 - 26 June 2026 - Teacher Students pages: canonical assignment source and substitute access
+
+### What was built
+Resolved a teacher-facing access bug on the Students pages. The teacher Students list was filtering on a dead legacy column that post-migration code never writes, so every teacher saw an empty list. Both the list page and the student detail page were repointed to a single access model: a teacher sees a student if they are formally assigned to the training via the canonical junction table, or if they are actively teaching it as a substitute. Substitute access is granted when the teacher holds an upcoming scheduled lesson on the training, or an open report on one of their own lessons, and it self-expires once the class is past and the report is filed. The detail page gate was widened to match the list so a visible card always opens rather than returning a not-found error.
+
+### Break/Fix Log
+The fix was scoped as an access-control change and run on the higher-reasoning tier with both review subagents. Three review rounds surfaced two issues beyond the original bug. First, surfacing substitute students in the list created cards that returned not-found on the detail page, because the detail gate still honoured only formal assignment. The detail gate was extended to the same model to close this. Second, an attempt to keep a reopened report holding access was traced to dead code: a report's deadline is set once at creation and never refreshed on reopen, and a reopen can only happen after that deadline has already lapsed, so a deadline-window check can never pass for a reopened report. Access for reopened reports was changed to hold until the report is completed rather than depending on the stale deadline. The underlying stale-deadline behaviour is broader than these pages and was logged as its own follow-up. Both files were verified for line endings and encoding, type-checked, and linted clean before commit. The final review confirmed no student reaches a teacher with no claim and no restricted field reaches a substitute.
+
+### Session result
+One commit. The primary bug is fixed: assigned teachers see their students again on both the list and detail pages, and substitutes get correctly scoped, self-expiring access. Two new items were recorded for later: refreshing the report deadline on reopen, and a set of pre-go-live hardening tasks for the access gate. Earlier in the session, a billing test for a business-client cancellation was re-run and confirmed correct across all three reporting surfaces, closing the last billing blocker.
+
+---
 ## Session 170 - 25 June 2026 - B2B 48hr Company Billing Fix (last launch blocker)
 
 ### What was built

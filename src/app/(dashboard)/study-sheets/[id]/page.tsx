@@ -21,7 +21,7 @@ export default async function StudySheetDetailPage({
 
   const { data: sheet } = await supabase
     .from('study_sheets')
-    .select('*')
+    .select('id, title, category, level, difficulty, content, attachments')
     .eq('id', id)
     .single()
 

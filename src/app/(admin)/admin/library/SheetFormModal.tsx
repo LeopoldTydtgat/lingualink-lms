@@ -672,7 +672,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                       {/* Name + view link */}
                       <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
                       <a
-                        href={att.url}
+                        href={`/api/library-file/${sheetId}/${idx}`}
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs underline flex-shrink-0"
