@@ -22,7 +22,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     .from('profiles')
     .select('role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   const isAdmin = profile?.role === 'admin'
 
@@ -71,8 +71,45 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     .map(r => (Array.isArray(r.profiles) ? r.profiles[0]?.full_name : r.profiles?.full_name))
     .filter((n): n is string => Boolean(n))
 
-  // Non-admin teachers can only view a training they are assigned to (regular or substitute).
-  if (!isAdmin && !assignedTeacherIds.includes(user.id)) notFound()
+  // Non-admin access gate (Condition A or B), mirroring the students list page so a card shown
+  // there always opens here. A: formally assigned via the training_teachers junction
+  // (assignedTeacherIds, built above). B: actively teaching THIS training as a substitute - an
+  // upcoming scheduled lesson, or an open report (pending in-window, or reopened until completed)
+  // on a lesson this teacher personally holds. Falls closed: no claim -> notFound().
+  if (!isAdmin && !assignedTeacherIds.includes(user.id)) {
+    const gateNow = new Date()
+    const { data: gateLessonsRaw } = await adminClient
+      .from('lessons')
+      .select('id, scheduled_at, status')
+      .eq('training_id', id)
+      .eq('teacher_id', user.id)
+
+    type GateLessonRow = { id: string; scheduled_at: string | null; status: string }
+    const gateLessons = (gateLessonsRaw ?? []) as GateLessonRow[]
+
+    // B1: an upcoming scheduled lesson on this training held by this teacher.
+    let hasActiveClaim = gateLessons.some(
+      l => l.status === 'scheduled' && l.scheduled_at && new Date(l.scheduled_at) > gateNow
+    )
+
+    // B2: an open (pending/reopened) report on one of this teacher's lessons for this training.
+    if (!hasActiveClaim && gateLessons.length > 0) {
+      const gateLessonIds = gateLessons.map(l => l.id)
+      const { data: gateReportsRaw } = await adminClient
+        .from('reports')
+        .select('status, deadline_at')
+        .in('lesson_id', gateLessonIds)
+        .in('status', ['pending', 'reopened'])
+
+      // 'pending' counts only inside its window; 'reopened' counts until completed (stale deadline).
+      type GateReportRow = { status: string; deadline_at: string | null }
+      hasActiveClaim = ((gateReportsRaw ?? []) as GateReportRow[]).some(
+        r => r.status === 'reopened' || (r.deadline_at && new Date(r.deadline_at) > gateNow)
+      )
+    }
+
+    if (!hasActiveClaim) notFound()
+  }
 
   // Fetch all lessons for this training
   const { data: lessons } = await adminClient
