@@ -1,3 +1,15 @@
+## Session 172 - 26 June 2026 - Teacher Students pages: canonical assignment source and substitute access
+
+### What was built
+Resolved a teacher-facing access bug on the Students pages. The teacher Students list was filtering on a dead legacy column that post-migration code never writes, so every teacher saw an empty list. Both the list page and the student detail page were repointed to a single access model: a teacher sees a student if they are formally assigned to the training via the canonical junction table, or if they are actively teaching it as a substitute. Substitute access is granted when the teacher holds an upcoming scheduled lesson on the training, or an open report on one of their own lessons, and it self-expires once the class is past and the report is filed. The detail page gate was widened to match the list so a visible card always opens rather than returning a not-found error.
+
+### Break/Fix Log
+The fix was scoped as an access-control change and run on the higher-reasoning tier with both review subagents. Three review rounds surfaced two issues beyond the original bug. First, surfacing substitute students in the list created cards that returned not-found on the detail page, because the detail gate still honoured only formal assignment. The detail gate was extended to the same model to close this. Second, an attempt to keep a reopened report holding access was traced to dead code: a report's deadline is set once at creation and never refreshed on reopen, and a reopen can only happen after that deadline has already lapsed, so a deadline-window check can never pass for a reopened report. Access for reopened reports was changed to hold until the report is completed rather than depending on the stale deadline. The underlying stale-deadline behaviour is broader than these pages and was logged as its own follow-up. Both files were verified for line endings and encoding, type-checked, and linted clean before commit. The final review confirmed no student reaches a teacher with no claim and no restricted field reaches a substitute.
+
+### Session result
+One commit. The primary bug is fixed: assigned teachers see their students again on both the list and detail pages, and substitutes get correctly scoped, self-expiring access. Two new items were recorded for later: refreshing the report deadline on reopen, and a set of pre-go-live hardening tasks for the access gate. Earlier in the session, a billing test for a business-client cancellation was re-run and confirmed correct across all three reporting surfaces, closing the last billing blocker.
+
+---
 ## Session 170 - 25 June 2026 - B2B 48hr Company Billing Fix (last launch blocker)
 
 ### What was built
