@@ -1,3 +1,27 @@
+## Session 175 - 27 June 2026 - PDF viewer annotation layer (Milestone 3)
+
+### What was built
+- Added a full annotation layer to the custom pdf.js viewer (src/components/pdf/PdfViewer.tsx), built on top of the render-only canvas viewer from the previous milestone. Every annotation coordinate is stored as a 0..1 fraction of the page, per page, so marks stay glued to the page content at any zoom, fit-to-width, or fullscreen.
+- Pen tool: freehand drawing with smoothed strokes, rendered as SVG over each page.
+- Text tool: click to place a text box, type, drag to reposition, double-click to re-edit.
+- Text box interaction follows the standard select-first model (Google Slides / PowerPoint / Acrobat): single click selects (orange outline plus a control bar), double click edits, drag moves. The control bar has A- / A+ to resize the text and an x to delete.
+- Delete and Backspace remove a selected box (gated so they never fire while typing).
+- Colour swatches: a standard eight-colour annotation palette (client-approved to go beyond the brand palette for this drawing feature only). Clicking a swatch sets the colour for the next mark, and recolours the currently selected or editing text box.
+- Undo and redo: snapshot-based history (capped at 50 steps). Each discrete action is one step; mid-gesture noise (per-keystroke typing, per-pixel dragging) is collapsed into a single step.
+- Clear-all uses the in-portal modal instead of the browser confirm box, and shows correctly in fullscreen.
+- Pen cursor is a custom pen-shaped cursor with a white outline for visibility on dark areas.
+- Annotations are held in a single serializable array (discriminated stroke / text, each with pageIndex plus 0..1 coords). This is the exact shape Milestone 4 will persist. Nothing is saved yet by design - marks clear on refresh.
+
+### Break/Fix Log
+- Issue 1: With the Text tool active, clicking the page produced no usable text box. Symptom: nothing appeared on click. Cause: the box was created and focused synchronously, but the same click gesture immediately pulled focus back off the textarea; its blur handler then fired, saw the box was empty, and discarded it - all before a frame painted. Fix: defer the focus() call to the next animation frame (requestAnimationFrame, with a cancelAnimationFrame cleanup) so the creating gesture settles first and the box keeps focus. Lesson: a focus() fired in the same tick as the click that triggers it loses the focus race; deferring one frame is the robust cure, not preventDefault.
+- Issue 2: Moving a text box took three clicks (finish typing, click away to deselect, click again, then drag), and there was no resize. Cause: the old model put a committed box straight back into edit mode on a single click, so there was no plain "selected" state to drag from. Fix: added a select-first state machine - single click selects, double click edits, drag moves - plus a control bar with A- / A+ sizing and delete. Lesson: matching the interaction model people already know from Slides and PowerPoint removes a whole class of "why does this feel wrong" friction.
+- Issue 3: Control-bar and colour-swatch buttons, when clicked while a box was being edited, blurred the textarea and kicked the user out of edit mode. Cause: a mousedown on a button steals focus from the textarea, firing its blur-to-commit. Fix: preventDefault on the buttons' mousedown and pointerdown so they never take focus. Lesson: any control that acts on the box being edited must suppress focus-stealing, or it silently commits the edit.
+- Issue 4: Undo existed but redo did not, and undo was a shallow last-item removal with no memory. Fix: replaced it with a proper past/future snapshot history, recording the pre-action array before each mutating action and collapsing mid-gesture changes (typing, dragging) into single steps. Lesson: a real history stack must snapshot the before-state at the start of a gesture (captured at drag-start for moves), not at commit, or a single drag becomes dozens of undo steps.
+
+### Session result
+Milestone 3 is complete and committed as 731ff8c. The annotation layer - the load-bearing risk of the whole custom PDF viewer, since the fraction-coordinate model had to keep marks aligned at every zoom - is proven working: pen, text, select/move/resize, the standard colour palette, an in-portal clear modal, and full undo/redo, all tested on the throwaway /student/pdf-test page (which stays out of the repo). No saving yet by design. Next up is Milestone 3.5 (make hyperlinks already baked into an uploaded PDF clickable over the canvas), then Milestone 4 (save annotations per class with RLS, plus the after-class read-only lock).
+
+---
 ## Session 174 - 26 June 2026 - Student homework: completion mechanic and content-delivery design
 
 ### What was built
