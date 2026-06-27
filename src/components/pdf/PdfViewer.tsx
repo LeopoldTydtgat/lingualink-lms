@@ -1,0 +1,1624 @@
+'use client'
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
+import type { PDFDocumentProxy, PDFDocumentLoadingTask } from 'pdfjs-dist'
+import {
+  ZoomIn,
+  ZoomOut,
+  MoveHorizontal,
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  MousePointer2,
+  Pencil,
+  Type,
+  Undo2,
+  Redo2,
+  Trash2,
+} from 'lucide-react'
+
+/*
+ * Worker setup (Next.js 16 App Router + Vercel serverless):
+ *
+ * pdfjs-dist is imported DYNAMICALLY inside the browser-only effect, never at
+ * module top level. That keeps the library out of the server bundle / SSR pass
+ * (pdf.js has an optional Node "canvas" dependency that can break a server
+ * build, and there is no DOM on the server anyway).
+ *
+ * The worker is wired with:
+ *     new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url)
+ * which makes the bundler (Turbopack / Webpack) emit the worker as a hashed,
+ * SAME-ORIGIN static asset and substitute its real runtime URL. This is the
+ * approach that works on Vercel (no node_modules resolution at request time),
+ * and it satisfies our CSP `worker-src 'self' blob:`. A bare module-specifier
+ * string would not resolve on the client, and a CDN URL would be CSP-blocked.
+ *
+ * Fallback if a future bundler change ever fails to emit the asset: copy
+ * node_modules/pdfjs-dist/build/pdf.worker.min.mjs into /public and set
+ * workerSrc = '/pdf.worker.min.mjs' (must match the installed pdfjs-dist version).
+ */
+
+const MIN_SCALE = 0.5
+const MAX_SCALE = 3
+const SCALE_STEP = 0.25
+const ORANGE = '#FF8303'
+
+// Pen stroke width and text size are stored in scale-1 ("page point") units and
+// multiplied by the current scale at render time, so a mark keeps the same size
+// relative to the page content at every zoom level.
+const PEN_WIDTH = 2
+const TEXT_SIZE = 16
+// Editing/wrapping width for a text box, in scale-1 px (multiplied by scale).
+const TEXT_BOX_WIDTH = 180
+// Text-box font sizing (scale-1 units): the A- / A+ step and the clamp range.
+const FONT_STEP = 4
+const FONT_MIN = 8
+const FONT_MAX = 48
+// Maximum number of undo restore points kept (oldest dropped past this).
+const HISTORY_LIMIT = 50
+
+// Custom pen cursor: a lucide "pencil" rendered as an inline SVG data URI, with
+// the hotspot at the pen tip (lower-left, "2 21"). A wider white outline sits
+// behind the black pencil so the cursor stays visible over dark page areas.
+// Falls back to crosshair where data-URI cursors are unsupported. ASCII only.
+const PEN_CURSOR_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" stroke="#ffffff" stroke-width="4"/>' +
+  '<path d="m15 5 4 4" stroke="#ffffff" stroke-width="4"/>' +
+  '<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" stroke="#000000" stroke-width="2"/>' +
+  '<path d="m15 5 4 4" stroke="#000000" stroke-width="2"/>' +
+  '</svg>'
+const PEN_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(PEN_CURSOR_SVG)}") 2 21, crosshair`
+
+// Standard annotation palette (client-approved to go beyond the brand palette
+// for this drawing feature). These are the eight standard annotation colours.
+const COLOR_SWATCHES = [
+  { value: '#000000', label: 'Black' },
+  { value: '#E03131', label: 'Red' },
+  { value: '#FF8303', label: 'Orange' },
+  { value: '#F2C94C', label: 'Yellow' },
+  { value: '#2F9E44', label: 'Green' },
+  { value: '#1971C2', label: 'Blue' },
+  { value: '#9C36B5', label: 'Purple' },
+  { value: '#E64980', label: 'Pink' },
+] as const
+type AnnColor = (typeof COLOR_SWATCHES)[number]['value']
+
+interface Props {
+  fileUrl: string
+}
+
+type Status = 'loading' | 'ready' | 'error'
+type Tool = 'cursor' | 'pen' | 'text'
+
+/*
+ * ---------------------------------------------------------------------------
+ * SERIALIZABLE ANNOTATION SHAPE (Milestone 4 will persist exactly this array).
+ *
+ * Every coordinate is a FRACTION of the page (0..1), per page, NEVER a raw
+ * pixel. On render the fraction is multiplied by the current displayed canvas
+ * size, so the same mark sits on the same spot at any zoom / fit / fullscreen.
+ * The objects hold no DOM refs and no functions, so `annotations` is directly
+ * JSON-serializable.
+ * ---------------------------------------------------------------------------
+ */
+interface StrokeAnnotation {
+  id: string
+  type: 'stroke'
+  pageIndex: number // 0-based
+  color: AnnColor
+  width: number // scale-1 px; rendered width = width * scale
+  points: { x: number; y: number }[] // each 0..1 fraction of the page
+}
+interface TextAnnotation {
+  id: string
+  type: 'text'
+  pageIndex: number // 0-based
+  color: AnnColor
+  x: number // 0..1 fraction (top-left corner)
+  y: number // 0..1 fraction (top-left corner)
+  text: string
+  fontSize: number // scale-1 px; rendered size = fontSize * scale
+}
+type Annotation = StrokeAnnotation | TextAnnotation
+
+// Per-page geometry of the displayed canvas, relative to the overlay wrapper.
+interface PageRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+// In-progress freehand stroke (lives in state only until pointer-up commits it).
+interface Draft {
+  pageIndex: number
+  points: { x: number; y: number }[]
+}
+// In-progress text-box drag (refs only; never rendered).
+interface DragState {
+  id: string
+  startX: number
+  startY: number
+  originX: number
+  originY: number
+  width: number
+  height: number
+  moved: boolean
+}
+
+function clamp01(n: number): number {
+  return n < 0 ? 0 : n > 1 ? 1 : n
+}
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+// Fraction (0..1) of an element from a pointer's client coordinates.
+function pointFraction(el: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+  const r = el.getBoundingClientRect()
+  return {
+    x: r.width > 0 ? clamp01((clientX - r.left) / r.width) : 0,
+    y: r.height > 0 ? clamp01((clientY - r.top) / r.height) : 0,
+  }
+}
+
+// Build a smoothed SVG path from 0..1 fraction points scaled to w x h pixels.
+// Uses quadratic segments through the midpoints of consecutive points.
+function strokePath(points: { x: number; y: number }[], w: number, h: number): string {
+  if (points.length === 0) return ''
+  const px = points.map((p) => ({ x: round1(p.x * w), y: round1(p.y * h) }))
+  const first = px[0]
+  if (!first) return ''
+  if (px.length === 1) {
+    // Single tap: a zero-length line so the round cap renders as a dot.
+    return `M ${first.x} ${first.y} L ${first.x} ${first.y}`
+  }
+  let d = `M ${first.x} ${first.y}`
+  for (let i = 1; i < px.length - 1; i++) {
+    const cur = px[i]
+    const nxt = px[i + 1]
+    if (!cur || !nxt) continue
+    const mx = round1((cur.x + nxt.x) / 2)
+    const my = round1((cur.y + nxt.y) / 2)
+    d += ` Q ${cur.x} ${cur.y} ${mx} ${my}`
+  }
+  const last = px[px.length - 1]
+  if (last) d += ` L ${last.x} ${last.y}`
+  return d
+}
+
+// Editable text box: a focused, auto-growing textarea. Kept as its own
+// component so the focus + auto-height effects have a stable home (the parent
+// renders overlays from a plain map, which cannot host hooks).
+function EditableTextBox({
+  value,
+  widthPx,
+  fontSizePx,
+  onChangeText,
+  onCommit,
+  style,
+}: {
+  value: string
+  widthPx: number
+  fontSizePx: number
+  onChangeText: (v: string) => void
+  onCommit: () => void
+  style: CSSProperties
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null)
+
+  // Focus on mount and drop the caret at the end of any existing text. The
+  // focus() is DEFERRED to the next animation frame on purpose: a synchronous
+  // focus() here loses a same-gesture focus race. The click that creates the
+  // box settles after this effect runs and pulls focus straight back off the
+  // textarea; its blur handler then fires, sees the box is empty, and discards
+  // it via finishEditing -- all before a single frame paints, so nothing ever
+  // appears. Running focus() on the next frame lets the creating gesture settle
+  // first, so the box keeps focus and survives.
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.focus()
+      const len = el.value.length
+      try {
+        el.setSelectionRange(len, len)
+      } catch {
+        // Some browsers throw on setSelectionRange for certain states; ignore.
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [])
+
+  // Grow to fit content height whenever the text, width, or font size changes
+  // (font size is included so A- / A+ resize the box live while editing).
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [value, widthPx, fontSizePx])
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      onChange={(e) => onChangeText(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          onCommit()
+        }
+      }}
+      onBlur={onCommit}
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ ...style, width: widthPx }}
+    />
+  )
+}
+
+export default function PdfViewer({ fileUrl }: Props) {
+  // Outer element that goes fullscreen.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  // Scrollable body; we measure its inner width for fit-to-width and watch its
+  // scroll position to keep the "Page X of Y" readout in sync.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  // Inner block that holds the stacked page canvases (populated imperatively).
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null)
+  // One entry per page, in page order, so Prev/Next can scroll the matching
+  // canvas to the top and measurePages can place the overlays. Rebuilt on every
+  // render pass; may be sparse mid-render.
+  const canvasesRef = useRef<HTMLCanvasElement[]>([])
+  // Page 1's intrinsic width at scale 1 (CSS px). The basis for fit-to-width.
+  const firstPageWidthRef = useRef(0)
+  // Throttles the scroll handler to one update per animation frame.
+  const scrollRafRef = useRef<number | null>(null)
+  // Bumped on every render pass so a stale async loop (e.g. from a fast double
+  // zoom) detects it has been superseded and stops touching the DOM.
+  const renderTokenRef = useRef(0)
+  // Monotonic id source for annotations (deterministic; avoids Date.now /
+  // Math.random, which react-hooks/purity forbids and which would also make
+  // ids non-reproducible).
+  const idCounterRef = useRef(0)
+  // Latest draft mirrored for synchronous reads in the pointer-up handler.
+  const latestDraftRef = useRef<Draft | null>(null)
+  // In-progress text-box drag.
+  const dragRef = useRef<DragState | null>(null)
+  // Pre-gesture annotation snapshot, captured at drag-start and pushed onto the
+  // undo stack only if the drag actually moved the box (so a live drag's many
+  // per-pixel updates collapse into one undo step). See onTextPointerUp.
+  const pendingPastRef = useRef<Annotation[] | null>(null)
+  // Always mirrors the latest annotations (kept in sync by an effect below) so
+  // history snapshots read the true-current array, never a stale closure value.
+  const annotationsRef = useRef<Annotation[]>([])
+
+  const [status, setStatus] = useState<Status>('loading')
+  const [errorMsg, setErrorMsg] = useState('')
+  const [scale, setScale] = useState(1.2)
+  // Fit-to-width mode: while on, the scale tracks the container width (and
+  // re-tracks on resize). Any manual zoom releases it.
+  const [fitMode, setFitMode] = useState(false)
+  const [numPages, setNumPages] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Annotation state. `annotations` IS the array that gets saved in Milestone 4.
+  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  const [tool, setTool] = useState<Tool>('cursor')
+  const [color, setColor] = useState<AnnColor>('#000000')
+  const [draft, setDraft] = useState<Draft | null>(null)
+  // A text box is either being EDITED (textarea) or SELECTED (outlined, with a
+  // control bar) -- never both. These two ids are kept mutually exclusive by
+  // enterEdit / selectBox below.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Displayed geometry of each page canvas, so overlays can be placed exactly
+  // on top of their canvas at the current zoom.
+  const [pageRects, setPageRects] = useState<PageRect[]>([])
+  // Confirmation modal for "clear all" (replaces window.confirm so it also shows
+  // in fullscreen, where only rootRef is visible).
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  // Undo / redo history as full-array snapshots. recordHistory() pushes the
+  // pre-mutation array onto `past` and clears `future`; undo/redo shuttle
+  // snapshots between the two stacks. `past` is capped at HISTORY_LIMIT.
+  const [past, setPast] = useState<Annotation[][]>([])
+  const [future, setFuture] = useState<Annotation[][]>([])
+
+  function nextId(): string {
+    idCounterRef.current += 1
+    return `a${idCounterRef.current}`
+  }
+
+  // Set the scale so page 1 exactly fills the available container width,
+  // clamped to the zoom range. Reads only refs, so it is stable.
+  const applyFitWidth = useCallback(() => {
+    const container = containerRef.current
+    const nativeWidth = firstPageWidthRef.current
+    if (!container || nativeWidth <= 0) return
+    const available = container.clientWidth
+    if (available <= 0) return
+    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, available / nativeWidth))
+    setScale(next)
+  }, [])
+
+  // Work out which page currently occupies the top half of the viewport and
+  // surface it in the readout. setState bails out on an unchanged value.
+  const updateCurrentPage = useCallback(() => {
+    const scroller = scrollRef.current
+    const canvases = canvasesRef.current
+    if (!scroller || canvases.length === 0) return
+    const scrollerTop = scroller.getBoundingClientRect().top
+    const midline = scroller.clientHeight / 2
+    let current = 1
+    for (let i = 0; i < canvases.length; i++) {
+      const canvas = canvases[i]
+      if (!canvas) continue
+      const top = canvas.getBoundingClientRect().top - scrollerTop
+      if (top < midline) current = i + 1
+    }
+    setCurrentPage(current)
+  }, [])
+
+  // Measure every page canvas relative to the overlay wrapper. Canvas offsets
+  // are taken against the wrapper (its offsetParent), so the absolutely placed
+  // overlays line up with the centred, stacked canvases at any zoom. Reads only
+  // refs, so it is stable.
+  const measurePages = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    const canvases = canvasesRef.current
+    const rects: PageRect[] = []
+    for (let i = 0; i < canvases.length; i++) {
+      const c = canvases[i]
+      if (!c) continue
+      rects[i] = { left: c.offsetLeft, top: c.offsetTop, width: c.offsetWidth, height: c.offsetHeight }
+    }
+    setPageRects(rects)
+  }, [])
+
+  // Capture the CURRENT annotations as an undo restore point and clear the redo
+  // stack. Call this BEFORE each mutating action: at the call site the array has
+  // not changed yet, so annotationsRef mirrors the before-state. Only ever
+  // called from event handlers, never during render. useCallback so deleteBox
+  // (below) and, through it, the Delete-key effect get a stable reference.
+  const recordHistory = useCallback(() => {
+    const snap = annotationsRef.current
+    setPast((p) => (p.length >= HISTORY_LIMIT ? [...p.slice(1), snap] : [...p, snap]))
+    setFuture([])
+  }, [])
+
+  // Delete one box and clear whichever id (if any) was pointing at it. Records
+  // history first so the deletion is undoable. useCallback (depending only on
+  // the stable recordHistory) so the Delete/Backspace key effect can list it as
+  // a dependency without re-subscribing every render. The toolbar/control-bar x
+  // and the Delete key all route through here, so every delete is undoable.
+  const deleteBox = useCallback(
+    (id: string) => {
+      recordHistory()
+      setAnnotations((anns) => anns.filter((a) => a.id !== id))
+      setSelectedId((prev) => (prev === id ? null : prev))
+      setEditingId((prev) => (prev === id ? null : prev))
+    },
+    [recordHistory],
+  )
+
+  // Load the document (browser only) whenever the URL changes.
+  useEffect(() => {
+    let cancelled = false
+    let loadingTask: PDFDocumentLoadingTask | null = null
+
+    setStatus('loading')
+    setErrorMsg('')
+    setNumPages(0)
+    setCurrentPage(1)
+    firstPageWidthRef.current = 0
+    pdfDocRef.current = null
+    // A different document means a clean annotation slate (and a fresh history).
+    setAnnotations([])
+    setEditingId(null)
+    setSelectedId(null)
+    setDraft(null)
+    setPageRects([])
+    setPast([])
+    setFuture([])
+    pendingPastRef.current = null
+
+    ;(async () => {
+      try {
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          'pdfjs-dist/build/pdf.worker.min.mjs',
+          import.meta.url,
+        ).toString()
+
+        // withCredentials ensures the auth cookie reaches our (same-origin,
+        // auth-gated) proxy; same-origin requests send cookies anyway, this is
+        // just explicit.
+        loadingTask = pdfjsLib.getDocument({ url: fileUrl, withCredentials: true })
+        const pdf = await loadingTask.promise
+
+        if (cancelled) {
+          if (!loadingTask.destroyed) loadingTask.destroy()
+          return
+        }
+        pdfDocRef.current = pdf
+
+        // Capture page 1's native width so fit-to-width has a basis the instant
+        // the viewer is ready. A failure here is non-fatal: the render pass
+        // below will surface any real document error.
+        let firstWidth = 0
+        try {
+          const firstPage = await pdf.getPage(1)
+          firstWidth = firstPage.getViewport({ scale: 1 }).width
+        } catch {
+          firstWidth = 0
+        }
+        if (cancelled) return
+
+        firstPageWidthRef.current = firstWidth
+        setNumPages(pdf.numPages)
+        setCurrentPage(1)
+        setStatus('ready')
+      } catch (err) {
+        if (cancelled) return
+        setErrorMsg(err instanceof Error ? err.message : 'Failed to load the PDF.')
+        setStatus('error')
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      pdfDocRef.current = null
+      // Full teardown (aborts network + tears down the worker and document).
+      // PDFDocumentProxy has no destroy() in v6; the loading task owns teardown.
+      if (loadingTask && !loadingTask.destroyed) loadingTask.destroy()
+    }
+  }, [fileUrl])
+
+  // Render every page to its own canvas, stacked vertically, whenever the
+  // document becomes ready or the zoom changes.
+  //
+  // NOTE: this re-renders ALL pages on every zoom. That is acceptable while the
+  // viewer is render-only plus a light annotation overlay; once it carries many
+  // strokes it will want a render queue / virtualization. Do not regress this
+  // into per-scroll re-rendering. After the pass settles we re-measure the page
+  // geometry so the annotation overlays re-place against the new canvas sizes.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const pdf = pdfDocRef.current
+    const container = containerRef.current
+    if (!pdf || !container) return
+
+    const token = ++renderTokenRef.current
+
+    ;(async () => {
+      try {
+        container.replaceChildren()
+        canvasesRef.current = []
+        // Render at device pixel ratio for crisp output on HiDPI screens.
+        const outputScale = window.devicePixelRatio || 1
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          if (token !== renderTokenRef.current) return // superseded by a newer pass
+          const page = await pdf.getPage(pageNum)
+          const viewport = page.getViewport({ scale })
+
+          const canvas = document.createElement('canvas')
+          canvas.width = Math.floor(viewport.width * outputScale)
+          canvas.height = Math.floor(viewport.height * outputScale)
+          canvas.style.width = `${Math.floor(viewport.width)}px`
+          canvas.style.height = `${Math.floor(viewport.height)}px`
+          canvas.style.display = 'block'
+          canvas.style.margin = '0 auto 16px'
+          canvas.style.backgroundColor = '#ffffff'
+          canvas.style.borderRadius = '4px'
+          canvas.style.boxShadow = '0 1px 6px rgba(0,0,0,0.15)'
+
+          if (token !== renderTokenRef.current) return
+          container.appendChild(canvas)
+          canvasesRef.current[pageNum - 1] = canvas
+
+          await page.render({
+            canvas,
+            viewport,
+            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
+          }).promise
+        }
+
+        // Page heights have settled (and replaceChildren reset the scroll to the
+        // top); refresh the readout and re-place the annotation overlays.
+        if (token === renderTokenRef.current) {
+          updateCurrentPage()
+          measurePages()
+        }
+      } catch (err) {
+        if (token !== renderTokenRef.current) return
+        setErrorMsg(err instanceof Error ? err.message : 'Failed to render the PDF.')
+        setStatus('error')
+      }
+    })()
+  }, [status, scale, updateCurrentPage, measurePages])
+
+  // Re-measure overlay geometry on any container size change: window resize,
+  // fullscreen transition, scrollbar appearance, and the margin:auto centring
+  // shift that a width change causes. (Zoom is already handled by the render
+  // pass above; this covers the size changes that do NOT re-render the pages.)
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => measurePages())
+    ro.observe(container)
+    return () => ro.disconnect()
+  }, [measurePages])
+
+  // While fit-to-width is active, apply it now and keep it fitted as the window
+  // (or fullscreen transition, which also fires resize) changes size. Debounced
+  // so a resize drag does not re-render every page on every pixel.
+  useEffect(() => {
+    if (!fitMode || status !== 'ready') return
+    applyFitWidth()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    function onResize() {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(applyFitWidth, 120)
+    }
+    window.addEventListener('resize', onResize)
+    return () => {
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [fitMode, status, applyFitWidth])
+
+  // Keep the fullscreen label/icon correct even when the user exits via Esc.
+  // (Same pattern as MaterialFileViewer.)
+  useEffect(() => {
+    function onFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === rootRef.current)
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
+  }, [])
+
+  // Close the clear-confirmation modal on Escape. Only attached while the modal
+  // is open, so it never competes with the text box's own Escape handler.
+  useEffect(() => {
+    if (!showClearConfirm) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setShowClearConfirm(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showClearConfirm])
+
+  // Delete / Backspace removes the selected box. Attached ONLY while a box is
+  // selected and NOT being edited, so it never competes with the textarea (where
+  // Backspace must edit text). Routed through deleteBox so the key-delete is
+  // recorded in history like every other delete.
+  useEffect(() => {
+    if (!selectedId || editingId) return
+    const id = selectedId
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        deleteBox(id)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selectedId, editingId, deleteBox])
+
+  // Mirror the live draft so the pointer-up handler can read the full stroke
+  // without a stale closure (and without nesting setState calls).
+  useEffect(() => {
+    latestDraftRef.current = draft
+  }, [draft])
+
+  // Mirror the latest annotations into a ref so history snapshots (recordHistory,
+  // undo, redo) always read the true-current array, immune to stale closures.
+  useEffect(() => {
+    annotationsRef.current = annotations
+  }, [annotations])
+
+  // Cancel any pending scroll-tracking frame on unmount.
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current)
+    }
+  }, [])
+
+  function zoomOut() {
+    setFitMode(false)
+    setScale((s) => Math.max(MIN_SCALE, Math.round((s - SCALE_STEP) * 100) / 100))
+  }
+  function zoomIn() {
+    setFitMode(false)
+    setScale((s) => Math.min(MAX_SCALE, Math.round((s + SCALE_STEP) * 100) / 100))
+  }
+
+  function goToPage(target: number) {
+    const clamped = Math.min(numPages, Math.max(1, target))
+    const scroller = scrollRef.current
+    const canvas = canvasesRef.current[clamped - 1]
+    if (scroller && canvas) {
+      // Scroll only this inner container (not the whole page) to the page top,
+      // leaving a small gap above it.
+      const top =
+        canvas.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top +
+        scroller.scrollTop -
+        12
+      scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+    }
+    setCurrentPage(clamped)
+  }
+
+  function handleScroll() {
+    if (scrollRafRef.current != null) return
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null
+      updateCurrentPage()
+    })
+  }
+
+  function handleFullscreen() {
+    const el = rootRef.current
+    if (!el) return
+    if (document.fullscreenElement === el) {
+      if (typeof document.exitFullscreen === 'function') document.exitFullscreen().catch(() => {})
+    } else if (typeof el.requestFullscreen === 'function') {
+      el.requestFullscreen().catch(() => {})
+    }
+  }
+
+  // --- Annotation editing helpers -------------------------------------------
+
+  function updateText(id: string, value: string) {
+    setAnnotations((anns) =>
+      anns.map((a) => (a.id === id && a.type === 'text' ? { ...a, text: value } : a)),
+    )
+  }
+
+  // Leave editing `id`; drop the box entirely if it was left blank.
+  function finishEditing(id: string) {
+    setEditingId((prev) => (prev === id ? null : prev))
+    setAnnotations((anns) => {
+      const b = anns.find((a) => a.id === id)
+      if (b && b.type === 'text' && b.text.trim() === '') return anns.filter((a) => a.id !== id)
+      return anns
+    })
+  }
+
+  // Enter edit mode on `id`. Records the pre-edit state first (one undo restores
+  // it), commits any other open edit, then makes edit and selection mutually
+  // exclusive (editing wins, selection cleared).
+  function enterEdit(id: string) {
+    recordHistory()
+    if (editingId && editingId !== id) finishEditing(editingId)
+    setSelectedId(null)
+    setEditingId(id)
+  }
+
+  // Select `id` (the click / post-drag state). Commits any other open edit
+  // first, then makes selection and editing mutually exclusive. Selection is not
+  // an undoable action, so it does NOT record history.
+  function selectBox(id: string) {
+    if (editingId && editingId !== id) finishEditing(editingId)
+    setEditingId(null)
+    setSelectedId(id)
+  }
+
+  // A- / A+ : nudge one box's stored (scale-1) font size within the clamp range.
+  // Rendered size is fontSize * scale, so this resizes the text live. One tap is
+  // one undo step.
+  function changeFontSize(id: string, delta: number) {
+    recordHistory()
+    setAnnotations((anns) =>
+      anns.map((a) =>
+        a.id === id && a.type === 'text'
+          ? { ...a, fontSize: Math.min(FONT_MAX, Math.max(FONT_MIN, a.fontSize + delta)) }
+          : a,
+      ),
+    )
+  }
+
+  function selectTool(t: Tool) {
+    if (editingId) finishEditing(editingId)
+    // Switching tools drops any selection (the control bar is a Text-tool affordance).
+    setSelectedId(null)
+    // Clicking the active pen/text tool again toggles back to cursor; clicking
+    // cursor (or a different tool) always selects that tool.
+    setTool((prev) => (t !== 'cursor' && prev === t ? 'cursor' : t))
+  }
+
+  // Undo / redo: snapshot-based. Each restores a whole-array snapshot and clears
+  // transient UI (a restored box comes back unselected, never mid-edit). State
+  // is read from the closure outside the updaters; annotationsRef supplies the
+  // current array to shuttle onto the opposite stack without nesting setStates.
+  function undo() {
+    if (past.length === 0) return
+    const prev = past[past.length - 1]
+    setFuture((f) => [annotationsRef.current, ...f])
+    setPast((p) => p.slice(0, -1))
+    setAnnotations(prev)
+    setEditingId(null)
+    setSelectedId(null)
+    setDraft(null)
+  }
+  function redo() {
+    if (future.length === 0) return
+    const next = future[0]
+    setPast((p) =>
+      p.length >= HISTORY_LIMIT ? [...p.slice(1), annotationsRef.current] : [...p, annotationsRef.current],
+    )
+    setFuture((f) => f.slice(1))
+    setAnnotations(next)
+    setEditingId(null)
+    setSelectedId(null)
+    setDraft(null)
+  }
+
+  function clearAll() {
+    recordHistory()
+    setAnnotations([])
+    setEditingId(null)
+    setSelectedId(null)
+    setDraft(null)
+    setShowClearConfirm(false)
+  }
+
+  // --- Pointer handling on a page overlay -----------------------------------
+
+  function onOverlayPointerDown(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
+    if (tool === 'pen') {
+      const el = e.currentTarget
+      if (typeof el.setPointerCapture === 'function') {
+        try {
+          el.setPointerCapture(e.pointerId)
+        } catch {
+          // Ignore: capture is a best-effort optimisation.
+        }
+      }
+      const f = pointFraction(el, e.clientX, e.clientY)
+      setDraft({ pageIndex, points: [f] })
+    } else if (tool === 'text') {
+      // Only the bare overlay handles empty-area clicks; clicks that bubbled up
+      // from a text box or its control bar are handled there and stop
+      // propagation, so they never reach here.
+      if (e.target !== e.currentTarget) return
+      // Empty-area click precedence:
+      //   1. If a box is being edited, just commit it (do NOT also create one).
+      //   2. Else if a box is selected, just clear the selection (click away).
+      //   3. Else create a new box and go straight to editing it.
+      if (editingId) {
+        finishEditing(editingId)
+        return
+      }
+      if (selectedId) {
+        setSelectedId(null)
+        return
+      }
+      const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
+      const id = nextId()
+      setSelectedId(null)
+      // Record before appending: one undo removes the whole box (typing into it
+      // does not push, so the box and its text collapse into a single step).
+      recordHistory()
+      setAnnotations((anns) => [
+        ...anns,
+        { id, type: 'text', pageIndex, color, x: f.x, y: f.y, text: '', fontSize: TEXT_SIZE },
+      ])
+      setEditingId(id)
+    }
+  }
+
+  function onOverlayPointerMove(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
+    if (tool !== 'pen') return
+    const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
+    setDraft((d) => (d && d.pageIndex === pageIndex ? { pageIndex, points: [...d.points, f] } : d))
+  }
+
+  function onOverlayPointerUp(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
+    if (tool !== 'pen') return
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    const d = latestDraftRef.current
+    if (d && d.pageIndex === pageIndex && d.points.length > 0) {
+      // Record before committing the stroke: one undo removes this stroke.
+      recordHistory()
+      const stroke: StrokeAnnotation = {
+        id: nextId(),
+        type: 'stroke',
+        pageIndex,
+        color,
+        width: PEN_WIDTH,
+        points: d.points,
+      }
+      setAnnotations((anns) => [...anns, stroke])
+    }
+    setDraft(null)
+  }
+
+  // --- Pointer handling on a committed (non-editing) text box ---------------
+
+  function onTextPointerDown(e: ReactPointerEvent<HTMLDivElement>, t: TextAnnotation, rect: PageRect) {
+    if (tool !== 'text') return
+    e.stopPropagation()
+    const el = e.currentTarget
+    if (typeof el.setPointerCapture === 'function') {
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    // Snapshot the pre-drag array now; onTextPointerUp pushes it only if an
+    // actual move happened, so a plain select-click records nothing.
+    pendingPastRef.current = annotationsRef.current
+    dragRef.current = {
+      id: t.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: t.x,
+      originY: t.y,
+      width: rect.width,
+      height: rect.height,
+      moved: false,
+    }
+  }
+
+  function onTextPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const dr = dragRef.current
+    if (!dr) return
+    e.stopPropagation()
+    const dx = e.clientX - dr.startX
+    const dy = e.clientY - dr.startY
+    if (!dr.moved && Math.abs(dx) + Math.abs(dy) > 3) dr.moved = true
+    if (!dr.moved || dr.width <= 0 || dr.height <= 0) return
+    const nx = clamp01(dr.originX + dx / dr.width)
+    const ny = clamp01(dr.originY + dy / dr.height)
+    setAnnotations((anns) => anns.map((a) => (a.id === dr.id && a.type === 'text' ? { ...a, x: nx, y: ny } : a)))
+  }
+
+  function onTextPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const dr = dragRef.current
+    if (!dr) return
+    e.stopPropagation()
+    dragRef.current = null
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    // A real move pushes the pre-drag snapshot as one undo step; a no-move
+    // select-click pushes nothing. Either way the pending snapshot is cleared.
+    if (dr.moved) {
+      const snap = pendingPastRef.current
+      if (snap) {
+        setPast((p) => (p.length >= HISTORY_LIMIT ? [...p.slice(1), snap] : [...p, snap]))
+        setFuture([])
+      }
+    }
+    pendingPastRef.current = null
+    // A no-move click SELECTS the box; a finished drag also leaves it selected.
+    // Double-click (a separate handler) is what enters edit mode.
+    selectBox(dr.id)
+  }
+
+  // --- Overlay rendering ----------------------------------------------------
+
+  // Small resize + delete bar shown above (or, near the page top, below) a
+  // selected or editing box. Buttons preventDefault on mouse/pointer down so
+  // clicking them never steals focus from the textarea (which would blur ->
+  // commit -> exit edit). The bar stops pointer propagation so clicking it never
+  // reaches the overlay and deselects.
+  function renderControlBar(t: TextAnnotation, below: boolean) {
+    return (
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          left: 0,
+          ...(below ? { top: 'calc(100% + 4px)' } : { bottom: 'calc(100% + 4px)' }),
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: 3,
+          backgroundColor: '#ffffff',
+          border: '1px solid #d1d5db',
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+          pointerEvents: 'auto',
+          whiteSpace: 'nowrap',
+          lineHeight: 1,
+        }}
+      >
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => changeFontSize(t.id, -FONT_STEP)}
+          aria-label="Decrease text size"
+          title="Decrease text size"
+          style={controlButtonStyle('#4b5563')}
+        >
+          A-
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => changeFontSize(t.id, FONT_STEP)}
+          aria-label="Increase text size"
+          title="Increase text size"
+          style={controlButtonStyle('#4b5563')}
+        >
+          A+
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => deleteBox(t.id)}
+          aria-label="Delete text box"
+          title="Delete text box"
+          style={controlButtonStyle('#FD5602')}
+        >
+          x
+        </button>
+      </div>
+    )
+  }
+
+  function renderTextBox(t: TextAnnotation, rect: PageRect) {
+    const isEditing = t.id === editingId
+    const isSelected = t.id === selectedId
+    const interactive = tool === 'text'
+    // Font / colour shared by both the textarea and the static text.
+    const baseStyle: CSSProperties = {
+      color: t.color,
+      fontFamily: 'inherit',
+      fontWeight: 600,
+      fontSize: t.fontSize * scale,
+      lineHeight: 1.25,
+    }
+    // Anchor the control bar above the box by default; flip below when the box
+    // sits too near the page top for the bar to fit above it.
+    const below = t.y * rect.height < 40
+    const bar = isEditing || isSelected ? renderControlBar(t, below) : null
+
+    // Wrapper pinned at the box's 0..1 top-left. It hugs the box (lineHeight 0
+    // kills the inline-block descender gap) so the control bar, anchored to the
+    // wrapper edges, sits flush above/below the box's real size and scrolls /
+    // zooms with it. pointerEvents none so only the box / bar inside react.
+    const wrapperStyle: CSSProperties = {
+      position: 'absolute',
+      left: `${t.x * 100}%`,
+      top: `${t.y * 100}%`,
+      lineHeight: 0,
+      pointerEvents: 'none',
+    }
+
+    if (isEditing) {
+      return (
+        <div key={t.id} style={wrapperStyle}>
+          <EditableTextBox
+            value={t.text}
+            widthPx={TEXT_BOX_WIDTH * scale}
+            fontSizePx={t.fontSize * scale}
+            onChangeText={(v) => updateText(t.id, v)}
+            onCommit={() => finishEditing(t.id)}
+            style={{
+              ...baseStyle,
+              position: 'relative',
+              display: 'block',
+              padding: `${2 * scale}px ${4 * scale}px`,
+              background: 'rgba(255,255,255,0.9)',
+              border: `1px solid ${ORANGE}`,
+              borderRadius: 4,
+              resize: 'none',
+              overflow: 'hidden',
+              outline: 'none',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              boxSizing: 'border-box',
+              pointerEvents: 'auto',
+            }}
+          />
+          {bar}
+        </div>
+      )
+    }
+
+    return (
+      <div key={t.id} style={wrapperStyle}>
+        <div
+          onPointerDown={(e) => onTextPointerDown(e, t, rect)}
+          onPointerMove={onTextPointerMove}
+          onPointerUp={onTextPointerUp}
+          onDoubleClick={() => enterEdit(t.id)}
+          style={{
+            ...baseStyle,
+            display: 'inline-block',
+            verticalAlign: 'top',
+            maxWidth: TEXT_BOX_WIDTH * scale,
+            padding: `${2 * scale}px ${4 * scale}px`,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            userSelect: 'none',
+            pointerEvents: interactive ? 'auto' : 'none',
+            cursor: interactive ? 'move' : 'default',
+            // Selected => thin orange outline (outline, not border, so the
+            // unselected box renders at exactly the same size / position).
+            outline: isSelected ? `1px solid ${ORANGE}` : 'none',
+            outlineOffset: isSelected ? 1 : 0,
+            textShadow: '0 1px 2px rgba(255,255,255,0.7)',
+          }}
+        >
+          {t.text === '' ? ' ' : t.text}
+        </div>
+        {bar}
+      </div>
+    )
+  }
+
+  function renderPageOverlay(rect: PageRect, pageIndex: number) {
+    const pageStrokes = annotations.filter(
+      (a): a is StrokeAnnotation => a.type === 'stroke' && a.pageIndex === pageIndex,
+    )
+    const pageTexts = annotations.filter(
+      (a): a is TextAnnotation => a.type === 'text' && a.pageIndex === pageIndex,
+    )
+    const drawingHere = draft && draft.pageIndex === pageIndex
+
+    return (
+      <div
+        key={pageIndex}
+        onPointerDown={(e) => onOverlayPointerDown(e, pageIndex)}
+        onPointerMove={(e) => onOverlayPointerMove(e, pageIndex)}
+        onPointerUp={(e) => onOverlayPointerUp(e, pageIndex)}
+        style={{
+          position: 'absolute',
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          // Click-through in cursor mode so scroll / zoom work normally.
+          pointerEvents: tool === 'cursor' ? 'none' : 'auto',
+          cursor: tool === 'pen' ? PEN_CURSOR : tool === 'text' ? 'text' : 'default',
+          touchAction: tool === 'cursor' ? 'auto' : 'none',
+          userSelect: 'none',
+        }}
+      >
+        <svg
+          width={rect.width}
+          height={rect.height}
+          style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', overflow: 'visible' }}
+        >
+          {pageStrokes.map((s) => (
+            <path
+              key={s.id}
+              d={strokePath(s.points, rect.width, rect.height)}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={s.width * scale}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ))}
+          {drawingHere && draft ? (
+            <path
+              d={strokePath(draft.points, rect.width, rect.height)}
+              fill="none"
+              stroke={color}
+              strokeWidth={PEN_WIDTH * scale}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          ) : null}
+        </svg>
+        {pageTexts.map((t) => renderTextBox(t, rect))}
+      </div>
+    )
+  }
+
+  const isReady = status === 'ready'
+  const canZoomOut = isReady && scale > MIN_SCALE
+  const canZoomIn = isReady && scale < MAX_SCALE
+  const canPrev = isReady && currentPage > 1
+  const canNext = isReady && currentPage < numPages
+  const canUndo = isReady && past.length > 0
+  const canRedo = isReady && future.length > 0
+  const canClear = isReady && annotations.length > 0
+  const zoomPct = Math.round(scale * 100)
+
+  const rootStyle: CSSProperties = {
+    width: '100%',
+    border: isFullscreen ? 'none' : '1px solid #e5e7eb',
+    borderRadius: isFullscreen ? 0 : 12,
+    overflow: 'hidden',
+    backgroundColor: '#f9fafb',
+    ...(isFullscreen ? { height: '100vh', display: 'flex', flexDirection: 'column' } : {}),
+  }
+  const bodyStyle: CSSProperties = {
+    overflow: 'auto',
+    padding: 16,
+    ...(isFullscreen ? { flex: 1, minHeight: 0 } : { maxHeight: '80vh' }),
+  }
+
+  return (
+    <div ref={rootRef} style={rootStyle}>
+      {/* Toolbar: zoom, fit-to-width, page nav, annotation tools, fullscreen.
+          No download, no print (the whole reason this viewer exists). */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 8,
+          padding: '10px 14px',
+          borderBottom: '1px solid #e5e7eb',
+          backgroundColor: '#ffffff',
+        }}
+      >
+        {/* Zoom */}
+        <button
+          type="button"
+          onClick={zoomOut}
+          disabled={!canZoomOut}
+          aria-label="Zoom out"
+          title="Zoom out"
+          style={iconButtonStyle(canZoomOut)}
+        >
+          <ZoomOut size={16} />
+        </button>
+
+        <span style={{ minWidth: 52, textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#374151' }}>
+          {zoomPct}%
+        </span>
+
+        <button
+          type="button"
+          onClick={zoomIn}
+          disabled={!canZoomIn}
+          aria-label="Zoom in"
+          title="Zoom in"
+          style={iconButtonStyle(canZoomIn)}
+        >
+          <ZoomIn size={16} />
+        </button>
+
+        <span style={dividerStyle} aria-hidden />
+
+        {/* Fit to width */}
+        <button
+          type="button"
+          onClick={() => {
+            setFitMode(true)
+            applyFitWidth()
+          }}
+          disabled={!isReady}
+          aria-pressed={fitMode}
+          title="Fit page to width"
+          style={toggleButtonStyle(fitMode, !isReady)}
+        >
+          <MoveHorizontal size={16} />
+          Fit width
+        </button>
+
+        <span style={dividerStyle} aria-hidden />
+
+        {/* Page navigation */}
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage - 1)}
+          disabled={!canPrev}
+          aria-label="Previous page"
+          title="Previous page"
+          style={iconButtonStyle(canPrev)}
+        >
+          <ChevronLeft size={16} />
+        </button>
+
+        <span
+          style={{
+            minWidth: 96,
+            textAlign: 'center',
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#374151',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Page {isReady ? currentPage : '-'} of {isReady ? numPages : '-'}
+        </span>
+
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage + 1)}
+          disabled={!canNext}
+          aria-label="Next page"
+          title="Next page"
+          style={iconButtonStyle(canNext)}
+        >
+          <ChevronRight size={16} />
+        </button>
+
+        <span style={dividerStyle} aria-hidden />
+
+        {/* Annotation tools */}
+        <button
+          type="button"
+          onClick={() => selectTool('cursor')}
+          disabled={!isReady}
+          aria-pressed={tool === 'cursor'}
+          aria-label="Select / scroll"
+          title="Select / scroll"
+          style={toolButtonStyle(tool === 'cursor', !isReady)}
+        >
+          <MousePointer2 size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTool('pen')}
+          disabled={!isReady}
+          aria-pressed={tool === 'pen'}
+          aria-label="Pen"
+          title="Pen (draw)"
+          style={toolButtonStyle(tool === 'pen', !isReady)}
+        >
+          <Pencil size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTool('text')}
+          disabled={!isReady}
+          aria-pressed={tool === 'text'}
+          aria-label="Text"
+          title="Text box"
+          style={toolButtonStyle(tool === 'text', !isReady)}
+        >
+          <Type size={16} />
+        </button>
+
+        <span style={dividerStyle} aria-hidden />
+
+        {/* Colour (standard annotation palette). preventDefault on mouse/pointer
+            down so clicking a swatch while editing does not blur (and thus
+            commit/exit) the textarea -- same trick as the control-bar buttons. */}
+        {COLOR_SWATCHES.map((sw) => (
+          <button
+            key={sw.value}
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setColor(sw.value)
+              // If a box is editing or selected, recolour THAT box too (undoable).
+              const target = editingId ?? selectedId
+              if (target) {
+                recordHistory()
+                setAnnotations((anns) =>
+                  anns.map((a) => (a.id === target && a.type === 'text' ? { ...a, color: sw.value } : a)),
+                )
+              }
+            }}
+            disabled={!isReady}
+            aria-pressed={color === sw.value}
+            aria-label={sw.label}
+            title={sw.label}
+            style={swatchStyle(sw.value, color === sw.value, !isReady)}
+          />
+        ))}
+
+        <span style={dividerStyle} aria-hidden />
+
+        {/* Undo / Redo / Clear */}
+        <button
+          type="button"
+          onClick={undo}
+          disabled={!canUndo}
+          aria-label="Undo last annotation"
+          title="Undo"
+          style={iconButtonStyle(canUndo)}
+        >
+          <Undo2 size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={redo}
+          disabled={!canRedo}
+          aria-label="Redo last annotation"
+          title="Redo"
+          style={iconButtonStyle(canRedo)}
+        >
+          <Redo2 size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!canClear) return
+            if (editingId) finishEditing(editingId)
+            setShowClearConfirm(true)
+          }}
+          disabled={!canClear}
+          aria-label="Clear all annotations"
+          title="Clear all"
+          style={iconButtonStyle(canClear)}
+        >
+          <Trash2 size={16} />
+        </button>
+
+        {/* Fullscreen, pushed to the right */}
+        <button
+          type="button"
+          onClick={handleFullscreen}
+          disabled={!isReady}
+          title={isFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
+          style={{ ...toggleButtonStyle(true, !isReady), marginLeft: 'auto' }}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+        </button>
+      </div>
+
+      {/* Body: stacked page canvases, scrollable. */}
+      <div ref={scrollRef} onScroll={handleScroll} style={bodyStyle}>
+        {status === 'loading' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+              padding: '60px 16px',
+              color: '#6b7280',
+              fontSize: 14,
+            }}
+          >
+            <span
+              className="animate-spin"
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: '50%',
+                border: '2px solid #e5e7eb',
+                borderTopColor: ORANGE,
+                display: 'inline-block',
+              }}
+            />
+            Loading PDF...
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+            <p style={{ fontWeight: 600, fontSize: 14, color: '#b91c1c', marginBottom: 4 }}>
+              Could not display this PDF.
+            </p>
+            <p style={{ fontSize: 13, color: '#6b7280', wordBreak: 'break-word' }}>{errorMsg}</p>
+          </div>
+        )}
+
+        {/* Page stack + annotation overlay. The wrapper is the positioning
+            context: canvases are appended imperatively into containerRef, and
+            the React-managed overlay layer is an absolute sibling so the two
+            never fight over the same DOM children. Both live inside the scroll
+            container, so overlays scroll with their canvases automatically. */}
+        <div style={{ position: 'relative', display: isReady ? 'block' : 'none' }}>
+          <div ref={containerRef} />
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            {pageRects.map((rect, pageIndex) => renderPageOverlay(rect, pageIndex))}
+          </div>
+        </div>
+      </div>
+
+      {/* Clear-all confirmation modal. Rendered as a child of rootRef so it is
+          visible in fullscreen too (only rootRef is shown in the fullscreen top
+          layer). position: fixed escapes rootRef's overflow:hidden and covers
+          the viewport / fullscreen element. */}
+      {showClearConfirm && (
+        <div
+          onClick={() => setShowClearConfirm(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            zIndex: 2147483000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Clear all annotations"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 360,
+              backgroundColor: '#ffffff',
+              borderRadius: 12,
+              padding: 22,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#111827', marginBottom: 8 }}>
+              Clear all annotations?
+            </div>
+            <div style={{ fontSize: 13.5, color: '#4b5563', lineHeight: 1.5, marginBottom: 18 }}>
+              This removes every pen mark and text box on this document. This cannot be undone.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                style={{
+                  height: 34,
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#ffffff',
+                  color: '#4b5563',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={clearAll}
+                style={{
+                  height: 34,
+                  padding: '0 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  backgroundColor: '#FD5602',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                }}
+              >
+                Clear all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// State-dependent colours via inline style (Tailwind v4 does not apply
+// dynamically constructed colour classes).
+
+// Square icon buttons (zoom, page nav, undo, redo, clear). `active` means enabled.
+function iconButtonStyle(active: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    border: `1px solid ${active ? ORANGE : '#e5e7eb'}`,
+    backgroundColor: active ? '#fff7ed' : '#f9fafb',
+    color: active ? ORANGE : '#9ca3af',
+    cursor: active ? 'pointer' : 'not-allowed',
+  }
+}
+
+// Square tool toggles (cursor / pen / text). `selected` => filled solid orange
+// with a white icon; inactive => white with a slate icon; `disabled` outranks
+// selection and shows the not-allowed (grey) state.
+function toolButtonStyle(selected: boolean, disabled: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    border: `1px solid ${disabled ? '#e5e7eb' : selected ? ORANGE : '#d1d5db'}`,
+    backgroundColor: disabled ? '#f9fafb' : selected ? ORANGE : '#ffffff',
+    color: disabled ? '#9ca3af' : selected ? '#ffffff' : '#4b5563',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  }
+}
+
+// Labelled toggle buttons (fit-to-width, fullscreen). `active` => orange.
+// `disabled` outranks `active` and shows the not-allowed state.
+function toggleButtonStyle(active: boolean, disabled: boolean): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+    height: 34,
+    padding: '0 12px',
+    borderRadius: 8,
+    border: `1px solid ${disabled ? '#e5e7eb' : active ? ORANGE : '#d1d5db'}`,
+    backgroundColor: disabled ? '#f9fafb' : active ? '#fff7ed' : '#ffffff',
+    color: disabled ? '#9ca3af' : active ? ORANGE : '#4b5563',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    whiteSpace: 'nowrap',
+  }
+}
+
+// Small control-bar buttons (A- / A+ / x). `textColor` lets the delete button
+// read in a stronger colour while the size buttons stay neutral.
+function controlButtonStyle(textColor: string): CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: 26,
+    height: 24,
+    padding: '0 6px',
+    borderRadius: 6,
+    border: '1px solid #d1d5db',
+    backgroundColor: '#ffffff',
+    color: textColor,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: 700,
+    fontFamily: 'inherit',
+    lineHeight: 1,
+  }
+}
+
+// Round colour swatch. Selected => dark ring with a white gap (visible against
+// every palette colour); disabled => dimmed and not-allowed.
+function swatchStyle(swatchColor: string, selected: boolean, disabled: boolean): CSSProperties {
+  return {
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    padding: 0,
+    borderRadius: '50%',
+    backgroundColor: swatchColor,
+    border: '1px solid rgba(0,0,0,0.15)',
+    boxShadow: selected ? '0 0 0 2px #ffffff, 0 0 0 4px #374151' : 'none',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.5 : 1,
+  }
+}
+
+const dividerStyle: CSSProperties = {
+  width: 1,
+  height: 22,
+  flexShrink: 0,
+  backgroundColor: '#e5e7eb',
+}
