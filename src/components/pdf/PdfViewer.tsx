@@ -153,12 +153,49 @@ interface DragState {
   height: number
   moved: boolean
 }
+// A baked-in PDF link surfaced from the uploaded file's own annotations,
+// normalised to the same 0..1 fraction-of-page model as every other overlay.
+// `url` is already validated to a safe scheme.
+interface PdfLink {
+  pageIndex: number // 0-based
+  left: number // 0..1 (top-left corner)
+  top: number // 0..1 (top-left corner)
+  width: number // 0..1
+  height: number // 0..1
+  url: string // absolute http / https / mailto only
+}
+// Minimal shape we read off pdf.js getAnnotations() results. Typed so member
+// access is not `any` (keeps eslint clean); everything we touch is narrowed or
+// validated before use.
+interface RawLinkAnnotation {
+  subtype?: string
+  url?: unknown
+  rect?: unknown
+}
 
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n
 }
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+// Defence in depth on top of pdf.js: pdf.js already leaves `url` undefined for
+// unsafe schemes (e.g. javascript:), but we additionally accept only absolute
+// http / https / mailto URLs from the uploaded (untrusted) file. A relative URL
+// has no scheme and throws in the URL constructor, so it is rejected too.
+function safeLinkUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const s = raw.trim()
+  if (s === '') return null
+  let parsed: URL
+  try {
+    parsed = new URL(s)
+  } catch {
+    return null
+  }
+  const proto = parsed.protocol.toLowerCase()
+  if (proto === 'http:' || proto === 'https:' || proto === 'mailto:') return parsed.href
+  return null
 }
 
 // Fraction (0..1) of an element from a pointer's client coordinates.
@@ -325,6 +362,11 @@ export default function PdfViewer({ fileUrl }: Props) {
   // Displayed geometry of each page canvas, so overlays can be placed exactly
   // on top of their canvas at the current zoom.
   const [pageRects, setPageRects] = useState<PageRect[]>([])
+
+  // Baked-in links surfaced from the uploaded PDF's own annotations. Fetched once
+  // per document (links do not change with zoom); re-placed by measurePages like
+  // every other overlay.
+  const [pdfLinks, setPdfLinks] = useState<PdfLink[]>([])
   // Confirmation modal for "clear all" (replaces window.confirm so it also shows
   // in fullscreen, where only rootRef is visible).
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -429,6 +471,7 @@ export default function PdfViewer({ fileUrl }: Props) {
     setSelectedId(null)
     setDraft(null)
     setPageRects([])
+    setPdfLinks([])
     setPast([])
     setFuture([])
     pendingPastRef.current = null
@@ -548,6 +591,61 @@ export default function PdfViewer({ fileUrl }: Props) {
       }
     })()
   }, [status, scale, updateCurrentPage, measurePages])
+
+  // Surface the links already baked into the uploaded PDF. Because we render to a
+  // flat canvas, the native clickable links are lost; this re-derives them from
+  // the file's annotation data so the overlay can render clickable hotspots. Runs
+  // once per document, after it is ready. Internal page-jump links (dest, no url)
+  // and unsafe schemes (url left undefined by pdf.js) are skipped.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const pdf = pdfDocRef.current
+    if (!pdf) return
+    let cancelled = false
+    ;(async () => {
+      const collected: PdfLink[] = []
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        if (cancelled) return
+        try {
+          const page = await pdf.getPage(pageNum)
+          const annots = (await page.getAnnotations()) as RawLinkAnnotation[]
+          const viewport = page.getViewport({ scale: 1 })
+          const vw = viewport.width
+          const vh = viewport.height
+          if (vw <= 0 || vh <= 0) continue
+          for (const a of annots) {
+            if (a.subtype !== 'Link') continue
+            const url = safeLinkUrl(a.url)
+            if (!url) continue
+            const rect = a.rect
+            if (!Array.isArray(rect) || rect.length < 4) continue
+            const conv = viewport.convertToViewportRectangle(rect as number[]) as number[]
+            const cx0 = conv[0]
+            const cy0 = conv[1]
+            const cx1 = conv[2]
+            const cy1 = conv[3]
+            if (cx0 === undefined || cy0 === undefined || cx1 === undefined || cy1 === undefined) continue
+            const x1 = Math.min(cx0, cx1)
+            const x2 = Math.max(cx0, cx1)
+            const y1 = Math.min(cy0, cy1)
+            const y2 = Math.max(cy0, cy1)
+            const left = clamp01(x1 / vw)
+            const top = clamp01(y1 / vh)
+            const width = clamp01((x2 - x1) / vw)
+            const height = clamp01((y2 - y1) / vh)
+            if (width <= 0 || height <= 0) continue
+            collected.push({ pageIndex: pageNum - 1, left, top, width, height, url })
+          }
+        } catch {
+          // A single page's links failing to parse is non-fatal; skip it.
+        }
+      }
+      if (!cancelled) setPdfLinks(collected)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [status])
 
   // Re-measure overlay geometry on any container size change: window resize,
   // fullscreen transition, scrollbar appearance, and the margin:auto centring
@@ -1090,6 +1188,8 @@ export default function PdfViewer({ fileUrl }: Props) {
     )
     const drawingHere = draft && draft.pageIndex === pageIndex
 
+    const pageLinks = pdfLinks.filter((l) => l.pageIndex === pageIndex)
+
     return (
       <div
         key={pageIndex}
@@ -1109,6 +1209,33 @@ export default function PdfViewer({ fileUrl }: Props) {
           userSelect: 'none',
         }}
       >
+        {pageLinks.map((lk, i) => (
+          <a
+            key={`pdflink-${pageIndex}-${i}`}
+            href={lk.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={lk.url}
+            style={{
+              position: 'absolute',
+              left: lk.left * rect.width,
+              top: lk.top * rect.height,
+              width: lk.width * rect.width,
+              height: lk.height * rect.height,
+              display: 'block',
+              borderRadius: 2,
+              // Transparent by default (the link text is already styled in the
+              // PDF; the pointer cursor is the affordance). To make hotspots
+              // faintly visible instead, change to: 'rgba(25, 113, 194, 0.10)'.
+              backgroundColor: 'transparent',
+              cursor: 'pointer',
+              // Clickable only in cursor mode; inert under pen/text so a link can
+              // never steal a stroke or a text placement (the parent overlay then
+              // catches the gesture). Mirrors the text-box interactivity gate.
+              pointerEvents: tool === 'cursor' ? 'auto' : 'none',
+            }}
+          />
+        ))}
         <svg
           width={rect.width}
           height={rect.height}
