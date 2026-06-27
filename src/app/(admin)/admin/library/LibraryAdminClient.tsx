@@ -277,7 +277,6 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <option value="">All Categories</option>
           <option value="Vocabulary">Vocabulary</option>
           <option value="Grammar">Grammar</option>
-          <option value="Material">Material</option>
         </select>
         <select
           value={filterLevel}
