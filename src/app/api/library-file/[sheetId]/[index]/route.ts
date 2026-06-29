@@ -29,49 +29,75 @@ export async function GET(
     const { sheetId, index } = await params
 
     // --- Auth wall ---
-    // Mirror the existing study-sheet page gates exactly, no tighter:
-    // the caller must be a logged-in student OR a teacher/admin.
+    // Identify the caller. This route loads the sheet with the service-role
+    // admin client, which BYPASSES RLS, so the study_sheets SELECT policies do
+    // not govern it. We re-enforce those same tiers in this code (tier check
+    // below). First: the caller must be logged in.
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
 
-    // A student is a row in `students` keyed by auth_user_id (see the student
-    // study page); a teacher/admin is a row in `profiles` keyed by id (see the
-    // admin library upload route). Either is allowed to view library files.
+    // Student = a row in `students` keyed by auth_user_id; teacher/admin = a row
+    // in `profiles` keyed by id. We need role + account_types to tell
+    // student / teacher / exam-teacher / admin apart for the tier check.
     const { data: student } = await supabase
       .from('students')
       .select('id')
       .eq('auth_user_id', user.id)
       .maybeSingle()
 
-    let authorised = !!student
-    if (!authorised) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle()
-      authorised = !!profile
-    }
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, role, account_types')
+      .eq('id', user.id)
+      .maybeSingle()
 
-    if (!authorised) {
+    // Neither a student nor a profile → denied outright, before any sheet is
+    // loaded, so sheet existence never leaks. (Matches prior behaviour.)
+    if (!student && !profile) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // --- Resolve the sheet and the attachment ---
-    // Service-role load: we have already run our own auth gate above, and the
-    // download below needs the service role anyway once the bucket is private.
+    // Service-role load: we ran our own auth gate above, and the download below
+    // needs the service role once the bucket is private. audience + allowed_roles
+    // are loaded so the tier check below can run.
     const adminClient = createAdminClient()
     const { data: sheet } = await adminClient
       .from('study_sheets')
-      .select('id, is_active, attachments')
+      .select('id, is_active, attachments, audience, allowed_roles')
       .eq('id', sheetId)
       .maybeSingle()
 
     if (!sheet || sheet.is_active !== true) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    // --- Tier check: mirror the four study_sheets RLS SELECT tiers exactly ---
+    // The admin client above bypassed RLS, so re-apply the same audience/role
+    // gates. account_types / allowed_roles are Postgres text[]; a missing array
+    // is treated as empty. Default deny: access only becomes true when a tier
+    // grants it. Order matters — broadest matching role wins
+    // (admin > exam teacher > teacher > student).
+    const accountTypes: string[] = Array.isArray(profile?.account_types) ? profile.account_types : []
+    const allowedRoles: string[] = Array.isArray(sheet.allowed_roles) ? sheet.allowed_roles : []
+    const isStudentAudience = sheet.audience === 'student'
+
+    let access = false
+    if (profile?.role === 'admin' || accountTypes.includes('school_admin')) {
+      access = true
+    } else if (accountTypes.includes('teacher_exam')) {
+      access = isStudentAudience || allowedRoles.includes('teacher') || allowedRoles.includes('teacher_exam')
+    } else if (accountTypes.includes('teacher')) {
+      access = isStudentAudience || allowedRoles.includes('teacher')
+    } else if (student) {
+      access = isStudentAudience
+    }
+
+    if (!access) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const attachments: Attachment[] = Array.isArray(sheet.attachments) ? sheet.attachments : []

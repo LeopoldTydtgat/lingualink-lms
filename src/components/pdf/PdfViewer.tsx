@@ -153,12 +153,49 @@ interface DragState {
   height: number
   moved: boolean
 }
+// A baked-in PDF link surfaced from the uploaded file's own annotations,
+// normalised to the same 0..1 fraction-of-page model as every other overlay.
+// `url` is already validated to a safe scheme.
+interface PdfLink {
+  pageIndex: number // 0-based
+  left: number // 0..1 (top-left corner)
+  top: number // 0..1 (top-left corner)
+  width: number // 0..1
+  height: number // 0..1
+  url: string // absolute http / https / mailto only
+}
+// Minimal shape we read off pdf.js getAnnotations() results. Typed so member
+// access is not `any` (keeps eslint clean); everything we touch is narrowed or
+// validated before use.
+interface RawLinkAnnotation {
+  subtype?: string
+  url?: unknown
+  rect?: unknown
+}
 
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n
 }
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+// Defence in depth on top of pdf.js: pdf.js already leaves `url` undefined for
+// unsafe schemes (e.g. javascript:), but we additionally accept only absolute
+// http / https / mailto URLs from the uploaded (untrusted) file. A relative URL
+// has no scheme and throws in the URL constructor, so it is rejected too.
+function safeLinkUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const s = raw.trim()
+  if (s === '') return null
+  let parsed: URL
+  try {
+    parsed = new URL(s)
+  } catch {
+    return null
+  }
+  const proto = parsed.protocol.toLowerCase()
+  if (proto === 'http:' || proto === 'https:' || proto === 'mailto:') return parsed.href
+  return null
 }
 
 // Fraction (0..1) of an element from a pointer's client coordinates.
@@ -283,6 +320,20 @@ export default function PdfViewer({ fileUrl }: Props) {
   const firstPageWidthRef = useRef(0)
   // Throttles the scroll handler to one update per animation frame.
   const scrollRafRef = useRef<number | null>(null)
+
+  // While a re-render (zoom / fit / fullscreen) rebuilds the canvases, the
+  // browser can momentarily move the scroll position. This flag tells the scroll
+  // handler to ignore those transient scrolls, so the page readout does not
+  // flicker while the render effect restores the reader's page deterministically.
+  const suppressScrollSyncRef = useRef(false)
+
+  // Page the reader was on when the tab was last hidden (e.g. they clicked a
+  // baked-in link that opened a new tab). Captured on visibilitychange -> hidden
+  // and restored on -> visible, because returning to the tab can nudge this
+  // scroll container by about a page and nothing else re-asserts position (no
+  // canvas rebuild fires for a plain tab switch).
+  const lastVisiblePageRef = useRef(1)
+
   // Bumped on every render pass so a stale async loop (e.g. from a fast double
   // zoom) detects it has been superseded and stops touching the DOM.
   const renderTokenRef = useRef(0)
@@ -310,6 +361,11 @@ export default function PdfViewer({ fileUrl }: Props) {
   const [fitMode, setFitMode] = useState(false)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
+
+  // Editable page-number box. null when not being edited (the box then shows the
+  // live current page); a string while the user is typing a page to jump to.
+  const [pageDraft, setPageDraft] = useState<string | null>(null)
+
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Annotation state. `annotations` IS the array that gets saved in Milestone 4.
@@ -325,6 +381,11 @@ export default function PdfViewer({ fileUrl }: Props) {
   // Displayed geometry of each page canvas, so overlays can be placed exactly
   // on top of their canvas at the current zoom.
   const [pageRects, setPageRects] = useState<PageRect[]>([])
+
+  // Baked-in links surfaced from the uploaded PDF's own annotations. Fetched once
+  // per document (links do not change with zoom); re-placed by measurePages like
+  // every other overlay.
+  const [pdfLinks, setPdfLinks] = useState<PdfLink[]>([])
   // Confirmation modal for "clear all" (replaces window.confirm so it also shows
   // in fullscreen, where only rootRef is visible).
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -429,6 +490,7 @@ export default function PdfViewer({ fileUrl }: Props) {
     setSelectedId(null)
     setDraft(null)
     setPageRects([])
+    setPdfLinks([])
     setPast([])
     setFuture([])
     pendingPastRef.current = null
@@ -499,7 +561,29 @@ export default function PdfViewer({ fileUrl }: Props) {
     const container = containerRef.current
     if (!pdf || !container) return
 
+    const scroller = scrollRef.current
+
+    // Remember which page is at the top of the viewport right now, so the same
+    // page can be restored after the rebuild. Without this, a zoom / fit /
+    // fullscreen rebuild lets the browser move the scroll position (it can jump
+    // to the top, or via scroll anchoring to the last page). Reading the live
+    // canvases + scroll BEFORE the rebuild captures the reader's true place.
+    let anchorPage = 1
+    if (scroller && canvasesRef.current.length > 0) {
+      const scrollerTop = scroller.getBoundingClientRect().top
+      const midline = scroller.clientHeight / 2
+      for (let i = 0; i < canvasesRef.current.length; i++) {
+        const c = canvasesRef.current[i]
+        if (!c) continue
+        const top = c.getBoundingClientRect().top - scrollerTop
+        if (top < midline) anchorPage = i + 1
+      }
+    }
+
     const token = ++renderTokenRef.current
+    // Ignore the transient scrolls the rebuild causes; we restore the page
+    // ourselves below and re-enable the readout afterwards.
+    suppressScrollSyncRef.current = true
 
     ;(async () => {
       try {
@@ -535,19 +619,84 @@ export default function PdfViewer({ fileUrl }: Props) {
           }).promise
         }
 
-        // Page heights have settled (and replaceChildren reset the scroll to the
-        // top); refresh the readout and re-place the annotation overlays.
         if (token === renderTokenRef.current) {
+          // Restore the reader's page (instant, no smooth scroll) BEFORE syncing
+          // the readout, so the page counter never flickers to the wrong page.
+          const target = canvasesRef.current[anchorPage - 1]
+          if (scroller && target) {
+            const top =
+              target.getBoundingClientRect().top -
+              scroller.getBoundingClientRect().top +
+              scroller.scrollTop
+            scroller.scrollTop = Math.max(0, top)
+          }
           updateCurrentPage()
           measurePages()
+          suppressScrollSyncRef.current = false
         }
       } catch (err) {
         if (token !== renderTokenRef.current) return
+        suppressScrollSyncRef.current = false
         setErrorMsg(err instanceof Error ? err.message : 'Failed to render the PDF.')
         setStatus('error')
       }
     })()
   }, [status, scale, updateCurrentPage, measurePages])
+
+  // Surface the links already baked into the uploaded PDF. Because we render to a
+  // flat canvas, the native clickable links are lost; this re-derives them from
+  // the file's annotation data so the overlay can render clickable hotspots. Runs
+  // once per document, after it is ready. Internal page-jump links (dest, no url)
+  // and unsafe schemes (url left undefined by pdf.js) are skipped.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const pdf = pdfDocRef.current
+    if (!pdf) return
+    let cancelled = false
+    ;(async () => {
+      const collected: PdfLink[] = []
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        if (cancelled) return
+        try {
+          const page = await pdf.getPage(pageNum)
+          const annots = (await page.getAnnotations()) as RawLinkAnnotation[]
+          const viewport = page.getViewport({ scale: 1 })
+          const vw = viewport.width
+          const vh = viewport.height
+          if (vw <= 0 || vh <= 0) continue
+          for (const a of annots) {
+            if (a.subtype !== 'Link') continue
+            const url = safeLinkUrl(a.url)
+            if (!url) continue
+            const rect = a.rect
+            if (!Array.isArray(rect) || rect.length < 4) continue
+            const conv = viewport.convertToViewportRectangle(rect as number[]) as number[]
+            const cx0 = conv[0]
+            const cy0 = conv[1]
+            const cx1 = conv[2]
+            const cy1 = conv[3]
+            if (cx0 === undefined || cy0 === undefined || cx1 === undefined || cy1 === undefined) continue
+            const x1 = Math.min(cx0, cx1)
+            const x2 = Math.max(cx0, cx1)
+            const y1 = Math.min(cy0, cy1)
+            const y2 = Math.max(cy0, cy1)
+            const left = clamp01(x1 / vw)
+            const top = clamp01(y1 / vh)
+            const width = clamp01((x2 - x1) / vw)
+            const height = clamp01((y2 - y1) / vh)
+            if (width <= 0 || height <= 0) continue
+            collected.push({ pageIndex: pageNum - 1, left, top, width, height, url })
+          }
+        } catch {
+          // A single page's links failing to parse is non-fatal; skip it.
+        }
+      }
+      if (!cancelled) setPdfLinks(collected)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [status])
 
   // Re-measure overlay geometry on any container size change: window resize,
   // fullscreen transition, scrollbar appearance, and the margin:auto centring
@@ -561,24 +710,6 @@ export default function PdfViewer({ fileUrl }: Props) {
     return () => ro.disconnect()
   }, [measurePages])
 
-  // While fit-to-width is active, apply it now and keep it fitted as the window
-  // (or fullscreen transition, which also fires resize) changes size. Debounced
-  // so a resize drag does not re-render every page on every pixel.
-  useEffect(() => {
-    if (!fitMode || status !== 'ready') return
-    applyFitWidth()
-    let timer: ReturnType<typeof setTimeout> | null = null
-    function onResize() {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(applyFitWidth, 120)
-    }
-    window.addEventListener('resize', onResize)
-    return () => {
-      if (timer) clearTimeout(timer)
-      window.removeEventListener('resize', onResize)
-    }
-  }, [fitMode, status, applyFitWidth])
-
   // Keep the fullscreen label/icon correct even when the user exits via Esc.
   // (Same pattern as MaterialFileViewer.)
   useEffect(() => {
@@ -588,6 +719,65 @@ export default function PdfViewer({ fileUrl }: Props) {
     document.addEventListener('fullscreenchange', onFullscreenChange)
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
   }, [])
+
+  // Hold the reader's page across a tab switch. Clicking a baked-in PDF link
+  // opens a new tab; on returning, the browser can shift this scroll container by
+  // about one page. The page-render effect's capture/restore does NOT cover this
+  // (no zoom / fit / fullscreen, so no rebuild). So capture the page when the tab
+  // is hidden and instantly restore it when it becomes visible again, suppressing
+  // the transient scroll sync so the readout does not flicker. The restore is
+  // deferred one frame so it runs AFTER the browser's own return adjustment.
+  useEffect(() => {
+    function onVisibilityChange() {
+      const scroller = scrollRef.current
+      const canvases = canvasesRef.current
+      if (!scroller || canvases.length === 0) return
+
+      if (document.visibilityState === 'hidden') {
+        // Capture the page currently filling the top of the viewport.
+        const scrollerTop = scroller.getBoundingClientRect().top
+        const midline = scroller.clientHeight / 2
+        let page = 1
+        for (let i = 0; i < canvases.length; i++) {
+          const c = canvases[i]
+          if (!c) continue
+          const top = c.getBoundingClientRect().top - scrollerTop
+          if (top < midline) page = i + 1
+        }
+        lastVisiblePageRef.current = page
+        return
+      }
+
+      // Became visible: re-assert the captured page over several animation frames.
+      // The browser's own "scroll the focused element back into view" nudge can
+      // land a frame or two after we become visible, so a single restore loses
+      // the race. Re-applying for a handful of frames wins it. Scroll sync stays
+      // suppressed for the whole window, then the readout is re-enabled.
+      suppressScrollSyncRef.current = true
+      let frames = 0
+      const reassert = () => {
+        const s = scrollRef.current
+        const target = canvasesRef.current[lastVisiblePageRef.current - 1]
+        if (s && target) {
+          const top =
+            target.getBoundingClientRect().top -
+            s.getBoundingClientRect().top +
+            s.scrollTop
+          s.scrollTop = Math.max(0, top)
+        }
+        frames += 1
+        if (frames < 6) {
+          requestAnimationFrame(reassert)
+        } else {
+          updateCurrentPage()
+          suppressScrollSyncRef.current = false
+        }
+      }
+      requestAnimationFrame(reassert)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [updateCurrentPage])
 
   // Close the clear-confirmation modal on Escape. Only attached while the modal
   // is open, so it never competes with the text box's own Escape handler.
@@ -637,11 +827,9 @@ export default function PdfViewer({ fileUrl }: Props) {
   }, [])
 
   function zoomOut() {
-    setFitMode(false)
     setScale((s) => Math.max(MIN_SCALE, Math.round((s - SCALE_STEP) * 100) / 100))
   }
   function zoomIn() {
-    setFitMode(false)
     setScale((s) => Math.min(MAX_SCALE, Math.round((s + SCALE_STEP) * 100) / 100))
   }
 
@@ -662,7 +850,16 @@ export default function PdfViewer({ fileUrl }: Props) {
     setCurrentPage(clamped)
   }
 
+  // Commit a typed page number from the page box: clamp to range and jump there.
+  function commitPage(raw: string | null) {
+    if (raw === null) return
+    const n = parseInt(raw, 10)
+    if (!Number.isFinite(n)) return
+    goToPage(Math.min(numPages, Math.max(1, n)))
+  }
+
   function handleScroll() {
+    if (suppressScrollSyncRef.current) return
     if (scrollRafRef.current != null) return
     scrollRafRef.current = requestAnimationFrame(() => {
       scrollRafRef.current = null
@@ -1090,6 +1287,8 @@ export default function PdfViewer({ fileUrl }: Props) {
     )
     const drawingHere = draft && draft.pageIndex === pageIndex
 
+    const pageLinks = pdfLinks.filter((l) => l.pageIndex === pageIndex)
+
     return (
       <div
         key={pageIndex}
@@ -1109,6 +1308,43 @@ export default function PdfViewer({ fileUrl }: Props) {
           userSelect: 'none',
         }}
       >
+        {pageLinks.map((lk, i) => (
+          <a
+            key={`pdflink-${pageIndex}-${i}`}
+            href={lk.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              // Drop focus from the link right after the new tab is opened. A
+              // focused link causes the browser to scroll it back into view when
+              // the user returns to this tab, which shifts the page by about one.
+              // Blurring removes that cause; the visibilitychange handler is the
+              // safety net. Deferred so the navigation (open in new tab) is not
+              // disturbed.
+              const a = e.currentTarget
+              requestAnimationFrame(() => a.blur())
+            }}
+            title={lk.url}
+            style={{
+              position: 'absolute',
+              left: lk.left * rect.width,
+              top: lk.top * rect.height,
+              width: lk.width * rect.width,
+              height: lk.height * rect.height,
+              display: 'block',
+              borderRadius: 2,
+              // Transparent by default (the link text is already styled in the
+              // PDF; the pointer cursor is the affordance). To make hotspots
+              // faintly visible instead, change to: 'rgba(25, 113, 194, 0.10)'.
+              backgroundColor: 'transparent',
+              cursor: 'pointer',
+              // Clickable only in cursor mode; inert under pen/text so a link can
+              // never steal a stroke or a text placement (the parent overlay then
+              // catches the gesture). Mirrors the text-box interactivity gate.
+              pointerEvents: tool === 'cursor' ? 'auto' : 'none',
+            }}
+          />
+        ))}
         <svg
           width={rect.width}
           height={rect.height}
@@ -1161,6 +1397,10 @@ export default function PdfViewer({ fileUrl }: Props) {
   }
   const bodyStyle: CSSProperties = {
     overflow: 'auto',
+    // Disable browser scroll anchoring: when the page canvases are rebuilt on
+    // zoom / fit / fullscreen, anchoring would otherwise move the scroll position
+    // (often to the last page). We restore the reader's page ourselves.
+    overflowAnchor: 'none',
     padding: 16,
     ...(isFullscreen ? { flex: 1, minHeight: 0 } : { maxHeight: '80vh' }),
   }
@@ -1241,15 +1481,47 @@ export default function PdfViewer({ fileUrl }: Props) {
 
         <span
           style={{
-            minWidth: 96,
-            textAlign: 'center',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
             fontSize: 13,
             fontWeight: 600,
             color: '#374151',
             whiteSpace: 'nowrap',
           }}
         >
-          Page {isReady ? currentPage : '-'} of {isReady ? numPages : '-'}
+          Page
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="Page number"
+            title="Type a page number and press Enter"
+            disabled={!isReady}
+            value={pageDraft ?? (isReady ? String(currentPage) : '-')}
+            onChange={(e) => setPageDraft(e.target.value.replace(/[^0-9]/g, ''))}
+            onFocus={(e) => {
+              setPageDraft(String(currentPage))
+              e.currentTarget.select()
+            }}
+            onBlur={() => {
+              commitPage(pageDraft)
+              setPageDraft(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitPage(pageDraft)
+                setPageDraft(null)
+                e.currentTarget.blur()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                setPageDraft(null)
+                e.currentTarget.blur()
+              }
+            }}
+            style={pageInputStyle(isReady)}
+          />
+          of {isReady ? numPages : '-'}
         </span>
 
         <button
@@ -1613,6 +1885,25 @@ function swatchStyle(swatchColor: string, selected: boolean, disabled: boolean):
     boxShadow: selected ? '0 0 0 2px #ffffff, 0 0 0 4px #374151' : 'none',
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.5 : 1,
+  }
+}
+
+// Page-number input in the toolbar. Small and centered; disabled state matches
+// the icon buttons.
+function pageInputStyle(enabled: boolean): CSSProperties {
+  return {
+    width: 44,
+    height: 30,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: 600,
+    color: enabled ? '#374151' : '#9ca3af',
+    border: `1px solid ${enabled ? '#d1d5db' : '#e5e7eb'}`,
+    borderRadius: 6,
+    backgroundColor: enabled ? '#ffffff' : '#f9fafb',
+    fontFamily: 'inherit',
+    padding: '0 4px',
+    cursor: enabled ? 'text' : 'not-allowed',
   }
 }
 

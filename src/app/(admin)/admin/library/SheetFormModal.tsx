@@ -113,8 +113,8 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   // ── Metadata fields ───────────────────────────────────────────────────────
   const [title, setTitle] = useState(sheet?.title ?? '')
-  const [category, setCategory] = useState<'Vocabulary' | 'Grammar' | 'Material'>(
-    (sheet?.category as 'Vocabulary' | 'Grammar' | 'Material') ?? 'Vocabulary'
+  const [category, setCategory] = useState<'vocabulary' | 'grammar'>(
+    (sheet?.category as 'vocabulary' | 'grammar') ?? 'vocabulary'
   )
   const [level, setLevel] = useState(sheet?.level ?? '')
   const [difficulty, setDifficulty] = useState<1 | 2 | 3 | null>(
@@ -264,7 +264,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     setError(null)
 
     const content: SheetContent = {
-      words: category === 'Vocabulary' ? words.filter(w => w.word.trim()) : [],
+      words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
       exercises: exercises.filter(ex => ex.question.trim()),
     }
 
@@ -272,7 +272,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       title: title.trim(),
       category,
       level,
-      difficulty: difficulty ?? null,
+      difficulty: difficulty ?? 1,
       intro_text: introText.trim() || null,
       content,
       allowed_roles: presetToRoles(rolesPreset),
@@ -370,12 +370,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
                   <select
                     value={category}
-                    onChange={e => setCategory(e.target.value as 'Vocabulary' | 'Grammar' | 'Material')}
+                    onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                   >
-                    <option value="Vocabulary">Vocabulary</option>
-                    <option value="Grammar">Grammar</option>
-                    <option value="Material">Material</option>
+                    <option value="vocabulary">Vocabulary</option>
+                    <option value="grammar">Grammar</option>
                   </select>
                 </div>
 
@@ -424,12 +423,12 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {/* ── VOCABULARY TAB ── */}
           {activeTab === 'vocabulary' && (
             <div className="space-y-4">
-              {category !== 'Vocabulary' && (
+              {category !== 'vocabulary' && (
                 <p className="text-sm text-gray-400 italic">
                   Vocabulary lists are for Vocabulary sheets only. Switch the category on the Metadata tab if needed.
                 </p>
               )}
-              {category === 'Vocabulary' && (
+              {category === 'vocabulary' && (
                 <>
                   {/* Column headers */}
                   <div className="grid text-xs font-medium text-gray-400 uppercase gap-2"
