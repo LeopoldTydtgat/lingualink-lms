@@ -48,6 +48,7 @@ export default async function StudyPage() {
     .from('study_sheets')
     .select('id, title, category, level, difficulty')
     .eq('is_active', true)
+    .eq('audience', 'student')
     .order('title', { ascending: true })
 
   // Flatten Supabase nested joins (they return arrays, not single objects)
