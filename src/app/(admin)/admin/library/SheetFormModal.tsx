@@ -162,6 +162,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Create mode only: files chosen but not yet uploaded. The study_sheets row
+  // doesn't exist until Save and the upload route rejects uploads for missing
+  // rows, so we stage Files here and upload them after the row is created.
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+
   // ── Access control ────────────────────────────────────────────────────────
   const [rolesPreset, setRolesPreset] = useState<string>(
     rolesToPreset(sheet?.allowed_roles ?? [])
@@ -237,6 +242,14 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         continue
       }
 
+      // Create mode: the study_sheets row doesn't exist yet and the upload route
+      // rejects uploads for missing rows. Defer — stage the File and upload on Save.
+      if (!isEdit) {
+        setPendingFiles(prev => [...prev, file])
+        continue
+      }
+
+      // Edit mode: the row exists, so upload immediately (unchanged behaviour).
       setUploading(true)
       const formData = new FormData()
       formData.append('file', file)
@@ -275,6 +288,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     }).catch(() => {/* ignore */})
   }
 
+  // Create mode: drop a staged file. Nothing is on the server yet, so no fetch.
+  const removePendingFile = (index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
@@ -299,31 +317,90 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
       audience: type === 'study_sheet' ? 'student' : 'staff',
       is_active: true,
-      attachments,
+      // Edit mode persists the already-uploaded attachments; create mode uploads
+      // after the row exists (see below), so it sends none here.
+      attachments: isEdit ? attachments : [],
     }
 
-    // For create mode, supply the pre-generated ID so storage paths align
-    if (!isEdit) {
-      payload.id = sheetId
+    // Edit mode: single PATCH; files were uploaded inline on selection.
+    if (isEdit) {
+      const res = await fetch(`/api/admin/library/${sheet!.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error || 'Something went wrong. Please try again.')
+        setSaving(false)
+        return
+      }
+
+      setSaving(false)
+      await onSaved()
+      return
     }
 
-    const url = isEdit ? `/api/admin/library/${sheet!.id}` : '/api/admin/library'
-    const method = isEdit ? 'PATCH' : 'POST'
+    // Create mode: save first, then upload (the upload route rejects files for
+    // rows that don't exist yet). Order: (a) create the row, (b) upload staged
+    // files, (c) PATCH the resulting attachments onto the row, (d) finish.
+    payload.id = sheetId
 
-    const res = await fetch(url, {
-      method,
+    // (a) Create the row with no attachments. On failure nothing else ran, so the
+    // staged files and form state stay intact for a retry.
+    const createRes = await fetch('/api/admin/library', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
+    if (!createRes.ok) {
+      const body = await createRes.json().catch(() => ({}))
       setError(body.error || 'Something went wrong. Please try again.')
       setSaving(false)
       return
     }
 
+    // (b) The row exists now — upload each staged file. Keep going on a failure so
+    // one bad file doesn't drop the rest; remember that something failed.
+    const uploaded: Attachment[] = []
+    let anyFailed = false
+    for (const file of pendingFiles) {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('sheet_id', sheetId)
+
+      const upRes = await fetch('/api/admin/library/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!upRes.ok) {
+        anyFailed = true
+        continue
+      }
+
+      const data: Attachment = await upRes.json()
+      uploaded.push(data)
+    }
+
+    // (c) Attach whatever uploaded successfully onto the new row.
+    if (uploaded.length > 0) {
+      await fetch(`/api/admin/library/${sheetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachments: uploaded }),
+      })
+    }
+
     setSaving(false)
+
+    // (d) The row exists regardless. If a file failed, tell the user — they can
+    // reopen the sheet (edit mode) and add it again, since re-upload now works.
+    if (anyFailed) {
+      setError("Sheet created, but some files didn't upload. Open the sheet to add them again.")
+    }
     await onSaved()
   }
 
@@ -332,7 +409,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     { key: 'metadata', label: 'Metadata' },
     { key: 'vocabulary', label: `Vocabulary (${words.length})` },
     { key: 'exercises', label: `Exercises (${exercises.length})` },
-    { key: 'files', label: `Files (${attachments.length})` },
+    { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
     { key: 'access', label: 'Access' },
   ]
   // Teaching Material is a staff-only resource: Title + Files only.
@@ -723,47 +800,86 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               </div>
 
               {/* Attachment list */}
-              {attachments.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+              {isEdit ? (
+                /* Edit mode: attachments live on the server — View link + storage-backed remove. */
+                attachments.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {attachments.map((att, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
+                      >
+                        {/* File type badge */}
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                          style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                        >
+                          {fileTypeLabel(att.type)}
+                        </span>
+
+                        {/* Name + view link */}
+                        <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
+                        <a
+                          href={`/api/library-file/${sheetId}/${idx}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs underline flex-shrink-0"
+                          style={{ color: '#FF8303' }}
+                        >
+                          View
+                        </a>
+
+                        {/* Remove */}
+                        <button
+                          type="button"
+                          onClick={() => handleFileRemove(att)}
+                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (
-                <div className="space-y-2">
-                  {attachments.map((att, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
-                    >
-                      {/* File type badge */}
-                      <span
-                        className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
-                        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                /* Create mode: files are staged locally and uploaded on Save. No View
+                   link (nothing is on the server yet); remove just drops the staged File. */
+                pendingFiles.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingFiles.map((file, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
                       >
-                        {fileTypeLabel(att.type)}
-                      </span>
+                        {/* File type badge */}
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                          style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                        >
+                          {fileTypeLabel(file.type)}
+                        </span>
 
-                      {/* Name + view link */}
-                      <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
-                      <a
-                        href={`/api/library-file/${sheetId}/${idx}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs underline flex-shrink-0"
-                        style={{ color: '#FF8303' }}
-                      >
-                        View
-                      </a>
+                        {/* Name (no view link — not uploaded yet) */}
+                        <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{file.name}</span>
 
-                      {/* Remove */}
-                      <button
-                        type="button"
-                        onClick={() => handleFileRemove(att)}
-                        className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
-                        title="Remove file"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        {/* Remove from the staged list only */}
+                        <button
+                          type="button"
+                          onClick={() => removePendingFile(idx)}
+                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           )}
