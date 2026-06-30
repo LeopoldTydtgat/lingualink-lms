@@ -45,7 +45,6 @@ function isSheetEmpty(sheet: StudySheet): boolean {
   const cat = sheet.category.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
   if (cat === 'grammar') return !(sheet.content?.exercises?.length)
-  if (cat === 'material') return !(sheet.attachments?.length)
   return false
 }
 
