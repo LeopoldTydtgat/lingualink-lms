@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { StudySheet, WordRow, ExerciseRow, SheetContent, Attachment } from './LibraryAdminClient'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +42,27 @@ function newExerciseRow(): ExerciseRow {
     options: ['', '', '', ''],
     correct_index: 0,
     explanation: '',
+  }
+}
+
+// Inverse of the server's buildExerciseRows: map an exercises-table row back into
+// the modal's editing shape. correct_index is recovered by locating correct_answer
+// in options; options is padded to the four-slot tuple the editor expects.
+function rowToExerciseRow(row: {
+  id: string
+  question_text: string | null
+  options: unknown
+  correct_answer: string | null
+  explanation: string | null
+}): ExerciseRow {
+  const opts = Array.isArray(row.options) ? row.options.map(o => String(o ?? '')) : []
+  const correctIdx = row.correct_answer != null ? opts.indexOf(row.correct_answer) : -1
+  return {
+    id: row.id,
+    question: row.question_text ?? '',
+    options: [opts[0] ?? '', opts[1] ?? '', opts[2] ?? '', opts[3] ?? ''] as [string, string, string, string],
+    correct_index: correctIdx >= 0 ? correctIdx : 0,
+    explanation: row.explanation ?? '',
   }
 }
 
@@ -148,10 +170,48 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   })
 
   // ── Exercise rows ─────────────────────────────────────────────────────────
-  const [exercises, setExercises] = useState<ExerciseRow[]>(() => {
-    const existing = sheet?.content?.exercises
-    return existing && existing.length > 0 ? existing : []
-  })
+  // Exercises live in the exercises table now (not content). Start empty and, in
+  // edit mode, load this sheet's rows from the table (see the effect below).
+  const [exercises, setExercises] = useState<ExerciseRow[]>([])
+  const [exercisesLoading, setExercisesLoading] = useState(isEdit)
+  // Set when the edit-mode load FAILS to read the table. Distinct from "genuinely
+  // empty": saving must be blocked, because a save would delete-then-reinsert an
+  // empty set and wipe rows we simply failed to read.
+  const [exercisesLoadError, setExercisesLoadError] = useState(false)
+
+  // Edit mode: load existing exercises from the exercises table. Mount-only — the
+  // modal remounts per edit, so this runs once and won't clobber in-progress edits.
+  useEffect(() => {
+    if (!isEdit) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, question_text, options, correct_answer, explanation')
+        .eq('study_sheet_id', sheetId)
+        .order('created_at', { ascending: true })
+      if (cancelled) return
+      if (error) {
+        // Couldn't read the authoritative rows. Show any legacy content for
+        // context, but flag the failure so saving is blocked — a save here would
+        // delete-then-reinsert and could wipe real exercises we failed to load.
+        const legacy = sheet?.content?.exercises
+        setExercises(Array.isArray(legacy) ? legacy : [])
+        setExercisesLoadError(true)
+      } else if (data && data.length > 0) {
+        setExercises(data.map(rowToExerciseRow))
+      } else {
+        // No table rows: genuinely empty, or a pre-migration sheet whose exercises
+        // still live in content.exercises — fall back so editing doesn't drop them
+        // (the next save migrates them into the table).
+        const legacy = sheet?.content?.exercises
+        setExercises(Array.isArray(legacy) && legacy.length > 0 ? legacy : [])
+      }
+      setExercisesLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // ── Attachments ───────────────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<Attachment[]>(() => {
@@ -295,6 +355,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    // Don't save until edit-mode exercises have loaded — a premature save would
+    // delete-then-reinsert with an empty set and wipe the sheet's exercises.
+    if (exercisesLoading) return
+    // Same hazard if the load FAILED: block the save so we don't persist an empty
+    // or partial exercise set over rows we couldn't read.
+    if (exercisesLoadError) {
+      setActiveTab('exercises')
+      setError("Couldn't load this sheet's exercises. Close and reopen before saving — saving now could erase them.")
+      return
+    }
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
 
     setSaving(true)
@@ -408,7 +478,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const allTabs: { key: FormTab; label: string }[] = [
     { key: 'metadata', label: 'Metadata' },
     { key: 'vocabulary', label: `Vocabulary (${words.length})` },
-    { key: 'exercises', label: `Exercises (${exercises.length})` },
+    { key: 'exercises', label: `Exercises (${exercisesLoading ? '…' : exercises.length})` },
     { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
     { key: 'access', label: 'Access' },
   ]
@@ -663,7 +733,15 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {/* ── EXERCISES TAB ── */}
           {activeTab === 'exercises' && type === 'study_sheet' && (
             <div className="space-y-6">
-              {exercises.length === 0 && (
+              {exercisesLoading && (
+                <p className="text-sm text-gray-400">Loading exercises…</p>
+              )}
+              {exercisesLoadError && (
+                <p className="text-sm text-red-600">
+                  Couldn&apos;t load this sheet&apos;s exercises. Close and reopen before saving — saving now could erase them.
+                </p>
+              )}
+              {!exercisesLoading && !exercisesLoadError && exercises.length === 0 && (
                 <p className="text-sm text-gray-400">
                   No exercises yet. Click Add Question to create the first one.
                 </p>
@@ -954,7 +1032,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || exercisesLoading || exercisesLoadError}
               className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
               style={{ backgroundColor: '#FF8303' }}
             >
