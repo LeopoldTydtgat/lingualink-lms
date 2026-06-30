@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import PdfViewer from '@/components/pdf/PdfViewer'
 
 type Word = {
   word: string
@@ -173,8 +174,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
       {attachments.map((att, idx) => {
         const isPdf = att.type === 'application/pdf'
         const isImage = att.type.startsWith('image/')
-        // Same-origin proxy URL. The teacher viewer KEEPS the native PDF toolbar
-        // (no #toolbar=0) so the teacher can zoom and fit while teaching.
+        // Same-origin proxy URL, served by the auth-gated /api/library-file route.
         const fileUrl = `/api/library-file/${sheetId}/${idx}`
         const isThisFullscreen = fullscreenIdx === idx
 
@@ -186,7 +186,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
           >
             <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
               <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
-              {(isPdf || isImage) && (
+              {isImage && (
                 <button
                   type="button"
                   onClick={() => handleFullscreen(idx)}
@@ -200,11 +200,9 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
               )}
             </div>
             {isPdf ? (
-              <iframe
-                src={fileUrl}
-                title={att.name}
-                style={{ width: '100%', height: '80vh', minHeight: '600px', border: 'none', display: 'block' }}
-              />
+              // PdfViewer replaces the native <iframe>: it renders the PDF through
+              // the same proxy with its own toolbar and carries NO download/print.
+              <PdfViewer fileUrl={fileUrl} />
             ) : isImage ? (
               <img
                 src={fileUrl}
