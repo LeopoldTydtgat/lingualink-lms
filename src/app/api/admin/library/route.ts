@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   const body = await request.json()
 
-  const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments } = body
+  const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments, audience } = body
 
   if (!title || !category) {
     return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
@@ -61,11 +61,14 @@ export async function POST(request: Request) {
   const insert: Record<string, unknown> = {
     title,
     category,
-    level: level || null,
+    level: level || '',
     difficulty: difficulty ?? null,
     intro_text: intro_text ?? null,
     content: content ?? { words: [], exercises: [] },
     allowed_roles: allowed_roles ?? ['teacher', 'teacher_exam'],
+    // Audience is an access boundary: only 'student' or 'staff'. Absent/invalid
+    // coerces to the fail-safe 'staff' so an unlabelled sheet never reaches students.
+    audience: audience === 'student' ? 'student' : 'staff',
     is_active: is_active ?? true,
     attachments: Array.isArray(attachments) ? attachments : [],
   }

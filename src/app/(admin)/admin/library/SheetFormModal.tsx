@@ -13,6 +13,8 @@ type Props = {
 
 type FormTab = 'metadata' | 'vocabulary' | 'exercises' | 'files' | 'access'
 
+type SheetType = 'teaching_material' | 'study_sheet'
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
@@ -110,6 +112,23 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   // ── Active tab ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<FormTab>('metadata')
+
+  // ── Sheet type (Teaching Material vs Study Sheet → audience column) ────────
+  // CREATE defaults to Teaching Material (the fail-safe, staff-only side).
+  // EDIT derives from the saved audience: only an explicit 'student' resolves to
+  // Study Sheet; 'staff', null, undefined, or anything else → Teaching Material.
+  const existingAudience = (sheet as (StudySheet & { audience?: string | null }) | null)?.audience
+  const [type, setType] = useState<SheetType>(
+    existingAudience === 'student' ? 'study_sheet' : 'teaching_material'
+  )
+  const selectType = (next: SheetType) => {
+    setType(next)
+    // Teaching Material hides vocabulary/exercises/access — if one of those is the
+    // active tab when switching, fall back to Metadata so no orphaned tab shows.
+    if (next === 'teaching_material' && (activeTab === 'vocabulary' || activeTab === 'exercises' || activeTab === 'access')) {
+      setActiveTab('metadata')
+    }
+  }
 
   // ── Metadata fields ───────────────────────────────────────────────────────
   const [title, setTitle] = useState(sheet?.title ?? '')
@@ -276,6 +295,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       intro_text: introText.trim() || null,
       content,
       allowed_roles: presetToRoles(rolesPreset),
+      // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
+      // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
+      audience: type === 'study_sheet' ? 'student' : 'staff',
       is_active: true,
       attachments,
     }
@@ -306,13 +328,18 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   }
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
-  const tabs: { key: FormTab; label: string }[] = [
+  const allTabs: { key: FormTab; label: string }[] = [
     { key: 'metadata', label: 'Metadata' },
     { key: 'vocabulary', label: `Vocabulary (${words.length})` },
     { key: 'exercises', label: `Exercises (${exercises.length})` },
     { key: 'files', label: `Files (${attachments.length})` },
     { key: 'access', label: 'Access' },
   ]
+  // Teaching Material is a staff-only resource: Title + Files only.
+  // Study Sheet keeps the full editor (metadata, vocabulary, exercises, files, access).
+  const tabs = type === 'study_sheet'
+    ? allTabs
+    : allTabs.filter(t => t.key === 'metadata' || t.key === 'files')
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -354,6 +381,47 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {activeTab === 'metadata' && (
             <div className="space-y-5">
 
+              {/* Type — Teaching Material vs Study Sheet (drives the audience column) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    {
+                      value: 'teaching_material' as SheetType,
+                      label: 'Teaching Material',
+                      description: 'Staff-only resource for teachers. Title and files only.',
+                    },
+                    {
+                      value: 'study_sheet' as SheetType,
+                      label: 'Study Sheet',
+                      description: 'Student-facing sheet with vocabulary, exercises, and access tiers.',
+                    },
+                  ].map(opt => (
+                    <label
+                      key={opt.value}
+                      className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                      style={{
+                        borderColor: type === opt.value ? '#FF8303' : '#e5e7eb',
+                        backgroundColor: type === opt.value ? '#FF830308' : 'white',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="sheet-type"
+                        value={opt.value}
+                        checked={type === opt.value}
+                        onChange={() => selectType(opt.value)}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
                 <input
@@ -365,63 +433,67 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-                  <select
-                    value={category}
-                    onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
-                  >
-                    <option value="vocabulary">Vocabulary</option>
-                    <option value="grammar">Grammar</option>
-                  </select>
-                </div>
+              {type === 'study_sheet' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                      <select
+                        value={category}
+                        onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                      >
+                        <option value="vocabulary">Vocabulary</option>
+                        <option value="grammar">Grammar</option>
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
-                  <select
-                    value={level}
-                    onChange={e => setLevel(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
-                  >
-                    <option value="">Not specified</option>
-                    {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
-              </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                      <select
+                        value={level}
+                        onChange={e => setLevel(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                      >
+                        <option value="">Not specified</option>
+                        {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty (optional)</label>
-                <div className="flex gap-2">
-                  {([1, 2, 3] as const).map(n => (
-                    <DifficultyButton
-                      key={n}
-                      value={n}
-                      selected={difficulty === n}
-                      onClick={() => setDifficulty(prev => prev === n ? null : n)}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty (optional)</label>
+                    <div className="flex gap-2">
+                      {([1, 2, 3] as const).map(n => (
+                        <DifficultyButton
+                          key={n}
+                          value={n}
+                          selected={difficulty === n}
+                          onClick={() => setDifficulty(prev => prev === n ? null : n)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Introduction / Learning Objectives
+                    </label>
+                    <textarea
+                      value={introText}
+                      onChange={e => setIntroText(e.target.value)}
+                      placeholder="Briefly describe what students will learn from this sheet…"
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-none"
                     />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Introduction / Learning Objectives
-                </label>
-                <textarea
-                  value={introText}
-                  onChange={e => setIntroText(e.target.value)}
-                  placeholder="Briefly describe what students will learn from this sheet…"
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-none"
-                />
-              </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           {/* ── VOCABULARY TAB ── */}
-          {activeTab === 'vocabulary' && (
+          {activeTab === 'vocabulary' && type === 'study_sheet' && (
             <div className="space-y-4">
               {category !== 'vocabulary' && (
                 <p className="text-sm text-gray-400 italic">
@@ -512,7 +584,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           )}
 
           {/* ── EXERCISES TAB ── */}
-          {activeTab === 'exercises' && (
+          {activeTab === 'exercises' && type === 'study_sheet' && (
             <div className="space-y-6">
               {exercises.length === 0 && (
                 <p className="text-sm text-gray-400">
@@ -697,7 +769,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           )}
 
           {/* ── ACCESS TAB ── */}
-          {activeTab === 'access' && (
+          {activeTab === 'access' && type === 'study_sheet' && (
             <div className="space-y-4">
               <p className="text-sm text-gray-500">
                 Controls which teacher roles can see and assign this sheet on the Teacher Portal.
