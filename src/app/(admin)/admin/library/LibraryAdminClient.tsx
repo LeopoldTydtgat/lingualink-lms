@@ -38,7 +38,7 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string        // 'Vocabulary' | 'Grammar' | 'Material'
+  category: string        // 'Vocabulary' | 'Grammar'
   level: string           // A1, A1+, A2 … C2
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
@@ -98,7 +98,6 @@ function isSheetEmpty(sheet: StudySheet): boolean {
   const cat = sheet.category.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
   if (cat === 'grammar') return !(sheet.content?.exercises?.length)
-  if (cat === 'material') return !(sheet.attachments?.length)
   return false
 }
 

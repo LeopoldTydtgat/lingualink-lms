@@ -28,10 +28,15 @@ export async function PATCH(
   const body = await request.json()
 
   // Only allow fields that are safe to update — strip anything unexpected
-  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments']
+  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments', 'audience']
   const update: Record<string, unknown> = {}
   for (const key of allowed) {
     if (key in body) update[key] = body[key]
+  }
+  // Audience is an access boundary: accept only 'student' or 'staff'. Any other
+  // value (or a malformed one) coerces to the fail-safe 'staff'. Absent = unchanged.
+  if ('audience' in update) {
+    update.audience = update.audience === 'student' ? 'student' : 'staff'
   }
   update.updated_at = new Date().toISOString()
 

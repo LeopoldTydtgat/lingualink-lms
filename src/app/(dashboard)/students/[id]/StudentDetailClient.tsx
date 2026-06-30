@@ -76,8 +76,6 @@ function CategoryBadge({ category }: { category: string }) {
       ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
       : category.toLowerCase() === 'grammar'
       ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : category.toLowerCase() === 'material'
-      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
       : { backgroundColor: '#f3f4f6', color: '#374151' }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
