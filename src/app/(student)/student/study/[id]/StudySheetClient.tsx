@@ -259,7 +259,7 @@ export default function StudySheetClient({
   }
 
   // Mark the whole sheet as done — independent of the exercise flow. Works for
-  // any sheet (vocabulary, grammar, material, or zero exercises).
+  // any sheet (vocabulary, grammar, or zero exercises).
   async function handleMarkAsDone() {
     setMarkingDone(true)
     setMarkError('')
