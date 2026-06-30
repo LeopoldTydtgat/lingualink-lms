@@ -41,10 +41,10 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function isSheetEmpty(sheet: StudySheet): boolean {
+function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
   const cat = sheet.category.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
-  if (cat === 'grammar') return !(sheet.content?.exercises?.length)
+  if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
   return false
 }
 
@@ -59,6 +59,8 @@ export default function AssignStudySheetsModal({
   const supabase = createClient()
 
   const [sheets, setSheets] = useState<StudySheet[]>([])
+  // Per-sheet exercise counts from the exercises table (the grammar empty-gate).
+  const [exCounts, setExCounts] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [levelFilter, setLevelFilter] = useState('all')
@@ -74,6 +76,16 @@ export default function AssignStudySheetsModal({
         .eq('is_active', true)
         .order('title')
       setSheets(data ?? [])
+
+      // Grammar "empty" is gated on exercise count, which now lives in the
+      // exercises table rather than content.exercises.
+      const { data: exRows } = await supabase.from('exercises').select('study_sheet_id')
+      const counts: Record<string, number> = {}
+      for (const r of exRows ?? []) {
+        counts[r.study_sheet_id] = (counts[r.study_sheet_id] ?? 0) + 1
+      }
+      setExCounts(counts)
+
       setLoading(false)
     }
     load()
@@ -233,7 +245,7 @@ export default function AssignStudySheetsModal({
           ) : (
             <div className="space-y-1">
               {filtered.map(sheet => {
-                const empty = isSheetEmpty(sheet)
+                const empty = isSheetEmpty(sheet, exCounts)
                 const isSelected = selected.has(sheet.id)
                 return (
                   <div
