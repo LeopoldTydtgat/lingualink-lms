@@ -144,7 +144,7 @@ interface TextAnnotation {
   text: string
   fontSize: number // scale-1 px; rendered size = fontSize * scale
 }
-type Annotation = StrokeAnnotation | TextAnnotation
+export type Annotation = StrokeAnnotation | TextAnnotation
 
 // Stable shared empty-annotations reference. Annotations are always REPLACED,
 // never mutated in place, so one shared array is safe to reuse. A stable
