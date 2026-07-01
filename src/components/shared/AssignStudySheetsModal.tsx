@@ -74,6 +74,9 @@ export default function AssignStudySheetsModal({
         .from('study_sheets')
         .select('id, title, category, level, difficulty, content, attachments')
         .eq('is_active', true)
+        // Homework is student-facing only. Teaching Material (audience='staff') must
+        // never be assignable to a student, so restrict this list to student sheets.
+        .eq('audience', 'student')
         .order('title')
       setSheets(data ?? [])
 
