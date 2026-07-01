@@ -94,6 +94,22 @@ type AnnColor = (typeof COLOR_SWATCHES)[number]['value']
 
 interface Props {
   fileUrl: string
+  // -- Milestone 4 annotation wiring (all optional, additive) ----------------
+  // When every prop below is omitted the viewer behaves EXACTLY as before:
+  // empty annotation slate, full editing toolbar, no change callback. The two
+  // current mount points pass none of these.
+  //
+  // Seed the annotation overlay when the document loads instead of starting
+  // empty. Applied once per document (fileUrl) load -- never re-seeded on every
+  // render (see the load effect).
+  initialAnnotations?: Annotation[]
+  // Read-only review mode: hides the annotation toolbar and pins the tool to
+  // 'cursor' so no drawing input is possible (the overlay stays click-through).
+  readOnly?: boolean
+  // Called whenever the COMMITTED annotations array changes (finished stroke,
+  // new/edited/moved/deleted text box, undo/redo/clear). Never fires for an
+  // in-progress pen draft or for the initial seed.
+  onAnnotationsChange?: (annotations: Annotation[]) => void
 }
 
 type Status = 'loading' | 'ready' | 'error'
@@ -129,6 +145,12 @@ interface TextAnnotation {
   fontSize: number // scale-1 px; rendered size = fontSize * scale
 }
 type Annotation = StrokeAnnotation | TextAnnotation
+
+// Stable shared empty-annotations reference. Annotations are always REPLACED,
+// never mutated in place, so one shared array is safe to reuse. A stable
+// reference lets an empty seed compare equal (===) to the empty initial state,
+// so the change effect can tell "nothing to seed" apart from a real user edit.
+const EMPTY_ANNOTATIONS: Annotation[] = []
 
 // Per-page geometry of the displayed canvas, relative to the overlay wrapper.
 interface PageRect {
@@ -303,7 +325,7 @@ function EditableTextBox({
   )
 }
 
-export default function PdfViewer({ fileUrl }: Props) {
+export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnnotationsChange }: Props) {
   // Outer element that goes fullscreen.
   const rootRef = useRef<HTMLDivElement | null>(null)
   // Scrollable body; we measure its inner width for fit-to-width and watch its
@@ -352,6 +374,15 @@ export default function PdfViewer({ fileUrl }: Props) {
   // Always mirrors the latest annotations (kept in sync by an effect below) so
   // history snapshots read the true-current array, never a stale closure value.
   const annotationsRef = useRef<Annotation[]>([])
+  // Latest initialAnnotations, mirrored so the document-load effect can seed
+  // from the current prop WITHOUT taking initialAnnotations as a dependency
+  // (which would re-run the whole load -- and wipe edits -- on every new array).
+  // Synced by an effect declared just before the load effect.
+  const initialAnnotationsRef = useRef<Annotation[] | undefined>(initialAnnotations)
+  // Latest onAnnotationsChange, mirrored so the annotations-change effect always
+  // calls the current callback and can depend only on the annotations array (a
+  // new function identity from the parent never re-fires it on its own).
+  const onAnnotationsChangeRef = useRef<((annotations: Annotation[]) => void) | undefined>(onAnnotationsChange)
 
   const [status, setStatus] = useState<Status>('loading')
   const [errorMsg, setErrorMsg] = useState('')
@@ -369,7 +400,18 @@ export default function PdfViewer({ fileUrl }: Props) {
   const [isFullscreen, setIsFullscreen] = useState(false)
 
   // Annotation state. `annotations` IS the array that gets saved in Milestone 4.
-  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  // Seeds from initialAnnotations at mount (falls back to the shared empty array
+  // -- identical to the previous `useState([])` when the prop is absent). The
+  // load effect re-seeds on every document (fileUrl) change.
+  const [annotations, setAnnotations] = useState<Annotation[]>(() => initialAnnotations ?? EMPTY_ANNOTATIONS)
+  // True while a SEED (the mount seed or a document-load re-seed) is being applied
+  // to `annotations`, so the change effect can skip that seed instead of reporting
+  // it as a user edit. Initialised true so the FIRST mount render (the seed / empty
+  // initial state, never a user edit) is skipped; the load effect re-arms it only
+  // when a re-seed actually changes the array; the change effect resets it on the
+  // render that applies the seed. A flag, not a reference check: an undo/redo back
+  // to the seed array still fires onAnnotationsChange.
+  const isSeedingRef = useRef(true)
   const [tool, setTool] = useState<Tool>('cursor')
   const [color, setColor] = useState<AnnColor>('#000000')
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -473,6 +515,16 @@ export default function PdfViewer({ fileUrl }: Props) {
     [recordHistory],
   )
 
+  // Keep initialAnnotationsRef current for the load effect below. Declared
+  // BEFORE the load effect so that on a commit where fileUrl AND
+  // initialAnnotations both change, this runs first and the load effect seeds
+  // from the fresh value. Reading the prop via this ref (instead of listing it
+  // as a load-effect dependency) avoids re-running the whole document load -- and
+  // wiping in-progress edits -- when only the prop changes.
+  useEffect(() => {
+    initialAnnotationsRef.current = initialAnnotations
+  }, [initialAnnotations])
+
   // Load the document (browser only) whenever the URL changes.
   useEffect(() => {
     let cancelled = false
@@ -484,8 +536,17 @@ export default function PdfViewer({ fileUrl }: Props) {
     setCurrentPage(1)
     firstPageWidthRef.current = 0
     pdfDocRef.current = null
-    // A different document means a clean annotation slate (and a fresh history).
-    setAnnotations([])
+    // A different document means a fresh history and a re-seeded annotation
+    // slate: seed from the caller's saved overlay when provided, else empty
+    // (exactly as before). Only the annotations seeding changed here; the
+    // history/selection reset below is untouched. Mark seeding in progress so the
+    // change effect skips this seed (a seed is not a user edit) -- but ONLY when
+    // the seed differs from the current array. A reference-equal seed makes
+    // setAnnotations bail (no re-render, so the change effect never runs to consume
+    // the flag); arming it then would wrongly suppress the NEXT real edit.
+    const seed = initialAnnotationsRef.current ?? EMPTY_ANNOTATIONS
+    if (annotationsRef.current !== seed) isSeedingRef.current = true
+    setAnnotations(seed)
     setEditingId(null)
     setSelectedId(null)
     setDraft(null)
@@ -819,6 +880,36 @@ export default function PdfViewer({ fileUrl }: Props) {
     annotationsRef.current = annotations
   }, [annotations])
 
+  // Keep onAnnotationsChangeRef pointing at the current callback.
+  useEffect(() => {
+    onAnnotationsChangeRef.current = onAnnotationsChange
+  }, [onAnnotationsChange])
+
+  // Report committed annotation changes to the caller. Keyed ONLY on the
+  // annotations array, so it fires for every persisted change (finished stroke,
+  // new/edited/moved/deleted text box, undo/redo/clear) but never for the
+  // transient pen draft (separate state) and never for a document seed (a seed
+  // sets isSeedingRef, which this effect consumes without firing). Because it is
+  // an explicit flag and not a reference check, an undo/redo that returns the
+  // array to the seed reference is still reported. No-op when no callback passed.
+  useEffect(() => {
+    if (isSeedingRef.current) {
+      isSeedingRef.current = false
+      return
+    }
+    onAnnotationsChangeRef.current?.(annotations)
+  }, [annotations])
+
+  // Read-only mode can never leave the cursor tool. On the first render the tool
+  // already defaults to 'cursor', so a read-only viewer is inert from the start;
+  // this also snaps back if readOnly is turned on at runtime while another tool
+  // was active. Every overlay/pointer gate keys off `tool`, so pinning it to
+  // 'cursor' makes the overlay click-through and text boxes non-interactive with
+  // no other change. No-op (today's behaviour) when readOnly is falsy.
+  useEffect(() => {
+    if (readOnly) setTool('cursor')
+  }, [readOnly])
+
   // Cancel any pending scroll-tracking frame on unmount.
   useEffect(() => {
     return () => {
@@ -929,6 +1020,9 @@ export default function PdfViewer({ fileUrl }: Props) {
   }
 
   function selectTool(t: Tool) {
+    // Read-only mode never changes tool (belt-and-braces: the toolbar that calls
+    // this is also hidden, and an effect pins the tool to 'cursor').
+    if (readOnly) return
     if (editingId) finishEditing(editingId)
     // Switching tools drops any selection (the control bar is a Text-tool affordance).
     setSelectedId(null)
@@ -1535,6 +1629,10 @@ export default function PdfViewer({ fileUrl }: Props) {
           <ChevronRight size={16} />
         </button>
 
+        {/* Annotation, colour and undo/redo/clear controls are hidden entirely
+            in read-only mode; zoom, fit, page nav and fullscreen stay visible. */}
+        {!readOnly && (
+          <>
         <span style={dividerStyle} aria-hidden />
 
         {/* Annotation tools */}
@@ -1639,6 +1737,8 @@ export default function PdfViewer({ fileUrl }: Props) {
         >
           <Trash2 size={16} />
         </button>
+          </>
+        )}
 
         {/* Fullscreen, pushed to the right */}
         <button
