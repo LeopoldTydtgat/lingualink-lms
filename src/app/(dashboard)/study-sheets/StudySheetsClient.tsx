@@ -14,6 +14,7 @@ type StudySheet = {
   difficulty: number
   is_active: boolean
   created_at: string
+  audience: string
 }
 
 type Props = {
@@ -40,6 +41,63 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
+function SheetTable({
+  heading,
+  rows,
+  emptyMessage,
+}: {
+  heading: string
+  rows: StudySheet[]
+  emptyMessage: string
+}) {
+  const router = useRouter()
+
+  return (
+    <div className="mb-8">
+      <h2 className="text-lg font-semibold text-gray-900 mb-3">{heading}</h2>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        {/* Table header */}
+        <div className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Title</span>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</span>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Level</span>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Difficulty</span>
+          <span></span>
+        </div>
+
+        {/* Rows */}
+        {rows.length === 0 ? (
+          <div className="px-6 py-12 text-center text-gray-400 text-sm">
+            {emptyMessage}
+          </div>
+        ) : (
+          rows.map((sheet) => (
+            <div
+              key={sheet.id}
+              onClick={() => router.push(`/study-sheets/${sheet.id}`)}
+              className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors last:border-0"
+              style={{ cursor: 'pointer' }}
+            >
+              <span className="font-medium text-gray-900 text-sm" style={{ cursor: 'pointer' }}>{sheet.title}</span>
+              <span className="text-sm text-gray-500 capitalize" style={{ cursor: 'pointer' }}>{sheet.category}</span>
+              <span className="text-sm" style={{ cursor: 'pointer' }}>
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303', cursor: 'pointer' }}
+                >
+                  {sheet.level}
+                </span>
+              </span>
+              <span style={{ cursor: 'pointer' }}><DifficultyBars count={sheet.difficulty} /></span>
+              <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
@@ -52,6 +110,9 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
     const matchesCategory = selectedCategory === 'All' || sheet.category === selectedCategory
     return matchesSearch && matchesLevel && matchesCategory
   })
+
+  const teachingMaterial = filtered.filter((sheet) => sheet.audience === 'staff')
+  const studentSheets = filtered.filter((sheet) => sheet.audience === 'student')
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -128,46 +189,19 @@ export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        {/* Table header */}
-        <div className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200">
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Title</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Level</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Difficulty</span>
-          <span></span>
-        </div>
+      {/* Teaching Material (audience = staff) */}
+      <SheetTable
+        heading="Teaching Material"
+        rows={teachingMaterial}
+        emptyMessage="No teaching material."
+      />
 
-        {/* Rows */}
-        {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-gray-400 text-sm">
-            No study sheets found.
-          </div>
-        ) : (
-          filtered.map((sheet) => (
-            <div
-              key={sheet.id}
-              onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-              className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors last:border-0"
-              style={{ cursor: 'pointer' }}
-            >
-              <span className="font-medium text-gray-900 text-sm" style={{ cursor: 'pointer' }}>{sheet.title}</span>
-              <span className="text-sm text-gray-500 capitalize" style={{ cursor: 'pointer' }}>{sheet.category}</span>
-              <span className="text-sm" style={{ cursor: 'pointer' }}>
-                <span
-                  className="px-2 py-0.5 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303', cursor: 'pointer' }}
-                >
-                  {sheet.level}
-                </span>
-              </span>
-              <span style={{ cursor: 'pointer' }}><DifficultyBars count={sheet.difficulty} /></span>
-              <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
-            </div>
-          ))
-        )}
-      </div>
+      {/* Study Sheets (audience = student) */}
+      <SheetTable
+        heading="Study Sheets"
+        rows={studentSheets}
+        emptyMessage="No study sheets."
+      />
     </div>
   )
 }
