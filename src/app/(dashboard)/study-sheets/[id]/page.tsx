@@ -13,11 +13,7 @@ export default async function StudySheetDetailPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single()
+  const { data: isAdminResult } = await supabase.rpc('is_admin')
 
   const { data: sheet } = await supabase
     .from('study_sheets')
@@ -37,7 +33,7 @@ export default async function StudySheetDetailPage({
     <StudySheetDetailClient
       sheet={sheet}
       exercises={exercises ?? []}
-      isAdmin={profile?.role === 'admin'}
+      isAdmin={isAdminResult === true}
     />
   )
 }
