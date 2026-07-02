@@ -21,9 +21,10 @@ export default async function StudentsPage() {
   const now = new Date()
 
   // Fetch trainings via the service-role client so the JS access gate below, not RLS, decides
-  // visibility. training_teachers is the canonical assignment record; trainings.teacher_id is a
-  // dead legacy column the post-migration code never writes, so it must never filter this list.
-  // Admin sees every training; a teacher is gated by the union of Conditions A and B further down.
+  // visibility. trainings.teacher_id is a dead legacy column the post-migration code never writes,
+  // so it must never filter this list. Admin sees every training; a teacher is gated by Condition B
+  // (an active booked-class relationship - an upcoming scheduled lesson, or an open report on one of
+  // their own lessons) computed further down. Formal training_teachers assignment alone no longer grants access.
   const { data: trainings, error } = await adminClient
     .from('trainings')
     .select(`
@@ -44,9 +45,6 @@ export default async function StudentsPage() {
       profiles!trainings_teacher_id_fkey (
         id,
         full_name
-      ),
-      training_teachers (
-        teacher_id
       )
     `)
     .order('start_date', { ascending: false })
@@ -109,18 +107,13 @@ export default async function StudentsPage() {
     profiles: Array.isArray(t.profiles) ? t.profiles[0] : t.profiles,
   }))
 
-  // Access gate: a teacher sees a training only via Condition A (formal junction assignment) or
-  // Condition B (active teaching, computed above). The service-role fetch bypassed RLS, so this
-  // union filter is the SOLE access control for teachers. Admin keeps every training.
+  // Access gate: a teacher sees a training ONLY via Condition B (an active booked-class
+  // relationship - an upcoming scheduled lesson, or an open report on one of their own lessons -
+  // computed above). Formal junction assignment alone no longer grants access. The service-role
+  // fetch bypassed RLS, so this filter is the SOLE access control for teachers. Admin keeps every training.
   const visibleTrainings = isAdmin
     ? flatTrainings
-    : flatTrainings.filter((t: { id: string; training_teachers?: { teacher_id: string }[] }) => {
-        // Condition A: formal assignment recorded in the training_teachers junction.
-        const teacherRows = Array.isArray(t.training_teachers) ? t.training_teachers : []
-        const isAssigned = teacherRows.some(tt => tt.teacher_id === user.id)
-        // Condition B: substitute / active-teaching access computed from lessons and reports.
-        return isAssigned || activeTrainingIds.has(t.id)
-      })
+    : flatTrainings.filter((t: { id: string }) => activeTrainingIds.has(t.id))
 
   // Split into current and past
   const currentTrainings = visibleTrainings.filter((t: { end_date: string | null }) => !t.end_date || new Date(t.end_date) >= now)
