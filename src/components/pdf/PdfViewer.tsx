@@ -349,6 +349,20 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // flicker while the render effect restores the reader's page deterministically.
   const suppressScrollSyncRef = useRef(false)
 
+  // True from the moment a render pass starts rebuilding the canvases until that
+  // pass's completion (or error) path runs. A dedicated flag -- deliberately NOT
+  // suppressScrollSyncRef, which the visibilitychange reassert also sets -- with
+  // one meaning: the canvas DOM and scroll position are mid-rebuild and must not
+  // be used as a capture source. A superseded pass never clears it; the newer
+  // pass that superseded it re-armed it and owns clearing it.
+  const rebuildInFlightRef = useRef(false)
+  // The page the current/last render pass anchored to, captured from the live
+  // DOM just before its rebuild. Persisted across passes so a pass that starts
+  // while another is mid-flight (fast zoom) reuses this trustworthy anchor
+  // instead of recapturing from the wiped/partial DOM, which would always read
+  // ~page 1 and throw the reader to the start of the document.
+  const anchorPageRef = useRef(1)
+
   // Page the reader was on when the tab was last hidden (e.g. they clicked a
   // baked-in link that opened a new tab). Captured on visibilitychange -> hidden
   // and restored on -> visible, because returning to the tab can nudge this
@@ -629,8 +643,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // fullscreen rebuild lets the browser move the scroll position (it can jump
     // to the top, or via scroll anchoring to the last page). Reading the live
     // canvases + scroll BEFORE the rebuild captures the reader's true place.
+    //
+    // Capture from the live DOM ONLY when no other pass is mid-flight. An
+    // in-flight pass has already wiped the canvases (replaceChildren below),
+    // which collapses the scroll content and makes the browser clamp scrollTop
+    // to 0 -- so a fresh capture here (a zoom click landing before the previous
+    // pass finished) would always read ~page 1. Reuse the anchor the in-flight
+    // pass captured from the intact DOM instead; scrolling is suppressed during
+    // a rebuild, so the reader cannot have meaningfully moved since.
     let anchorPage = 1
-    if (scroller && canvasesRef.current.length > 0) {
+    if (rebuildInFlightRef.current) {
+      anchorPage = anchorPageRef.current
+    } else if (scroller && canvasesRef.current.length > 0) {
       const scrollerTop = scroller.getBoundingClientRect().top
       const midline = scroller.clientHeight / 2
       for (let i = 0; i < canvasesRef.current.length; i++) {
@@ -640,11 +664,15 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         if (top < midline) anchorPage = i + 1
       }
     }
+    // Persist the anchor so a pass that overlaps THIS one can reuse it. (In the
+    // reuse branch above this writes back the value just read -- a no-op.)
+    anchorPageRef.current = anchorPage
 
     const token = ++renderTokenRef.current
     // Ignore the transient scrolls the rebuild causes; we restore the page
     // ourselves below and re-enable the readout afterwards.
     suppressScrollSyncRef.current = true
+    rebuildInFlightRef.current = true
 
     ;(async () => {
       try {
@@ -694,10 +722,12 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           updateCurrentPage()
           measurePages()
           suppressScrollSyncRef.current = false
+          rebuildInFlightRef.current = false
         }
       } catch (err) {
         if (token !== renderTokenRef.current) return
         suppressScrollSyncRef.current = false
+        rebuildInFlightRef.current = false
         setErrorMsg(err instanceof Error ? err.message : 'Failed to render the PDF.')
         setStatus('error')
       }
