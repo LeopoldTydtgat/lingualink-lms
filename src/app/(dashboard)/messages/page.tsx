@@ -3,6 +3,21 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
+import { getBookedClassStudentIds } from '@/lib/access/bookedClass'
+
+// Row from the messages select('*'); mirrors MessagesClient's Message so the
+// contacts prop stays assignable. Only created_at is read off latestMessage here.
+type MessageRow = {
+  id: string
+  sender_id: string
+  sender_type: string
+  receiver_id: string
+  receiver_type: string
+  content: string
+  attachments: unknown[]
+  read_at: string | null
+  created_at: string
+}
 
 interface PageProps {
   // Next.js 15 â€” searchParams is a Promise, must be awaited
@@ -30,6 +45,12 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // with ?openAdmin=true&adminId={id}. We read those params and fetch the admin
   // profile so MessagesClient can auto-select the conversation immediately.
   const { openAdmin, adminId, studentId } = await searchParams
+
+  const isAdmin = profile.role === 'admin'
+  // Condition B booked-class student set - the SOLE access key for this teacher's
+  // student-data reads here (deep-link resolve + new-message picker). Admin is ungated
+  // (null). The message-history contacts section below is intentionally NOT gated.
+  const bookedStudentIds = isAdmin ? null : await getBookedClassStudentIds(admin, user.id)
 
   let adminContact: {
     id: string
@@ -72,13 +93,12 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     unreadCount: number
   } | null = null
 
-  if (studentId) {
-    const adminClient = createAdminClient()
-    const { data: studentData } = await adminClient
+  if (studentId && (isAdmin || bookedStudentIds?.has(studentId))) {
+    const { data: studentData } = await admin
       .from('students')
       .select('id, full_name, email, photo_url')
       .eq('id', studentId)
-      .single()
+      .maybeSingle()
     if (studentData) {
       studentContact = {
         id: studentData.id,
@@ -105,7 +125,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const contactMap = new Map<string, {
     id: string
     type: string
-    latestMessage: any
+    latestMessage: MessageRow
     unreadCount: number
   }>()
 
@@ -157,8 +177,8 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // Combine contact map with display details
   const contacts = Array.from(contactMap.values()).map(contact => {
     const details = contact.type === 'student'
-      ? (studentDetails || []).find((s: any) => s.id === contact.id)
-      : (profileDetails || []).find((p: any) => p.id === contact.id)
+      ? (studentDetails || []).find((s: { id: string; auth_user_id: string; full_name: string; email: string | null; photo_url: string | null }) => s.id === contact.id)
+      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null; email: string | null }) => p.id === contact.id)
 
     return {
       ...contact,
@@ -174,11 +194,12 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     new Date(a.latestMessage.created_at).getTime()
   )
 
-  // Only students assigned to this teacher via active trainings
-  // Admin sees all students; teachers only see their own
+  // New-message picker students. Admin sees all active students; a teacher sees ONLY
+  // students with an active booked-class relationship (Condition B), computed once above.
+  // The dead trainings.teacher_id column is no longer consulted.
   let allStudents: { id: string; full_name: string; email: string; photo_url: string | null }[] = []
 
-  if (profile.role === 'admin') {
+  if (isAdmin) {
     const { data } = await supabase
       .from('students')
       .select('id, full_name, email, photo_url')
@@ -187,18 +208,11 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     allStudents = data || []
   } else {
     // Use admin client — RLS blocks teacher role from reading these tables directly
-    const { data: assignedTrainings } = await admin
-      .from('trainings')
-      .select('student_id')
-      .eq('teacher_id', profile.id)
-
-    const assignedIds = (assignedTrainings ?? []).map((t: { student_id: string }) => t.student_id)
-
-    if (assignedIds.length > 0) {
+    if (bookedStudentIds && bookedStudentIds.size > 0) {
       const { data } = await admin
         .from('students')
         .select('id, full_name, email, photo_url')
-        .in('id', assignedIds)
+        .in('id', [...bookedStudentIds])
         .eq('is_active', true)
         .order('full_name')
       allStudents = data || []
