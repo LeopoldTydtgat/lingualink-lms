@@ -66,17 +66,16 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   // Flatten the nested join: each row has teacher_id, and profiles may arrive as object or array.
   type TeacherJoinRow = { teacher_id: string; profiles: { id: string; full_name: string } | { id: string; full_name: string }[] | null }
   const teacherRows = (Array.isArray(training.training_teachers) ? training.training_teachers : []) as TeacherJoinRow[]
-  const assignedTeacherIds = teacherRows.map(r => r.teacher_id)
   const assignedTeacherNames = teacherRows
     .map(r => (Array.isArray(r.profiles) ? r.profiles[0]?.full_name : r.profiles?.full_name))
     .filter((n): n is string => Boolean(n))
 
-  // Non-admin access gate (Condition A or B), mirroring the students list page so a card shown
-  // there always opens here. A: formally assigned via the training_teachers junction
-  // (assignedTeacherIds, built above). B: actively teaching THIS training as a substitute - an
-  // upcoming scheduled lesson, or an open report (pending in-window, or reopened until completed)
-  // on a lesson this teacher personally holds. Falls closed: no claim -> notFound().
-  if (!isAdmin && !assignedTeacherIds.includes(user.id)) {
+  // Non-admin access gate (Condition B only), mirroring the students list page so a card shown
+  // there always opens here. Access requires an active booked-class relationship with THIS
+  // training: an upcoming scheduled lesson, or an open report (pending in-window, or reopened
+  // until completed) on a lesson this teacher personally holds. Formal training_teachers
+  // assignment alone no longer grants access. Falls closed: no claim -> notFound().
+  if (!isAdmin) {
     const gateNow = new Date()
     const { data: gateLessonsRaw } = await adminClient
       .from('lessons')
