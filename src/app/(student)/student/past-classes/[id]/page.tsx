@@ -20,7 +20,7 @@ export default async function PastClassDetailPage({
     .from('students')
     .select('id, full_name, timezone, profile_completed')
     .eq('auth_user_id', user.id)
-    .single();
+    .maybeSingle();
 
   if (!student) redirect('/student/login');
 
@@ -52,7 +52,7 @@ export default async function PastClassDetailPage({
     `)
     .eq('id', id)
     .eq('student_id', student.id)
-    .single();
+    .maybeSingle();
 
   if (!lesson) notFound();
 
@@ -105,11 +105,13 @@ export default async function PastClassDetailPage({
   // Each annotation row corresponds to a PDF the teacher marked up during the
   // class (marks are only ever created through the PDF viewer). Shape for the
   // client, which renders one read-only viewer per entry.
-  const annotatedPdfs = (annotatedRows ?? []).map((r) => ({
-    studySheetId: r.study_sheet_id as string,
-    attachmentIndex: r.attachment_index as number,
-    annotations: (r.annotations ?? []) as Annotation[],
-  }));
+  const annotatedPdfs = (annotatedRows ?? [])
+    .filter((r) => Array.isArray(r.annotations) && r.annotations.length > 0)
+    .map((r) => ({
+      studySheetId: r.study_sheet_id as string,
+      attachmentIndex: r.attachment_index as number,
+      annotations: (Array.isArray(r.annotations) ? r.annotations : []) as Annotation[],
+    }));
 
   return (
     <PastClassDetailClient
