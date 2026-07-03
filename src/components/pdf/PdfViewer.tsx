@@ -22,6 +22,7 @@ import {
   Highlighter,
   Type,
   Underline,
+  ArrowUpRight,
   Undo2,
   Redo2,
   Trash2,
@@ -62,6 +63,9 @@ const PEN_WIDTH = 2
 const HIGHLIGHTER_WIDTH = 14
 const HIGHLIGHTER_OPACITY = 0.4
 const UNDERLINE_WIDTH = 3
+// Arrow is its own annotation type (not part of the stroke pipeline); this is
+// its line width in scale-1 px (rendered width = ARROW_WIDTH * scale).
+const ARROW_WIDTH = 3
 const TEXT_SIZE = 16
 // Editing/wrapping width for a text box, in scale-1 px (multiplied by scale).
 const TEXT_BOX_WIDTH = 180
@@ -120,7 +124,7 @@ interface Props {
 }
 
 type Status = 'loading' | 'ready' | 'error'
-type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline'
+type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline' | 'arrow'
 
 /*
  * ---------------------------------------------------------------------------
@@ -152,7 +156,19 @@ interface TextAnnotation {
   text: string
   fontSize: number // scale-1 px; rendered size = fontSize * scale
 }
-export type Annotation = StrokeAnnotation | TextAnnotation
+// A straight arrow with an arrowhead at `end`. A separate union member, NOT an
+// overloaded StrokeAnnotation: it stores only its two endpoints (0..1 fractions),
+// committed from the same pointer draft as the pen (first + last point kept).
+interface ArrowAnnotation {
+  id: string
+  type: 'arrow'
+  pageIndex: number // 0-based
+  color: AnnColor
+  width: number // scale-1 px; rendered width = width * scale
+  start: { x: number; y: number } // 0..1 fraction
+  end: { x: number; y: number } // 0..1 fraction
+}
+export type Annotation = StrokeAnnotation | TextAnnotation | ArrowAnnotation
 
 // Stable shared empty-annotations reference. Annotations are always REPLACED,
 // never mutated in place, so one shared array is safe to reuse. A stable
@@ -262,12 +278,14 @@ function strokePath(points: { x: number; y: number }[], w: number, h: number): s
   return d
 }
 
-// Pen, highlighter and underline are all freehand stroke gestures sharing one
-// pointer flow (draft -> commit as a StrokeAnnotation); only the committed
-// width/opacity/geometry differ. Grouping them keeps every "is this a drawing
-// gesture?" check in one place.
+// Pen, highlighter, underline and arrow all share ONE pointer flow: a draft
+// that commits on pointer-up. Pen/highlighter/underline commit as a
+// StrokeAnnotation (differing only in committed width/opacity/geometry); arrow
+// keeps just the draft's first and last points and commits as an
+// ArrowAnnotation. Grouping them keeps every "is this a drawing gesture?" check
+// in one place (down seeds the draft, move extends it, up commits).
 function isDrawingTool(t: Tool): boolean {
-  return t === 'pen' || t === 'highlighter' || t === 'underline'
+  return t === 'pen' || t === 'highlighter' || t === 'underline' || t === 'arrow'
 }
 
 // Editable text box: a focused, auto-growing textarea. Kept as its own
@@ -1178,6 +1196,27 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     if (d && d.pageIndex === pageIndex && d.points.length > 0) {
       // Record before committing the stroke: one undo removes this stroke.
       recordHistory()
+      if (tool === 'arrow') {
+        // Arrow is NOT a stroke: keep only the draft's first and last points and
+        // commit an ArrowAnnotation. start/end are always defined here (points is
+        // non-empty), mirroring the underline start/end guard.
+        const start = d.points[0]
+        const end = d.points[d.points.length - 1]
+        if (start && end) {
+          const arrow: ArrowAnnotation = {
+            id: nextId(),
+            type: 'arrow',
+            pageIndex,
+            color,
+            width: ARROW_WIDTH,
+            start: { x: start.x, y: start.y },
+            end: { x: end.x, y: end.y },
+          }
+          setAnnotations((anns) => [...anns, arrow])
+        }
+        setDraft(null)
+        return
+      }
       // Pen, highlighter and underline all commit as one StrokeAnnotation; only
       // the width/opacity (and, for underline, the geometry) differ. Pen is
       // unchanged: PEN_WIDTH and no opacity field.
@@ -1448,7 +1487,16 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     const pageTexts = annotations.filter(
       (a): a is TextAnnotation => a.type === 'text' && a.pageIndex === pageIndex,
     )
+    const pageArrows = annotations.filter(
+      (a): a is ArrowAnnotation => a.type === 'arrow' && a.pageIndex === pageIndex,
+    )
     const drawingHere = draft && draft.pageIndex === pageIndex
+    // Live arrow-draft endpoints (draft's first point -> current point), computed
+    // here so the SVG stays flat. With noUncheckedIndexedAccess a draft point can
+    // be undefined, so the render checks both before drawing.
+    const draftArrowStart = drawingHere && draft && tool === 'arrow' ? draft.points[0] : undefined
+    const draftArrowEnd =
+      drawingHere && draft && tool === 'arrow' ? draft.points[draft.points.length - 1] : undefined
 
     const pageLinks = pdfLinks.filter((l) => l.pageIndex === pageIndex)
 
@@ -1513,6 +1561,39 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           height={rect.height}
           style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', overflow: 'visible' }}
         >
+          {/* Arrowhead markers: one per committed arrow (fill baked to that
+              arrow's colour, so a per-arrow id avoids colour bleed) plus one for
+              the live draft. markerUnits defaults to strokeWidth, so each head
+              scales with its line's width at every zoom. */}
+          <defs>
+            {pageArrows.map((a) => (
+              <marker
+                key={`arrowhead-${a.id}`}
+                id={`arrowhead-${a.id}`}
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={a.color} />
+              </marker>
+            ))}
+            {drawingHere && draft && tool === 'arrow' ? (
+              <marker
+                id="arrowhead-draft"
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="8"
+                markerHeight="8"
+                orient="auto"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
+              </marker>
+            ) : null}
+          </defs>
           {pageStrokes.map((s) => (
             <path
               key={s.id}
@@ -1525,7 +1606,20 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               strokeLinejoin="round"
             />
           ))}
-          {drawingHere && draft ? (
+          {pageArrows.map((a) => (
+            <line
+              key={a.id}
+              x1={a.start.x * rect.width}
+              y1={a.start.y * rect.height}
+              x2={a.end.x * rect.width}
+              y2={a.end.y * rect.height}
+              stroke={a.color}
+              strokeWidth={a.width * scale}
+              strokeLinecap="round"
+              markerEnd={`url(#arrowhead-${a.id})`}
+            />
+          ))}
+          {drawingHere && draft && tool !== 'arrow' ? (
             <path
               d={strokePath(draft.points, rect.width, rect.height)}
               fill="none"
@@ -1534,6 +1628,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               strokeOpacity={tool === 'highlighter' ? HIGHLIGHTER_OPACITY : 1}
               strokeLinecap="round"
               strokeLinejoin="round"
+            />
+          ) : null}
+          {drawingHere && draft && tool === 'arrow' && draftArrowStart && draftArrowEnd ? (
+            <line
+              x1={draftArrowStart.x * rect.width}
+              y1={draftArrowStart.y * rect.height}
+              x2={draftArrowEnd.x * rect.width}
+              y2={draftArrowEnd.y * rect.height}
+              stroke={color}
+              strokeWidth={ARROW_WIDTH * scale}
+              strokeLinecap="round"
+              markerEnd="url(#arrowhead-draft)"
             />
           ) : null}
         </svg>
@@ -1750,6 +1856,17 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           style={toolButtonStyle(tool === 'underline', !isReady)}
         >
           <Underline size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTool('arrow')}
+          disabled={!isReady}
+          aria-pressed={tool === 'arrow'}
+          aria-label="Arrow"
+          title="Arrow"
+          style={toolButtonStyle(tool === 'arrow', !isReady)}
+        >
+          <ArrowUpRight size={16} />
         </button>
         <button
           type="button"
