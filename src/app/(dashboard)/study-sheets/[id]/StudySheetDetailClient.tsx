@@ -43,7 +43,7 @@ type Props = {
   sheet: StudySheet
   exercises: Exercise[]
   isAdmin: boolean
-  annotationsByAttachment: Record<number, Annotation[]>
+  annotationsByName: Record<string, Annotation[]>
 }
 
 // Trailing-debounce interval for annotation autosave. A burst of pen strokes
@@ -257,11 +257,11 @@ function AnnotatablePdf({
 function MaterialFileViewer({
   attachments,
   sheetId,
-  annotationsByAttachment,
+  annotationsByName,
 }: {
   attachments: Attachment[]
   sheetId: string
-  annotationsByAttachment: Record<number, Annotation[]>
+  annotationsByName: Record<string, Annotation[]>
 }) {
   const containerRefs = useRef<(HTMLDivElement | null)[]>([])
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
@@ -331,7 +331,7 @@ function MaterialFileViewer({
                 studySheetId={sheetId}
                 attachmentIndex={idx}
                 attachmentName={att.name}
-                initialAnnotations={annotationsByAttachment[idx]}
+                initialAnnotations={annotationsByName[att.name]}
               />
             ) : isImage ? (
               <img
@@ -351,7 +351,7 @@ function MaterialFileViewer({
   )
 }
 
-export default function StudySheetDetailClient({ sheet, exercises, isAdmin, annotationsByAttachment }: Props) {
+export default function StudySheetDetailClient({ sheet, exercises, isAdmin, annotationsByName }: Props) {
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
   const attachments = sheet.attachments ?? []
@@ -397,7 +397,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
         <MaterialFileViewer
           attachments={attachments}
           sheetId={sheet.id}
-          annotationsByAttachment={annotationsByAttachment}
+          annotationsByName={annotationsByName}
         />
       )}
 
