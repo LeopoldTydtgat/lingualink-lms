@@ -11,6 +11,7 @@ import {
   PolarAngleAxis,
   ResponsiveContainer,
 } from 'recharts';
+import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,9 +55,16 @@ interface ExistingReview {
   review_text: string | null;
 }
 
+interface AnnotatedPdf {
+  studySheetId: string;
+  attachmentIndex: number;
+  annotations: Annotation[];
+}
+
 interface Props {
   lesson: Lesson;
   assignments: Assignment[];
+  annotatedPdfs: AnnotatedPdf[];
   existingReview: ExistingReview | null;
   studentId: string;
   studentTimezone: string;
@@ -181,6 +189,7 @@ function StarRating({
 export default function PastClassDetailClient({
   lesson,
   assignments,
+  annotatedPdfs,
   existingReview,
   studentId,
   studentTimezone,
@@ -321,6 +330,32 @@ export default function PastClassDetailClient({
                 </div>
               ) : null
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Teacher's marked-up material ── */}
+      {annotatedPdfs.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
+          <h2 className="font-semibold text-gray-900 mb-1 text-sm">
+            Material Your Teacher Marked Up
+          </h2>
+          <p className="text-xs text-gray-500 mb-3">
+            The notes your teacher made on screen during this class. View only.
+          </p>
+          <div className="space-y-4">
+            {annotatedPdfs.map((pdf) => (
+              <div
+                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
+                className="border border-gray-200 rounded-xl overflow-hidden bg-white"
+              >
+                <PdfViewer
+                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
+                  initialAnnotations={pdf.annotations}
+                  readOnly
+                />
+              </div>
+            ))}
           </div>
         </div>
       )}

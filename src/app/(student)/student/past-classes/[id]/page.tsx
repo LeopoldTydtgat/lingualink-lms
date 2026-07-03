@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect, notFound } from 'next/navigation';
 import PastClassDetailClient from './PastClassDetailClient';
 import { requireTz } from '@/lib/time/requireTz';
+import type { Annotation } from '@/components/pdf/PdfViewer';
 
 export default async function PastClassDetailPage({
   params,
@@ -77,6 +78,18 @@ export default async function PastClassDetailPage({
     .eq('student_id', student.id)
     .maybeSingle();
 
+  // Fetch the teacher's marked-up PDFs for this lesson. The RLS policy
+  // "Students read final lesson annotations after cutoff" returns rows ONLY when
+  // this is the student's own lesson AND the 15-minute post-class cutoff has
+  // passed — so this user-scoped query IS the access gate. No ownership or cutoff
+  // logic is re-derived here, and the service-role client is never used on this path.
+  const { data: annotatedRows } = await supabase
+    .from('lesson_annotations')
+    .select('study_sheet_id, attachment_index, annotations')
+    .eq('lesson_id', id)
+    .order('study_sheet_id', { ascending: true })
+    .order('attachment_index', { ascending: true });
+
   // Flatten joins
   const flatLesson = {
     ...lesson,
@@ -89,10 +102,20 @@ export default async function PastClassDetailPage({
     study_sheet: Array.isArray(a.study_sheet) ? a.study_sheet[0] : a.study_sheet,
   }));
 
+  // Each annotation row corresponds to a PDF the teacher marked up during the
+  // class (marks are only ever created through the PDF viewer). Shape for the
+  // client, which renders one read-only viewer per entry.
+  const annotatedPdfs = (annotatedRows ?? []).map((r) => ({
+    studySheetId: r.study_sheet_id as string,
+    attachmentIndex: r.attachment_index as number,
+    annotations: (r.annotations ?? []) as Annotation[],
+  }));
+
   return (
     <PastClassDetailClient
       lesson={flatLesson}
       assignments={flatAssignments}
+      annotatedPdfs={annotatedPdfs}
       existingReview={existingReview ?? null}
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'past-class-detail:student')}
