@@ -79,7 +79,7 @@ export async function GET(
     // with the same generic 403, so nothing about the sheet leaks.
     const { data: annotationRow } = await supabase
       .from('lesson_annotations')
-      .select('id')
+      .select('id, attachment_name')
       .eq('lesson_id', lessonId)
       .eq('study_sheet_id', sheetId)
       .eq('attachment_index', idx)
@@ -104,11 +104,19 @@ export async function GET(
     }
 
     const attachments: Attachment[] = Array.isArray(sheet.attachments) ? sheet.attachments : []
-    if (idx >= attachments.length) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    }
 
-    const attachment = attachments[idx]
+    // Resolve WHICH attachment to serve. attachment_name (recorded by the teacher
+    // autosave alongside the positional index) is the stable key: match it against
+    // the sheet's CURRENT attachments so an admin reorder/removal can't shift the
+    // teacher's marks onto a different same-sheet PDF. If the annotated file was
+    // since removed or renamed, find() returns undefined and the filename validation
+    // below denies with 404 — we NEVER fall back to position when a name is present.
+    // Only a legacy row with a null name (none exist today; kept for forward-safety)
+    // falls back to attachments[idx].
+    const attachment =
+      typeof annotationRow.attachment_name === 'string' && annotationRow.attachment_name.length > 0
+        ? attachments.find((a) => a && a.name === annotationRow.attachment_name)
+        : attachments[idx]
     // Re-validate the filename at this boundary (mirrors /api/library-file): the
     // admin library create/PATCH routes write the attachments array verbatim, so a
     // hostile or malformed name could otherwise reach the storage path ('../'
