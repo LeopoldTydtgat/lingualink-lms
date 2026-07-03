@@ -172,10 +172,11 @@ function AnnotatablePdf({
   // save is the last to write. The chained callback never rejects (it try/catches
   // internally), so the chain can never break.
   const saveChainRef = useRef<Promise<void>>(Promise.resolve())
-  // Minimal fail-safe cue. Only an exact 'saved' status clears the warning; every
-  // other outcome (no live class, refused write, transport error, or an
-  // unexpected/absent status) shows "not saving" so marks are never silently
-  // discarded. 'idle' and 'saved' render nothing.
+  // Minimal fail-safe cue. Only 'not_saving' (a write refused during a live
+  // class), an unexpected/absent status, or a transport error shows the warning,
+  // so marks are never silently discarded on a real failure. 'no_live_class' (the
+  // common prep-time / between-classes case) maps to 'idle' and is silent, as are
+  // 'saved' and 'idle'; none render a badge.
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'not-saving'>('idle')
 
   // Persist the latest committed annotations to whichever lesson is live now.
@@ -190,7 +191,25 @@ function AnnotatablePdf({
     saveChainRef.current = saveChainRef.current.then(async () => {
       try {
         const r = await saveLessonAnnotations({ studySheetId, attachmentIndex, attachmentName, annotations })
-        setSaveState(r?.status === 'saved' ? 'saved' : 'not-saving')
+        // Map each declared status explicitly. Only an exact 'saved' clears the
+        // warning; 'no_live_class' is the benign common case (prep time / between
+        // classes) and stays silent; 'not_saving' is a real refusal during a live
+        // class. The warn-by-default branch means any unknown/absent status is
+        // treated as not-saved (fail-safe), never silently ignored. NOTE: the
+        // status values use underscores, but saveState uses a hyphen.
+        switch (r?.status) {
+          case 'saved':
+            setSaveState('saved')
+            break
+          case 'no_live_class':
+            setSaveState('idle')
+            break
+          case 'not_saving':
+            setSaveState('not-saving')
+            break
+          default:
+            setSaveState('not-saving')
+        }
       } catch {
         // A transport error is a harmless no-op for persistence, but for the
         // indicator it counts as not-saved (fail-safe): show the warning.
@@ -247,7 +266,7 @@ function AnnotatablePdf({
             fontWeight: 600,
           }}
         >
-          Not saving — no active class
+          Not saving — check your connection
         </div>
       )}
     </div>
