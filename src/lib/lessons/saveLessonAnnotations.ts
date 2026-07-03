@@ -29,6 +29,7 @@ import type { Annotation } from '@/components/pdf/PdfViewer'
 export type SaveAnnotationsInput = {
   studySheetId: string
   attachmentIndex: number
+  attachmentName: string
   annotations: Annotation[]
 }
 
@@ -65,6 +66,7 @@ export async function saveLessonAnnotations(
         lesson_id: live.lessonId,
         study_sheet_id: input.studySheetId,
         attachment_index: input.attachmentIndex,
+        attachment_name: input.attachmentName,
         annotations: input.annotations,
         updated_at: new Date().toISOString(),
       },
@@ -85,6 +87,7 @@ export async function saveLessonAnnotations(
       lessonId: live.lessonId,
       studySheetId: input.studySheetId,
       attachmentIndex: input.attachmentIndex,
+      attachmentName: input.attachmentName,
       annotationCount: input.annotations.length,
       error,
     })
