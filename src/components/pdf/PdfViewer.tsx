@@ -19,7 +19,9 @@ import {
   Minimize2,
   MousePointer2,
   Pencil,
+  Highlighter,
   Type,
+  Underline,
   Undo2,
   Redo2,
   Trash2,
@@ -55,6 +57,11 @@ const ORANGE = '#FF8303'
 // multiplied by the current scale at render time, so a mark keeps the same size
 // relative to the page content at every zoom level.
 const PEN_WIDTH = 2
+// Highlighter and underline reuse the pen's stroke pipeline; only their committed
+// width/opacity (and, for underline, geometry) differ. Widths are scale-1 px.
+const HIGHLIGHTER_WIDTH = 14
+const HIGHLIGHTER_OPACITY = 0.4
+const UNDERLINE_WIDTH = 3
 const TEXT_SIZE = 16
 // Editing/wrapping width for a text box, in scale-1 px (multiplied by scale).
 const TEXT_BOX_WIDTH = 180
@@ -113,7 +120,7 @@ interface Props {
 }
 
 type Status = 'loading' | 'ready' | 'error'
-type Tool = 'cursor' | 'pen' | 'text'
+type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline'
 
 /*
  * ---------------------------------------------------------------------------
@@ -132,6 +139,7 @@ interface StrokeAnnotation {
   pageIndex: number // 0-based
   color: AnnColor
   width: number // scale-1 px; rendered width = width * scale
+  opacity?: number // 0..1; absent = 1 (fully opaque). Used by highlighter.
   points: { x: number; y: number }[] // each 0..1 fraction of the page
 }
 interface TextAnnotation {
@@ -252,6 +260,14 @@ function strokePath(points: { x: number; y: number }[], w: number, h: number): s
   const last = px[px.length - 1]
   if (last) d += ` L ${last.x} ${last.y}`
   return d
+}
+
+// Pen, highlighter and underline are all freehand stroke gestures sharing one
+// pointer flow (draft -> commit as a StrokeAnnotation); only the committed
+// width/opacity/geometry differ. Grouping them keeps every "is this a drawing
+// gesture?" check in one place.
+function isDrawingTool(t: Tool): boolean {
+  return t === 'pen' || t === 'highlighter' || t === 'underline'
 }
 
 // Editable text box: a focused, auto-growing textarea. Kept as its own
@@ -1100,7 +1116,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // --- Pointer handling on a page overlay -----------------------------------
 
   function onOverlayPointerDown(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
-    if (tool === 'pen') {
+    if (isDrawingTool(tool)) {
       const el = e.currentTarget
       if (typeof el.setPointerCapture === 'function') {
         try {
@@ -1143,13 +1159,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   }
 
   function onOverlayPointerMove(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
-    if (tool !== 'pen') return
+    if (!isDrawingTool(tool)) return
     const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
     setDraft((d) => (d && d.pageIndex === pageIndex ? { pageIndex, points: [...d.points, f] } : d))
   }
 
   function onOverlayPointerUp(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
-    if (tool !== 'pen') return
+    if (!isDrawingTool(tool)) return
     const el = e.currentTarget
     if (typeof el.releasePointerCapture === 'function') {
       try {
@@ -1162,13 +1178,36 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     if (d && d.pageIndex === pageIndex && d.points.length > 0) {
       // Record before committing the stroke: one undo removes this stroke.
       recordHistory()
+      // Pen, highlighter and underline all commit as one StrokeAnnotation; only
+      // the width/opacity (and, for underline, the geometry) differ. Pen is
+      // unchanged: PEN_WIDTH and no opacity field.
+      let width = PEN_WIDTH
+      let opacity: number | undefined
+      let points = d.points
+      if (tool === 'highlighter') {
+        width = HIGHLIGHTER_WIDTH
+        opacity = HIGHLIGHTER_OPACITY
+      } else if (tool === 'underline') {
+        width = UNDERLINE_WIDTH
+        const start = d.points[0]
+        const end = d.points[d.points.length - 1]
+        if (start && end) {
+          // Force a straight horizontal rule: two points sharing the start's y,
+          // spanning from the start x to the release x.
+          points = [
+            { x: start.x, y: start.y },
+            { x: end.x, y: start.y },
+          ]
+        }
+      }
       const stroke: StrokeAnnotation = {
         id: nextId(),
         type: 'stroke',
         pageIndex,
         color,
-        width: PEN_WIDTH,
-        points: d.points,
+        width,
+        ...(opacity !== undefined ? { opacity } : {}),
+        points,
       }
       setAnnotations((anns) => [...anns, stroke])
     }
@@ -1427,7 +1466,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           height: rect.height,
           // Click-through in cursor mode so scroll / zoom work normally.
           pointerEvents: tool === 'cursor' ? 'none' : 'auto',
-          cursor: tool === 'pen' ? PEN_CURSOR : tool === 'text' ? 'text' : 'default',
+          cursor: isDrawingTool(tool) ? PEN_CURSOR : tool === 'text' ? 'text' : 'default',
           touchAction: tool === 'cursor' ? 'auto' : 'none',
           userSelect: 'none',
         }}
@@ -1481,6 +1520,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               fill="none"
               stroke={s.color}
               strokeWidth={s.width * scale}
+              strokeOpacity={s.opacity ?? 1}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -1491,6 +1531,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               fill="none"
               stroke={color}
               strokeWidth={PEN_WIDTH * scale}
+              strokeOpacity={tool === 'highlighter' ? HIGHLIGHTER_OPACITY : 1}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
@@ -1687,6 +1728,28 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           style={toolButtonStyle(tool === 'pen', !isReady)}
         >
           <Pencil size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTool('highlighter')}
+          disabled={!isReady}
+          aria-pressed={tool === 'highlighter'}
+          aria-label="Highlighter"
+          title="Highlighter"
+          style={toolButtonStyle(tool === 'highlighter', !isReady)}
+        >
+          <Highlighter size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectTool('underline')}
+          disabled={!isReady}
+          aria-pressed={tool === 'underline'}
+          aria-label="Underline"
+          title="Underline"
+          style={toolButtonStyle(tool === 'underline', !isReady)}
+        >
+          <Underline size={16} />
         </button>
         <button
           type="button"
