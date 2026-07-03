@@ -131,7 +131,20 @@ export async function getLiveLessonForTeacher(): Promise<LiveLesson | null> {
     .gte('scheduled_at', new Date(nowMs - 24 * 60 * 60_000).toISOString())
     .order('scheduled_at', { ascending: false })
 
-  if (error || !lessons || lessons.length === 0) return null
+  if (error) {
+    // A DB fault here (grant regression, schema drift, network fault) would
+    // otherwise surface to the caller as an indistinguishable null, which the
+    // autosave action reports as 'no_live_class' — a state the teacher UI now
+    // treats as the benign "no class right now" case and stays silent on. Log it
+    // so a genuine fault is visible in server/Sentry logs instead of vanishing.
+    // Context only — never any annotation content.
+    console.error('[getLiveLessonForTeacher] lessons query failed', {
+      teacherId: user.id,
+      error,
+    })
+    return null
+  }
+  if (!lessons || lessons.length === 0) return null
 
   const picked = pickLiveLesson(lessons as LessonRow[], nowMs)
   if (!picked) return null
