@@ -152,11 +152,13 @@ function AnnotatablePdf({
   fileUrl,
   studySheetId,
   attachmentIndex,
+  attachmentName,
   initialAnnotations,
 }: {
   fileUrl: string
   studySheetId: string
   attachmentIndex: number
+  attachmentName: string
   initialAnnotations?: Annotation[]
 }) {
   // Debounce timer + the latest committed annotations pending a write.
@@ -187,7 +189,7 @@ function AnnotatablePdf({
     latestRef.current = null
     saveChainRef.current = saveChainRef.current.then(async () => {
       try {
-        const r = await saveLessonAnnotations({ studySheetId, attachmentIndex, annotations })
+        const r = await saveLessonAnnotations({ studySheetId, attachmentIndex, attachmentName, annotations })
         setSaveState(r?.status === 'saved' ? 'saved' : 'not-saving')
       } catch {
         // A transport error is a harmless no-op for persistence, but for the
@@ -195,7 +197,7 @@ function AnnotatablePdf({
         setSaveState('not-saving')
       }
     })
-  }, [studySheetId, attachmentIndex])
+  }, [studySheetId, attachmentIndex, attachmentName])
 
   // Trailing debounce: reset the timer on every committed change so a burst of
   // pen strokes collapses into one write. Never fires for the seed or an
@@ -328,6 +330,7 @@ function MaterialFileViewer({
                 fileUrl={fileUrl}
                 studySheetId={sheetId}
                 attachmentIndex={idx}
+                attachmentName={att.name}
                 initialAnnotations={annotationsByAttachment[idx]}
               />
             ) : isImage ? (
