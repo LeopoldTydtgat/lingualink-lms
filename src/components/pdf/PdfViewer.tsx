@@ -23,6 +23,9 @@ import {
   Type,
   Underline,
   ArrowUpRight,
+  Star,
+  Check,
+  X,
   Undo2,
   Redo2,
   Trash2,
@@ -73,6 +76,12 @@ const TEXT_BOX_WIDTH = 180
 const FONT_STEP = 4
 const FONT_MIN = 8
 const FONT_MAX = 48
+// Shape-stamp sizing (scale-1 units): default box side, clamp range, and the
+// A- / A+ step. Rendered side = size * scale, mirroring the text-box font sizing.
+const STAMP_SIZE = 24
+const STAMP_MIN = 12
+const STAMP_MAX = 96
+const STAMP_STEP = 6
 // Maximum number of undo restore points kept (oldest dropped past this).
 const HISTORY_LIMIT = 50
 
@@ -124,7 +133,7 @@ interface Props {
 }
 
 type Status = 'loading' | 'ready' | 'error'
-type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline' | 'arrow'
+type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline' | 'arrow' | 'stamp'
 
 /*
  * ---------------------------------------------------------------------------
@@ -168,7 +177,21 @@ interface ArrowAnnotation {
   start: { x: number; y: number } // 0..1 fraction
   end: { x: number; y: number } // 0..1 fraction
 }
-export type Annotation = StrokeAnnotation | TextAnnotation | ArrowAnnotation
+// A click-placed shape stamp (star / tick / cross). Not part of the stroke
+// pipeline and NOT a drag gesture: it is placed by a single click at its centre
+// and resized after placement by an A- / A+ control (see changeStampSize),
+// mirroring the text box. It stores only its centre point and a box side length.
+interface ShapeAnnotation {
+  id: string
+  type: 'shape'
+  kind: 'star' | 'tick' | 'cross'
+  pageIndex: number // 0-based
+  color: AnnColor
+  x: number // 0..1 fraction (centre of the stamp)
+  y: number // 0..1 fraction (centre of the stamp)
+  size: number // scale-1 px; rendered side = size * scale
+}
+export type Annotation = StrokeAnnotation | TextAnnotation | ArrowAnnotation | ShapeAnnotation
 
 // Stable shared empty-annotations reference. Annotations are always REPLACED,
 // never mutated in place, so one shared array is safe to reuse. A stable
@@ -276,6 +299,22 @@ function strokePath(points: { x: number; y: number }[], w: number, h: number): s
   const last = px[px.length - 1]
   if (last) d += ` L ${last.x} ${last.y}`
   return d
+}
+
+// Build a filled 5-point star path centred at (cx, cy) that fits a box of the
+// given half-side (outer radius). Ten alternating outer/inner vertices starting
+// at the top (-90 deg); inner radius is a fixed fraction so every star matches.
+function starPath(cx: number, cy: number, outer: number): string {
+  const inner = outer * 0.4
+  let d = ''
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner
+    const ang = -Math.PI / 2 + (i * Math.PI) / 5
+    const x = round1(cx + r * Math.cos(ang))
+    const y = round1(cy + r * Math.sin(ang))
+    d += `${i === 0 ? 'M' : 'L'} ${x} ${y} `
+  }
+  return `${d}Z`
 }
 
 // Pen, highlighter, underline and arrow all share ONE pointer flow: a draft
@@ -461,6 +500,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // to the seed array still fires onAnnotationsChange.
   const isSeedingRef = useRef(true)
   const [tool, setTool] = useState<Tool>('cursor')
+  // Which shape the stamp tool places. Held alongside `tool` (like the active
+  // colour), so extending Tool with a single 'stamp' member keeps the union small
+  // while the three toolbar buttons choose star / tick / cross.
+  const [stampKind, setStampKind] = useState<'star' | 'tick' | 'cross'>('star')
   const [color, setColor] = useState<AnnColor>('#000000')
   const [draft, setDraft] = useState<Draft | null>(null)
   // A text box is either being EDITED (textarea) or SELECTED (outlined, with a
@@ -1083,6 +1126,20 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     )
   }
 
+  // A- / A+ for a stamp: nudge one shape's stored (scale-1) box size within the
+  // clamp range. Rendered side is size * scale, so this resizes the stamp live.
+  // One tap is one undo step. Mirrors changeFontSize (size instead of fontSize).
+  function changeStampSize(id: string, delta: number) {
+    recordHistory()
+    setAnnotations((anns) =>
+      anns.map((a) =>
+        a.id === id && a.type === 'shape'
+          ? { ...a, size: Math.min(STAMP_MAX, Math.max(STAMP_MIN, a.size + delta)) }
+          : a,
+      ),
+    )
+  }
+
   function selectTool(t: Tool) {
     // Read-only mode never changes tool (belt-and-braces: the toolbar that calls
     // this is also hidden, and an effect pins the tool to 'cursor').
@@ -1093,6 +1150,21 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // Clicking the active pen/text tool again toggles back to cursor; clicking
     // cursor (or a different tool) always selects that tool.
     setTool((prev) => (t !== 'cursor' && prev === t ? 'cursor' : t))
+  }
+
+  // Pick a stamp shape: activate the stamp tool AND set its kind. A separate
+  // helper (not selectTool) because the stamp has a second dimension (kind): the
+  // three buttons all map to tool 'stamp' but different kinds. Same readOnly and
+  // edit/selection guards as selectTool. Clicking the ALREADY-active kind toggles
+  // back to cursor (mirrors selectTool's active-tool toggle); switching to a
+  // different kind stays on the stamp tool and just changes the kind.
+  function selectStamp(kind: 'star' | 'tick' | 'cross') {
+    if (readOnly) return
+    if (editingId) finishEditing(editingId)
+    setSelectedId(null)
+    const sameActive = tool === 'stamp' && stampKind === kind
+    setStampKind(kind)
+    setTool(sameActive ? 'cursor' : 'stamp')
   }
 
   // Undo / redo: snapshot-based. Each restores a whole-array snapshot and clears
@@ -1173,6 +1245,29 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         { id, type: 'text', pageIndex, color, x: f.x, y: f.y, text: '', fontSize: TEXT_SIZE },
       ])
       setEditingId(id)
+    } else if (tool === 'stamp') {
+      // Click-to-place (never a drag): only the bare overlay creates a stamp.
+      // Clicks that bubbled up from an existing stamp's hit target stop
+      // propagation there, so they never reach here (same guard as text).
+      if (e.target !== e.currentTarget) return
+      // Precedence mirrors text: if something is selected, the first click just
+      // clears the selection (click away to deselect) and places nothing; a
+      // second click then places. Stamps have no editing state, so unlike text
+      // there is no editing branch to commit first.
+      if (selectedId) {
+        setSelectedId(null)
+        return
+      }
+      const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
+      const id = nextId()
+      // Record before appending: one undo removes the whole stamp.
+      recordHistory()
+      setAnnotations((anns) => [
+        ...anns,
+        { id, type: 'shape', kind: stampKind, pageIndex, color, x: f.x, y: f.y, size: STAMP_SIZE },
+      ])
+      // Select (never edit) the new stamp so its A- / A+ control shows at once.
+      setSelectedId(id)
     }
   }
 
@@ -1322,6 +1417,76 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     selectBox(dr.id)
   }
 
+  // --- Pointer handling on a committed shape stamp --------------------------
+  // Modelled on the text-box pointer flow (select + drag), kept as separate
+  // handlers so the text path is unchanged. Differences: the target is a
+  // ShapeAnnotation whose x/y is the stamp CENTRE, there is no editing state
+  // (double-click does nothing), and the move predicate narrows to 'shape'.
+  // Shapes reuse the same dragRef / pendingPastRef, the same 3px threshold, and
+  // the same "snapshot only if actually moved" one-undo-step rule. Only one drag
+  // runs at a time, so sharing dragRef with text is safe.
+  function onShapePointerDown(e: ReactPointerEvent<HTMLDivElement>, s: ShapeAnnotation, rect: PageRect) {
+    if (tool !== 'stamp') return
+    e.stopPropagation()
+    const el = e.currentTarget
+    if (typeof el.setPointerCapture === 'function') {
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    pendingPastRef.current = annotationsRef.current
+    dragRef.current = {
+      id: s.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: s.x,
+      originY: s.y,
+      width: rect.width,
+      height: rect.height,
+      moved: false,
+    }
+  }
+
+  function onShapePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const dr = dragRef.current
+    if (!dr) return
+    e.stopPropagation()
+    const dx = e.clientX - dr.startX
+    const dy = e.clientY - dr.startY
+    if (!dr.moved && Math.abs(dx) + Math.abs(dy) > 3) dr.moved = true
+    if (!dr.moved || dr.width <= 0 || dr.height <= 0) return
+    const nx = clamp01(dr.originX + dx / dr.width)
+    const ny = clamp01(dr.originY + dy / dr.height)
+    setAnnotations((anns) => anns.map((a) => (a.id === dr.id && a.type === 'shape' ? { ...a, x: nx, y: ny } : a)))
+  }
+
+  function onShapePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const dr = dragRef.current
+    if (!dr) return
+    e.stopPropagation()
+    dragRef.current = null
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    if (dr.moved) {
+      const snap = pendingPastRef.current
+      if (snap) {
+        setPast((p) => (p.length >= HISTORY_LIMIT ? [...p.slice(1), snap] : [...p, snap]))
+        setFuture([])
+      }
+    }
+    pendingPastRef.current = null
+    // A no-move click SELECTS the stamp; a finished drag also leaves it selected.
+    selectBox(dr.id)
+  }
+
   // --- Overlay rendering ----------------------------------------------------
 
   // Small resize + delete bar shown above (or, near the page top, below) a
@@ -1380,6 +1545,70 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           onClick={() => deleteBox(t.id)}
           aria-label="Delete text box"
           title="Delete text box"
+          style={controlButtonStyle('#FD5602')}
+        >
+          x
+        </button>
+      </div>
+    )
+  }
+
+  // Resize + delete bar for a selected STAMP. Identical structure and styling to
+  // renderControlBar, but A- / A+ drive changeStampSize (box size) instead of
+  // changeFontSize. Kept separate so the text control bar is untouched. Buttons
+  // preventDefault on pointer/mouse down and the bar stops propagation, exactly
+  // like the text bar, so clicking it never deselects the stamp.
+  function renderShapeControlBar(s: ShapeAnnotation, below: boolean) {
+    return (
+      <div
+        onPointerDown={(e) => e.stopPropagation()}
+        onPointerUp={(e) => e.stopPropagation()}
+        style={{
+          position: 'absolute',
+          left: 0,
+          ...(below ? { top: 'calc(100% + 4px)' } : { bottom: 'calc(100% + 4px)' }),
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: 3,
+          backgroundColor: '#ffffff',
+          border: '1px solid #d1d5db',
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+          pointerEvents: 'auto',
+          whiteSpace: 'nowrap',
+          lineHeight: 1,
+        }}
+      >
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => changeStampSize(s.id, -STAMP_STEP)}
+          aria-label="Decrease stamp size"
+          title="Decrease stamp size"
+          style={controlButtonStyle('#4b5563')}
+        >
+          A-
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => changeStampSize(s.id, STAMP_STEP)}
+          aria-label="Increase stamp size"
+          title="Increase stamp size"
+          style={controlButtonStyle('#4b5563')}
+        >
+          A+
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={() => deleteBox(s.id)}
+          aria-label="Delete stamp"
+          title="Delete stamp"
           style={controlButtonStyle('#FD5602')}
         >
           x
@@ -1480,6 +1709,44 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     )
   }
 
+  // Transparent pointer hit target for a committed stamp. The visible glyph is
+  // drawn in the page <svg> (which is pointerEvents:none), so — exactly like a
+  // text box — the stamp needs a real DOM element to receive select/drag. This
+  // div is centred on the stamp (translate -50% so x/y is the CENTRE) and sized
+  // to the stamp's box. It is interactive ONLY under the stamp tool (mirrors the
+  // text box's `interactive = tool === 'text'` gate): under cursor the overlay is
+  // click-through, under other tools this stays pointerEvents:none. When the
+  // stamp is selected it also hosts the A- / A+ / delete control bar.
+  function renderShapeHitTarget(s: ShapeAnnotation, rect: PageRect) {
+    const interactive = tool === 'stamp'
+    const isSelected = s.id === selectedId
+    const sidePx = s.size * scale
+    // Flip the control bar below the stamp when its top edge sits too near the
+    // page top for the bar to fit above (mirrors the text box's `below`).
+    const below = s.y * rect.height - sidePx / 2 < 40
+    return (
+      <div
+        key={`shape-hit-${s.id}`}
+        onPointerDown={(e) => onShapePointerDown(e, s, rect)}
+        onPointerMove={onShapePointerMove}
+        onPointerUp={onShapePointerUp}
+        style={{
+          position: 'absolute',
+          left: `${s.x * 100}%`,
+          top: `${s.y * 100}%`,
+          width: sidePx,
+          height: sidePx,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: interactive ? 'auto' : 'none',
+          cursor: interactive ? 'move' : 'default',
+          touchAction: interactive ? 'none' : 'auto',
+        }}
+      >
+        {isSelected ? renderShapeControlBar(s, below) : null}
+      </div>
+    )
+  }
+
   function renderPageOverlay(rect: PageRect, pageIndex: number) {
     const pageStrokes = annotations.filter(
       (a): a is StrokeAnnotation => a.type === 'stroke' && a.pageIndex === pageIndex,
@@ -1489,6 +1756,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     )
     const pageArrows = annotations.filter(
       (a): a is ArrowAnnotation => a.type === 'arrow' && a.pageIndex === pageIndex,
+    )
+    const pageShapes = annotations.filter(
+      (a): a is ShapeAnnotation => a.type === 'shape' && a.pageIndex === pageIndex,
     )
     const drawingHere = draft && draft.pageIndex === pageIndex
     // Live arrow-draft endpoints (draft's first point -> current point), computed
@@ -1619,6 +1889,68 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               markerEnd={`url(#arrowhead-${a.id})`}
             />
           ))}
+          {pageShapes.map((s) => {
+            // Centre + box side in display px. x/y is the stamp CENTRE.
+            const cx = s.x * rect.width
+            const cy = s.y * rect.height
+            const side = s.size * scale
+            const half = side / 2
+            // Tick / cross are stroked; width scales with the stamp (min 2px so a
+            // tiny stamp stays visible). Star is filled with the stamp colour.
+            const strokeW = Math.max(2, side * 0.12)
+            const isSelected = s.id === selectedId
+            return (
+              <g key={s.id}>
+                {isSelected ? (
+                  // Selection frame in the orange accent, just outside the box
+                  // (like the text box's outline; does not resize the stamp).
+                  <rect
+                    x={round1(cx - half - 3)}
+                    y={round1(cy - half - 3)}
+                    width={round1(side + 6)}
+                    height={round1(side + 6)}
+                    rx={3}
+                    fill="none"
+                    stroke={ORANGE}
+                    strokeWidth={1}
+                  />
+                ) : null}
+                {s.kind === 'star' ? (
+                  <path d={starPath(cx, cy, half)} fill={s.color} stroke="none" />
+                ) : s.kind === 'tick' ? (
+                  <path
+                    d={`M ${round1(cx - half * 0.6)} ${round1(cy + half * 0.05)} L ${round1(cx - half * 0.15)} ${round1(cy + half * 0.55)} L ${round1(cx + half * 0.7)} ${round1(cy - half * 0.55)}`}
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={strokeW}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ) : (
+                  <>
+                    <line
+                      x1={round1(cx - half * 0.6)}
+                      y1={round1(cy - half * 0.6)}
+                      x2={round1(cx + half * 0.6)}
+                      y2={round1(cy + half * 0.6)}
+                      stroke={s.color}
+                      strokeWidth={strokeW}
+                      strokeLinecap="round"
+                    />
+                    <line
+                      x1={round1(cx + half * 0.6)}
+                      y1={round1(cy - half * 0.6)}
+                      x2={round1(cx - half * 0.6)}
+                      y2={round1(cy + half * 0.6)}
+                      stroke={s.color}
+                      strokeWidth={strokeW}
+                      strokeLinecap="round"
+                    />
+                  </>
+                )}
+              </g>
+            )
+          })}
           {drawingHere && draft && tool !== 'arrow' ? (
             <path
               d={strokePath(draft.points, rect.width, rect.height)}
@@ -1644,6 +1976,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           ) : null}
         </svg>
         {pageTexts.map((t) => renderTextBox(t, rect))}
+        {pageShapes.map((s) => renderShapeHitTarget(s, rect))}
       </div>
     )
   }
@@ -1878,6 +2211,39 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           style={toolButtonStyle(tool === 'text', !isReady)}
         >
           <Type size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectStamp('star')}
+          disabled={!isReady}
+          aria-pressed={tool === 'stamp' && stampKind === 'star'}
+          aria-label="Star stamp"
+          title="Star stamp"
+          style={toolButtonStyle(tool === 'stamp' && stampKind === 'star', !isReady)}
+        >
+          <Star size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectStamp('tick')}
+          disabled={!isReady}
+          aria-pressed={tool === 'stamp' && stampKind === 'tick'}
+          aria-label="Tick stamp"
+          title="Tick stamp"
+          style={toolButtonStyle(tool === 'stamp' && stampKind === 'tick', !isReady)}
+        >
+          <Check size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => selectStamp('cross')}
+          disabled={!isReady}
+          aria-pressed={tool === 'stamp' && stampKind === 'cross'}
+          aria-label="Cross stamp"
+          title="Cross stamp"
+          style={toolButtonStyle(tool === 'stamp' && stampKind === 'cross', !isReady)}
+        >
+          <X size={16} />
         </button>
 
         <span style={dividerStyle} aria-hidden />
