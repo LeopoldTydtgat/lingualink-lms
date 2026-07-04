@@ -135,6 +135,31 @@ interface Props {
 type Status = 'loading' | 'ready' | 'error'
 type Tool = 'cursor' | 'pen' | 'text' | 'highlighter' | 'underline' | 'arrow' | 'stamp'
 
+// Which toolbar control (if any) the pointer is currently over. Colour swatches reuse
+// AnnColor directly since each swatch value is already a unique string; every other
+// control gets one literal name. Powers hoverFilterStyle only -- never read by any
+// click handler or annotation logic.
+type ToolbarHoverKey =
+  | 'zoomOut'
+  | 'zoomIn'
+  | 'fitWidth'
+  | 'prevPage'
+  | 'nextPage'
+  | 'cursor'
+  | 'pen'
+  | 'highlighter'
+  | 'underline'
+  | 'arrow'
+  | 'text'
+  | 'stampStar'
+  | 'stampTick'
+  | 'stampCross'
+  | 'undo'
+  | 'redo'
+  | 'clear'
+  | 'fullscreen'
+  | AnnColor
+
 /*
  * ---------------------------------------------------------------------------
  * SERIALIZABLE ANNOTATION SHAPE (Milestone 4 will persist exactly this array).
@@ -485,6 +510,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   const [pageDraft, setPageDraft] = useState<string | null>(null)
 
   const [isFullscreen, setIsFullscreen] = useState(false)
+
+  // Which toolbar control (if any) is currently under the pointer; drives the hover
+  // tint only (hoverFilterStyle) -- never read by click handlers or annotation logic.
+  // null = nothing hovered, matching editingId/selectedId below.
+  const [hoverKey, setHoverKey] = useState<ToolbarHoverKey | null>(null)
 
   // Annotation state. `annotations` IS the array that gets saved in Milestone 4.
   // Seeds from initialAnnotations at mount (falls back to the shared empty array
@@ -2031,7 +2061,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canZoomOut}
           aria-label="Zoom out"
           title="Zoom out"
-          style={iconButtonStyle(canZoomOut)}
+          onMouseEnter={() => setHoverKey('zoomOut')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'zoomOut' ? null : k))}
+          style={{ ...iconButtonStyle(canZoomOut), ...hoverFilterStyle(hoverKey === 'zoomOut', canZoomOut) }}
         >
           <ZoomOut size={16} />
         </button>
@@ -2046,7 +2078,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canZoomIn}
           aria-label="Zoom in"
           title="Zoom in"
-          style={iconButtonStyle(canZoomIn)}
+          onMouseEnter={() => setHoverKey('zoomIn')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'zoomIn' ? null : k))}
+          style={{ ...iconButtonStyle(canZoomIn), ...hoverFilterStyle(hoverKey === 'zoomIn', canZoomIn) }}
         >
           <ZoomIn size={16} />
         </button>
@@ -2063,7 +2097,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!isReady}
           aria-pressed={fitMode}
           title="Fit page to width"
-          style={toggleButtonStyle(fitMode, !isReady)}
+          onMouseEnter={() => setHoverKey('fitWidth')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'fitWidth' ? null : k))}
+          style={{ ...toggleButtonStyle(fitMode, !isReady), ...hoverFilterStyle(hoverKey === 'fitWidth', isReady) }}
         >
           <MoveHorizontal size={16} />
           Fit width
@@ -2078,7 +2114,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canPrev}
           aria-label="Previous page"
           title="Previous page"
-          style={iconButtonStyle(canPrev)}
+          onMouseEnter={() => setHoverKey('prevPage')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'prevPage' ? null : k))}
+          style={{ ...iconButtonStyle(canPrev), ...hoverFilterStyle(hoverKey === 'prevPage', canPrev) }}
         >
           <ChevronLeft size={16} />
         </button>
@@ -2134,7 +2172,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canNext}
           aria-label="Next page"
           title="Next page"
-          style={iconButtonStyle(canNext)}
+          onMouseEnter={() => setHoverKey('nextPage')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'nextPage' ? null : k))}
+          style={{ ...iconButtonStyle(canNext), ...hoverFilterStyle(hoverKey === 'nextPage', canNext) }}
         >
           <ChevronRight size={16} />
         </button>
@@ -2153,7 +2193,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'cursor'}
           aria-label="Select / scroll"
           title="Select / scroll"
-          style={toolButtonStyle(tool === 'cursor', !isReady)}
+          onMouseEnter={() => setHoverKey('cursor')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'cursor' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'cursor', !isReady), ...hoverFilterStyle(hoverKey === 'cursor', isReady) }}
         >
           <MousePointer2 size={16} />
         </button>
@@ -2164,7 +2206,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'pen'}
           aria-label="Pen"
           title="Pen (draw)"
-          style={toolButtonStyle(tool === 'pen', !isReady)}
+          onMouseEnter={() => setHoverKey('pen')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'pen' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'pen', !isReady), ...hoverFilterStyle(hoverKey === 'pen', isReady) }}
         >
           <Pencil size={16} />
         </button>
@@ -2175,7 +2219,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'highlighter'}
           aria-label="Highlighter"
           title="Highlighter"
-          style={toolButtonStyle(tool === 'highlighter', !isReady)}
+          onMouseEnter={() => setHoverKey('highlighter')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'highlighter' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'highlighter', !isReady), ...hoverFilterStyle(hoverKey === 'highlighter', isReady) }}
         >
           <Highlighter size={16} />
         </button>
@@ -2186,7 +2232,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'underline'}
           aria-label="Underline"
           title="Underline"
-          style={toolButtonStyle(tool === 'underline', !isReady)}
+          onMouseEnter={() => setHoverKey('underline')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'underline' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'underline', !isReady), ...hoverFilterStyle(hoverKey === 'underline', isReady) }}
         >
           <Underline size={16} />
         </button>
@@ -2197,7 +2245,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'arrow'}
           aria-label="Arrow"
           title="Arrow"
-          style={toolButtonStyle(tool === 'arrow', !isReady)}
+          onMouseEnter={() => setHoverKey('arrow')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'arrow' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'arrow', !isReady), ...hoverFilterStyle(hoverKey === 'arrow', isReady) }}
         >
           <ArrowUpRight size={16} />
         </button>
@@ -2208,7 +2258,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'text'}
           aria-label="Text"
           title="Text box"
-          style={toolButtonStyle(tool === 'text', !isReady)}
+          onMouseEnter={() => setHoverKey('text')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'text' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'text', !isReady), ...hoverFilterStyle(hoverKey === 'text', isReady) }}
         >
           <Type size={16} />
         </button>
@@ -2219,7 +2271,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'stamp' && stampKind === 'star'}
           aria-label="Star stamp"
           title="Star stamp"
-          style={toolButtonStyle(tool === 'stamp' && stampKind === 'star', !isReady)}
+          onMouseEnter={() => setHoverKey('stampStar')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'stampStar' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'stamp' && stampKind === 'star', !isReady), ...hoverFilterStyle(hoverKey === 'stampStar', isReady) }}
         >
           <Star size={16} />
         </button>
@@ -2230,7 +2284,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'stamp' && stampKind === 'tick'}
           aria-label="Tick stamp"
           title="Tick stamp"
-          style={toolButtonStyle(tool === 'stamp' && stampKind === 'tick', !isReady)}
+          onMouseEnter={() => setHoverKey('stampTick')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'stampTick' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'stamp' && stampKind === 'tick', !isReady), ...hoverFilterStyle(hoverKey === 'stampTick', isReady) }}
         >
           <Check size={16} />
         </button>
@@ -2241,7 +2297,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           aria-pressed={tool === 'stamp' && stampKind === 'cross'}
           aria-label="Cross stamp"
           title="Cross stamp"
-          style={toolButtonStyle(tool === 'stamp' && stampKind === 'cross', !isReady)}
+          onMouseEnter={() => setHoverKey('stampCross')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'stampCross' ? null : k))}
+          style={{ ...toolButtonStyle(tool === 'stamp' && stampKind === 'cross', !isReady), ...hoverFilterStyle(hoverKey === 'stampCross', isReady) }}
         >
           <X size={16} />
         </button>
@@ -2257,6 +2315,8 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
+            onMouseEnter={() => setHoverKey(sw.value)}
+            onMouseLeave={() => setHoverKey((k) => (k === sw.value ? null : k))}
             onClick={() => {
               setColor(sw.value)
               // If a mark is editing or selected, recolour THAT mark too (any type,
@@ -2277,7 +2337,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             aria-pressed={color === sw.value}
             aria-label={sw.label}
             title={sw.label}
-            style={swatchStyle(sw.value, color === sw.value, !isReady)}
+            style={{
+              ...swatchStyle(sw.value, color === sw.value, !isReady),
+              ...hoverFilterStyle(hoverKey === sw.value, isReady),
+            }}
           />
         ))}
 
@@ -2290,7 +2353,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canUndo}
           aria-label="Undo last annotation"
           title="Undo"
-          style={iconButtonStyle(canUndo)}
+          onMouseEnter={() => setHoverKey('undo')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'undo' ? null : k))}
+          style={{ ...iconButtonStyle(canUndo), ...hoverFilterStyle(hoverKey === 'undo', canUndo) }}
         >
           <Undo2 size={16} />
         </button>
@@ -2300,7 +2365,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canRedo}
           aria-label="Redo last annotation"
           title="Redo"
-          style={iconButtonStyle(canRedo)}
+          onMouseEnter={() => setHoverKey('redo')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'redo' ? null : k))}
+          style={{ ...iconButtonStyle(canRedo), ...hoverFilterStyle(hoverKey === 'redo', canRedo) }}
         >
           <Redo2 size={16} />
         </button>
@@ -2314,7 +2381,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           disabled={!canClear}
           aria-label="Clear all annotations"
           title="Clear all"
-          style={iconButtonStyle(canClear)}
+          onMouseEnter={() => setHoverKey('clear')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'clear' ? null : k))}
+          style={{ ...iconButtonStyle(canClear), ...hoverFilterStyle(hoverKey === 'clear', canClear) }}
         >
           <Trash2 size={16} />
         </button>
@@ -2327,7 +2396,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           onClick={handleFullscreen}
           disabled={!isReady}
           title={isFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
-          style={{ ...toggleButtonStyle(isFullscreen, !isReady), marginLeft: 'auto' }}
+          onMouseEnter={() => setHoverKey('fullscreen')}
+          onMouseLeave={() => setHoverKey((k) => (k === 'fullscreen' ? null : k))}
+          style={{
+            ...toggleButtonStyle(isFullscreen, !isReady),
+            ...hoverFilterStyle(hoverKey === 'fullscreen', isReady),
+            marginLeft: 'auto',
+          }}
         >
           {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
@@ -2593,4 +2668,13 @@ const dividerStyle: CSSProperties = {
   height: 22,
   flexShrink: 0,
   backgroundColor: '#e5e7eb',
+}
+
+// Subtle hover tint layered on top of a button's base style. Returns {} when disabled
+// or not the hovered control, so disabled buttons never react to hover and every
+// button is byte-for-byte unaffected by this function existing. `filter` is a property
+// none of the four style helpers above ever set, so spreading this before or after
+// them can never clobber a value they own.
+function hoverFilterStyle(hovered: boolean, enabled: boolean): CSSProperties {
+  return hovered && enabled ? { filter: 'brightness(0.94)' } : {}
 }
