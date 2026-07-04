@@ -2185,7 +2185,24 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           <>
         <span style={dividerStyle} aria-hidden />
 
-        {/* Annotation tools */}
+        {/* Annotation tools: Cursor / Draw / Highlight / Underline / Arrow / Text as
+            ONE segmented, icon-only pill group. Each segment is UNCHANGED -- same
+            selectTool handler, toolButtonStyle active styling, aria-pressed, tooltip
+            and hoverFilterStyle; only the wrapping <div> is new. The star/tick/cross
+            stamps and the colour swatch strip below stay exactly as they are -- they
+            become the Shapes dropdown and the colour dot in separate later pieces. */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: 3,
+            borderRadius: 10,
+            border: '1px solid #e5e7eb',
+            backgroundColor: '#f9fafb',
+            flexShrink: 0,
+          }}
+        >
         <button
           type="button"
           onClick={() => selectTool('cursor')}
@@ -2264,6 +2281,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         >
           <Type size={16} />
         </button>
+        </div>
         <button
           type="button"
           onClick={() => selectStamp('star')}
