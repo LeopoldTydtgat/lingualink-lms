@@ -42,6 +42,15 @@ function toIcsDate(isoStr: string): string {
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
 }
 
+// Escape a TEXT value for ICS (RFC 5545): backslash first, then ';' ',' and newlines.
+function escapeIcsText(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r\n|\n/g, '\\n')
+}
+
 // Build local date string YYYY-MM-DD without UTC conversion.
 function toLocalDateStr(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -301,14 +310,15 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     visibleRangeRef.current = visibleRange
   }, [visibleRange])
 
-  async function fetchClassesInRange(startStr: string, endStr: string): Promise<ClassEvent[]> {
-    const { data } = await supabase
+  async function fetchClassesInRange(startStr: string, endStr?: string): Promise<ClassEvent[]> {
+    let query = supabase
       .from('lessons')
       .select(`id, scheduled_at, duration_minutes, students ( full_name )`)
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startStr)
-      .lte('scheduled_at', endStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
+    if (endStr !== undefined) query = query.lte('scheduled_at', endStr)
+    const { data } = await query
 
     if (!data) return []
     return data.map((c: any) => {
@@ -547,32 +557,30 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     setPendingDelete(null)
   }
 
-  async function exportMonthToCalendar() {
-    const ref = weekStart
-    const year = ref.getFullYear()
-    const month = ref.getMonth()
-    const monthStartStr = `${year}-${pad(month + 1)}-01T00:00:00`
-    const monthEndStr = `${toLocalDateStr(new Date(year, month + 1, 1))}T00:00:00`
-    const monthClasses = await fetchClassesInRange(monthStartStr, monthEndStr)
-    if (monthClasses.length === 0) {
-      setExportMsg('No classes this month to export')
+  async function exportClassesToCalendar() {
+    const nowIso = new Date().toISOString()
+    const upcoming = await fetchClassesInRange(nowIso)
+    if (upcoming.length === 0) {
+      setExportMsg('No upcoming classes to export')
       setTimeout(() => setExportMsg(''), 3000)
       return
     }
+    const stamp = toIcsDate(new Date().toISOString())
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//LinguaLink Online//Teacher Portal//EN',
     ]
-    monthClasses.forEach(c => {
+    upcoming.forEach(c => {
       const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString()
       lines.push(
         'BEGIN:VEVENT',
-        `UID:${c.id}`,
+        `UID:${c.id}@lingualinkonline.com`,
+        `DTSTAMP:${stamp}`,
         `DTSTART:${toIcsDate(c.scheduled_at)}`,
         `DTEND:${toIcsDate(endsAt)}`,
-        `SUMMARY:${c.student_name}`,
-        `DESCRIPTION:Class with ${c.student_name}`,
+        `SUMMARY:${escapeIcsText(c.student_name)}`,
+        `DESCRIPTION:${escapeIcsText(`Class with ${c.student_name}`)}`,
         'END:VEVENT',
       )
     })
@@ -581,7 +589,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `lingualink-classes-${year}-${pad(month + 1)}.ics`
+    a.download = `lingualink-classes-${toLocalDateStr(new Date())}.ics`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -722,7 +730,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         )}
 
         <button
-          onClick={exportMonthToCalendar}
+          onClick={exportClassesToCalendar}
           style={{
             marginLeft: 'auto',
             padding: '8px 16px',
@@ -735,11 +743,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             cursor: 'pointer',
           }}
         >
-          Export Month
+          Export Classes
         </button>
       </div>
 
-      <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', textAlign: 'right' }}>Exports all your classes for {MONTHS_SHORT[weekStart.getMonth()]} {weekStart.getFullYear()}</p>
+      <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', textAlign: 'right' }}>Exports all your upcoming classes as a calendar file</p>
 
       {exportMsg && (
         <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px', textAlign: 'right' }}>
