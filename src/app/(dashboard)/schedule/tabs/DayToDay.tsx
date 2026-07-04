@@ -30,6 +30,7 @@ const GRID_HEIGHT = SLOT_COUNT * SLOT_HEIGHT       // 836px
 // Monday-first; index-aligned with getWeekDays(weekStart) — DAY_LABELS[i] labels weekDays[i].
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
@@ -241,18 +242,26 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [actionError, setActionError] = useState('')
   const [drag, setDrag] = useState<null | { dayIdx: number; startSlot: number; endSlot: number }>(null)
   const [now, setNow] = useState<Date>(() => new Date())
+  const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
+  const [monthAnchor, setMonthAnchor] = useState<Date>(() => {
+    const n = new Date()
+    return new Date(n.getFullYear(), n.getMonth(), 1)
+  })
+  const [monthClasses, setMonthClasses] = useState<ClassEvent[]>([])
 
   // Tracks the visible range without causing the Realtime subscription to re-subscribe
   // on every week navigation. The subscription callback reads this ref at event time
   // so it always fetches the week the user is currently viewing.
   const visibleRangeRef = useRef<{ start: string; end: string } | null>(null)
 
-  // Mount-only scroll-to-08:00. 8:00 is 3 hours past START_HOUR = 6 slots * SLOT_HEIGHT.
+  // Scroll to 08:00 on mount and on every entry into week view (the grid remounts when the
+  // month view unmounts it). Keyed on viewMode only, so ordinary week navigation (weekStart
+  // changes) does not re-scroll. 8:00 is 3 hours past START_HOUR = 6 slots * SLOT_HEIGHT.
   useEffect(() => {
-    if (scrollRef.current) {
+    if (viewMode === 'week' && scrollRef.current) {
       scrollRef.current.scrollTop = (8 - START_HOUR) * 2 * SLOT_HEIGHT
     }
-  }, [])
+  }, [viewMode])
 
   // Esc clears mode (and any in-flight drag preview).
   useEffect(() => {
@@ -424,6 +433,43 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     return idx >= 0 && idx <= 6 ? idx : -1
   }, [weekStart])
 
+  // Month grid geometry: the Monday-first cell span covering monthAnchor's month.
+  // weekCount is the exact number of week-rows (4-6) so no fully-adjacent-month row shows.
+  const monthGrid = useMemo(() => {
+    const year = monthAnchor.getFullYear()
+    const month = monthAnchor.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const leadingBlanks = (monthAnchor.getDay() + 6) % 7   // Mon=0 offset of the 1st
+    const weekCount = Math.ceil((leadingBlanks + daysInMonth) / 7)
+    const gridStart = getMondayWeekStart(monthAnchor)
+    const days = Array.from({ length: weekCount * 7 }, (_, i) => addDays(gridStart, i))
+    return { gridStart, days }
+  }, [monthAnchor])
+
+  // Booked-class counts per local day (YYYY-MM-DD) for the month grid, bucketed in the
+  // same browser-local frame the week view uses in expandClassBlocks.
+  const monthClassCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of monthClasses) {
+      const key = toLocalDateStr(new Date(c.scheduled_at))
+      map.set(key, (map.get(key) ?? 0) + 1)
+    }
+    return map
+  }, [monthClasses])
+
+  // Month-mode data: fetch the full visible grid span so leading/trailing cells show
+  // truthful counts. Separate from the week fetch path, which stays unchanged.
+  useEffect(() => {
+    if (viewMode !== 'month') return
+    const { gridStart, days } = monthGrid
+    const startStr = `${toLocalDateStr(gridStart)}T00:00:00`
+    const endStr = `${toLocalDateStr(addDays(gridStart, days.length))}T00:00:00`
+    let cancelled = false
+    fetchClassesInRange(startStr, endStr).then(data => { if (!cancelled) setMonthClasses(data) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, monthGrid])
+
   function startDrag(dayIdx: number, slotIdx: number) {
     if (!mode) return
     const slotMs = weekDays[dayIdx].getTime() + (START_HOUR * 60 + slotIdx * 30) * 60_000
@@ -569,6 +615,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     ? pxFromMin(nowMin)
     : null
 
+  // Today's local midnight (month-grid today treatment) and whether the month view is on
+  // the current month (Today button disabled state in month mode). Same local basis as todayIdx.
+  const nowDate = new Date()
+  const todayMid = startOfDayLocal(nowDate)
+  const viewingCurrentMonth = monthAnchor.getFullYear() === nowDate.getFullYear() && monthAnchor.getMonth() === nowDate.getMonth()
+
   function gotoWeek(delta: number) {
     setDrag(null)
     isDraggingRef.current = false
@@ -581,10 +633,48 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     setWeekStart(getMondayWeekStart(new Date()))
   }
 
+  function gotoMonth(delta: number) {
+    setMonthAnchor(new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + delta, 1))
+  }
+
+  function goToThisMonth() {
+    const n = new Date()
+    setMonthAnchor(new Date(n.getFullYear(), n.getMonth(), 1))
+  }
+
+  // Week -> Month anchors to today's month when today falls inside the displayed week
+  // [weekStart, weekStart + 7), else to weekStart's month (the user navigated elsewhere).
+  // Computed fresh at click time so todayIdx memo staleness cannot bite. Guarded so
+  // re-clicking Month while already in month mode does not re-anchor.
+  function switchToMonth() {
+    if (viewMode === 'month') return
+    const today = new Date()
+    const todaySod = startOfDayLocal(today)
+    const weekStartSod = startOfDayLocal(weekStart)
+    const weekEndSod = startOfDayLocal(addDays(weekStart, 7))
+    const anchorDate = (todaySod >= weekStartSod && todaySod < weekEndSod) ? today : weekStart
+    setMonthAnchor(new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1))
+    setViewMode('month')
+  }
+
+  function switchToWeek() {
+    setViewMode('week')
+  }
+
+  // Clicking a month-grid day jumps to that day's week and returns to week view.
+  function openWeekForDay(day: Date) {
+    setDrag(null)
+    isDraggingRef.current = false
+    setWeekStart(getMondayWeekStart(day))
+    setViewMode('week')
+  }
+
   return (
     <div>
       {/* Mode buttons + Export */}
       <div className="flex items-center gap-3 mb-4">
+        {viewMode === 'week' && (
+          <>
         <button
           onClick={() => setMode(mode === 'available' ? null : 'available')}
           style={{
@@ -628,6 +718,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             ? 'Click or drag on the calendar to mark yourself unavailable'
             : 'Select a mode, drag to add blocks. Press Esc to exit.'}
         </span>
+          </>
+        )}
 
         <button
           onClick={exportMonthToCalendar}
@@ -668,6 +760,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       )}
 
       {/* Legend - dot pills */}
+      {viewMode === 'week' && (
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
         {[
           { color: '#FF8303', label: 'Booked class' },
@@ -685,37 +778,54 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         ))}
         <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {profile.timezone}</span>
       </div>
+      )}
 
       {/* Week navigation */}
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', padding: '0 4px' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
-            onClick={() => gotoWeek(-7)}
-            aria-label="Previous week"
+            onClick={() => (viewMode === 'month' ? gotoMonth(-1) : gotoWeek(-7))}
+            aria-label={viewMode === 'month' ? 'Previous month' : 'Previous week'}
             style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
           >
             ←
           </button>
         <button
-          onClick={() => gotoWeek(7)}
-          aria-label="Next week"
+          onClick={() => (viewMode === 'month' ? gotoMonth(1) : gotoWeek(7))}
+          aria-label={viewMode === 'month' ? 'Next month' : 'Next week'}
           style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
         >
           →
         </button>
           <button
-            onClick={goToToday}
-            disabled={todayIdx >= 0}
-            style={{ padding: '7px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '13px', fontWeight: 600, cursor: todayIdx >= 0 ? 'default' : 'pointer', opacity: todayIdx >= 0 ? 0.5 : 1 }}
+            onClick={viewMode === 'month' ? goToThisMonth : goToToday}
+            disabled={viewMode === 'month' ? viewingCurrentMonth : todayIdx >= 0}
+            style={{ padding: '7px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '13px', fontWeight: 600, cursor: (viewMode === 'month' ? viewingCurrentMonth : todayIdx >= 0) ? 'default' : 'pointer', opacity: (viewMode === 'month' ? viewingCurrentMonth : todayIdx >= 0) ? 0.5 : 1 }}
           >
             Today
           </button>
+          <div style={{ display: 'inline-flex', alignItems: 'center', padding: '2px', borderRadius: '999px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff' }}>
+            <button
+              onClick={switchToWeek}
+              style={{ padding: '6px 16px', borderRadius: '999px', border: 'none', backgroundColor: viewMode === 'week' ? '#FF8303' : 'transparent', color: viewMode === 'week' ? '#ffffff' : '#374151', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              Week
+            </button>
+            <button
+              onClick={switchToMonth}
+              style={{ padding: '6px 16px', borderRadius: '999px', border: 'none', backgroundColor: viewMode === 'month' ? '#FF8303' : 'transparent', color: viewMode === 'month' ? '#ffffff' : '#374151', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+            >
+              Month
+            </button>
+          </div>
         </div>
-        <span style={{ flex: 1, textAlign: 'center', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{formatWeekLabel(weekStart)}</span>
+        <span style={{ flex: 1, textAlign: 'center', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{viewMode === 'month' ? `${MONTHS_LONG[monthAnchor.getMonth()]} ${monthAnchor.getFullYear()}` : formatWeekLabel(weekStart)}</span>
         {/* right spacer balances the left nav group so the title stays centered */}
-        <div style={{ width: '150px' }} />
+        <div style={{ width: '310px' }} />
       </div>
 
+      {viewMode === 'week' && (
+        <>
       {/* Calendar grid */}
       <div
         ref={scrollRef}
@@ -1055,6 +1165,79 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
         Click any green or red block to remove it. Booked classes cannot be removed here.
       </p>
+        </>
+      )}
+
+      {viewMode === 'month' && (
+        <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #E0DFDC', overflow: 'hidden' }}>
+          {/* Weekday header row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {DAY_LABELS.map((label, i) => (
+              <div key={`mh-${i}`} style={{
+                textAlign: 'center',
+                padding: '8px 4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                color: '#9CA3AF',
+                backgroundColor: '#ffffff',
+                borderBottom: '1px solid #E0DFDC',
+                borderRight: i < 6 ? '1px solid #F1F1F0' : undefined,
+              }}>
+                {label.toUpperCase()}
+              </div>
+            ))}
+          </div>
+
+          {/* Day cells */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {monthGrid.days.map((day, i) => {
+              const inMonth = day.getMonth() === monthAnchor.getMonth()
+              const isToday = startOfDayLocal(day) === todayMid
+              const count = monthClassCounts.get(toLocalDateStr(day)) ?? 0
+              const col = i % 7
+              const row = Math.floor(i / 7)
+              return (
+                <div
+                  key={`mc-${i}`}
+                  onClick={() => openWeekForDay(day)}
+                  style={{
+                    minHeight: '84px',
+                    padding: '6px 7px',
+                    cursor: 'pointer',
+                    backgroundColor: isToday ? 'rgba(255, 131, 3, 0.06)' : '#ffffff',
+                    borderTop: row > 0 ? '1px solid #F1F1F0' : undefined,
+                    borderRight: col < 6 ? '1px solid #F1F1F0' : undefined,
+                  }}
+                >
+                  <div style={{
+                    fontSize: '13px',
+                    fontWeight: isToday ? 700 : 600,
+                    color: isToday ? '#FF8303' : (inMonth ? '#111827' : '#C7CBD1'),
+                  }}>
+                    {day.getDate()}
+                  </div>
+                  {count > 0 && (
+                    <div style={{ marginTop: '6px' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '1px 7px',
+                        borderRadius: '999px',
+                        backgroundColor: '#FF8303',
+                        color: '#ffffff',
+                        fontSize: '10.5px',
+                        fontWeight: 600,
+                      }}>
+                        {count} {count === 1 ? 'class' : 'classes'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {pendingDelete && (
         <div style={{
