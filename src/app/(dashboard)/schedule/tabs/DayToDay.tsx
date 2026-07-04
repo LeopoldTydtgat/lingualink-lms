@@ -588,11 +588,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         <button
           onClick={() => setMode(mode === 'available' ? null : 'available')}
           style={{
-            padding: '8px 16px',
+            padding: '8px 18px',
             backgroundColor: mode === 'available' ? '#15803D' : '#16A34A',
             color: '#ffffff',
             border: mode === 'available' ? '2px solid #14532D' : '2px solid transparent',
-            borderRadius: '6px',
+            borderRadius: '999px',
             fontSize: '13px',
             fontWeight: '600',
             cursor: 'pointer',
@@ -605,11 +605,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         <button
           onClick={() => setMode(mode === 'unavailable' ? null : 'unavailable')}
           style={{
-            padding: '8px 16px',
+            padding: '8px 18px',
             backgroundColor: mode === 'unavailable' ? '#B91C1C' : '#DC2626',
             color: '#ffffff',
             border: mode === 'unavailable' ? '2px solid #7F1D1D' : '2px solid transparent',
-            borderRadius: '6px',
+            borderRadius: '999px',
             fontSize: '13px',
             fontWeight: '600',
             cursor: 'pointer',
@@ -667,8 +667,27 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </p>
       )}
 
+      {/* Legend - dot pills */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        {[
+          { color: '#FF8303', label: 'Booked class' },
+          { color: '#16A34A', label: 'Available (specific)' },
+          { color: '#94A3B8', label: 'Weekly availability' },
+          { color: '#DC2626', label: 'Unavailable' },
+        ].map(item => (
+          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff' }}>
+            <div style={{
+              width: '8px', height: '8px', borderRadius: '50%',
+              backgroundColor: item.color,
+            }} />
+            <span style={{ fontSize: '12px', color: '#374151' }}>{item.label}</span>
+          </div>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {profile.timezone}</span>
+      </div>
+
       {/* Week navigation */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', padding: '0 4px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', padding: '0 4px' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={() => gotoWeek(-7)}
@@ -677,6 +696,13 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           >
             ←
           </button>
+        <button
+          onClick={() => gotoWeek(7)}
+          aria-label="Next week"
+          style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
+        >
+          →
+        </button>
           <button
             onClick={goToToday}
             disabled={todayIdx >= 0}
@@ -685,14 +711,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             Today
           </button>
         </div>
-        <span style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>{formatWeekLabel(weekStart)}</span>
-        <button
-          onClick={() => gotoWeek(7)}
-          aria-label="Next week"
-          style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
-        >
-          →
-        </button>
+        <span style={{ flex: 1, textAlign: 'center', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{formatWeekLabel(weekStart)}</span>
+        {/* right spacer balances the left nav group so the title stays centered */}
+        <div style={{ width: '150px' }} />
       </div>
 
       {/* Calendar grid */}
@@ -1029,25 +1050,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             )
           })}
         </div>
-      </div>
-
-      {/* Legend - dot pills */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
-        {[
-          { color: '#FF8303', label: 'Booked class' },
-          { color: '#16A34A', label: 'Available (specific)' },
-          { color: '#94A3B8', label: 'Weekly availability' },
-          { color: '#DC2626', label: 'Unavailable' },
-        ].map(item => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff' }}>
-            <div style={{
-              width: '8px', height: '8px', borderRadius: '50%',
-              backgroundColor: item.color,
-            }} />
-            <span style={{ fontSize: '12px', color: '#374151' }}>{item.label}</span>
-          </div>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {profile.timezone}</span>
       </div>
 
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
