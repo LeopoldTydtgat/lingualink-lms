@@ -2259,13 +2259,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             onPointerDown={(e) => e.preventDefault()}
             onClick={() => {
               setColor(sw.value)
-              // If a box is editing or selected, recolour THAT box too (undoable).
+              // If a mark is editing or selected, recolour THAT mark too (any type,
+              // undoable). Only snapshot history when the colour actually changes,
+              // so re-picking a mark's current colour is a true no-op.
               const target = editingId ?? selectedId
               if (target) {
-                recordHistory()
-                setAnnotations((anns) =>
-                  anns.map((a) => (a.id === target && a.type === 'text' ? { ...a, color: sw.value } : a)),
-                )
+                const current = annotationsRef.current.find((a) => a.id === target)
+                if (current && current.color !== sw.value) {
+                  recordHistory()
+                  setAnnotations((anns) =>
+                    anns.map((a) => (a.id === target ? { ...a, color: sw.value } : a)),
+                  )
+                }
               }
             }}
             disabled={!isReady}
