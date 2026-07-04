@@ -667,49 +667,29 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </p>
       )}
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {[
-          { color: '#FF8303', label: 'Booked class' },
-          { color: '#DCFCE7', border: '#16A34A', label: 'Available (specific)' },
-          { color: '#EDF2F7', border: '#C9D4E2', label: 'Weekly availability' },
-          { color: '#FEE2E2', border: '#DC2626', label: 'Unavailable' },
-        ].map(item => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{
-              width: '14px', height: '14px', borderRadius: '3px',
-              backgroundColor: item.color,
-              border: item.border ? `1px solid ${item.border}` : 'none',
-            }} />
-            <span style={{ fontSize: '12px', color: '#6B7280' }}>{item.label}</span>
-          </div>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#6B7280' }}>All times in {profile.timezone}</span>
-      </div>
-
       {/* Week navigation */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', padding: '0 4px' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={() => gotoWeek(-7)}
             aria-label="Previous week"
-            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+            style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
           >
             ←
           </button>
           <button
             onClick={goToToday}
             disabled={todayIdx >= 0}
-            style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: todayIdx >= 0 ? 'default' : 'pointer', opacity: todayIdx >= 0 ? 0.5 : 1 }}
+            style={{ padding: '7px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '13px', fontWeight: 600, cursor: todayIdx >= 0 ? 'default' : 'pointer', opacity: todayIdx >= 0 ? 0.5 : 1 }}
           >
             Today
           </button>
         </div>
-        <span style={{ fontSize: '15px', fontWeight: '600', color: '#374151' }}>{formatWeekLabel(weekStart)}</span>
+        <span style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>{formatWeekLabel(weekStart)}</span>
         <button
           onClick={() => gotoWeek(7)}
           aria-label="Next week"
-          style={{ padding: '6px 14px', borderRadius: '6px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}
+          style={{ width: '34px', height: '34px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff', color: '#374151', fontSize: '15px', cursor: 'pointer' }}
         >
           →
         </button>
@@ -738,7 +718,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             borderBottom: '1px solid #E0DFDC',
             borderRight: '1px solid #F1F1F0',
             borderTopLeftRadius: '8px',
-            minHeight: '54px',
+            minHeight: '66px',
           }} />
 
           {/* Sticky header — day cells */}
@@ -752,15 +732,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 borderBottom: isHeaderToday ? undefined : '1px solid #E0DFDC',
                 borderRight: '1px solid #F1F1F0',
                 textAlign: 'center',
-                padding: '10px 4px',
-                color: isHeaderToday ? '#FF8303' : '#2C2C2A',
-                fontWeight: 600,
-                fontSize: '13px',
-                lineHeight: 1.2,
+                padding: '8px 4px',
               }}>
-                <div>{DAY_LABELS[i]}</div>
-                <div style={{ fontSize: '11px', fontWeight: 500, color: isHeaderToday ? '#FF8303' : '#5F5E5A' }}>
-                  {MONTHS_SHORT[d.getMonth()]} {d.getDate()}
+                <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', color: isHeaderToday ? '#FF8303' : '#9CA3AF' }}>
+                  {DAY_LABELS[i].toUpperCase()}
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 700, lineHeight: 1.1, color: isHeaderToday ? '#FF8303' : '#111827' }}>
+                  {d.getDate()}
+                </div>
+                <div style={{ fontSize: '11px', fontWeight: 500, color: isHeaderToday ? '#FF8303' : '#9CA3AF' }}>
+                  {MONTHS_SHORT[d.getMonth()]}
                 </div>
               </div>
             )
@@ -793,15 +774,20 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             {todayIdx >= 0 && nowPx !== null && (
               <div style={{
                 position: 'absolute',
-                top: nowPx - 5,
-                right: -1,
-                width: 0, height: 0,
-                borderTop: '5px solid transparent',
-                borderBottom: '5px solid transparent',
-                borderLeft: '7px solid #FD5602',
+                top: nowPx - 8,
+                right: '2px',
+                fontSize: '10px',
+                fontWeight: 700,
+                color: '#FD5602',
+                backgroundColor: '#ffffff',
+                padding: '1px 4px',
+                borderRadius: '4px',
                 pointerEvents: 'none',
                 zIndex: 6,
-              }} />
+                whiteSpace: 'nowrap',
+              }}>
+                {formatTime(nowMin)}
+              </div>
             )}
           </div>
 
@@ -815,13 +801,10 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 position: 'relative',
                 height: GRID_HEIGHT,
                 borderRight: '1px solid #F1F1F0',
-                backgroundColor: 'transparent',
+                backgroundColor: isToday ? 'rgba(255, 131, 3, 0.045)' : 'transparent',
               }}>
-                {/* Slot cells (38) — drag interaction + past-slot fade */}
+                {/* Slot cells (38) - drag interaction */}
                 {Array.from({ length: SLOT_COUNT }, (_, slotIdx) => {
-                  const slotMs = day.getTime() + (START_HOUR * 60 + slotIdx * 30) * 60_000
-                  const isPast = slotMs < Date.now()
-                  const cellBg = isPast ? '#F9FAFB' : 'transparent'
                   const onTheHour = (slotIdx % 2) === 0
                   return (
                     <div
@@ -835,7 +818,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         right: 0,
                         height: SLOT_HEIGHT,
                         borderTop: onTheHour ? '1px solid #E9EAEC' : '1px solid #F4F5F6',
-                        backgroundColor: cellBg,
+                        backgroundColor: 'transparent',
                         zIndex: 0,
                       }}
                     />
@@ -1018,22 +1001,53 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   </div>
                 )}
 
-                {/* Now indicator (today only) */}
+                {/* Now indicator (today only) - line plus a dot on its left end */}
                 {isToday && nowPx !== null && (
-                  <div style={{
-                    position: 'absolute',
-                    top: nowPx - 1,
-                    left: 0, right: 0,
-                    height: '2px',
-                    backgroundColor: '#FD5602',
-                    pointerEvents: 'none',
-                    zIndex: 5,
-                  }} />
+                  <>
+                    <div style={{
+                      position: 'absolute',
+                      top: nowPx - 1,
+                      left: 0, right: 0,
+                      height: '2px',
+                      backgroundColor: '#FD5602',
+                      pointerEvents: 'none',
+                      zIndex: 5,
+                    }} />
+                    <div style={{
+                      position: 'absolute',
+                      top: nowPx - 4,
+                      left: '-4px',
+                      width: '8px', height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: '#FD5602',
+                      pointerEvents: 'none',
+                      zIndex: 5,
+                    }} />
+                  </>
                 )}
               </div>
             )
           })}
         </div>
+      </div>
+
+      {/* Legend - dot pills */}
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+        {[
+          { color: '#FF8303', label: 'Booked class' },
+          { color: '#16A34A', label: 'Available (specific)' },
+          { color: '#94A3B8', label: 'Weekly availability' },
+          { color: '#DC2626', label: 'Unavailable' },
+        ].map(item => (
+          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff' }}>
+            <div style={{
+              width: '8px', height: '8px', borderRadius: '50%',
+              backgroundColor: item.color,
+            }} />
+            <span style={{ fontSize: '12px', color: '#374151' }}>{item.label}</span>
+          </div>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {profile.timezone}</span>
       </div>
 
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
