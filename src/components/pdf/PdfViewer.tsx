@@ -2327,7 +2327,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           onClick={handleFullscreen}
           disabled={!isReady}
           title={isFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
-          style={{ ...toggleButtonStyle(true, !isReady), marginLeft: 'auto' }}
+          style={{ ...toggleButtonStyle(isFullscreen, !isReady), marginLeft: 'auto' }}
         >
           {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
@@ -2481,9 +2481,9 @@ function iconButtonStyle(active: boolean): CSSProperties {
     width: 34,
     height: 34,
     borderRadius: 8,
-    border: `1px solid ${active ? ORANGE : '#e5e7eb'}`,
-    backgroundColor: active ? '#fff7ed' : '#f9fafb',
-    color: active ? ORANGE : '#9ca3af',
+    border: `1px solid ${active ? '#d1d5db' : '#e5e7eb'}`,
+    backgroundColor: active ? '#ffffff' : '#f9fafb',
+    color: active ? '#4b5563' : '#9ca3af',
     cursor: active ? 'pointer' : 'not-allowed',
   }
 }
