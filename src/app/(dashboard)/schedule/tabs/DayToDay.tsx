@@ -854,19 +854,19 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       position: 'absolute',
                       top, left: 0, right: 0, height,
                       backgroundColor: '#EDF2F7',
-                      border: '1px solid #C9D4E2',
-                      borderRadius: '6px',
+                      border: '1px dashed #C9D4E2',
+                      borderRadius: '8px',
                       pointerEvents: 'none',
                       zIndex: 1,
                     }}>
                       {label && (label.twoLine ? (
                         <div style={{ position: 'absolute', top: labelTop, left: 0, right: 0, padding: '5px 7px', overflow: 'hidden' }}>
-                          <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#475569', lineHeight: 1.2 }}>Weekly availability</div>
-                          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3, marginTop: '2px' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ fontSize: '11.5px', fontWeight: 500, color: '#475569', lineHeight: 1.2 }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3, marginTop: '2px' }}>Weekly availability</div>
                         </div>
                       ) : (
                         <div style={{ position: 'absolute', top: labelTop, left: 0, right: 0, padding: '5px 7px', overflow: 'hidden', fontSize: '11.5px', fontWeight: 500, color: '#475569', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                          Weekly availability
+                          {timeRangeLabel(b.startMin, b.endMin)}
                         </div>
                       ))}
                     </div>
@@ -878,6 +878,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  const greenDot = <div style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16A34A', flexShrink: 0 }} />
                   return (
                     <div
                       key={`av-${b.recordId}`}
@@ -885,19 +886,33 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#DCFCE7',
-                        border: '1px solid #16A34A',
-                        borderRadius: '6px',
-                        color: '#15803D',
-                        fontSize: '11px',
-                        padding: '2px 4px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '8px',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        padding: '3px 6px',
                         cursor: 'pointer',
                         zIndex: 2,
                         overflow: 'hidden',
-                        lineHeight: 1.2,
                       }}
                     >
-                      {timeRangeLabel(b.startMin, b.endMin)}
+                      {height >= 44 ? (
+                        <>
+                          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                            {greenDot}
+                            <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#374151' }}>Available</span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#6B7280' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          {height >= 68 && (
+                            <div style={{ fontSize: '10.5px', color: '#9CA3AF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Available for bookings</div>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                          {greenDot}
+                          <span style={{ fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -907,6 +922,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  const redDot = <div style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#DC2626', flexShrink: 0 }} />
                   return (
                     <div
                       key={`un-${b.recordId}`}
@@ -914,19 +930,29 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#FEE2E2',
-                        border: '1px solid #DC2626',
-                        borderRadius: '6px',
-                        color: '#B91C1C',
-                        fontSize: '11px',
-                        padding: '2px 4px',
+                        backgroundColor: '#FFF5F5',
+                        border: '1px solid #FECACA',
+                        borderRadius: '8px',
+                        padding: '3px 6px',
                         cursor: 'pointer',
                         zIndex: 2,
                         overflow: 'hidden',
-                        lineHeight: 1.2,
                       }}
                     >
-                      {timeRangeLabel(b.startMin, b.endMin)}
+                      {height >= 44 ? (
+                        <>
+                          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                            {redDot}
+                            <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#B91C1C' }}>Unavailable</span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#B91C1C' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                        </>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                          {redDot}
+                          <span style={{ fontSize: '11px', color: '#B91C1C', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -936,23 +962,33 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  // Past classes mute to grey - end instant compared to the 60s now tick.
+                  const isPastClass = day.getTime() + b.endMin * 60_000 < now.getTime()
                   return (
                     <div key={`cl-${i}`} title={b.studentName} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
-                      backgroundColor: '#FF8303',
-                      border: '1px solid rgba(255, 131, 3, 0.55)',
-                      borderRadius: '6px',
-                      color: '#ffffff',
-                      fontSize: '11px',
-                      padding: '2px 4px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #E5E7EB',
+                      borderLeft: isPastClass ? '3px solid #D6D3CE' : '3px solid #FF8303',
+                      borderRadius: '8px',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                      padding: '3px 6px',
                       cursor: 'default',
                       zIndex: 3,
                       overflow: 'hidden',
-                      lineHeight: 1.1,
                     }}>
-                      <div style={{ color: '#ffffff', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
-                      <div style={{ color: '#FFE3C4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                      {height >= 44 ? (
+                        <>
+                          <div style={{ fontSize: '11.5px', fontWeight: 600, color: isPastClass ? '#9CA3AF' : '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
+                          <div style={{ fontSize: '11px', color: isPastClass ? '#9CA3AF' : '#6B7280' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                        </>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '10.5px', fontWeight: 600, color: isPastClass ? '#9CA3AF' : '#111827', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{b.studentName}</span>
+                          <span style={{ fontSize: '10.5px', color: isPastClass ? '#9CA3AF' : '#6B7280', whiteSpace: 'nowrap', flexShrink: 0 }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -968,7 +1004,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       ? 'rgba(220,252,231,0.85)'
                       : 'repeating-linear-gradient(45deg, rgba(220,38,38,0.16) 0 6px, rgba(220,38,38,0.04) 6px 12px)',
                     border: `1px dashed ${mode === 'available' ? '#16A34A' : '#DC2626'}`,
-                    borderRadius: '6px',
+                    borderRadius: '8px',
                     pointerEvents: 'none',
                     zIndex: 4,
                     display: 'flex',
