@@ -158,6 +158,7 @@ type ToolbarHoverKey =
   | 'redo'
   | 'clear'
   | 'fullscreen'
+  | 'colorDot'
   | AnnColor
 
 /*
@@ -495,6 +496,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // calls the current callback and can depend only on the annotations array (a
   // new function identity from the parent never re-fires it on its own).
   const onAnnotationsChangeRef = useRef<((annotations: Annotation[]) => void) | undefined>(onAnnotationsChange)
+  // Wraps the colour-dot trigger + popover so an outside pointer-down can be
+  // detected (target not contained) and close the open popover. See the colorOpen
+  // effect below.
+  const colorMenuRef = useRef<HTMLDivElement | null>(null)
 
   const [status, setStatus] = useState<Status>('loading')
   const [errorMsg, setErrorMsg] = useState('')
@@ -535,6 +540,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // while the three toolbar buttons choose star / tick / cross.
   const [stampKind, setStampKind] = useState<'star' | 'tick' | 'cross'>('star')
   const [color, setColor] = useState<AnnColor>('#000000')
+  // Whether the colour popover (the single dot that folds the 8 swatches) is
+  // open. Purely presentational: it gates the popover and never touches the
+  // selected colour, any mark, or the save path.
+  const [colorOpen, setColorOpen] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
   // A text box is either being EDITED (textarea) or SELECTED (outlined, with a
   // control bar) -- never both. These two ids are kept mutually exclusive by
@@ -987,6 +996,29 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [showClearConfirm])
+
+  // Close the colour popover on Escape or an outside pointer-down. Mirrors the
+  // clear-confirm Escape effect above: listeners are attached ONLY while the
+  // popover is open. Picking a swatch does NOT close it (a mark can be tried
+  // against several colours in a row); it closes on Escape, an outside
+  // pointer-down (ref-gated -- a press inside the dot/popover wrapper is
+  // ignored), or clicking the dot again. Presentation only.
+  useEffect(() => {
+    if (!colorOpen) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setColorOpen(false)
+    }
+    function onPointerDown(e: PointerEvent) {
+      const wrap = colorMenuRef.current
+      if (wrap && !wrap.contains(e.target as Node)) setColorOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [colorOpen])
 
   // Delete / Backspace removes the selected box. Attached ONLY while a box is
   // selected and NOT being edited, so it never competes with the textarea (where
@@ -2324,43 +2356,85 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
         <span style={dividerStyle} aria-hidden />
 
-        {/* Colour (standard annotation palette). preventDefault on mouse/pointer
-            down so clicking a swatch while editing does not blur (and thus
-            commit/exit) the textarea -- same trick as the control-bar buttons. */}
-        {COLOR_SWATCHES.map((sw) => (
+        {/* Colour: the 8-swatch palette folded behind ONE round colour-dot
+            trigger. The dot is filled with the current colour and uses the swatch
+            styling (swatchStyle) so it sits alongside the tool / stamp controls.
+            CRITICAL: the dot -- exactly like every swatch -- preventDefaults its
+            mouse AND pointer down; without it, opening the popover while a text
+            box is mid-edit would blur the textarea, drop editingId, and silently
+            break the recolour-the-editing-mark path. The popover stays open across
+            picks (so a mark can be tried against several colours in a row) and
+            closes only on Escape, an outside pointer-down, or clicking the dot
+            again. The 8 swatch buttons inside are UNCHANGED from the old strip. */}
+        <div ref={colorMenuRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
           <button
-            key={sw.value}
             type="button"
             onMouseDown={(e) => e.preventDefault()}
             onPointerDown={(e) => e.preventDefault()}
-            onMouseEnter={() => setHoverKey(sw.value)}
-            onMouseLeave={() => setHoverKey((k) => (k === sw.value ? null : k))}
-            onClick={() => {
-              setColor(sw.value)
-              // If a mark is editing or selected, recolour THAT mark too (any type,
-              // undoable). Only snapshot history when the colour actually changes,
-              // so re-picking a mark's current colour is a true no-op.
-              const target = editingId ?? selectedId
-              if (target) {
-                const current = annotationsRef.current.find((a) => a.id === target)
-                if (current && current.color !== sw.value) {
-                  recordHistory()
-                  setAnnotations((anns) =>
-                    anns.map((a) => (a.id === target ? { ...a, color: sw.value } : a)),
-                  )
-                }
-              }
-            }}
+            onClick={() => setColorOpen((o) => !o)}
             disabled={!isReady}
-            aria-pressed={color === sw.value}
-            aria-label={sw.label}
-            title={sw.label}
-            style={{
-              ...swatchStyle(sw.value, color === sw.value, !isReady),
-              ...hoverFilterStyle(hoverKey === sw.value, isReady),
-            }}
+            aria-haspopup="true"
+            aria-expanded={colorOpen}
+            aria-label="Colour"
+            title="Colour"
+            onMouseEnter={() => setHoverKey('colorDot')}
+            onMouseLeave={() => setHoverKey((k) => (k === 'colorDot' ? null : k))}
+            style={{ ...swatchStyle(color, colorOpen, !isReady), ...hoverFilterStyle(hoverKey === 'colorDot', isReady) }}
           />
-        ))}
+          {colorOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                zIndex: 20,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 26px)',
+                gap: 6,
+                padding: 8,
+                backgroundColor: '#ffffff',
+                border: '1px solid #d1d5db',
+                borderRadius: 8,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+              }}
+            >
+              {COLOR_SWATCHES.map((sw) => (
+                <button
+                  key={sw.value}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setHoverKey(sw.value)}
+                  onMouseLeave={() => setHoverKey((k) => (k === sw.value ? null : k))}
+                  onClick={() => {
+                    setColor(sw.value)
+                    // If a mark is editing or selected, recolour THAT mark too (any type,
+                    // undoable). Only snapshot history when the colour actually changes,
+                    // so re-picking a mark's current colour is a true no-op.
+                    const target = editingId ?? selectedId
+                    if (target) {
+                      const current = annotationsRef.current.find((a) => a.id === target)
+                      if (current && current.color !== sw.value) {
+                        recordHistory()
+                        setAnnotations((anns) =>
+                          anns.map((a) => (a.id === target ? { ...a, color: sw.value } : a)),
+                        )
+                      }
+                    }
+                  }}
+                  disabled={!isReady}
+                  aria-pressed={color === sw.value}
+                  aria-label={sw.label}
+                  title={sw.label}
+                  style={{
+                    ...swatchStyle(sw.value, color === sw.value, !isReady),
+                    ...hoverFilterStyle(hoverKey === sw.value, isReady),
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
         <span style={dividerStyle} aria-hidden />
 
