@@ -1,3 +1,28 @@
+## Session 183 - 05 July 2026 - Chrome-free live annotation page to stop screen-share leaks
+
+### What was built
+- The teacher's PDF annotation autosave logic was extracted out of the study sheet detail page into its own component, so it could be reused on a new page without duplicating it.
+- A new chrome-free route group was added alongside the main dashboard. Its layout checks the user is logged in the same way the dashboard does, with no left menu, top header, or right-hand panel at all.
+- The study sheet data loading logic (auth check, fetching the sheet, exercises, and any existing annotations) was pulled out into one shared function, so both the normal study sheet page and the new chrome-free page load data the exact same way.
+- A new page was added under the chrome-free route group that reuses the same student sheet component as before, but with a flag that hides the "Back to Study Sheets" button, since that button would otherwise navigate a teacher straight back into the full dashboard mid-class.
+- A button was added to the normal study sheet page, "Open Live Window", which opens the chrome-free page in a small separate popup window with no browser tabs or bookmarks bar. This is the window a teacher shares in Teams during a live lesson, so the student never sees billing figures or another student's name on screen.
+
+### Break/Fix Log
+Issue 1: When the chrome-free layout was first built, it copied the dashboard's login check but skipped a second check the dashboard also does, which confirms the logged-in user still has a valid profile. Without that second check, a narrow timing gap existed where a student could reach a teacher-only page for a short window after switching between portals.
+Cause: the chrome-free layout was written to only skip the parts that draw the menus, but it accidentally skipped a security check bundled in with them.
+Fix: the same profile check used on the dashboard was added to the chrome-free layout as well, so both layouts now protect equally.
+Lesson: when copying a layout to strip out its visual chrome, every check inside it needs to be looked at individually, since not everything in there is just visual.
+
+Issue 2: Testing this feature as a student account (to confirm students get blocked) crashed the site with an error instead of sending the student back to their own portal.
+Cause: the code that redirects a wrongly-placed user back to their own portal was building that address in a shortened form that only works once the site is live on its real domain, not while testing locally.
+Fix: that address is now always built as a full, complete web address, which works both locally and once live.
+Lesson: a redirect that only gets exercised in one environment can hide a bug for a long time, so testing the "wrong user, wrong portal" case locally, not just on the live site, that catches it earlier.
+
+### Session result
+Teachers can now open a study sheet during a live lesson and click one button to pop out a separate, stripped-down window showing only the PDF and the annotation tools, with nothing else on screen. That window is what gets shared in Teams, so a student never sees the teacher's earnings or another student's details during a live class. All five planned checks were run by hand: the chrome-free page renders correctly with nothing extra, the original study sheet page still works exactly as before, a logged-out visitor gets sent to the login page, a student account gets sent back to their own portal, and drawing on the chrome-free page saves correctly to the database. This closes out the confidentiality issue that was blocking go-live.
+
+---
+
 ## Session 182 - 03-04 July 2026 - PDF annotation toolset expansion: highlighter, underline, arrow, and stamps
 
 ### What was built
