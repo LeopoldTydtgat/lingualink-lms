@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock } from 'lucide-react'
 import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -679,19 +679,52 @@ function StepDuration({
   onSelect: (minutes: number) => void
 }) {
   const options = [
-    { minutes: 30, label: '30 minutes', hours: 0.5 },
-    { minutes: 60, label: '1 hour', hours: 1 },
-    { minutes: 90, label: '1.5 hours', hours: 1.5 },
+    { minutes: 30, label: '30 minutes', hours: 0.5, description: 'Great for quick practice and focused conversations.' },
+    { minutes: 60, label: '1 hour', hours: 1, description: 'Ideal for deeper learning and real progress.' },
+    { minutes: 90, label: '1.5 hours', hours: 1.5, description: 'Perfect for in-depth sessions and specialised topics.' },
   ]
 
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
-        Choose duration
-      </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-        You have <strong>{formatHours(hoursRemaining)}</strong> remaining in your training.
-      </p>
+      {/* Header row: title + subtitle on the left, training-balance chip on the right */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '16px',
+          marginBottom: '24px',
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+            Choose your lesson duration
+          </h2>
+          <p style={{ fontSize: '14px', color: '#6b7280' }}>
+            Select the duration that works best for you.
+          </p>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            flexShrink: 0,
+            backgroundColor: '#ffffff',
+            border: '1px solid #E0DFDC',
+            borderRadius: '10px',
+            padding: '8px 14px',
+          }}
+        >
+          <Clock size={18} color="#FF8303" style={{ flexShrink: 0 }} />
+          <div>
+            <p style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.3' }}>Training balance</p>
+            <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827', lineHeight: '1.3' }}>
+              {formatHours(hoursRemaining)}
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {options.map((option) => {
@@ -706,55 +739,85 @@ function StepDuration({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
+                gap: '16px',
                 padding: '16px 20px',
                 borderRadius: '10px',
                 border: '2px solid',
-                borderColor: isSelected ? '#FF8303' : canBook ? '#E0DFDC' : '#f3f4f6',
-                backgroundColor: isSelected ? '#fff7ed' : canBook ? '#ffffff' : '#fafafa',
+                borderColor: isSelected ? '#FF8303' : '#E0DFDC',
+                backgroundColor: '#ffffff',
                 cursor: canBook ? 'pointer' : 'not-allowed',
                 opacity: canBook ? 1 : 0.5,
+                textAlign: 'left',
               }}
             >
-              <div>
-                <p
-                  style={{
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    color: canBook ? '#111827' : '#9ca3af',
-                    marginBottom: '2px',
-                  }}
-                >
+              {/* Icon holder — neutral grey circle with an orange clock */}
+              <div
+                style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Clock size={20} color="#FF8303" />
+              </div>
+
+              {/* Title + one-line description */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: '15px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
                   {option.label}
                 </p>
-                <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  Uses {formatHours(option.hours)} from your balance
+                <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
+                  {option.description}
                 </p>
               </div>
-              {!canBook && (
+
+              {/* Right cluster: insufficient-hours message, or the per-option deduction + selection check */}
+              {!canBook ? (
                 <span
                   style={{
                     fontSize: '12px',
                     color: '#FD5602',
                     fontWeight: '500',
+                    flexShrink: 0,
                   }}
                 >
                   Not enough hours
                 </span>
-              )}
-              {isSelected && canBook && (
-                <div
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#FF8303',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Check size={14} color="#ffffff" />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+                  <div style={{ width: '1px', height: '36px', backgroundColor: '#E0DFDC' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Clock size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: '13px', fontWeight: '700', color: '#111827', lineHeight: '1.3' }}>
+                        Uses {formatHours(option.hours)}
+                      </p>
+                      <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.3' }}>
+                        from your balance
+                      </p>
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <div
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        backgroundColor: '#FF8303',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Check size={14} color="#ffffff" />
+                    </div>
+                  )}
                 </div>
               )}
             </button>
@@ -788,12 +851,14 @@ function StepDateTime({
   studentTimezone,
   durationMinutes,
   onSelect,
+  onAdvance,
   selectedStartIso,
 }: {
   teacherId: string
   studentTimezone: string
   durationMinutes: number
   onSelect: (isoString: string | null) => void
+  onAdvance: () => void
   selectedStartIso: string | null
 }) {
   const slotsNeeded = durationMinutes / 30
@@ -803,6 +868,28 @@ function StepDateTime({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedDay, setSelectedDay] = useState<string | null>(null) // a YYYY-MM-DD dateKey
+
+  // Pending auto-advance timer after a start-time click. The short delay lets the
+  // span-pill selection paint before the wizard moves on; the latest slot click
+  // always wins (the previous timer is cleared and restarted). Any in-step
+  // navigation — a day switch or a week arrow — cancels a pending advance: the
+  // user is still browsing, and a day switch runs onSelect(null), so a queued
+  // advance would otherwise fire into a null start and render a blank Confirm
+  // step. The timer is also cleared on unmount, which is every step change (this
+  // component only renders on the date-&-time step), so it can never fire after
+  // the user has navigated away.
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingAdvance = () => {
+    if (advanceTimerRef.current !== null) {
+      clearTimeout(advanceTimerRef.current)
+      advanceTimerRef.current = null
+    }
+  }
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current)
+    }
+  }, [])
 
   // Fetch availability slots from the API whenever week or teacher changes.
   //
@@ -975,6 +1062,7 @@ function StepDateTime({
     selectedStart !== null ? new Date(selectedStart.getTime() + durationMinutes * 60000) : null
 
   const goBack = () => {
+    cancelPendingAdvance() // browsing weeks is navigation, never a confirm
     const prev = new Date(weekStart)
     prev.setDate(prev.getDate() - 7)
     // Don't allow going before current week
@@ -983,6 +1071,7 @@ function StepDateTime({
   }
 
   const goForward = () => {
+    cancelPendingAdvance() // browsing weeks is navigation, never a confirm
     const next = new Date(weekStart)
     next.setDate(next.getDate() + 7)
     setWeekStart(next)
@@ -1079,6 +1168,8 @@ function StepDateTime({
                   key={dateKey}
                   disabled={!selectable}
                   onClick={() => {
+                    // Touching the day strip is navigation, never a confirm — cancel any queued advance.
+                    cancelPendingAdvance()
                     if (selectable && dateKey !== activeDayKey) {
                       setSelectedDay(dateKey)
                       onSelect(null) // a time picked on the previous day no longer applies
@@ -1179,7 +1270,15 @@ function StepDateTime({
                           return (
                             <button
                               key={slot.startIso}
-                              onClick={() => onSelect(slot.startIso)}
+                              onClick={() => {
+                                onSelect(slot.startIso)
+                                // Debounced Calendly-style auto-advance — the latest slot click wins.
+                                cancelPendingAdvance()
+                                advanceTimerRef.current = setTimeout(() => {
+                                  advanceTimerRef.current = null
+                                  onAdvance()
+                                }, 250)
+                              }}
                               style={{
                                 padding: '10px 2px',
                                 borderRadius: '8px',
@@ -1503,14 +1602,6 @@ export default function BookingClient({
     }
   }
 
-  // Can the user proceed to the next step?
-  function canProceed(): boolean {
-    if (logicalStep === 'teacher') return selectedTeacherId !== null
-    if (logicalStep === 'duration') return selectedDuration !== null
-    if (logicalStep === 'datetime') return selectedStartIso !== null
-    return true
-  }
-
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
       {/* Page header */}
@@ -1539,8 +1630,10 @@ export default function BookingClient({
             selectedTeacherId={selectedTeacherId}
             studentTimezone={studentTimezone}
             onSelect={(id) => {
+              // Reset the time only when the teacher actually changes, so Back-then-forward keeps the pick.
+              if (id !== selectedTeacherId) setSelectedStartIso(null)
               setSelectedTeacherId(id)
-              setSelectedStartIso(null) // reset time if teacher changes
+              handleNext() // Calendly-style: selecting a teacher advances to the next step
             }}
           />
         )}
@@ -1550,8 +1643,10 @@ export default function BookingClient({
             hoursRemaining={hoursRemaining}
             selectedDuration={selectedDuration}
             onSelect={(minutes) => {
+              // Reset the time only when the duration actually changes, so Back-then-forward keeps the pick.
+              if (minutes !== selectedDuration) setSelectedStartIso(null)
               setSelectedDuration(minutes)
-              setSelectedStartIso(null) // reset time if duration changes
+              handleNext() // Calendly-style: selecting a duration advances to the next step
             }}
           />
         )}
@@ -1563,6 +1658,7 @@ export default function BookingClient({
             durationMinutes={selectedDuration}
             selectedStartIso={selectedStartIso}
             onSelect={setSelectedStartIso}
+            onAdvance={handleNext}
           />
         )}
 
@@ -1598,73 +1694,26 @@ export default function BookingClient({
         )}
       </div>
 
-      {/* Navigation buttons */}
-      {logicalStep !== 'confirm' && (
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <button
-            onClick={handleBack}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '10px 18px',
-              backgroundColor: '#ffffff',
-              border: '1px solid #E0DFDC',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#4b5563',
-              cursor: 'pointer',
-            }}
-          >
-            <ChevronLeft size={16} />
-            Back
-          </button>
-          <button
-            onClick={handleNext}
-            disabled={!canProceed()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '10px 18px',
-              backgroundColor: canProceed() ? '#FF8303' : '#E0DFDC',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              color: canProceed() ? '#ffffff' : '#9ca3af',
-              cursor: canProceed() ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Continue
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
-
-      {/* Back button on confirm step */}
-      {logicalStep === 'confirm' && (
-        <button
-          onClick={handleBack}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '10px 18px',
-            backgroundColor: '#ffffff',
-            border: '1px solid #E0DFDC',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: '500',
-            color: '#4b5563',
-            cursor: 'pointer',
-          }}
-        >
-          <ChevronLeft size={16} />
-          Back
-        </button>
-      )}
+      {/* Steps auto-advance on selection, so there is no Continue button; Back stays on every step. */}
+      <button
+        onClick={handleBack}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '10px 18px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '8px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#4b5563',
+          cursor: 'pointer',
+        }}
+      >
+        <ChevronLeft size={16} />
+        Back
+      </button>
     </div>
   )
 }
