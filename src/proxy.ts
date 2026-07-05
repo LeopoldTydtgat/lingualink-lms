@@ -216,14 +216,14 @@ export async function proxy(request: NextRequest) {
           const teacherBase = portalUrl('teacher')
           const target = isProductionHost(host) && teacherBase
             ? `${teacherBase}/upcoming-classes`
-            : '/upcoming-classes'
+            : new URL('/upcoming-classes', request.url)
           return NextResponse.redirect(target)
         }
         if (hasStudent && !hasProfile && !pathname.startsWith('/student/')) {
           const studentBase = portalUrl('student')
           const target = isProductionHost(host) && studentBase
             ? `${studentBase}/student/my-classes`
-            : '/student/my-classes'
+            : new URL('/student/my-classes', request.url)
           return NextResponse.redirect(target)
         }
       }
