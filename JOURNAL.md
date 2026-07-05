@@ -1,3 +1,22 @@
+## Session 182 - 03-04 July 2026 - PDF annotation toolset expansion: highlighter, underline, arrow, and stamps
+
+### What was built
+- Highlighter and underline tools added as StrokeAnnotation variants via the existing pen pointer path. Highlighter renders as a thick semi-transparent stroke, underline as a straight horizontal rule. StrokeAnnotation gained an optional opacity field that defaults absent, so previously saved strokes and the pen commit path were unaffected.
+- Arrow tool added as a new annotation type with start and end points stored as fractions of the page, drawn by dragging and rendered as an SVG line with an arrowhead marker. It commits through its own path alongside the existing stroke and text types, and flows into the same annotations array so autosave, undo and redo all cover it.
+- Star, tick and cross stamp tools added as a new shape annotation type, placed with a single click and resized afterwards with the same plus and minus control used on text boxes. Rendered as SVG glyphs with an invisible hit area sized for easy selection and dragging.
+- Toolbar restyled in stages: inactive tool buttons greyed so only the active tool shows orange, hover feedback added across all toolbar buttons, the annotation tool buttons grouped into one segmented pill, and the colour swatches folded into a single colour dot popover.
+
+### Break/Fix Log
+Issue 1: Clicking a colour swatch to recolour an already placed annotation added a phantom step to the undo history, so the first undo after a recolour did nothing visible.
+Cause: the swatch click handler pushed a new undo entry every time it fired, including when it was only updating the colour of an existing annotation rather than creating a new one.
+Fix: the handler now recolours the selected annotation in place without pushing an extra undo entry.
+Lesson: any handler that can fire on both a create path and an edit path needs to check which one it actually is before touching undo history, or edits start polluting the undo stack.
+
+### Session result
+All six new annotation tools (highlighter, underline, arrow, star, tick, cross) are built, working, and share the same annotations array, autosave path and student read-only gate as the original pen and text tools, so nothing about saving or displaying marks needed to change. The toolbar went through four rounds of polish afterwards to make the active tool clearer and the whole bar feel less cluttered. One real bug came up during that polish and was fixed the same day it was found.
+
+---
+
 ## Session 181 - 05 July 2026 - Booking teacher ratings, profile modal and wizard auto-advance
 
 ### What was built
