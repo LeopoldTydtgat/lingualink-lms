@@ -1,3 +1,28 @@
+## Session 180 - 05 July 2026 - Calendar visual rebuild, ICS export, and class details card
+
+### What was built
+- Restyled the Day to Day calendar in four stages: booked blocks became cards with status dots and past classes muted to grey (b85b862); the calendar chrome got card headers, a today tint, a live now-dot, and a pill-style legend (05453ee); mode buttons became pills and the week nav arrows were grouped with the legend moved above the grid (18fa13e); and a read-only Month view was added alongside the existing week view (e21c917).
+- Rebuilt Export Classes (4518d65). It used to export only the classes visible in the currently viewed month. It now exports every upcoming non-cancelled class with no upper bound. Fixed three things that were quietly making the exported file invalid or unreliable: added a missing timestamp field, added proper escaping for commas, semicolons, and line breaks in the event text, and switched to a fixed ID per class so reimporting an updated export updates the existing calendar event instead of creating a duplicate. Tested by importing the real file into Outlook, the stricter of the common calendar apps, and it worked.
+- Added a class details card (3cdd2aa). Booked blocks in the week grid are narrow, so the student name was already truncating with an ellipsis by design. Clicking a block now opens a centered popup with the full name, date, time range, and duration. Chose a centered popup over one anchored to the block itself, because the calendar's scroll area clips in both directions and the block clips its own contents too, so an anchored version would get cut off. No new data was needed; the date, duration, and full name were all already available, just not all shown on the block.
+
+### Break/Fix Log
+
+Issue 1: Exported calendar file could duplicate itself on reimport
+Symptom: Exporting and reimporting the same calendar more than once could add a second copy of every class instead of updating the first, and some stricter calendar apps flagged the file as invalid.
+Cause: The file was missing a required timestamp field, some event text was not escaped for special characters, and the unique ID for each event was different every time the same class was exported, so the calendar app had no way to recognise "this is the same class as before."
+Fix: Added the missing timestamp, added proper text escaping, and made each event's ID a fixed value based on the class's own database ID rather than something regenerated on every export.
+Lesson: A calendar file needs to identify each event the same way every time it is generated, or "export it again later" quietly turns into "now there are two of everything."
+
+Issue 2: Reviewed, uncommitted work went missing from the working tree
+Symptom: The class details card had been built and fully reviewed in an earlier session, but at the start of this session the file showed no trace of it: clean git status, no diff, feature missing from the app.
+Cause: The change had never been committed. It was correct and reviewed on disk, but something overwrote the file back to its old state before it got committed, and because it was never committed there was nothing in git history or the stash to point to what happened.
+Fix: Checked git log, reflog, and stash to confirm nothing was hiding there, confirmed the full reviewed change still existed in the earlier session's written report, and had it reapplied exactly as reviewed rather than redesigned, so it did not need to go through review again.
+Lesson: A change that has been tested and reviewed but not committed is not actually safe yet. Testing a change and committing it now happen in the same sitting, never left for later.
+
+### Session result
+The calendar rebuild that started with the card-style blocks is finished end to end: new look, a working Month view, an export that survives a real reimport, and a details card that fixes the readability problem the new compact block size created. All six pieces are committed on dev. Nothing is pushed yet; the business stays on LearnCube until the whole project is tested.
+
+---
 ## Session 179 - 03 July 2026 - Milestone 4 complete: teacher PDF annotation, end to end
 
 ### What was built
