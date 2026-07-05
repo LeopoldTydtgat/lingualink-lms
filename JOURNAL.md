@@ -1,3 +1,32 @@
+## Session 181 - 05 July 2026 - Booking teacher ratings, profile modal and wizard auto-advance
+
+### What was built
+- Migration file capturing the already-live get_teacher_reviews_summary function: security definer with search_path pinned to empty, execute revoked from public and from anon, granted to authenticated only. Returns per teacher an average rating to one decimal, a review count, and up to five recent reviews as rating, text and date, with admin edited text taking precedence and no student identity anywhere.
+- Booking page server load extended: the teacher profile join now pulls nationality, qualifications, specialties, quote, native, speaking and teaching languages and the intro video URL. Review stats from the RPC are merged into each teacher as strictly additive data: any failure logs and falls back to zero stats so the booking flow always renders.
+- Teacher selection cards redesigned: white background always, 2px orange border and check circle on selection, larger photo, a star rating line shown only when a teacher has at least one review (nothing rendered at zero), a Teaches line, a two line bio clamp and a View profile link. The card was restructured from a button element to a div with role="button" so the nested View profile button is valid HTML.
+- Teacher profile modal: photo, name, rating, nationality, a Teaches / Speaks / Native languages block, quote in italics, full bio, qualifications, specialties, an external intro video link and up to five nameless recent reviews with month and year. Every section renders only when data exists. Closes on X, backdrop and Esc; footer has Close and Select this teacher.
+- Calendly style auto-advance across the wizard: picking a teacher or a duration moves straight to the next step, clicking a time slot advances after a short delay so the selected span is visible first, and clicking an already selected option advances again so Back then forward works. The Continue button is gone from steps 1 to 3, Back remains everywhere, and the Confirm step and reschedule entry path are unchanged.
+- Duration step redesigned: heading with subtitle, a training balance chip, icon circles, one line descriptions per duration, and a right hand cluster showing what each option uses from the balance. Selection uses the same white card, orange border and check vocabulary as step 1. Options the balance cannot cover stay disabled with the existing Not enough hours message.
+
+### Break/Fix Log
+
+Issue 1: anon could execute the new reviews RPC
+Symptom: after revoking execute from PUBLIC, the grants check on pg_proc still showed anon holding execute on the function, meaning anyone with the public anon key could call it unauthenticated.
+Cause: Supabase default privileges explicitly grant execute to anon, authenticated and service_role on every new function in the public schema. Revoking from PUBLIC removes only the implicit grant; the explicit anon grant survives.
+Fix: an explicit revoke execute from anon, verified by re-reading proacl, with the revoke baked into the captured migration so replays stay correct.
+Lesson: every new database function needs an explicit revoke from anon, and the check is reading the actual grants list, never assuming the PUBLIC revoke covered it.
+
+Issue 2: a pending auto-advance could fire into an empty Confirm step
+Symptom: caught in code review before it shipped. Click a time slot, then click a different day within the advance delay: the queued advance fires after the day switch has cleared the selected time and lands on a blank Confirm step.
+Cause: the timer cleanup only ran on unmount, which happens on step changes. Day strip clicks and week arrows navigate inside the step without unmounting it, and a day switch nulls the selected time, so a queued advance survived and fired into a null selection.
+Fix: a cancel helper invoked on day clicks and both week arrows, latest click wins on repeated slot clicks, and the unmount cleanup kept as the final backstop.
+Lesson: with auto-advance, every navigation control inside a step must cancel a pending advance. Unmount cleanup alone is not enough.
+
+### Session result
+The booking wizard now sells the teacher before the calendar and moves at Calendly speed. Step 1 shows real star ratings and a full anonymised profile per teacher, backed by a hardened definer function that exposes aggregates and review text without any student identity, and steps advance on selection instead of waiting for a Continue click. A full 60 minute booking and the reschedule entry path both passed end to end in the browser. Committed as 76e3564 and 93e42dc. Open items: the client decides whether reviewer names appear in the modal and whether new reviews display immediately or only after moderation; the most popular badge idea waits for real booking data; and a known edge where a reschedule preset to a duration the balance cannot cover now has no forward path on the duration step is queued as the next piece.
+
+---
+
 ## Session 180 - 05 July 2026 - Calendar visual rebuild, ICS export, and class details card
 
 ### What was built
