@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { type Annotation } from '@/components/pdf/PdfViewer'
 import AnnotatablePdf from '@/components/pdf/AnnotatablePdf'
@@ -280,6 +280,21 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
               {sheet.difficulty != null && <DifficultyBars count={sheet.difficulty} />}
             </div>
           </div>
+          {/* Live window entry - prep page only (NEW255 d). Opens the chrome-free
+              (live) page in a named popup so the teacher can window-share just the
+              PDF in Teams. Hidden in the live window itself via the same {!live} gate. */}
+          {!live && (
+            <button
+              type="button"
+              onClick={() => window.open(`/live-annotate/${sheet.id}`, 'live-annotate', 'popup')}
+              className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+              style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+              title="Open this sheet in a separate window to screen-share in Teams"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Open Live Window
+            </button>
+          )}
         </div>
       </div>
 
