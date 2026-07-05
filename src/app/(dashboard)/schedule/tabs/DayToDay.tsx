@@ -247,6 +247,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
   const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(new Date()))
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [classDetail, setClassDetail] = useState<{
+    studentName: string
+    dayIdx: number
+    startMin: number
+    endMin: number
+  } | null>(null)
   const [exportMsg, setExportMsg] = useState('')
   const [actionError, setActionError] = useState('')
   const [drag, setDrag] = useState<null | { dayIdx: number; startSlot: number; endSlot: number }>(null)
@@ -276,6 +282,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        if (classDetail) { setClassDetail(null); return }
         setMode(null)
         setDrag(null)
         isDraggingRef.current = false
@@ -283,7 +290,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [classDetail])
 
   // Now-indicator tick — recompute every 60s.
   useEffect(() => {
@@ -1087,7 +1094,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   // Past classes mute to grey - end instant compared to the 60s now tick.
                   const isPastClass = day.getTime() + b.endMin * 60_000 < now.getTime()
                   return (
-                    <div key={`cl-${i}`} title={b.studentName} style={{
+                    <div key={`cl-${i}`} title={b.studentName} onClick={() => setClassDetail({ studentName: b.studentName, dayIdx: b.dayIdx, startMin: b.startMin, endMin: b.endMin })} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
                       backgroundColor: '#FFFFFF',
@@ -1096,7 +1103,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       borderRadius: '8px',
                       boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
                       padding: '3px 6px',
-                      cursor: 'default',
+                      cursor: 'pointer',
                       zIndex: 3,
                       overflow: 'hidden',
                     }}>
@@ -1279,6 +1286,49 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 }}
               >
                 Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {classDetail && (
+        <div
+          onClick={() => setClassDetail(null)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff', borderRadius: '12px', padding: '24px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)', minWidth: '320px', maxWidth: '360px',
+            }}
+          >
+            <p style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '12px' }}>
+              {classDetail.studentName}
+            </p>
+            <p style={{ fontSize: '13px', color: '#374151', marginBottom: '6px' }}>
+              {weekDays[classDetail.dayIdx].toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            </p>
+            <p style={{ fontSize: '13px', color: '#374151', marginBottom: '6px' }}>
+              {timeRangeLabel(classDetail.startMin, classDetail.endMin)}
+            </p>
+            <p style={{ fontSize: '13px', color: '#6B7280', marginBottom: '20px' }}>
+              {classDetail.endMin - classDetail.startMin} minutes
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setClassDetail(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                  backgroundColor: '#F3F4F6', color: '#374151', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Close
               </button>
             </div>
           </div>
