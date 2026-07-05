@@ -3,10 +3,16 @@
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2 } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X } from 'lucide-react'
 import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RecentReview {
+  rating: number
+  text: string
+  submitted_at: string
+}
 
 interface Teacher {
   id: string
@@ -14,6 +20,18 @@ interface Teacher {
   photo_url: string | null
   bio: string | null
   timezone: string | null
+  nationality: string | null
+  qualifications: string | null
+  specialties: string | null
+  quote: string | null
+  native_languages: string[] | null
+  speaking_languages: string[] | null
+  teaching_languages: string[] | null
+  video_url: string | null
+  // Additive review stats merged in by the server page — never block booking on them.
+  avgRating: number | null
+  reviewCount: number
+  recentReviews: RecentReview[]
 }
 
 interface RescheduleLesson {
@@ -159,15 +177,354 @@ function StepIndicator({
 
 // ─── Step 1 — Teacher selection ───────────────────────────────────────────────
 
+// Read-only star row. Colours copied verbatim from the account page's StarRating
+// (src/app/(dashboard)/account/AccountClient.tsx) so ratings read identically
+// across portals.
+function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
+  return (
+    <div style={{ display: 'flex', gap: '2px' }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          size={size}
+          style={{
+            fill: star <= rating ? '#FF8303' : 'none',
+            color: star <= rating ? '#FF8303' : '#d1d5db',
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// "4.8 (12 reviews)" with stars — rendered only when there is at least one review.
+function RatingLine({
+  avgRating,
+  reviewCount,
+  starSize,
+}: {
+  avgRating: number | null
+  reviewCount: number
+  starSize?: number
+}) {
+  if (reviewCount <= 0 || avgRating === null) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <StarRow rating={Math.round(avgRating)} size={starSize} />
+      <span style={{ fontSize: '13px', color: '#6b7280' }}>
+        {avgRating.toFixed(1)} ({reviewCount} {reviewCount === 1 ? 'review' : 'reviews'})
+      </span>
+    </div>
+  )
+}
+
+// Trim and drop blank entries from a nullable text[] column.
+function cleanList(arr: string[] | null): string[] {
+  return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string' && s.trim().length > 0) : []
+}
+
+// ─── Teacher profile modal ────────────────────────────────────────────────────
+// Mirrors the student-portal ClassReminderModal overlay/card/close pattern
+// (src/components/student/ClassReminderModal.tsx): fixed backdrop + centred card,
+// backdrop click closes, plus Esc. Body scrolls; footer stays put.
+function TeacherProfileModal({
+  teacher,
+  studentTimezone,
+  onClose,
+  onSelect,
+}: {
+  teacher: Teacher
+  studentTimezone: string
+  onClose: () => void
+  onSelect: (id: string) => void
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const languageRows = [
+    { label: 'Teaches', values: cleanList(teacher.teaching_languages) },
+    { label: 'Speaks', values: cleanList(teacher.speaking_languages) },
+    { label: 'Native', values: cleanList(teacher.native_languages) },
+  ].filter((row) => row.values.length > 0)
+
+  const reviewDateFormatter = new Intl.DateTimeFormat('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: studentTimezone,
+  })
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.45)',
+          zIndex: 999,
+        }}
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${teacher.full_name} profile`}
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 1000,
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          width: 'calc(100% - 32px)',
+          maxWidth: '480px',
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+        }}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          aria-label="Close profile"
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#9ca3af',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+          }}
+        >
+          <X size={20} />
+        </button>
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '28px' }}>
+          {/* Header: photo + name + rating */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px', paddingRight: '20px' }}>
+            {teacher.photo_url ? (
+              <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <Image
+                  src={teacher.photo_url}
+                  alt={teacher.full_name}
+                  width={72}
+                  height={72}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <User size={30} color="#9ca3af" />
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '6px' }}>
+                {teacher.full_name}
+              </h2>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} />
+              {teacher.nationality && teacher.nationality.trim().length > 0 && (
+                <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                  {teacher.nationality}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Languages */}
+          {languageRows.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '18px' }}>
+              {languageRows.map((row) => (
+                <div key={row.label} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                  <span style={{ fontWeight: '600', color: '#374151', minWidth: '64px', flexShrink: 0 }}>
+                    {row.label}
+                  </span>
+                  <span style={{ color: '#6b7280' }}>{row.values.join(', ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Quote — italic per spec */}
+          {teacher.quote && teacher.quote.trim().length > 0 && (
+            <p style={{ fontSize: '14px', fontStyle: 'italic', color: '#4b5563', lineHeight: '1.6', marginBottom: '18px' }}>
+              {teacher.quote}
+            </p>
+          )}
+
+          {/* Full bio */}
+          {teacher.bio && teacher.bio.trim().length > 0 && (
+            <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', marginBottom: '18px', whiteSpace: 'pre-wrap' }}>
+              {teacher.bio}
+            </p>
+          )}
+
+          {/* Qualifications */}
+          {teacher.qualifications && teacher.qualifications.trim().length > 0 && (
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
+                Qualifications
+              </h3>
+              <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {teacher.qualifications}
+              </p>
+            </div>
+          )}
+
+          {/* Specialties */}
+          {teacher.specialties && teacher.specialties.trim().length > 0 && (
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
+                Specialties
+              </h3>
+              <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {teacher.specialties}
+              </p>
+            </div>
+          )}
+
+          {/* Intro video */}
+          {teacher.video_url && teacher.video_url.trim().length > 0 && (
+            <a
+              href={teacher.video_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#FF8303',
+                textDecoration: 'none',
+                marginBottom: '18px',
+              }}
+            >
+              Watch intro video
+            </a>
+          )}
+
+          {/* Recent reviews — up to 5, no student identity */}
+          {teacher.recentReviews.length > 0 && (
+            <div style={{ marginTop: '4px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>
+                Recent reviews
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {teacher.recentReviews.slice(0, 5).map((review, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      borderTop: i === 0 ? 'none' : '1px solid #f3f4f6',
+                      paddingTop: i === 0 ? '0' : '14px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '8px' }}>
+                      <StarRow rating={review.rating} />
+                      <span style={{ fontSize: '12px', color: '#9ca3af', flexShrink: 0 }}>
+                        {reviewDateFormatter.format(new Date(review.submitted_at))}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      {review.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: '1px solid #E0DFDC',
+            padding: '16px 28px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px',
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              padding: '10px 18px',
+              backgroundColor: '#ffffff',
+              border: '1px solid #E0DFDC',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#4b5563',
+              cursor: 'pointer',
+            }}
+          >
+            Close
+          </button>
+          <button
+            onClick={() => {
+              onSelect(teacher.id)
+              onClose()
+            }}
+            style={{
+              padding: '10px 18px',
+              backgroundColor: '#FF8303',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#ffffff',
+              cursor: 'pointer',
+            }}
+          >
+            Select this teacher
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function StepTeacher({
   teachers,
   selectedTeacherId,
+  studentTimezone,
   onSelect,
 }: {
   teachers: Teacher[]
   selectedTeacherId: string | null
+  studentTimezone: string
   onSelect: (id: string) => void
 }) {
+  const [profileTeacher, setProfileTeacher] = useState<Teacher | null>(null)
+
   return (
     <div>
       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
@@ -180,10 +537,22 @@ function StepTeacher({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {teachers.map((teacher) => {
           const isSelected = selectedTeacherId === teacher.id
+          const teaches = cleanList(teacher.teaching_languages)
           return (
-            <button
+            <div
               key={teacher.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
               onClick={() => onSelect(teacher.id)}
+              onKeyDown={(e) => {
+                // Ignore keydowns bubbling up from the nested "View profile" button.
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect(teacher.id)
+                }
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -192,26 +561,26 @@ function StepTeacher({
                 borderRadius: '10px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
-                backgroundColor: isSelected ? '#fff7ed' : '#ffffff',
+                backgroundColor: '#ffffff',
                 cursor: 'pointer',
                 textAlign: 'left',
               }}
             >
               {teacher.photo_url ? (
-                <div style={{ width: '48px', height: '48px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
                   <Image
                     src={teacher.photo_url}
                     alt={teacher.full_name}
-                    width={48}
-                    height={48}
+                    width={56}
+                    height={56}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 </div>
               ) : (
                 <div
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '56px',
+                    height: '56px',
                     borderRadius: '50%',
                     backgroundColor: '#f3f4f6',
                     display: 'flex',
@@ -220,18 +589,50 @@ function StepTeacher({
                     flexShrink: 0,
                   }}
                 >
-                  <User size={22} color="#9ca3af" />
+                  <User size={26} color="#9ca3af" />
                 </div>
               )}
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
                   {teacher.full_name}
                 </p>
-                {teacher.bio && (
-                  <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
-                    {teacher.bio.length > 120 ? teacher.bio.slice(0, 120) + '…' : teacher.bio}
+                {teacher.reviewCount > 0 && (
+                  <div style={{ marginBottom: '4px' }}>
+                    <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} />
+                  </div>
+                )}
+                {teaches.length > 0 && (
+                  <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>
+                    Teaches {teaches.join(', ')}
                   </p>
                 )}
+                {teacher.bio && teacher.bio.trim().length > 0 && (
+                  <p
+                    className="line-clamp-2"
+                    style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}
+                  >
+                    {teacher.bio}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setProfileTeacher(teacher)
+                  }}
+                  style={{
+                    marginTop: '8px',
+                    padding: '0',
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: '#FF8303',
+                    cursor: 'pointer',
+                  }}
+                >
+                  View profile
+                </button>
               </div>
               {isSelected && (
                 <div
@@ -249,10 +650,19 @@ function StepTeacher({
                   <Check size={14} color="#ffffff" />
                 </div>
               )}
-            </button>
+            </div>
           )
         })}
       </div>
+
+      {profileTeacher && (
+        <TeacherProfileModal
+          teacher={profileTeacher}
+          studentTimezone={studentTimezone}
+          onClose={() => setProfileTeacher(null)}
+          onSelect={onSelect}
+        />
+      )}
     </div>
   )
 }
@@ -1127,6 +1537,7 @@ export default function BookingClient({
           <StepTeacher
             teachers={teachers}
             selectedTeacherId={selectedTeacherId}
+            studentTimezone={studentTimezone}
             onSelect={(id) => {
               setSelectedTeacherId(id)
               setSelectedStartIso(null) // reset time if teacher changes
