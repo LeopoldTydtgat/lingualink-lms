@@ -1364,6 +1364,7 @@ function StepConfirm({
   startIso,
   studentTimezone,
   hoursRemaining,
+  isReschedule,
   isSubmitting,
   onConfirm,
 }: {
@@ -1372,6 +1373,7 @@ function StepConfirm({
   startIso: string
   studentTimezone: string
   hoursRemaining: number
+  isReschedule: boolean
   isSubmitting: boolean
   onConfirm: () => void
 }) {
@@ -1457,7 +1459,7 @@ function StepConfirm({
           {[
             { label: 'Date & Time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
             { label: 'Duration', value: formatHours(durationMinutes / 60) },
-            { label: 'Hours deducted', value: formatHours(hoursUsed) },
+            { label: 'Hours deducted', value: formatHours(isReschedule ? 0 : hoursUsed) },
             { label: 'Remaining after booking', value: formatHours(hoursAfter) },
           ].map(({ label, value }) => (
             <div
@@ -1701,6 +1703,7 @@ export default function BookingClient({
               startIso={selectedStartIso}
               studentTimezone={studentTimezone}
               hoursRemaining={hoursRemaining}
+              isReschedule={rescheduleLesson !== null}
               isSubmitting={isSubmitting}
               onConfirm={handleConfirm}
             />
