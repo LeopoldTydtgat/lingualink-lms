@@ -72,7 +72,7 @@ export default async function AdminReportsPage() {
   const { data: teachersData } = await supabase
     .from('profiles')
     .select('id, full_name')
-    .eq('role', 'teacher')
+    .in('role', ['teacher', 'admin'])
     .order('full_name');
 
   const initialReports = (reportsData ?? []).map((r) => {
