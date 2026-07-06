@@ -350,6 +350,114 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
     { id: 'trace', label: 'Live Classes Trace' },
   ] as const;
 
+  // -- Export modal state --
+  const [showExport,       setShowExport]       = useState(false);
+  const [exportPreset,     setExportPreset]     = useState<'today' | 'week' | 'month' | 'custom'>('month');
+  const [exportFrom,       setExportFrom]       = useState('');
+  const [exportTo,         setExportTo]         = useState('');
+  const [exportTeacher,    setExportTeacher]    = useState('');
+  const [exportOutcome,    setExportOutcome]    = useState('');
+  const [exportClientType, setExportClientType] = useState('');
+  const [generating,       setGenerating]       = useState(false);
+  const [exportError,      setExportError]      = useState('');
+
+  const pad2   = (n: number) => n.toString().padStart(2, '0');
+  const ymdUTC = (dt: Date) => `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+
+  // Preset ranges anchored to the SAST business calendar - never the admin's browser clock, and
+  // never toISOString. The server interprets these yyyy-mm-dd bounds as SAST days, so the reference
+  // "today" must be SAST too. UTC-noon arithmetic keeps the day/week/month math boundary-safe.
+  function rangeForPreset(preset: 'today' | 'week' | 'month') {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Johannesburg',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const part = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+    const y = part('year');
+    const m = part('month'); // 1-based
+    const d = part('day');
+
+    if (preset === 'today') {
+      const t = new Date(Date.UTC(y, m - 1, d, 12));
+      return { from: ymdUTC(t), to: ymdUTC(t) };
+    }
+    if (preset === 'week') {
+      const base = new Date(Date.UTC(y, m - 1, d, 12));
+      const dow = base.getUTCDay();                 // 0=Sun .. 6=Sat
+      const toMonday = dow === 0 ? -6 : 1 - dow;    // week starts Monday
+      const monday = new Date(Date.UTC(y, m - 1, d + toMonday, 12));
+      const sunday = new Date(Date.UTC(y, m - 1, d + toMonday + 6, 12));
+      return { from: ymdUTC(monday), to: ymdUTC(sunday) };
+    }
+    const first = new Date(Date.UTC(y, m - 1, 1, 12));
+    const last  = new Date(Date.UTC(y, m, 0, 12));  // day 0 of next month = last day of this month
+    return { from: ymdUTC(first), to: ymdUTC(last) };
+  }
+
+  function openExport() {
+    const { from, to } = rangeForPreset('month');
+    setExportPreset('month');
+    setExportFrom(from);
+    setExportTo(to);
+    setExportTeacher('');
+    setExportOutcome('');
+    setExportClientType('');
+    setExportError('');
+    setGenerating(false);
+    setShowExport(true);
+  }
+
+  function applyPreset(preset: 'today' | 'week' | 'month' | 'custom') {
+    setExportPreset(preset);
+    if (preset !== 'custom') {
+      const { from, to } = rangeForPreset(preset);
+      setExportFrom(from);
+      setExportTo(to);
+    }
+  }
+
+  async function generateExport() {
+    if (!exportFrom || !exportTo) return;
+    const params = new URLSearchParams();
+    params.set('date_from', exportFrom);
+    params.set('date_to', exportTo);
+    if (exportTeacher)    params.set('teacher_id',  exportTeacher);
+    if (exportOutcome)    params.set('status',      exportOutcome);
+    if (exportClientType) params.set('client_type', exportClientType);
+    setExportError('');
+    setGenerating(true);
+    try {
+      const res = await fetch(`/api/admin/reports/export?${params.toString()}`);
+      if (!res.ok) {
+        let msg = `Export failed (${res.status}).`;
+        try {
+          const body = await res.json();
+          if (body?.error) msg = body.error;
+        } catch {
+          // non-JSON error body; keep the status message
+        }
+        setExportError(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url;
+      a.download = `Lingualink_ClassReports_${exportFrom}_to_${exportTo}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setShowExport(false);
+    } catch {
+      setExportError('Network error - please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   return (
     <div className="p-6">
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -371,6 +479,14 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
             </div>
           )}
         </div>
+
+        <button
+          onClick={openExport}
+          className="text-sm font-medium px-4 py-2 rounded-lg text-white whitespace-nowrap"
+          style={{ backgroundColor: '#FF8303' }}
+        >
+          Export Reports
+        </button>
       </div>
 
       <div className="border-b border-gray-200 mb-6">
@@ -392,6 +508,115 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
         {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} />}
         {activeTab === 'trace' && <LiveTrace />}
       </div>
+
+      {showExport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-base font-semibold text-gray-900 mb-4">Export Reports</h3>
+
+            <div className="flex flex-col gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Date Range</label>
+                <select
+                  value={exportPreset}
+                  onChange={(e) => applyPreset(e.target.value as 'today' | 'week' | 'month' | 'custom')}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
+                  <input
+                    type="date"
+                    value={exportFrom}
+                    onChange={(e) => { setExportFrom(e.target.value); setExportPreset('custom'); }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
+                  <input
+                    type="date"
+                    value={exportTo}
+                    onChange={(e) => { setExportTo(e.target.value); setExportPreset('custom'); }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Teacher</label>
+                <select
+                  value={exportTeacher}
+                  onChange={(e) => setExportTeacher(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">All Teachers</option>
+                  {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Class Outcome</label>
+                <select
+                  value={exportOutcome}
+                  onChange={(e) => setExportOutcome(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">All Outcomes</option>
+                  <option value="Taken">Taken</option>
+                  <option value="Student No-Show">Student No-Show</option>
+                  <option value="Teacher No-Show">Teacher No-Show</option>
+                  <option value="Cancelled by Student">Cancelled by Student</option>
+                  <option value="Cancelled by Teacher">Cancelled by Teacher</option>
+                  <option value="Cancelled by Admin">Cancelled by Admin</option>
+                  <option value="Scheduled">Scheduled</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Client Type</label>
+                <select
+                  value={exportClientType}
+                  onChange={(e) => setExportClientType(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">All</option>
+                  <option value="private">Private</option>
+                  <option value="company">Company</option>
+                </select>
+              </div>
+            </div>
+
+            {exportError && (
+              <p className="text-sm mt-4" style={{ color: '#DC2626' }}>{exportError}</p>
+            )}
+
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowExport(false)}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={generateExport}
+                disabled={generating || !exportFrom || !exportTo}
+                className="px-4 py-2 text-sm text-white rounded-lg font-medium disabled:opacity-60"
+                style={{ backgroundColor: '#FF8303' }}
+              >
+                {generating ? 'Generating...' : 'Generate & Download'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
