@@ -53,8 +53,35 @@ export default async function BookPage({
     redirect('/student/my-classes')
   }
 
+  // If rescheduling, fetch the original lesson. This must resolve before the
+  // effective-balance calc below, which adds the lesson's own hours back in.
+  let rescheduleLesson: {
+    id: string
+    scheduled_at: string
+    duration_minutes: number
+    teacher_id: string
+  } | null = null
+
+  if (params.reschedule) {
+    const { data: lesson } = await supabase
+      .from('lessons')
+      .select('id, scheduled_at, duration_minutes, teacher_id')
+      .eq('id', params.reschedule)
+      .eq('student_id', student.id)
+      .eq('status', 'scheduled')
+      .maybeSingle()
+    rescheduleLesson = lesson ?? null
+  }
+
   // Hours remaining
   const hoursRemaining = training.total_hours - training.hours_consumed
+  // Rescheduling adds the lesson's own hours back in because those hours are not
+  // actually being spent again — the original booking already consumed them and a
+  // reschedule neither refunds nor re-charges. Downstream steps gate and display
+  // against this effective balance, not the raw consumed-inclusive number.
+  const effectiveHoursRemaining = rescheduleLesson
+    ? hoursRemaining + rescheduleLesson.duration_minutes / 60
+    : hoursRemaining
 
   // Get teachers assigned to this training via training_teachers
   const { data: rawAssignments } = await supabase
@@ -124,31 +151,12 @@ export default async function BookPage({
     return { ...t, avgRating, reviewCount, recentReviews }
   })
 
-  // If rescheduling, fetch the original lesson
-  let rescheduleLesson: {
-    id: string
-    scheduled_at: string
-    duration_minutes: number
-    teacher_id: string
-  } | null = null
-
-  if (params.reschedule) {
-    const { data: lesson } = await supabase
-      .from('lessons')
-      .select('id, scheduled_at, duration_minutes, teacher_id')
-      .eq('id', params.reschedule)
-      .eq('student_id', student.id)
-      .eq('status', 'scheduled')
-      .maybeSingle()
-    rescheduleLesson = lesson ?? null
-  }
-
   return (
     <BookingClient
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'book:student')}
       trainingId={training.id}
-      hoursRemaining={hoursRemaining}
+      hoursRemaining={effectiveHoursRemaining}
       teachers={teachers}
       rescheduleLesson={rescheduleLesson}
     />

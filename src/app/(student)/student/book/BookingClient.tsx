@@ -111,14 +111,24 @@ function getDayOfWeek(date: Date, timezone: string): number {
 function StepIndicator({
   currentStep,
   totalSteps,
+  skipTeacherStep,
+  skipDurationStep,
 }: {
   currentStep: number
   totalSteps: number
+  skipTeacherStep: boolean
+  skipDurationStep: boolean
 }) {
-  const labels =
-    totalSteps === 4
-      ? ['Teacher', 'Duration', 'Date & Time', 'Confirm']
-      : ['Duration', 'Date & Time', 'Confirm']
+  // The label SET, not just the count, depends on WHICH steps are skipped: the
+  // two 3-step shapes (skip Teacher vs skip Duration) differ, so totalSteps alone
+  // cannot disambiguate them. Build the visible labels from the flags — by
+  // construction labels.length === totalSteps.
+  const labels = [
+    ...(skipTeacherStep ? [] : ['Teacher']),
+    ...(skipDurationStep ? [] : ['Duration']),
+    'Date & Time',
+    'Confirm',
+  ]
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', marginBottom: '32px' }}>
@@ -128,7 +138,7 @@ function StepIndicator({
         const isActive = stepNum === currentStep
 
         return (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', flex: i < labels.length - 1 ? 1 : 'none' }}>
+          <div key={label} style={{ display: 'flex', alignItems: 'center', flex: i < totalSteps - 1 ? 1 : 'none' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
               <div
                 style={{
@@ -157,7 +167,7 @@ function StepIndicator({
                 {label}
               </span>
             </div>
-            {i < labels.length - 1 && (
+            {i < totalSteps - 1 && (
               <div
                 style={{
                   flex: 1,
@@ -1517,9 +1527,13 @@ export default function BookingClient({
 }: Props) {
   const router = useRouter()
 
-  // If only one teacher, skip teacher selection step — steps are 3 not 4
+  // Two steps can be skipped independently: the Teacher step (single-teacher
+  // trainings — currently never) and the Duration step (a reschedule locks the
+  // original duration in, so there is nothing to choose). The wizard therefore
+  // has 4, 3, or 2 steps.
   const skipTeacherStep = false
-  const totalSteps = skipTeacherStep ? 3 : 4
+  const skipDurationStep = rescheduleLesson !== null
+  const totalSteps = 4 - (skipTeacherStep ? 1 : 0) - (skipDurationStep ? 1 : 0)
 
   // Step numbering: if skipping teacher step, step 1=Duration, 2=DateTime, 3=Confirm
   // If not skipping: step 1=Teacher, 2=Duration, 3=DateTime, 4=Confirm
@@ -1542,13 +1556,23 @@ export default function BookingClient({
   function getLogicalStep(): 'teacher' | 'duration' | 'datetime' | 'confirm' {
     if (!skipTeacherStep) {
       if (step === 1) return 'teacher'
-      if (step === 2) return 'duration'
-      if (step === 3) return 'datetime'
-      return 'confirm'
+      if (!skipDurationStep) {
+        if (step === 2) return 'duration'
+        if (step === 3) return 'datetime'
+        return 'confirm'
+      } else {
+        if (step === 2) return 'datetime'
+        return 'confirm'
+      }
     } else {
-      if (step === 1) return 'duration'
-      if (step === 2) return 'datetime'
-      return 'confirm'
+      if (!skipDurationStep) {
+        if (step === 1) return 'duration'
+        if (step === 2) return 'datetime'
+        return 'confirm'
+      } else {
+        if (step === 1) return 'datetime'
+        return 'confirm'
+      }
     }
   }
 
@@ -1612,7 +1636,12 @@ export default function BookingClient({
       </div>
 
       {/* Step indicator */}
-      <StepIndicator currentStep={step} totalSteps={totalSteps} />
+      <StepIndicator
+        currentStep={step}
+        totalSteps={totalSteps}
+        skipTeacherStep={skipTeacherStep}
+        skipDurationStep={skipDurationStep}
+      />
 
       {/* Step content */}
       <div
