@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon } from 'lucide-react'
 import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -857,6 +857,7 @@ function StepDuration({
 // ─── Step 3 — Date and time selection ────────────────────────────────────────
 
 function StepDateTime({
+  teacher,
   teacherId,
   studentTimezone,
   durationMinutes,
@@ -864,6 +865,7 @@ function StepDateTime({
   onAdvance,
   selectedStartIso,
 }: {
+  teacher: Teacher
   teacherId: string
   studentTimezone: string
   durationMinutes: number
@@ -878,6 +880,7 @@ function StepDateTime({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedDay, setSelectedDay] = useState<string | null>(null) // a YYYY-MM-DD dateKey
+  const [hoveredSlotIso, setHoveredSlotIso] = useState<string | null>(null) // green hover on available slot chips
 
   // Pending auto-advance timer after a start-time click. The short delay lets the
   // span-pill selection paint before the wizard moves on; the latest slot click
@@ -1006,17 +1009,23 @@ function StepDateTime({
     return true
   }
 
-  // A day can be picked iff it isn't past and a booking of the chosen
-  // duration can start somewhere in it.
+  // Single source of truth: the bookable START slots of every visible day, keyed
+  // by dateKey. The day-cell counts, the day strip, the time-group chips, and the
+  // earliest-available hint ALL derive from this one structure, so a day's "N
+  // slots" count can never disagree with the chips rendered for it. A day can be
+  // picked iff it isn't past and a booking of the chosen duration can start
+  // somewhere in it (isBookableStart, reused verbatim).
   const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
-  const selectableDayKeys: string[] = []
+  const startsByDay: Record<string, Slot[]> = {}
   for (const day of weekDays) {
     const dateKey = getLocalDateKey(day, studentTimezone)
     const daySlots = slots[dateKey] ?? []
-    if (day >= todayStart && daySlots.some((_, i) => isBookableStart(daySlots, i))) {
-      selectableDayKeys.push(dateKey)
-    }
+    startsByDay[dateKey] =
+      day >= todayStart ? daySlots.filter((_, i) => isBookableStart(daySlots, i)) : []
   }
+  const selectableDayKeys = weekDays
+    .map((day) => getLocalDateKey(day, studentTimezone))
+    .filter((dateKey) => startsByDay[dateKey].length > 0)
 
   // The active day is derived, never synced via an effect: keep the student's
   // pick while it stays selectable, otherwise fall back to the first open day.
@@ -1030,29 +1039,29 @@ function StepDateTime({
       ? weekDays.find((d) => getLocalDateKey(d, studentTimezone) === activeDayKey)
       : undefined
 
-  // Bookable START slots of the active day, grouped by part of day. The hour
-  // comes from a formatter pinned to the student's timezone — Date.getHours()
-  // is browser-local and wrong for a student in another timezone.
+  // Bookable START slots of the active day, grouped by part of day — taken from
+  // the shared startsByDay structure so the chips shown always match the day's
+  // count. The hour comes from a formatter pinned to the student's timezone —
+  // Date.getHours() is browser-local and wrong for a student in another timezone.
   const hourFormatter = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     hour12: false,
     timeZone: studentTimezone,
   })
-  const activeDaySlots = activeDayKey !== null ? slots[activeDayKey] ?? [] : []
+  const activeDayStarts = activeDayKey !== null ? startsByDay[activeDayKey] ?? [] : []
   const morningStarts: Slot[] = []
   const afternoonStarts: Slot[] = []
   const eveningStarts: Slot[] = []
-  activeDaySlots.forEach((slot, i) => {
-    if (!isBookableStart(activeDaySlots, i)) return
+  activeDayStarts.forEach((slot) => {
     const hour = Number(hourFormatter.format(new Date(slot.startIso)))
     if (hour < 12) morningStarts.push(slot)
     else if (hour < 17) afternoonStarts.push(slot)
     else eveningStarts.push(slot)
   })
   const partsOfDay = [
-    { label: 'Morning', starts: morningStarts },
-    { label: 'Afternoon', starts: afternoonStarts },
-    { label: 'Evening', starts: eveningStarts },
+    { label: 'Morning', starts: morningStarts, Icon: Sun },
+    { label: 'Afternoon', starts: afternoonStarts, Icon: Sunset },
+    { label: 'Evening', starts: eveningStarts, Icon: Moon },
   ]
 
   const longDayFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -1067,6 +1076,31 @@ function StepDateTime({
     hour12: false,
     timeZone: studentTimezone,
   })
+  const weekdayFormatter = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    timeZone: studentTimezone,
+  })
+
+  // Earliest bookable start within the visible week (for the selected duration),
+  // read straight off the shared startsByDay structure. weekDays is chronological
+  // and each day's starts are time-sorted, so the first non-empty day's first
+  // start is the earliest. Null when the whole visible week has none.
+  //
+  // weekdayLabel is taken from the day COLUMN (the same weekDays Date the strip
+  // and panel headers format), not the slot instant, so the hint always names the
+  // day it actually selects. These can differ when the route buckets a slot whose
+  // true student-local date falls on the adjacent day (large teacher/student tz
+  // offsets); the time still comes from the real instant below.
+  let earliest: { dateKey: string; startIso: string; weekdayLabel: string } | null = null
+  for (const day of weekDays) {
+    const dateKey = getLocalDateKey(day, studentTimezone)
+    const starts = startsByDay[dateKey]
+    if (starts.length > 0) {
+      earliest = { dateKey, startIso: starts[0].startIso, weekdayLabel: weekdayFormatter.format(day) }
+      break
+    }
+  }
+
   const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + durationMinutes * 60000) : null
@@ -1088,6 +1122,11 @@ function StepDateTime({
   }
 
   const isPrevDisabled = weekStart <= getWeekStart(new Date())
+  // The "Earliest available" hint only makes sense on the week that actually
+  // contains today; on a future week the first open slot is not the soonest
+  // bookable time. Compare Monday-midnight instants via getTime(), never Date
+  // identity. Uses the existing getWeekStart helper + the existing new Date() ref.
+  const isCurrentWeek = weekStart.getTime() === getWeekStart(new Date()).getTime()
 
   // Week label e.g. "31 Mar – 6 Apr 2026"
   const weekEnd = new Date(weekStart)
@@ -1099,9 +1138,86 @@ function StepDateTime({
       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
         Choose date and time
       </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-        Times shown in your local timezone ({studentTimezone}).
-      </p>
+
+      {/* Context strip — teacher, the selected/locked duration, and the timezone
+          note. Non-interactive; always visible (it does not depend on the fetched
+          availability, so it stays put through loading and week navigation). */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '10px',
+          marginBottom: '20px',
+        }}
+      >
+        {teacher.photo_url ? (
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+            <Image
+              src={teacher.photo_url}
+              alt={teacher.full_name}
+              width={40}
+              height={40}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <User size={20} color="#9ca3af" />
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: '120px' }}>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+            {teacher.full_name}
+          </p>
+          {teacher.reviewCount > 0 && (
+            <div style={{ marginTop: '2px' }}>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
+            </div>
+          )}
+        </div>
+
+        {/* Duration chip — reads from durationMinutes, so it also shows the locked
+            duration on the reschedule path where the Duration step never renders. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            flexShrink: 0,
+            backgroundColor: '#ffffff',
+            border: '1px solid #E0DFDC',
+            borderRadius: '8px',
+            padding: '6px 12px',
+          }}
+        >
+          <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
+            {durationMinutes} min
+          </span>
+        </div>
+
+        {/* Timezone note — relocated here from the old subtitle line */}
+        <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+          Times shown in your local timezone ({studentTimezone})
+        </p>
+      </div>
 
       {/* Week navigation */}
       <div
@@ -1166,12 +1282,49 @@ function StepDateTime({
 
       {!loading && !error && (
         <>
+          {earliest !== null && isCurrentWeek && (
+            <button
+              type="button"
+              onClick={() => {
+                // Mirrors a day-strip click: cancel any queued auto-advance and,
+                // if it's a different day, switch to it and drop a time picked on
+                // the old day. It deliberately never selects the SLOT — slot
+                // selection auto-advances, and this must not.
+                cancelPendingAdvance()
+                if (earliest && earliest.dateKey !== activeDayKey) {
+                  setSelectedDay(earliest.dateKey)
+                  onSelect(null)
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'none',
+                border: 'none',
+                padding: '0',
+                marginBottom: '14px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '500',
+                color: '#FF8303',
+              }}
+            >
+              <Clock size={14} style={{ flexShrink: 0 }} />
+              Earliest available: {earliest.weekdayLabel} at{' '}
+              {timeFormatter.format(new Date(earliest.startIso))}
+            </button>
+          )}
+
           {/* Week strip — pick a day */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
             {weekDays.map((day) => {
               const dateKey = getLocalDateKey(day, studentTimezone)
               const selectable = selectableDayKeys.includes(dateKey)
               const isActive = selectable && dateKey === activeDayKey
+              // Same source as the chips: a day can never show a count that
+              // disagrees with the start times rendered for it.
+              const count = startsByDay[dateKey]?.length ?? 0
 
               return (
                 <button
@@ -1190,8 +1343,8 @@ function StepDateTime({
                     padding: '9px 2px',
                     textAlign: 'center',
                     border: '1px solid',
-                    borderColor: selectable && !isActive ? '#E0DFDC' : 'transparent',
-                    backgroundColor: isActive ? '#FF8303' : selectable ? '#ffffff' : '#fafafa',
+                    borderColor: isActive ? '#FF8303' : selectable ? '#E0DFDC' : 'transparent',
+                    backgroundColor: isActive ? '#FFF0DC' : selectable ? '#ffffff' : '#fafafa',
                     cursor: selectable ? 'pointer' : 'default',
                   }}
                 >
@@ -1201,7 +1354,7 @@ function StepDateTime({
                       fontWeight: '500',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
-                      color: isActive ? '#ffe7cf' : selectable ? '#6b7280' : '#d1d5db',
+                      color: selectable ? '#6b7280' : '#d1d5db',
                     }}
                   >
                     {formatDayLabel(day, studentTimezone).split(' ')[0]}
@@ -1210,22 +1363,23 @@ function StepDateTime({
                     style={{
                       fontSize: '15px',
                       fontWeight: '500',
-                      color: isActive ? '#ffffff' : selectable ? '#111827' : '#d1d5db',
+                      color: selectable ? '#111827' : '#d1d5db',
                     }}
                   >
                     {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
                   </p>
-                  {selectable && (
-                    <div
-                      style={{
-                        width: '5px',
-                        height: '5px',
-                        borderRadius: '50%',
-                        backgroundColor: isActive ? '#ffffff' : '#FF8303',
-                        margin: '4px auto 0',
-                      }}
-                    />
-                  )}
+                  {/* "N slots" for pickable days; a blank spacer (no count) keeps
+                      disabled/past/no-availability cells the same height. */}
+                  <p
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: '500',
+                      marginTop: '3px',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    {selectable ? `${count} ${count === 1 ? 'slot' : 'slots'}` : <>&nbsp;</>}
+                  </p>
                 </button>
               )
             })}
@@ -1243,18 +1397,27 @@ function StepDateTime({
                   .filter((part) => part.starts.length > 0)
                   .map((part) => (
                     <div key={part.label}>
-                      <p
+                      <div
                         style={{
-                          fontSize: '11px',
-                          fontWeight: '500',
-                          color: '#9ca3af',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
                           marginBottom: '8px',
                         }}
                       >
-                        {part.label}
-                      </p>
+                        <part.Icon size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+                        <p
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: '500',
+                            color: '#9ca3af',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                          }}
+                        >
+                          {part.label}
+                        </p>
+                      </div>
                       <div
                         style={{
                           display: 'grid',
@@ -1277,9 +1440,14 @@ function StepDateTime({
                             startMs < selMs + durationMinutes * 60000
                           if (isInsideSelection) return null
 
+                          const isHovered = hoveredSlotIso === slot.startIso
                           return (
                             <button
                               key={slot.startIso}
+                              onMouseEnter={() => setHoveredSlotIso(slot.startIso)}
+                              onMouseLeave={() =>
+                                setHoveredSlotIso((cur) => (cur === slot.startIso ? null : cur))
+                              }
                               onClick={() => {
                                 onSelect(slot.startIso)
                                 // Debounced Calendly-style auto-advance — the latest slot click wins.
@@ -1299,8 +1467,17 @@ function StepDateTime({
                                 cursor: 'pointer',
                                 whiteSpace: 'nowrap',
                                 gridColumn: isSelected ? 'span 2' : 'auto',
-                                backgroundColor: isSelected ? '#FF8303' : '#FFF0DC',
-                                color: isSelected ? '#ffffff' : '#FF8303',
+                                // Available slot chips are green (the two approved greens:
+                                // #E8F5E9 base, #D7EEDD on hover). The selected chip softens
+                                // to white with #FF8303 text and a #FF8303 inset outline via
+                                // box-shadow — no dimension change vs the borderless chips.
+                                backgroundColor: isSelected
+                                  ? '#ffffff'
+                                  : isHovered
+                                    ? '#D7EEDD'
+                                    : '#E8F5E9',
+                                color: isSelected ? '#FF8303' : '#2E7D32',
+                                boxShadow: isSelected ? 'inset 0 0 0 1px #FF8303' : undefined,
                               }}
                             >
                               {isSelected
@@ -1682,9 +1859,10 @@ export default function BookingClient({
           />
         )}
 
-        {logicalStep === 'datetime' && selectedTeacherId && selectedDuration && (
+        {logicalStep === 'datetime' && selectedTeacher && selectedDuration && (
           <StepDateTime
-            teacherId={selectedTeacherId}
+            teacher={selectedTeacher}
+            teacherId={selectedTeacher.id}
             studentTimezone={studentTimezone}
             durationMinutes={selectedDuration}
             selectedStartIso={selectedStartIso}
