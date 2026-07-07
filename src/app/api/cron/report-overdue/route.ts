@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, teacherReportForfeitedEmailContent } from '@/lib/email/templates'
 import { verifyCronAuth } from '@/lib/cron-auth'
+import { createPendingReport } from '@/lib/reports/createPendingReport'
 
 // Daily cron. For each report that is still 'pending' more than 12 hours after
 // its lesson ended, it flags the report (status -> 'flagged'; this is the pay
@@ -34,6 +35,78 @@ export async function GET(request: Request) {
 
   const now = new Date()
   const twelveHoursAgo = new Date(now.getTime() - 12 * 60 * 60 * 1000)
+
+  // ── NEW258: self-healing repair sweep ─────────────────────────────────────
+  // A killed booking request can commit a 'scheduled' lesson but never write its
+  // paired 'pending' report (the booking routes write it as a separate
+  // non-blocking call). Such a lesson is invisible to the reports-driven query
+  // below and stays 'scheduled' forever, counted at full projected pay. A live
+  // AFTER INSERT trigger (NEW258) now closes the gap at source; this sweep
+  // repairs any pre-trigger orphans so they become flaggable — once the report
+  // exists, the normal flow below flags it on the next run (its deadline is
+  // already past). Bounded to 50 per run. Any failure here is logged and
+  // swallowed so it never aborts the flagging pass that follows.
+  // Fetch candidates oldest-first and cap the candidate scan, but apply the
+  // per-run repair budget to the ORPHANS (below), not to this raw fetch. Most
+  // past-'scheduled' rows already have a report — grace-window lessons, and
+  // 'reopened' reports whose lesson stays 'scheduled' forever (the flagging pass
+  // never flips 'reopened' to 'missed') — so a plain unordered LIMIT would let
+  // that reported backlog crowd genuine orphans out of the window and silently
+  // starve the exact rows this sweep exists to repair. Oldest-first drains the
+  // most-overdue zombies, and hitting the candidate cap is logged so a growing
+  // backlog is visible rather than silent.
+  const CANDIDATE_LIMIT = 200
+  const REPAIR_LIMIT = 50
+  try {
+    const { data: pastScheduled, error: sweepFetchErr } = await supabase
+      .from('lessons')
+      .select('id, teacher_id, scheduled_at, duration_minutes')
+      .eq('status', 'scheduled')
+      .lt('scheduled_at', now.toISOString())
+      .order('scheduled_at', { ascending: true })
+      .limit(CANDIDATE_LIMIT)
+
+    if (sweepFetchErr) {
+      console.error('[NEW258] repair sweep: failed to fetch past scheduled lessons:', sweepFetchErr)
+    } else if (pastScheduled && pastScheduled.length > 0) {
+      if (pastScheduled.length === CANDIDATE_LIMIT) {
+        console.warn(`[NEW258] repair sweep: candidate scan hit the ${CANDIDATE_LIMIT}-row cap; any orphans older than the scanned window wait for a later run`)
+      }
+      // No NOT EXISTS in the JS client: fetch report rows for these lesson ids
+      // and filter the orphans in code.
+      const lessonIds = pastScheduled.map((l) => l.id)
+      const { data: existingReports, error: sweepReportsErr } = await supabase
+        .from('reports')
+        .select('lesson_id')
+        .in('lesson_id', lessonIds)
+
+      if (sweepReportsErr) {
+        console.error('[NEW258] repair sweep: failed to fetch existing reports:', sweepReportsErr)
+      } else {
+        const hasReport = new Set((existingReports ?? []).map((r) => r.lesson_id))
+        const orphans = pastScheduled.filter((l) => !hasReport.has(l.id)).slice(0, REPAIR_LIMIT)
+
+        for (const lesson of orphans) {
+          const classEndsAtIso = new Date(
+            new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
+          ).toISOString()
+          const { error: repairErr } = await createPendingReport(
+            supabase,
+            lesson.id,
+            lesson.teacher_id,
+            classEndsAtIso
+          )
+          if (repairErr) {
+            console.error(`[NEW258] repair sweep: failed to create pending report for lesson ${lesson.id}:`, repairErr)
+          } else {
+            console.log(`[NEW258] repair sweep: created missing pending report for lesson ${lesson.id}`)
+          }
+        }
+      }
+    }
+  } catch (sweepErr) {
+    console.error('[NEW258] repair sweep: unexpected error, continuing to flagging pass:', sweepErr)
+  }
 
   // Coarse filter on the joined lesson's scheduled_at (start time);
   // exact start + duration + 12h check is per-row in JS.
