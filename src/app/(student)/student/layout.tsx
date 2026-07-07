@@ -128,7 +128,7 @@ export default async function StudentDashboardLayout({
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {/* Sidebar runs full height - logo lives here */}
-      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={user.id} />
+      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
 
       {/* Right side: header on top, then content row below */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
