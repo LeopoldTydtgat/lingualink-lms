@@ -367,7 +367,7 @@ export async function POST(req: NextRequest) {
     // ── 6. Create the new lesson record ───────────────────────────────────────
     const startTime = new Date(scheduledAt)
 
-    const { data: newLesson, error: lessonError } = await supabase
+    const { data: newLesson, error: lessonError } = await adminClient
       .from('lessons')
       .insert({
         training_id: trainingId,
