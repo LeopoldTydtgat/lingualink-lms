@@ -249,7 +249,10 @@ export async function POST(request: NextRequest) {
   // Atomic hours deduction via RPC — locks the training row, re-checks balance,
   // and increments hours_consumed in a single transaction. Closes the TOCTOU
   // window on the previous read-then-write pattern.
-  const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+  // NEW257: book_class_atomic now RETURNS the id of the 'class_booking'
+  // hours_log row it inserted. Capture it for the lesson_id backfill after the
+  // lesson insert succeeds below.
+  const { data: hoursLogId, error: deductError } = await adminClient.rpc('book_class_atomic', {
     p_training_id: training_id,
     p_hours_needed: hoursRequested,
   })
@@ -339,6 +342,25 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+  }
+
+  // NEW257: backfill hours_log.lesson_id. book_class_atomic returned the id of
+  // the 'class_booking' ledger row; now that the lesson exists, link the two.
+  // Non-blocking: the booking already succeeded and the ledger row exists, so a
+  // failure only leaves the link unset — log it and continue. Uses adminClient
+  // (hours_log UPDATE runs under the service role / bypasses RLS).
+  if (hoursLogId) {
+    const { error: backfillError } = await adminClient
+      .from('hours_log')
+      .update({ lesson_id: lesson.id })
+      .eq('id', hoursLogId)
+    if (backfillError) {
+      console.error('[NEW257] hours_log.lesson_id backfill failed (admin create):', {
+        hours_log_id: hoursLogId,
+        lesson_id: lesson.id,
+        error: backfillError,
+      })
+    }
   }
 
   // NEW178: create the paired 'pending' report row the teacher later completes

@@ -254,6 +254,10 @@ export async function POST(req: NextRequest) {
     // transaction, closing the read-then-write TOCTOU window.
     let oldDurationHours = 0
     let oldTeamsMeetingId: string | null = null
+    // NEW257: id of the hours_log ledger row inserted by book_class_atomic.
+    // Set only on the fresh-book path below; stays null on the reschedule path
+    // (which uses reschedule_class_atomic and is not backfilled here).
+    let hoursLogId: string | null = null
 
     if (rescheduleId) {
       const { data: oldLesson, error: oldLessonError } = await adminClient
@@ -306,10 +310,15 @@ export async function POST(req: NextRequest) {
         )
       }
     } else {
-      const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+      const { data: deductData, error: deductError } = await adminClient.rpc('book_class_atomic', {
         p_training_id: trainingId,
         p_hours_needed: hoursNeeded,
       })
+      // NEW257: book_class_atomic now RETURNS the id of the 'class_booking'
+      // hours_log row it inserted. Capture it for the lesson_id backfill after
+      // the lesson insert succeeds below. (On deductError we return before it is
+      // used, so assigning here is safe.)
+      hoursLogId = deductData
 
       if (deductError) {
         const msg = (deductError.message || '').toLowerCase()
@@ -489,6 +498,28 @@ export async function POST(req: NextRequest) {
         }
       }
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+    }
+
+    // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
+    // book_class_atomic returned the id of the 'class_booking' ledger row; now
+    // that the lesson exists, link the two. Fresh-book path only — hoursLogId is
+    // null on the reschedule path (reschedule_class_atomic writes its own paired
+    // ledger row and is not backfilled here). Non-blocking: the booking already
+    // succeeded and the ledger row exists, so a failure only leaves the link
+    // unset — log it and continue. Uses adminClient because hours_log grants
+    // students SELECT only (RLS would deny a student-session UPDATE).
+    if (hoursLogId) {
+      const { error: backfillError } = await adminClient
+        .from('hours_log')
+        .update({ lesson_id: newLesson.id })
+        .eq('id', hoursLogId)
+      if (backfillError) {
+        console.error('[NEW257] hours_log.lesson_id backfill failed (student book):', {
+          hours_log_id: hoursLogId,
+          lesson_id: newLesson.id,
+          error: backfillError,
+        })
+      }
     }
 
     // H1i: After successful reschedule, the OLD lesson row (cancelled by
