@@ -201,6 +201,34 @@ export async function POST(req: NextRequest) {
 
     const adminClient = createAdminClient()
 
+    // Verify the requested teacher is assigned to this training — assignment check, NEW260.
+    // The client only offers assigned teachers, but the API must enforce it too: without
+    // this, a student could POST any teacherId and book (or reschedule onto) a teacher who
+    // was never assigned to their training. Placed before the fresh-book/reschedule split so
+    // the single check gates both branches. adminClient because hours_log/junction reads are
+    // service-role here and this must not depend on the student's training_teachers RLS.
+    const { data: assignedTeacher, error: assignmentError } = await adminClient
+      .from('training_teachers')
+      .select('teacher_id')
+      .eq('training_id', trainingId)
+      .eq('teacher_id', teacherId)
+      .maybeSingle()
+
+    if (assignmentError) {
+      console.error('training_teachers assignment check failed:', assignmentError)
+      return NextResponse.json(
+        { error: 'Failed to verify teacher assignment. Please try again.' },
+        { status: 500 }
+      )
+    }
+
+    if (!assignedTeacher) {
+      return NextResponse.json(
+        { error: 'This teacher is not assigned to your training' },
+        { status: 403 }
+      )
+    }
+
     // ── 3c. Re-check teacher availability server-side ─────────────────────────
     const slotAvailable = await isSlotAvailable(teacherId, scheduledAt, durationMinutes, adminClient)
     if (!slotAvailable) {
