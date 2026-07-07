@@ -1,3 +1,42 @@
+## Session 186 - 07 July 2026 - Closing student-side booking security gaps
+
+### What was built
+- Added lesson_id to the hours_log ledger so every balance change traces back to the exact lesson that caused it, with a database function stamping it automatically and the booking route backfilling it on write.
+- Added a database trigger and a scheduled repair job that guarantee every scheduled lesson gets a matching pending report row, closing a gap where a lesson could exist with no report ever created for it.
+- Closed a hole where a student could book a class in a way that let the system silently treat a missed lesson as the teacher's fault (a forgeable no-show), by moving that one database write to a trusted server-side path and removing write access that was never meant to be used directly.
+- Added a check to the student booking and reschedule flow so a student can only book a class with a teacher who is actually assigned to their training, closing a gap where any teacher could be booked directly through the booking request itself, bypassing the on-screen teacher list.
+
+### Break/Fix Log
+
+**Issue 1**
+Symptom: hours_log entries had no reliable link back to the lesson that caused them, making it hard to audit or reverse a balance change with confidence.
+Cause: the ledger was designed before lesson-level traceability was a requirement.
+Fix: added a lesson_id column, a database function to stamp it consistently, and updated the booking route to backfill it on every write.
+Lesson: an audit ledger is only as good as its weakest link back to the source record.
+
+**Issue 2**
+Symptom: some scheduled lessons had no pending report waiting for the teacher to fill in after class, so they could pass by unnoticed with nothing flagged.
+Cause: report creation depended on a single code path that could be skipped or fail silently.
+Fix: added a database trigger so a pending report is created the moment a lesson is scheduled, plus a scheduled sweep that finds and repairs any lesson still missing one.
+Lesson: anything that must always exist should be guaranteed at the database level, not only by application code that can be bypassed or fail quietly.
+
+**Issue 3**
+Symptom: a ticket assumed a database access rule around student lesson creation was unused and safe to remove.
+Cause: the assumption was wrong. Live-code verification showed the student booking route was writing that lesson row under the student's own session, not a trusted server-side account, meaning that access rule was actually the only thing gating a potentially forgeable teacher no-show.
+Fix: moved that one database write to a trusted server-side account so the route's own checks (ownership, hours balance, timing rules, no double-booking) now do the gating instead, then safely removed the access rules and leftover default permissions that were no longer needed. Tested the full booking and cancellation cycle before and after the change.
+Lesson: never remove a security rule on the assumption it is dead weight. Verify against the live, running code first. This one very nearly went the other way.
+
+**Issue 4**
+Symptom: the student booking and reschedule flow accepted a teacher choice from the request itself and never checked whether that teacher was actually assigned to the student's training. The on-screen teacher list only ever showed assigned teachers, but the request behind it did not enforce the same rule.
+Cause: the check for teacher assignment only ever existed on the screen the student sees, not in the server-side code handling the actual booking.
+Fix: added a single check against the student's assigned teachers that runs before either booking a new class or rescheduling an existing one, so both paths are covered by the same rule. A request naming an unassigned teacher is now rejected outright.
+Lesson: a restriction shown only in the interface is not a restriction at all. Anything that matters for security must be enforced in the server-side code handling the request, not just the screen in front of it.
+
+### Session result
+This session closed out three related student-booking security gaps found during a wider review, plus one ledger traceability improvement, tightening the booking and billing chain from hours logging through to lesson creation and teacher assignment. All four fixes were verified against the live database and tested end to end before being committed and pushed.
+
+---
+
 ## Session 185 - 7 July 2026 - Admin reports export and Join Class click logging complete
 
 ### What was built
