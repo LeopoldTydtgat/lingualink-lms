@@ -40,6 +40,7 @@ interface TraceLesson {
 interface Props {
   initialReports: Report[];
   teachers:       { id: string; full_name: string }[];
+  students:       { id: string; full_name: string }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -339,7 +340,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers }: Props) {
+export default function ReportsClient({ initialReports, teachers, students }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending').length;
@@ -356,6 +357,7 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
   const [exportFrom,       setExportFrom]       = useState('');
   const [exportTo,         setExportTo]         = useState('');
   const [exportTeacher,    setExportTeacher]    = useState('');
+  const [exportStudent,    setExportStudent]    = useState('');
   const [exportOutcome,    setExportOutcome]    = useState('');
   const [exportClientType, setExportClientType] = useState('');
   const [generating,       setGenerating]       = useState(false);
@@ -402,6 +404,7 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
     setExportFrom(from);
     setExportTo(to);
     setExportTeacher('');
+    setExportStudent('');
     setExportOutcome('');
     setExportClientType('');
     setExportError('');
@@ -424,6 +427,7 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
     params.set('date_from', exportFrom);
     params.set('date_to', exportTo);
     if (exportTeacher)    params.set('teacher_id',  exportTeacher);
+    if (exportStudent)    params.set('student_id',  exportStudent);
     if (exportOutcome)    params.set('status',      exportOutcome);
     if (exportClientType) params.set('client_type', exportClientType);
     setExportError('');
@@ -559,6 +563,18 @@ export default function ReportsClient({ initialReports, teachers }: Props) {
                 >
                   <option value="">All Teachers</option>
                   {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Student</label>
+                <select
+                  value={exportStudent}
+                  onChange={(e) => setExportStudent(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+                >
+                  <option value="">All Students</option>
+                  {students.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                 </select>
               </div>
 
