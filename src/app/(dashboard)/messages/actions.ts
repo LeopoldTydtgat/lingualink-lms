@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentNewMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
+import { getBookedClassStudentIds } from '@/lib/access/bookedClass'
 
 export async function sendMessage(
   receiverId: string,
@@ -27,6 +28,50 @@ export async function sendMessage(
   if (!profile) return { error: 'Profile not found' }
 
   const senderType = profile.role === 'admin' ? 'admin' : 'teacher'
+
+  // NEW262 item (a): server-side sender→receiver relationship gate. The messages RLS
+  // insert policy only checks sender identity, so without this any authenticated
+  // teacher could message any student/teacher/admin by POSTing an arbitrary receiverId.
+  // This mirrors the NEW260 booking assignment check and MUST stay in sync with the
+  // messages page's picker gating: teacher→student reuses the SAME Condition B
+  // getBookedClassStudentIds set that builds the new-message picker, so send permission
+  // exactly matches the list (never training_teachers here). Admin sender is ungated
+  // (may message anyone), matching existing behaviour. Fail closed — any verification
+  // lookup error returns rather than falling through to the insert.
+  if (senderType === 'teacher') {
+    const accessDb = createAdminClient()
+    if (receiverType === 'student') {
+      let bookedStudentIds: Set<string>
+      try {
+        bookedStudentIds = await getBookedClassStudentIds(accessDb, user.id)
+      } catch {
+        return { error: 'Could not verify access. Please try again.' }
+      }
+      if (!bookedStudentIds.has(receiverId)) {
+        return { error: 'You can only message students you currently teach.' }
+      }
+    } else {
+      // receiverType is 'teacher' or 'admin'. Confirm the recipient profile exists and
+      // its role matches the claim: role 'admin' for receiverType 'admin', any non-admin
+      // profile role for receiverType 'teacher'. This closes the hole where a teacher
+      // passes receiverType 'teacher' with a student id to bypass the student check above.
+      const { data: recipientProfile, error: recipientError } = await accessDb
+        .from('profiles')
+        .select('id, role')
+        .eq('id', receiverId)
+        .maybeSingle()
+      if (recipientError) {
+        return { error: 'Could not verify access. Please try again.' }
+      }
+      const roleMatches =
+        receiverType === 'admin'
+          ? recipientProfile?.role === 'admin'
+          : !!recipientProfile && recipientProfile.role !== 'admin'
+      if (!recipientProfile || !roleMatches) {
+        return { error: 'Invalid recipient.' }
+      }
+    }
+  }
 
   const safeContent = sanitizeHtml(content)
 

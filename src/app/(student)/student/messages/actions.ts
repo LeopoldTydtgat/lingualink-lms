@@ -27,6 +27,38 @@ export async function sendMessage(
 
   if (!student) return { error: 'Student not found' }
 
+  // NEW262 item (a): server-side sender→receiver relationship gate. The messages RLS
+  // insert policy only checks sender identity, so without this any authenticated student
+  // could message any teacher (or another student) by POSTing an arbitrary receiverId.
+  // This mirrors the SAME training_teachers rule the student messages page uses to build
+  // assignedTeachers, so send permission exactly matches the contact list; it also
+  // implicitly blocks student→student sends (a students.id never matches a teacher_id).
+  // Fail closed — a lookup error returns rather than falling through to the insert.
+  const accessDb = createAdminClient()
+  const { data: studentTrainings, error: trainingsError } = await accessDb
+    .from('trainings')
+    .select('id')
+    .eq('student_id', student.id)
+  if (trainingsError) {
+    return { error: 'Could not verify access. Please try again.' }
+  }
+  const trainingIds = (studentTrainings ?? []).map((t) => t.id)
+  // Multiple trainings can each assign the same teacher, so this can match several
+  // rows — use .limit(1) + a length check instead of .maybeSingle() (which throws on
+  // multiple rows). An empty trainingIds list yields no match and is blocked below.
+  const { data: assignmentRows, error: assignmentError } = await accessDb
+    .from('training_teachers')
+    .select('teacher_id')
+    .in('training_id', trainingIds)
+    .eq('teacher_id', receiverId)
+    .limit(1)
+  if (assignmentError) {
+    return { error: 'Could not verify access. Please try again.' }
+  }
+  if (!assignmentRows || assignmentRows.length === 0) {
+    return { error: 'You can only message teachers assigned to your training.' }
+  }
+
   const safeContent = sanitizeHtml(content)
 
   const { error } = await supabase.from('messages').insert({
