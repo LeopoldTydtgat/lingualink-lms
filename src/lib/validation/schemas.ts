@@ -358,3 +358,11 @@ export const adminClassesPatchSchema = z.discriminatedUnion('action', [
   adminClassesPatchEditSchema,
   adminClassesPatchCancelSchema,
 ]);
+
+// ─── Join-class click log ─────────────────────────────────────────────────────
+
+export const JoinClickSchema = z.object({
+  lesson_id: z.string().uuid(),
+})
+
+export type JoinClickInput = z.infer<typeof JoinClickSchema>
