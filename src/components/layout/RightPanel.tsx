@@ -178,6 +178,18 @@ export default function RightPanel({
                   rel="noopener noreferrer"
                   onMouseEnter={() => setJoinHovered(true)}
                   onMouseLeave={() => setJoinHovered(false)}
+                  onClick={() => {
+                    // Fire-and-forget teacher join-click logging. Guarded to the joinable
+                    // state only, and never awaited / never throws — logging must not block
+                    // or break opening Teams.
+                    if (!isJoinable || !nextLesson?.teams_join_url) return
+                    fetch('/api/join-click', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ lesson_id: nextLesson.id }),
+                      keepalive: true,
+                    }).catch(() => {})
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
