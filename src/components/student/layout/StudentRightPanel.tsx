@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 
 interface NextLesson {
+  id: string
   scheduled_at: string
   teams_join_url: string | null
   duration_minutes: number
@@ -164,6 +165,18 @@ export default function StudentRightPanel({
                   rel="noopener noreferrer"
                   onMouseEnter={() => setJoinHovered(true)}
                   onMouseLeave={() => setJoinHovered(false)}
+                  onClick={() => {
+                    // Fire-and-forget student join-click logging. Guarded to the
+                    // joinable state only, and never awaited / never throws —
+                    // logging must not block or break opening Teams.
+                    if (!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) || !nextLesson.teams_join_url) return
+                    fetch('/api/join-click', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ lesson_id: nextLesson.id }),
+                      keepalive: true,
+                    }).catch(() => {})
+                  }}
                   style={{
                     display: 'block',
                     padding: '7px 12px',

@@ -39,6 +39,7 @@ export default async function StudentDashboardLayout({
   const { data: nextLesson } = await supabase
     .from('lessons')
     .select(`
+      id,
       scheduled_at,
       teams_join_url,
       duration_minutes,

@@ -252,6 +252,18 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
               href={lesson.teams_join_url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                // Fire-and-forget student join-click logging. Guarded to the
+                // joinable state only, and never awaited / never throws —
+                // logging must not block or break opening Teams.
+                if (!lesson.teams_join_url || !isLessonJoinable(lesson.scheduled_at, lesson.duration_minutes, lesson.status, now)) return
+                fetch('/api/join-click', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ lesson_id: lesson.id }),
+                  keepalive: true,
+                }).catch(() => {})
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
