@@ -1,3 +1,33 @@
+## Session 185 - 7 July 2026 - Admin reports export and Join Class click logging complete
+
+### What was built
+
+- Admin reports Excel export built end to end: an export modal on the admin Reports page generating a styled ExcelJS workbook with 22 columns covering class details, report status, feedback, join times, billability, per-lesson rate snapshots, cancellation windows and policy flags. All dates render in SAST via Intl formatters, date bounds use literal +02:00 offset strings, and every export writes an audit row to a new export_log table. The teacher filter includes the dual-role admin account (commit ae1d96a).
+- Three live database tables captured in repo migrations so the repo matches production: lesson_rate_snapshots (rate frozen per lesson via trigger, 55 rows backfilled), lesson_join_clicks (deny-all RLS), and export_log (deny-all RLS). The rate snapshot trigger is included so a fresh environment reproduces the live behaviour (commit d9b1abc).
+- Student filter added to the export modal so exports can be narrowed to a single student as well as a single teacher (commit b8d0f3f).
+- Teacher-side Join Class click logging: a new server route validates the body with Zod, confirms the caller is the lesson's teacher, and inserts into lesson_join_clicks through the service-role client, since the table's deny-all RLS makes client-side inserts impossible by design. The teacher right panel fires the log on click, guarded to the joinable window, never awaited and never able to block opening Teams (commit 13f9962).
+- Student-side Join Class click logging: the same route extended to accept students. The caller's auth user resolves through students.auth_user_id to the students table primary key, which is then matched against the lesson's student_id, since lessons.student_id references the table PK and not the auth UUID. Click hooks added to the student right panel and the class reminder modal in the same fire-and-forget shape, with the lesson id threaded through the student layout query. Both the supabase-rls-auditor and code-reviewer subagents cleared the change before commit (commit 823b6fd).
+
+### Break/Fix Log
+
+Issue 1
+Symptom: The three new tables existed only in the live database, created directly in the SQL Editor, with nothing in the repo migrations.
+Cause: The export feature was built against live DDL first to keep momentum, leaving the repo behind production.
+Fix: A catch-up migration was written from live pg_dump-style reads of the actual tables, trigger and grants, then committed.
+Lesson: Live-first DDL is fine for speed, but the catch-up migration is part of the feature, not an optional cleanup. The repo is not done until it can rebuild production.
+
+Issue 2
+Symptom: Extending the join-click route to students risked authorising the wrong person, because the two ownership checks look identical but compare different kinds of IDs.
+Cause: lessons.teacher_id references profiles.id, which IS the auth UUID, while lessons.student_id references students.id, a table PK reachable only through students.auth_user_id. Both are UUIDs, so a direct comparison would compile, pass type checks, and silently authorise nobody or the wrong rows.
+Fix: The foreign keys were read from the live database before any code was written, and the student branch resolves auth user to students.id first, then compares PK to PK. The RLS auditor confirmed the indirection matches the database's own get_current_student_id helper.
+Lesson: When two ID columns share a type, the schema, not the code, says what they mean. Read the actual foreign keys before writing any ownership check.
+
+### Session result
+
+The admin reports workstream is complete across five commits. The client can now export a full billing and operations picture of any date range to Excel, filtered by teacher, student, outcome or client type, with every export audited. Join Class clicks are now logged for both teachers and students through one ownership-checked server route, and the export already renders both join columns, so no follow-up wiring remains. The student side was live-tested end to end: a real student click opened Teams and landed the correct row, verified in the database and then cleaned up along with the test schedule change. All work is pushed to origin/dev. This closes the admin chat roadmap in full.
+
+---
+
 ## Session 184 - 7 July 2026 - Student booking wizard restructure complete
 
 ### What was built
