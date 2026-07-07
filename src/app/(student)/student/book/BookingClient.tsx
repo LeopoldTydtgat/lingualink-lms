@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info } from 'lucide-react'
 import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1582,6 +1582,63 @@ function StepConfirm({
         Please review your class details before confirming.
       </p>
 
+      {/* Teacher context strip — mirrors the Step 3 strip: white card,
+          #E0DFDC border, 40px avatar, name + RatingLine. No duration chip
+          or timezone line here. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '10px',
+          marginBottom: '20px',
+        }}
+      >
+        {teacher.photo_url ? (
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+            <Image
+              src={teacher.photo_url}
+              alt={teacher.full_name}
+              width={40}
+              height={40}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <User size={20} color="#9ca3af" />
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: '120px' }}>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+            {teacher.full_name}
+          </p>
+          {teacher.reviewCount > 0 && (
+            <div style={{ marginTop: '2px' }}>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Details card — no orange header. Four icon rows + a cancellation
+          footnote. Icons: Calendar / Clock / Wallet / ChartNoAxesColumn. */}
       <div
         style={{
           backgroundColor: '#ffffff',
@@ -1591,69 +1648,76 @@ function StepConfirm({
           marginBottom: '24px',
         }}
       >
-        {/* Orange header */}
-        <div style={{ backgroundColor: '#FF8303', padding: '12px 20px' }}>
-          <span style={{ color: '#ffffff', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Class Summary
-          </span>
-        </div>
-
-        <div style={{ padding: '20px' }}>
-          {/* Teacher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            {teacher.photo_url ? (
-              <div style={{ width: '44px', height: '44px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
-                <Image
-                  src={teacher.photo_url}
-                  alt={teacher.full_name}
-                  width={44}
-                  height={44}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              </div>
-            ) : (
+        {[
+          { Icon: Calendar, label: 'Date & time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
+          { Icon: Clock, label: 'Duration', value: formatHours(durationMinutes / 60) },
+          { Icon: Wallet, label: 'Hours deducted', value: formatHours(isReschedule ? 0 : hoursUsed) },
+          { Icon: ChartNoAxesColumn, label: 'Remaining after booking', value: formatHours(hoursAfter) },
+        ].map(({ Icon, label, value }, idx) => (
+          <div
+            key={label}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '14px 20px',
+              borderTop: idx === 0 ? 'none' : '1px solid #f3f4f6',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '50%',
-                  backgroundColor: '#f3f4f6',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: '#FFF0DC',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
-                <User size={20} color="#9ca3af" />
+                <Icon size={18} color="#FF8303" />
               </div>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
+                <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{value}</p>
+              </div>
+            </div>
+            {idx === 3 && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  backgroundColor: '#FFF0DC',
+                  borderRadius: '999px',
+                  padding: '4px 12px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#FF8303',
+                }}
+              >
+                {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
+              </span>
             )}
-            <div>
-              <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{teacher.full_name}</p>
-              <p style={{ fontSize: '13px', color: '#9ca3af' }}>Your teacher</p>
-            </div>
           </div>
+        ))}
 
-          {/* Details rows */}
-          {[
-            { label: 'Date & Time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
-            { label: 'Duration', value: formatHours(durationMinutes / 60) },
-            { label: 'Hours deducted', value: formatHours(isReschedule ? 0 : hoursUsed) },
-            { label: 'Remaining after booking', value: formatHours(hoursAfter) },
-          ].map(({ label, value }) => (
-            <div
-              key={label}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                paddingTop: '12px',
-                paddingBottom: '12px',
-                borderTop: '1px solid #f3f4f6',
-              }}
-            >
-              <span style={{ fontSize: '14px', color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{value}</span>
-            </div>
-          ))}
+        {/* Cancellation footnote */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 20px',
+            backgroundColor: '#f9fafb',
+            borderTop: '1px solid #f3f4f6',
+          }}
+        >
+          <Info size={16} color="#6b7280" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', color: '#6b7280' }}>
+            You can change or cancel up to 24 hours before your lesson.
+          </span>
         </div>
       </div>
 
