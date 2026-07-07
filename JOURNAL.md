@@ -1,3 +1,32 @@
+## Session 184 - 7 July 2026 - Student booking wizard restructure complete
+
+### What was built
+
+- Reschedule flow fixed to use the student's effective balance (true balance plus the hours of the lesson being rescheduled) so a reschedule is never blocked by hours the student is about to get back. The duration step is now skipped on the reschedule path since duration is locked to the original lesson (commit 74feb3d).
+- Confirm screen now shows "Hours deducted: 0min" on the reschedule path via a label-only ternary. The underlying hours math is untouched; a reschedule is a date change, not a new deduction (commit 4aabe66).
+- Step 3 (Date and Time) fully redesigned: context strip with teacher avatar, name and rating plus a locked duration chip and timezone note; per-day slot counts from a shared startsByDay structure; an "Earliest available" hint for the current week; Sun, Sunset and Moon time-of-day group icons in brand orange; green slot chips; soft selected states using the #FFF0DC tint and #FF8303 border (commit 1a76bd1).
+- Step 4 (Confirm) redesigned to match Step 3's visual language: the old orange "Class Summary" header bar replaced with the Step 3 teacher context strip, four icon rows (Calendar, Clock, Wallet, chart) with #FFF0DC icon tiles, a before-and-after balance chip on the Remaining row ("Xh -> Yh" on a booking, "Reschedule - no hours deducted" on a reschedule), and a 24-hour cancellation footnote inside the card. Hours math, the low-hours warning and the confirm handler were copied verbatim and left untouched (commit 75ff651).
+
+### Break/Fix Log
+
+Issue 1
+Symptom: Rescheduling a lesson could be blocked for insufficient hours even though the student was only moving an existing lesson, and the wizard forced the student back through the duration step.
+Cause: The reschedule path reused the normal booking flow, checking against the raw remaining balance and rendering every step.
+Fix: Compute an effective balance that adds back the hours of the lesson being rescheduled, and skip the duration step entirely on the reschedule path with the duration locked to the original lesson.
+Lesson: A reschedule is not a new booking. Every balance check and every wizard step must be evaluated against what the operation actually is, not the flow it happens to reuse.
+
+Issue 2
+Symptom: The confirm screen told a rescheduling student that hours would be deducted.
+Cause: The confirm screen displayed the standard deduction value with no awareness of the reschedule path.
+Fix: A label-only ternary shows 0min deducted on reschedule while the real hours math stays untouched.
+Lesson: Display fixes should be display-only. Changing what the user sees must never mean changing what the system computes.
+
+### Session result
+
+The student booking wizard restructure is complete across four commits. The reschedule path now behaves correctly end to end (effective balance, skipped duration step, honest confirm screen), and Steps 3 and 4 share one coherent visual language built entirely from inline style props within the approved palette. Both the normal booking and reschedule paths were browser tested before each commit. All work is pushed to origin/dev. Green slot chips and several UI decisions remain pending client sign-off as noted on the standing decision list. With this entry the journal pause is lifted and normal end-of-session journal reminders resume.
+
+---
+
 ## Session 183 - 05 July 2026 - Chrome-free live annotation page to stop screen-share leaks
 
 ### What was built
