@@ -385,6 +385,10 @@ export default function DashboardClient({
                                   </Link>
                                 </div>
                               </>
+                            ) : report.status === 'reopened' ? (
+                              <span className="text-xs font-semibold" style={{ color: '#c2410c' }}>
+                                Reopened
+                              </span>
                             ) : (
                               <span className="text-xs text-gray-500">
                                 {overdue >= 1

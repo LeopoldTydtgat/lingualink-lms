@@ -60,7 +60,7 @@ export interface LiveLesson {
 
 export interface PendingReportItem {
   id: string
-  status: 'pending' | 'flagged'
+  status: 'pending' | 'flagged' | 'reopened'
   deadline_at: string | null
   lesson_scheduled_at: string
   lesson_duration: number
@@ -133,7 +133,9 @@ export default async function AdminDashboardPage() {
           .order('scheduled_at')
       : Promise.resolve(null),
 
-    // Pending reports with teacher + lesson + student (for the pending panel)
+    // Outstanding reports (pending + admin-reopened) — feeds the pending panel and count.
+    // A 'reopened' report is awaiting the teacher's late submission just like 'pending', so it
+    // belongs in the same "outstanding / awaiting teacher" bucket (NEW270).
     supabase
       .from('reports')
       .select(`
@@ -144,7 +146,7 @@ export default async function AdminDashboardPage() {
           student:students!student_id(full_name)
         )
       `)
-      .eq('status', 'pending')
+      .in('status', ['pending', 'reopened'])
       .order('deadline_at'),
 
     // Flagged reports (same shape — shown first in pending panel, in red)
