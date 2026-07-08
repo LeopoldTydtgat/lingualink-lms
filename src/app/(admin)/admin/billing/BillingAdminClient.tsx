@@ -131,19 +131,21 @@ function escapeCSV(val: unknown): string {
 
 async function fetchBillingEntities(
   teacherIds: string[],
-  studentIds: string[]
+  studentIds: string[],
+  lessonIds: string[]
 ): Promise<{
   teachers: { id: string; full_name: string; hourly_rate: number | null; currency: string | null }[]
   students: { id: string; full_name: string; company_id: string | null; cancellation_policy: string | null }[]
+  lessonRates: { lesson_id: string; hourly_rate: number }[]
 }> {
   const res = await fetch('/api/admin/billing/entities', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teacherIds, studentIds }),
+    body: JSON.stringify({ teacherIds, studentIds, lessonIds }),
   })
   if (!res.ok) {
     console.error('fetchBillingEntities failed:', res.status)
-    return { teachers: [], students: [] }
+    return { teachers: [], students: [], lessonRates: [] }
   }
   return res.json()
 }
@@ -249,9 +251,15 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
     const teacherIds = [...new Set(rawLessons.map(l => l.teacher_id))]
     const studentIds = [...new Set(rawLessons.map(l => l.student_id))]
+    const lessonIds = [...new Set(rawLessons.map(l => l.id))]
 
-    // Fetch sensitive fields via server-side API route
-    const { teachers: tProfiles, students: sRows } = await fetchBillingEntities(teacherIds, studentIds)
+    // Fetch sensitive fields via server-side API route (incl. per-lesson rate snapshots)
+    const { teachers: tProfiles, students: sRows, lessonRates } = await fetchBillingEntities(teacherIds, studentIds, lessonIds)
+
+    // Snapshot rates keyed by lesson. Absence (missing row or null rate) means fall
+    // back to the teacher's live profiles.hourly_rate below (NEW268 D1).
+    const snapMap: Record<string, number> = {}
+    for (const r of lessonRates) snapMap[r.lesson_id] = r.hourly_rate
 
     // Fetch company names directly — companies table has no sensitive columns
     const companyIds = [...new Set(sRows.map(s => s.company_id).filter(Boolean))] as string[]
@@ -272,11 +280,21 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       const s = studentMap[l.student_id] || { full_name: 'Unknown', company_id: null, cancellation_policy: null }
       const companyId = s.company_id
       const companyName = companyId ? (companyMap[companyId] || null) : null
+
+      // Per-lesson pay rate: the booking-time snapshot when present, else the teacher's
+      // live profiles.hourly_rate (NEW268 D1). The snapshot READ is server-side in
+      // /api/admin/billing/entities; here we only compose the fallback + log the miss.
+      const snapRate = snapMap[l.id]
+      if (snapRate == null) {
+        console.error('[billing] no rate snapshot for lesson; falling back to live profiles.hourly_rate', { lesson_id: l.id })
+      }
+      const hourlyRate = snapRate != null ? snapRate : t.hourly_rate
+
       return {
         ...l,
         teacherName: t.full_name,
         studentName: s.full_name,
-        hourlyRate: t.hourly_rate,
+        hourlyRate,
         teacherCurrency: t.currency,
         cancellationPolicy: s.cancellation_policy,
         companyId,
