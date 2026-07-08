@@ -2,9 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
-import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
+import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
-import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import {
   recomputeInvoiceAmountsForTeacher,
   recomputeInvoiceAmountsForAllTeachers,
@@ -65,7 +64,7 @@ export async function GET(req: NextRequest) {
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const type = searchParams.get('type') // 'teacher_invoices' | 'teacher_earnings' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
+  const type = searchParams.get('type') // 'teacher_invoices' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
   const dateFrom = searchParams.get('dateFrom')
   const dateTo = searchParams.get('dateTo')
   const teacherId = searchParams.get('teacherId')
@@ -131,111 +130,6 @@ export async function GET(req: NextRequest) {
 
     csv = toCSV(headers, rows)
     filename = 'teacher-invoices.csv'
-  }
-
-  // ── 2. Teacher Earnings Summary ───────────────────────────────────────────────────────
-  else if (type === 'teacher_earnings') {
-    // hourly_rate has a column-level REVOKE on `authenticated` — must use the
-    // admin client. Role check above has already gated access to this branch.
-    const adminClient = createAdminClient()
-    const { data: teachers, error: teachersErr } = await adminClient
-      .from('profiles')
-      .select('id, full_name, email, hourly_rate, timezone, currency')
-      .in('role', ['teacher', 'admin'])
-      .order('full_name')
-    if (teachersErr) throw teachersErr
-
-    let lessonsQuery = supabase
-      .from('lessons')
-      .select('id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at')
-      .in('status', MONTH_BILLING_PREFILTER_STATUSES)
-
-    if (teacherId) lessonsQuery = lessonsQuery.eq('teacher_id', teacherId)
-    if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
-    if (dateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', dateTo)
-
-    const { data: lessons, error: lessonsErr } = await lessonsQuery
-    if (lessonsErr) throw lessonsErr
-
-    // Group lessons by teacher × month (in the teacher's local timezone)
-    const earningsMap: Record<string, {
-      teacherName: string
-      teacherEmail: string
-      month: string
-      completed: number
-      noShows: number
-      totalHours: number
-      hourlyRate: number
-      currency: string
-      totalOwed: number
-    }> = {}
-
-    const missingTzTeachers = new Set<string>()
-
-    for (const lesson of (lessons || [])) {
-      const teacher = (teachers || []).find(t => t.id === lesson.teacher_id)
-      if (!teacher) continue
-
-      const bill = getBillability({
-        status: lesson.status,
-        scheduledAt: lesson.scheduled_at,
-        cancelledAt: lesson.cancelled_at,
-        cancellationPolicy: null,
-        hourlyRate: teacher.hourly_rate || 0,
-        durationMinutes: lesson.duration_minutes,
-      })
-      if (!bill.billableToTeacher) continue
-
-      if (!teacher.timezone) {
-        missingTzTeachers.add(teacher.id)
-        continue
-      }
-      const monthKey = getMonthKeyInTz(new Date(lesson.scheduled_at), teacher.timezone)
-      const mapKey = `${teacher.id}_${monthKey}`
-
-      if (!earningsMap[mapKey]) {
-        earningsMap[mapKey] = {
-          teacherName: teacher.full_name,
-          teacherEmail: teacher.email,
-          month: monthKey,
-          completed: 0,
-          noShows: 0,
-          totalHours: 0,
-          hourlyRate: teacher.hourly_rate || 0,
-          currency: teacher.currency || 'EUR',
-          totalOwed: 0,
-        }
-      }
-
-      const entry = earningsMap[mapKey]
-      if (lesson.status === 'completed') entry.completed++
-      if (lesson.status === 'student_no_show') entry.noShows++
-      entry.totalHours += lesson.duration_minutes / 60
-      entry.totalOwed += bill.amount
-    }
-
-    if (missingTzTeachers.size > 0) {
-      return NextResponse.json(
-        { error: 'TIMEZONE_MISSING', message: `Cannot export earnings: ${missingTzTeachers.size} teacher(s) have no timezone set. Set their timezones before exporting.` },
-        { status: 422 }
-      )
-    }
-
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate', 'Total Owed', 'Currency']
-    const rows = Object.values(earningsMap).map(e => [
-      e.teacherName,
-      e.teacherEmail,
-      formatMonthCSV(e.month),
-      e.completed,
-      e.noShows,
-      e.totalHours.toFixed(2),
-      e.hourlyRate.toFixed(2),
-      e.totalOwed.toFixed(2),
-      e.currency,
-    ])
-
-    csv = toCSV(headers, rows)
-    filename = 'teacher-earnings.csv'
   }
 
   // ── 4. Company Billing Report ─────────────────────────────────────────────────────────

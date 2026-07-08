@@ -232,17 +232,24 @@ export async function GET(
 
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
-          const billable = getBillability({
+          const profile = profileMap[lesson.teacher_id]
+
+          // Snapshot rate for this lesson, else the teacher's live rate (Decision A).
+          // Resolved BEFORE the billable gate so getBillability is the single source
+          // of truth for both the gate AND the per-lesson amount — mirrors the invoice
+          // path (recomputeAmounts.ts), which resolves the rate for every prefiltered
+          // lesson then reads getBillability(...).amount.
+          const resolvedRate = resolveLessonRate(rateMap, lesson.id, profile?.rate ?? 0)
+          const bill = getBillability({
             status: lesson.status,
             scheduledAt: lesson.scheduled_at,
             cancelledAt: lesson.cancelled_at,
             cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
-            hourlyRate: 0,            // gate only — amount is summed separately below with the real rate
+            hourlyRate: resolvedRate,
             durationMinutes: lesson.duration_minutes ?? 0,
-          }).billableToTeacher
-          if (!billable) continue
+          })
+          if (!bill.billableToTeacher) continue
 
-          const profile = profileMap[lesson.teacher_id]
           if (!profile?.timezone) {
             missingTzTeachers.add(lesson.teacher_id)
             continue
@@ -264,12 +271,13 @@ export async function GET(
             }
           }
 
-          // Snapshot rate for this lesson, else the teacher's live rate (Decision A).
-          const resolvedRate = resolveLessonRate(rateMap, lesson.id, profile?.rate ?? 0)
           summary[key].classesTaken++
           if (report?.no_show_type === 'student') summary[key].studentNoShows++
           summary[key].totalMinutes += lesson.duration_minutes ?? 0
-          summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * resolvedRate
+          // Sum the per-lesson amount ALREADY rounded to cents by getBillability
+          // (Math.round(...*100)/100), so Total Owed equals the invoice amount_eur
+          // for the same teacher-month instead of drifting by fractions of a cent.
+          summary[key].billableAmount += bill.amount
           summary[key].rates.add(resolvedRate)
         }
 
