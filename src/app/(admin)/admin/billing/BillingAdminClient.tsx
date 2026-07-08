@@ -214,7 +214,10 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
-        supabase.from('invoices').select('*').order('billing_month', { ascending: false }),
+        supabase
+          .from('invoices')
+          .select('id, teacher_id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number')
+          .order('billing_month', { ascending: false }),
         supabase.from('settings').select('value').eq('key', 'invoice_template_path').maybeSingle(),
       ])
 
