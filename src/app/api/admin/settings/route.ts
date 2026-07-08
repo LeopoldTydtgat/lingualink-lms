@@ -10,6 +10,7 @@ const ALLOWED_KEYS = [
   'payment_timeline_days',
   'low_balance_threshold',
   'default_cancellation_window',
+  'export_timezone',
 ]
 
 export async function GET() {

@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
+import { formatInstantInTz, tzLabel } from '@/lib/exportTime'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ async function fetchBillingEntities(
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function BillingAdminClient({ adminId }: { adminId: string }) {
+export default function BillingAdminClient({ adminId, exportTz }: { adminId: string; exportTz: string }) {
   const supabase = createClient()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
@@ -502,13 +503,17 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   }
 
   // ── Student Billing CSV (client-side) ───────────────────────────────────────
-  // Serializes the lessons CURRENTLY on screen (sbLessons) so the exported CSV is
-  // provably identical to the table: the same getBillability call, the same
-  // per-row currency, the same status labels. Deliberately NOT a server-route
+  // Serializes the lessons CURRENTLY on screen (sbLessons) so the exported CSV's
+  // BILLING figures mirror the table exactly: the same getBillability call, the
+  // same per-row currency, the same status labels. Deliberately NOT a server-route
   // export - that would recompute billing in a second place and risk drifting
   // from the numbers the admin sees here.
+  // NEW271: the Date & Time column is the one intentional exception — it renders in
+  // the settings-driven export timezone (formatInstantInTz + exportTz) to agree with
+  // the server-route exports, so it can differ from the on-screen column, which
+  // stays in the admin's own browser timezone. The billing numbers still match 1:1.
   const buildStudentBillingCSV = (): string => {
-    const headers = ['Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
+    const headers = ['Student', 'Teacher', `Date & Time (${tzLabel(exportTz)})`, 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
     const rows = sbLessons.map(l => {
       const bill = getBillability({
         status: l.status,
@@ -521,7 +526,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       return [
         l.studentName,
         l.teacherName,
-        formatDateTime(l.scheduled_at),
+        formatInstantInTz(l.scheduled_at, exportTz),
         l.duration_minutes,
         getLessonStatusLabel(l.status),
         bill.label,
