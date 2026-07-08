@@ -5,6 +5,7 @@ import BillingClient from './BillingClient'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 
 type LessonRow = {
   id: string
@@ -13,6 +14,8 @@ type LessonRow = {
   status: string
   cancelled_at: string | null
   students: { full_name: string } | { full_name: string }[] | null
+  // Per-lesson pay rate resolved server-side (snapshot ?? live profiles.hourly_rate).
+  rate: number
 }
 
 export default async function BillingPage() {
@@ -107,11 +110,16 @@ export default async function BillingPage() {
     .in('status', MONTH_BILLING_PREFILTER_STATUSES)
     .order('scheduled_at', { ascending: true })
 
+  // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+  // Resolved here so the browser never reads the snapshot table; the client just
+  // consumes `lesson.rate`. Fallback is the teacher's live profiles.hourly_rate.
+  const rateMap = await fetchLessonRateMap(admin, (lessons ?? []).map(l => l.id))
+
   const lessonsByMonth: Record<string, LessonRow[]> = {}
-  for (const lesson of (lessons as LessonRow[] | null) || []) {
+  for (const lesson of ((lessons ?? []) as Omit<LessonRow, 'rate'>[])) {
     const key = getMonthKeyInTz(new Date(lesson.scheduled_at), tz)
     if (!lessonsByMonth[key]) lessonsByMonth[key] = []
-    lessonsByMonth[key].push(lesson)
+    lessonsByMonth[key].push({ ...lesson, rate: resolveLessonRate(rateMap, lesson.id, billingInfo.hourly_rate ?? 0) })
   }
 
   const { data: settingsData } = await admin

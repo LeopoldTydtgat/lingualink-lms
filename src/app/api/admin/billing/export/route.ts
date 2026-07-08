@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import {
   recomputeInvoiceAmountsForTeacher,
@@ -272,6 +273,10 @@ export async function GET(req: NextRequest) {
     const { data: lessons, error: lessonsErr } = await lessonsQuery
     if (lessonsErr) throw lessonsErr
 
+    // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+    // The teacher's live profiles.hourly_rate is used only as the fallback (NEW268 D1).
+    const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map(l => l.id))
+
     const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
     const rows: (string | number | boolean | null)[][] = []
 
@@ -289,7 +294,7 @@ export async function GET(req: NextRequest) {
             scheduledAt: lesson.scheduled_at,
             cancelledAt: lesson.cancelled_at,
             cancellationPolicy: student.cancellation_policy as '24hr' | '48hr' | null,
-            hourlyRate: teacher?.hourly_rate ?? 0,
+            hourlyRate: resolveLessonRate(rateMap, lesson.id, teacher?.hourly_rate ?? 0),
             durationMinutes: lesson.duration_minutes,
           })
 

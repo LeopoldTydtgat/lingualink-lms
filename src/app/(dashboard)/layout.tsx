@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 import { getBillability, projectedContribution } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import LeftNav from '@/components/layout/LeftNav'
 import TopHeader from '@/components/layout/TopHeader'
 import RightPanel from '@/components/layout/RightPanel'
@@ -97,12 +98,17 @@ export default async function DashboardLayout({
 
     const { data: monthLessons } = await supabase
       .from('lessons')
-      .select('duration_minutes, status, cancelled_at, scheduled_at')
+      .select('id, duration_minutes, status, cancelled_at, scheduled_at')
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startUtc)
       .lt('scheduled_at', endUtc)
       // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
       .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
+
+    // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+    // `hourlyRate` is the teacher's live rate, used only as the fallback. Applies to
+    // both settled amounts and projected amounts (scheduled lessons have snapshots too).
+    const rateMap = await fetchLessonRateMap(admin, (monthLessons ?? []).map(l => l.id))
 
     const nowMs = now.getTime()
 
@@ -117,7 +123,7 @@ export default async function DashboardLayout({
           scheduledAt: lesson.scheduled_at,
           cancelledAt: lesson.cancelled_at,
           cancellationPolicy: null,
-          hourlyRate,
+          hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
         })
         if (bill.billableToTeacher) currentAmount += bill.amount
@@ -135,7 +141,7 @@ export default async function DashboardLayout({
           scheduledAt: lesson.scheduled_at,
           cancelledAt: lesson.cancelled_at,
           cancellationPolicy: null,
-          hourlyRate,
+          hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
         },
         nowMs

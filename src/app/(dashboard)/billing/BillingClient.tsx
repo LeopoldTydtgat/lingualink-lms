@@ -30,6 +30,8 @@ interface Lesson {
   status: string
   cancelled_at: string | null
   students: { full_name: string } | { full_name: string }[] | null
+  // Per-lesson pay rate resolved server-side (snapshot ?? live profiles.hourly_rate).
+  rate: number
 }
 
 interface BillingInfoDisplay {
@@ -383,7 +385,6 @@ export default function BillingClient({
                     {lessons.length === 0 ? (
                       <p className="text-sm text-gray-400">No billable classes for this month.</p>
                     ) : (() => {
-                      const rate = billingInfo?.hourly_rate ?? 0
                       const rows = lessons.map(lesson => ({
                         lesson,
                         bill: getBillability({
@@ -391,7 +392,9 @@ export default function BillingClient({
                           scheduledAt: lesson.scheduled_at,
                           cancelledAt: lesson.cancelled_at,
                           cancellationPolicy: null,
-                          hourlyRate: rate,
+                          // Per-lesson rate from lesson_rate_snapshots, resolved server-side
+                          // in billing/page.tsx (snapshot ?? live profiles.hourly_rate).
+                          hourlyRate: lesson.rate,
                           durationMinutes: lesson.duration_minutes,
                         }),
                       }))

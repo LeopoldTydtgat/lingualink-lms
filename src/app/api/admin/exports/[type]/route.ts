@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
@@ -217,13 +218,17 @@ export async function GET(
           classesTaken: number
           studentNoShows: number
           totalMinutes: number
-          rate: number
+          rates: Set<number>
           currency: string
           billableAmount: number
           invoiceUploaded: string
         }> = {}
 
         const missingTzTeachers = new Set<string>()
+
+        // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+        // profile.rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
+        const rateMap = await fetchLessonRateMap(adminClient, lessonIds)
 
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
@@ -252,17 +257,20 @@ export async function GET(
               classesTaken: 0,
               studentNoShows: 0,
               totalMinutes: 0,
-              rate: profile?.rate ?? 0,
+              rates: new Set<number>(),
               currency: profile?.currency ?? 'EUR',
               billableAmount: 0,
               invoiceUploaded: '',
             }
           }
 
+          // Snapshot rate for this lesson, else the teacher's live rate (Decision A).
+          const resolvedRate = resolveLessonRate(rateMap, lesson.id, profile?.rate ?? 0)
           summary[key].classesTaken++
           if (report?.no_show_type === 'student') summary[key].studentNoShows++
           summary[key].totalMinutes += lesson.duration_minutes ?? 0
-          summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * (profile?.rate ?? 0)
+          summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * resolvedRate
+          summary[key].rates.add(resolvedRate)
         }
 
         if (missingTzTeachers.size > 0) {
@@ -287,7 +295,9 @@ export async function GET(
           'Classes Taken': s.classesTaken,
           'Student No-Shows': s.studentNoShows,
           'Total Hours': (s.totalMinutes / 60).toFixed(2),
-          'Hourly Rate': s.rate.toFixed(2),
+          // Decision B: one rate if every lesson in the teacher-month resolved to the
+          // same rate, else "varies" (amounts above are per-lesson snapshot-correct).
+          'Hourly Rate': s.rates.size === 0 ? '0.00' : s.rates.size === 1 ? [...s.rates][0].toFixed(2) : 'varies',
           'Total Owed': s.billableAmount.toFixed(2),
           'Currency': s.currency,
           'Invoice Status': invoiceMap[key] ?? 'not uploaded',
@@ -403,6 +413,10 @@ export async function GET(
         const teacherMap: Record<string, { rate: number; currency: string }> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
+        // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+        // teacherMap rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
+        const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map((l: { id: string }) => l.id))
+
         const sMap: Record<string, any> = {}
         students?.forEach((s: any) => { sMap[s.id] = s })
 
@@ -415,7 +429,7 @@ export async function GET(
             scheduledAt: l.scheduled_at,
             cancelledAt: l.cancelled_at,
             cancellationPolicy: student?.cancellation_policy as '24hr' | '48hr' | null,
-            hourlyRate: teacherMap[l.teacher_id]?.rate ?? 0,
+            hourlyRate: resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
             durationMinutes: l.duration_minutes ?? 0,
           })
           const billable24 = bill.billableToTeacher
