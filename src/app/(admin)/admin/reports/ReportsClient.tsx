@@ -14,7 +14,7 @@ interface LessonSummary { id: string; scheduled_at: string; duration_minutes: nu
 interface Report {
   id:               string;
   lesson_id:        string;
-  status:           'pending' | 'completed' | 'flagged';
+  status:           'pending' | 'completed' | 'flagged' | 'reopened';
   did_class_happen: boolean | null;
   no_show_type:     string | null;
   feedback_text:    string | null;
@@ -70,6 +70,7 @@ function ReportStatusBadge({ status }: { status: string }) {
     pending:   { bg: '#FEF3C7', text: '#92400E', label: 'Pending' },
     completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
     flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
+    reopened:  { bg: '#FFEDD5', text: '#C2410C', label: 'Reopened' },
   };
   const s = styles[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
   return (
@@ -154,6 +155,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
           <option value="pending">Pending</option>
           <option value="completed">Completed</option>
           <option value="flagged">Flagged</option>
+          <option value="reopened">Reopened</option>
         </select>
         <select value={teacherFilter} onChange={(e) => setTeacherFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
           <option value="">All Teachers</option>
@@ -197,6 +199,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
                 let rowBg = '';
                 if (r.status === 'flagged') rowBg = '#FEF2F2';
                 if (r.status === 'pending') rowBg = '#FFFBEB';
+                if (r.status === 'reopened') rowBg = '#FFF7ED';
                 return (
                   <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
                     <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at) : '—'}</td>
@@ -214,7 +217,9 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
                     <td className="py-3 px-3 text-gray-600 text-xs">
                       {r.status === 'flagged' && r.flagged_at
                         ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
-                        : r.deadline_at ? formatDateTime(r.deadline_at) : '—'}
+                        : r.status === 'reopened'
+                          ? '—'
+                          : r.deadline_at ? formatDateTime(r.deadline_at) : '—'}
                     </td>
                     <td className="py-3 px-3">
                       <div className="flex items-center gap-2">
@@ -224,7 +229,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
                         {r.status === 'flagged' && (
                           <button onClick={() => setReopenId(r.id)} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
                         )}
-                        {r.status === 'pending' && (
+                        {(r.status === 'pending' || r.status === 'reopened') && (
                           <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
                         )}
                       </div>
@@ -241,7 +246,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen flagged report?</h3>
-            <p className="text-sm text-gray-600 mb-5">This will set the report back to pending and allow the teacher to submit it late.</p>
+            <p className="text-sm text-gray-600 mb-5">This will reopen the report and allow the teacher to submit it late.</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setReopenId(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopenLoading}>Cancel</button>
               <button onClick={() => handleReopen(reopenId)} disabled={reopenLoading} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>
@@ -343,7 +348,7 @@ function LiveTrace() {
 export default function ReportsClient({ initialReports, teachers, students }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
-  const pendingCount = initialReports.filter((r) => r.status === 'pending').length;
+  const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
   const flaggedCount = initialReports.filter((r) => r.status === 'flagged').length;
 
   const tabs = [

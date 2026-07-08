@@ -156,6 +156,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
           {report.status === 'flagged'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>Flagged</span>}
           {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#166534' }}>Completed</span>}
           {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>Pending</span>}
+          {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEDD5', color: '#C2410C' }}>Reopened</span>}
           {report.status === 'flagged' && (
             <button onClick={() => setShowConfirm(true)} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
@@ -289,7 +290,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen this report?</h3>
-            <p className="text-sm text-gray-600 mb-5">The report status will be set back to pending and the teacher will be able to submit it late.</p>
+            <p className="text-sm text-gray-600 mb-5">The report will be reopened and the teacher will be able to submit it late.</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowConfirm(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopening}>Cancel</button>
               <button onClick={handleReopen} disabled={reopening} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>

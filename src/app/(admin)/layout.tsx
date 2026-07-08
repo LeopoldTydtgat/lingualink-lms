@@ -73,7 +73,7 @@ export default async function AdminLayout({
     adminDb
       .from('reports')
       .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending'),
+      .in('status', ['pending', 'reopened']),
 
     // Flagged reports
     adminDb
