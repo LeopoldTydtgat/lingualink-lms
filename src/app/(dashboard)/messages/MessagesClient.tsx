@@ -33,7 +33,6 @@ interface Contact {
   id: string
   type: string
   name: string
-  email: string
   photo_url: string | null
   latestMessage: Message | null
   unreadCount: number
@@ -322,7 +321,6 @@ export default function MessagesClient({
         id: student.id,
         type: 'student',
         name: student.full_name,
-        email: student.email,
         photo_url: student.photo_url,
         latestMessage: null,
         unreadCount: 0,

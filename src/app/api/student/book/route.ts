@@ -239,7 +239,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4. Load the teacher's profile for emails ──────────────────────────────
-    const { data: teacher, error: teacherError } = await supabase
+    const { data: teacher, error: teacherError } = await adminClient
       .from('profiles')
       .select('id, full_name, email, timezone')
       .eq('id', teacherId)

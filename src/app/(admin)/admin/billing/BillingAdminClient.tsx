@@ -24,7 +24,6 @@ interface Invoice {
 interface TeacherProfile {
   id: string
   full_name: string
-  email: string
 }
 
 interface Company {
@@ -203,7 +202,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, email')
+          .select('id, full_name')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),

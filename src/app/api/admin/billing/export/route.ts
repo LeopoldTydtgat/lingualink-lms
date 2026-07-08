@@ -97,7 +97,11 @@ export async function GET(req: NextRequest) {
       await recomputeInvoiceAmountsForAllTeachers()
     }
 
-    let query = supabase
+    // The embedded profiles join exposes teacher email — read it on the admin
+    // client, never the RLS-bound server client (NEW262d). The isAdmin gate
+    // above authorises this export; `supabase` stays for that auth check only.
+    const adminClient = createAdminClient()
+    let query = adminClient
       .from('invoices')
       .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency)')
       .order('billing_month', { ascending: false })

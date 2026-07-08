@@ -153,7 +153,7 @@ export default function BillingClient({
   const sym = currencySymbol(billingInfo?.currency)
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
-    { teacher: { id: string; full_name: string; email: string }; invoices: Invoice[] }[]
+    { teacher: { id: string; full_name: string }; invoices: Invoice[] }[]
   >([])
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
@@ -165,7 +165,7 @@ export default function BillingClient({
     // FIX: removed profiles fetch — use server-side data where possible
     const { data: teachers } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select('id, full_name')
       .in('role', ['teacher', 'admin'])
       .order('full_name')
 
@@ -577,7 +577,6 @@ export default function BillingClient({
               <div key={teacher.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                   <h3 className="font-semibold text-gray-900">{teacher.full_name}</h3>
-                  <span className="text-sm text-gray-400">{teacher.email}</span>
                 </div>
                 {invoices.length === 0 ? (
                   <p className="p-4 text-sm text-gray-400">No invoices yet.</p>
