@@ -37,7 +37,13 @@ export async function GET(req: NextRequest) {
   const minimal = searchParams.get('minimal') === 'true'
   const search = searchParams.get('search') ?? ''
 
-  let query = supabase
+  // email + hourly_rate must not be read through the RLS-bound client.
+  // hourly_rate has no column SELECT grant for authenticated (per-column grant
+  // model) — reading it through an RLS-bound client fails. The isAdmin gate
+  // above already authorised this list — run it on the admin client. The
+  // auth/role check before the gate stays on the RLS client. (NEW262d)
+  const adminClient = createAdminClient()
+  let query = adminClient
     .from('profiles')
     .select(minimal ? 'id, full_name' : 'id, full_name, email, status, account_types, hourly_rate, photo_url')
     .not('account_types', 'is', null)

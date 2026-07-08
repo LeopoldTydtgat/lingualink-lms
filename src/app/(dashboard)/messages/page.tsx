@@ -56,7 +56,6 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     id: string
     type: string
     name: string
-    email: string
     photo_url: string | null
     latestMessage: null
     unreadCount: number
@@ -74,7 +73,6 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         id: adminProfile.id,
         type: adminProfile.role, // 'admin'
         name: adminProfile.full_name,
-        email: '',
         photo_url: adminProfile.photo_url ?? null,
         latestMessage: null,
         unreadCount: 0,
@@ -87,7 +85,6 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     id: string
     type: string
     name: string
-    email: string
     photo_url: string | null
     latestMessage: null
     unreadCount: number
@@ -104,7 +101,6 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         id: studentData.id,
         type: 'student',
         name: studentData.full_name,
-        email: studentData.email ?? '',
         photo_url: studentData.photo_url ?? null,
         latestMessage: null,
         unreadCount: 0,
@@ -166,11 +162,10 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     : { data: [] }
 
   // Fetch profile details for teacher/admin contacts
-  // email is included so the union type with studentDetails is consistent
   const { data: profileDetails } = profileContactIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, full_name, role, photo_url, email')
+        .select('id, full_name, role, photo_url')
         .in('id', profileContactIds)
     : { data: [] }
 
@@ -178,12 +173,11 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const contacts = Array.from(contactMap.values()).map(contact => {
     const details = contact.type === 'student'
       ? (studentDetails || []).find((s: { id: string; auth_user_id: string; full_name: string; email: string | null; photo_url: string | null }) => s.id === contact.id)
-      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null; email: string | null }) => p.id === contact.id)
+      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null }) => p.id === contact.id)
 
     return {
       ...contact,
       name: details?.full_name || 'Unknown',
-      email: details?.email || '',
       photo_url: details?.photo_url || null,
     }
   })
