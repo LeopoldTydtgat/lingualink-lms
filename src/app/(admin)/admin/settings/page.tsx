@@ -12,6 +12,7 @@ const SETTING_KEYS = [
   'payment_timeline_days',
   'low_balance_threshold',
   'default_cancellation_window',
+  'export_timezone',
 ]
 
 export default async function AdminSettingsPage() {

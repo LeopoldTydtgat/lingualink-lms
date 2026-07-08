@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
@@ -28,13 +29,9 @@ function toCSV(rows: Record<string, unknown>[]): string {
   return lines.join('\r\n')
 }
 
-function formatDateTime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-}
-
+// Date-only helper — used for `date`-typed columns (training start/end) that are
+// NOT instants and must stay exactly as stored. Instant (timestamptz) columns are
+// rendered in the resolved export timezone via formatInstantInTz / formatDateInTz.
 function formatDate(iso: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 10)
@@ -67,6 +64,12 @@ export async function GET(
 
   const allowed = await checkAdminAccess(supabase)
   if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // Resolve the settings-driven export timezone once per request. Every instant
+  // (timestamptz) column below renders in this zone and its header carries the
+  // zone's short label. Date-only columns are unaffected.
+  const exportTz = await getExportTimezone()
+  const exportTzLabel = tzLabel(exportTz)
 
   const { searchParams } = new URL(request.url)
   const fromDate = searchParams.get('from')   // YYYY-MM-DD
@@ -153,8 +156,8 @@ export async function GET(
             durationMinutes: l.duration_minutes ?? 0,
           }).billableToTeacher
           return {
-            'Date': formatDate(l.scheduled_at),
-            'Time (UTC)': formatDateTime(l.scheduled_at).slice(11),
+            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
+            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Teacher': teacherMap[l.teacher_id] ?? '',
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
@@ -254,6 +257,10 @@ export async function GET(
             missingTzTeachers.add(lesson.teacher_id)
             continue
           }
+          // NEW271: Month buckets in the TEACHER's own timezone (matches NEW268 D3 /
+          // recomputeAmounts.ts invoice basis). Display columns render in the export tz,
+          // but the billing-period KEY is teacher-local so this CSV's Month/Total agree
+          // with invoices.amount_eur and the invoice-status join keys correctly.
           const month = getMonthKeyInTz(new Date(lesson.scheduled_at), profile.timezone).slice(0, 7)
           const key = `${lesson.teacher_id}__${month}`
 
@@ -446,8 +453,8 @@ export async function GET(
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
-            'Date': formatDate(l.scheduled_at),
-            'Time (UTC)': formatDateTime(l.scheduled_at).slice(11),
+            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
+            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
             'Status': l.status,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
@@ -521,7 +528,7 @@ export async function GET(
 
           rows.push({
             'Student': studentMap[lesson.studentId] ?? '',
-            'Class Date': formatDate(lesson.scheduledAt),
+            [`Class Date (${exportTzLabel})`]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
             'Teacher': teacherMap[report.teacher_id] ?? '',
             'Grammar': ld.grammar ?? '',
             'Expression': ld.expression ?? '',
@@ -596,11 +603,11 @@ export async function GET(
           return {
             'Teacher': teacherMap[r.teacher_id] ?? '',
             'Student': lesson ? studentMap[lesson.studentId] ?? '' : '',
-            'Class Date': lesson ? formatDateTime(lesson.scheduledAt) : '',
+            [`Class Date (${exportTzLabel})`]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
             'Hours Since Class': hoursSinceClass,
             'Report Status': r.status,
-            'Deadline': r.deadline_at ? formatDateTime(r.deadline_at) : '',
-            'Flagged At': r.flagged_at ? formatDateTime(r.flagged_at) : '',
+            [`Deadline (${exportTzLabel})`]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
+            [`Flagged At (${exportTzLabel})`]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
           }
         })
 

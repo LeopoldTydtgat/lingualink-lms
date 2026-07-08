@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Save, Mail, Clock, FileText, CreditCard, AlertTriangle, Ban } from 'lucide-react'
+import { Save, Mail, Clock, FileText, CreditCard, AlertTriangle, Ban, Globe } from 'lucide-react'
 import { toast } from 'sonner'
 
 // Shape of the settings object we receive from the API
@@ -13,6 +13,7 @@ interface SettingsValues {
   payment_timeline_days: string
   low_balance_threshold: string
   default_cancellation_window: string
+  export_timezone: string
 }
 
 interface Props {
@@ -28,6 +29,7 @@ const DEFAULTS: SettingsValues = {
   payment_timeline_days: '15',
   low_balance_threshold: '2',
   default_cancellation_window: '24',
+  export_timezone: 'Africa/Johannesburg',
 }
 
 export default function SettingsClient({ initialSettings }: Props) {
@@ -232,6 +234,32 @@ export default function SettingsClient({ initialSettings }: Props) {
               )
             })}
           </div>
+        </SettingRow>
+      </SettingSection>
+
+      {/* ── Section: Exports ─────────────────────────────────────────── */}
+      <SettingSection
+        icon={<Globe className="h-5 w-5" style={{ color: '#FF8303' }} />}
+        title="Exports"
+        description="The timezone used for all date and time columns in CSV and Excel exports."
+      >
+        <SettingRow
+          label="Export timezone"
+          hint="Every exported date and time column is rendered in this timezone. Date-only fields (billing months, training start/end dates) are unaffected."
+        >
+          <select
+            value={values.export_timezone}
+            onChange={e => handleChange('export_timezone', e.target.value)}
+            className="w-full max-w-xs rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2"
+            style={{ color: '#FF8303', fontWeight: 500 }}
+          >
+            <option value="Africa/Johannesburg">South Africa (SAST)</option>
+            <option value="Europe/London">UK (London)</option>
+            <option value="Europe/Lisbon">Portugal (Lisbon)</option>
+            <option value="Europe/Madrid">Spain (Madrid)</option>
+            <option value="Europe/Paris">France (Paris)</option>
+            <option value="Europe/Berlin">Germany (Berlin)</option>
+          </select>
         </SettingRow>
       </SettingSection>
 

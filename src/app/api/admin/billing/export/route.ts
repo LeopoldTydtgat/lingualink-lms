@@ -8,19 +8,13 @@ import {
   recomputeInvoiceAmountsForTeacher,
   recomputeInvoiceAmountsForAllTeachers,
 } from '@/lib/billing/recomputeAmounts'
+import { getExportTimezone, formatInstantInTz, tzLabel } from '@/lib/exportTime'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
-function formatDateTimeCSV(dateStr: string): string {
-  const d = new Date(dateStr)
-  const day = String(d.getDate()).padStart(2, '0')
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const year = d.getFullYear()
-  const hours = String(d.getHours()).padStart(2, '0')
-  const mins = String(d.getMinutes()).padStart(2, '0')
-  return `${day}/${month}/${year} ${hours}:${mins}`
-}
-
+// Instant (timestamptz) columns render in the resolved export timezone via
+// formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
+// is NOT an instant, so it keeps its own month formatter.
 function formatMonthCSV(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00Z')
   return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
@@ -62,6 +56,11 @@ export async function GET(req: NextRequest) {
     (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
 
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // Resolve the settings-driven export timezone once per request. Every instant
+  // (timestamptz) column below renders in this zone; its header carries the label.
+  const exportTz = await getExportTimezone()
+  const exportTzLabel = tzLabel(exportTz)
 
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type') // 'teacher_invoices' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
@@ -112,7 +111,7 @@ export async function GET(req: NextRequest) {
     const { data: invoices, error: invoicesErr } = await query
     if (invoicesErr) throw invoicesErr
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', 'Uploaded At', 'Paid At']
+    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', `Uploaded At (${exportTzLabel})`, `Paid At (${exportTzLabel})`]
     const rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return [
@@ -123,8 +122,8 @@ export async function GET(req: NextRequest) {
         inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00',
         (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
         inv.status,
-        inv.uploaded_at ? formatDateTimeCSV(inv.uploaded_at) : '',
-        inv.paid_at ? formatDateTimeCSV(inv.paid_at) : '',
+        inv.uploaded_at ? formatInstantInTz(inv.uploaded_at, exportTz) : '',
+        inv.paid_at ? formatInstantInTz(inv.paid_at, exportTz) : '',
       ]
     })
 
@@ -171,7 +170,7 @@ export async function GET(req: NextRequest) {
     // The teacher's live profiles.hourly_rate is used only as the fallback (NEW268 D1).
     const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map(l => l.id))
 
-    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
+    const headers = ['Company', 'Student', 'Teacher', `Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
     const rows: (string | number | boolean | null)[][] = []
 
     for (const company of (companies || [])) {
@@ -199,7 +198,7 @@ export async function GET(req: NextRequest) {
             company.name,
             student.full_name,
             teacher?.full_name || '',
-            formatDateTimeCSV(lesson.scheduled_at),
+            formatInstantInTz(lesson.scheduled_at, exportTz),
             lesson.duration_minutes,
             lesson.status,
             bill.billableToTeacher ? 'Yes' : 'No',
@@ -229,7 +228,7 @@ export async function GET(req: NextRequest) {
     const { data: reports, error: reportsErr } = await reportsQuery
     if (reportsErr) throw reportsErr
 
-    const headers = ['Student', 'Class Date', 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
+    const headers = ['Student', `Class Date (${exportTzLabel})`, 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
     const rows = (reports || []).map(r => {
       const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
       // Use unknown as intermediate to safely bridge the array→object cast for nested profiles
@@ -241,7 +240,7 @@ export async function GET(req: NextRequest) {
       const ld = (r.level_data as Record<string, string>) || {}
       return [
         (student as { full_name: string } | null)?.full_name || '',
-        lessonWithProfiles?.scheduled_at ? formatDateTimeCSV(lessonWithProfiles.scheduled_at) : '',
+        lessonWithProfiles?.scheduled_at ? formatInstantInTz(lessonWithProfiles.scheduled_at, exportTz) : '',
         teacher?.full_name || '',
         ld.grammar || '',
         ld.expression || '',
@@ -304,13 +303,13 @@ export async function GET(req: NextRequest) {
     studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
     const now = Date.now()
-    const headers = ['Teacher', 'Student', 'Class Date & Time', 'Duration (min)', 'Status', 'Hours Since Class']
+    const headers = ['Teacher', 'Student', `Class Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Hours Since Class']
     const rows = (reports || []).map((r: any) => {
       const lesson = lessonMap[r.lesson_id]
       return [
         teacherMap[r.teacher_id] ?? '',
         lesson ? (studentMap[lesson.studentId] ?? '') : '',
-        lesson ? formatDateTimeCSV(lesson.scheduledAt) : '',
+        lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
         lesson ? lesson.durationMinutes : '',
         r.status,
         lesson ? Math.max(0, Math.floor((now - (new Date(lesson.scheduledAt).getTime() + lesson.durationMinutes * 60 * 1000)) / (1000 * 60 * 60))) : '',

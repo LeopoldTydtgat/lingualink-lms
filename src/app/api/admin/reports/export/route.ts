@@ -2,38 +2,17 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getExportTimezone, tzLabel } from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 
 export const runtime = 'nodejs';
 
-// SAST (Africa/Johannesburg, UTC+2, no DST). Server-side display formatters only.
-const SAST_DATE = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Africa/Johannesburg',
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric',
-});
-const SAST_TIME = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Africa/Johannesburg',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
-
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '';
-  return SAST_DATE.format(new Date(iso));
-}
-function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return '';
-  return SAST_TIME.format(new Date(iso));
-}
-function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return `${SAST_DATE.format(d)}, ${SAST_TIME.format(d)}`;
-}
+// Display formatters are built PER REQUEST inside GET() from the settings-driven
+// export timezone (was a hardcoded Africa/Johannesburg/SAST). Format style is
+// unchanged (en-GB, month:'short', hour12:false); only the zone + header labels
+// are now dynamic. NOTE: the +02:00 calendar-day QUERY BOUNDS below are separate
+// and intentionally left as-is (see the query and NEW271 notes).
 
 // Flatten a Supabase nested join result to its first element (project rule).
 function firstOf<T>(v: T | T[] | null | undefined): T | null {
@@ -82,6 +61,32 @@ export async function GET(request: NextRequest) {
 
     // --- Data queries: service-role admin client (all three snapshot/log tables are admin-only) ---
     const admin = createAdminClient();
+
+    // Resolve the settings-driven export timezone once and build the display
+    // formatters in that zone. Format style matches the previous SAST formatters
+    // exactly (en-GB, month:'short', hour12:false); only the timezone and the
+    // column-header labels are now dynamic.
+    const exportTz = await getExportTimezone();
+    const exportTzLabel = tzLabel(exportTz);
+    const dateFmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: exportTz,
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+    const timeFmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: exportTz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const fmtDate = (iso: string | null | undefined): string => (iso ? dateFmt.format(new Date(iso)) : '');
+    const fmtTime = (iso: string | null | undefined): string => (iso ? timeFmt.format(new Date(iso)) : '');
+    const fmtDateTime = (iso: string | null | undefined): string => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return `${dateFmt.format(d)}, ${timeFmt.format(d)}`;
+    };
 
     // SAST calendar-day bounds via literal offset strings (no Date construction, no toISOString).
     let query = admin
@@ -277,24 +282,24 @@ export async function GET(request: NextRequest) {
     const ws = workbook.addWorksheet('Class Reports');
 
     ws.columns = [
-      { header: 'Class Date (SAST)', key: 'classDate', width: 16 },
-      { header: 'Class Time (SAST)', key: 'classTime', width: 12 },
+      { header: `Class Date (${exportTzLabel})`, key: 'classDate', width: 16 },
+      { header: `Class Time (${exportTzLabel})`, key: 'classTime', width: 12 },
       { header: 'Duration (mins)', key: 'duration', width: 14 },
       { header: 'Teacher', key: 'teacher', width: 22 },
       { header: 'Student', key: 'student', width: 22 },
       { header: 'Client Type', key: 'clientType', width: 20 },
       { header: 'Class Outcome', key: 'outcome', width: 20 },
       { header: 'Report Submitted', key: 'reportSubmitted', width: 16 },
-      { header: 'Report Submitted At (SAST)', key: 'reportSubmittedAt', width: 24 },
+      { header: `Report Submitted At (${exportTzLabel})`, key: 'reportSubmittedAt', width: 24 },
       { header: 'Flagged', key: 'flagged', width: 10 },
       { header: 'Feedback / Recap', key: 'feedback', width: 60 },
-      { header: 'Teacher Joined At (SAST)', key: 'teacherJoinedAt', width: 24 },
-      { header: 'Student Joined At (SAST)', key: 'studentJoinedAt', width: 24 },
+      { header: `Teacher Joined At (${exportTzLabel})`, key: 'teacherJoinedAt', width: 24 },
+      { header: `Student Joined At (${exportTzLabel})`, key: 'studentJoinedAt', width: 24 },
       { header: 'Review Submitted', key: 'reviewSubmitted', width: 16 },
       { header: 'Teacher Billable', key: 'teacherBillable', width: 16 },
       { header: 'Hourly Rate', key: 'hourlyRate', width: 12 },
       { header: 'Amount Owed to Teacher', key: 'amountOwed', width: 22 },
-      { header: 'Cancelled At (SAST)', key: 'cancelledAt', width: 24 },
+      { header: `Cancelled At (${exportTzLabel})`, key: 'cancelledAt', width: 24 },
       { header: 'Cancellation Window', key: 'cancellationWindow', width: 18 },
       { header: 'Cancellation Policy Applied', key: 'policyApplied', width: 24 },
       { header: 'Billable Under Policy', key: 'billableUnderPolicy', width: 18 },
