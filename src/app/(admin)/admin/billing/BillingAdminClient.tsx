@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
+import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,11 @@ interface Invoice {
 interface TeacherProfile {
   id: string
   full_name: string
+  // timezone is non-sensitive (not column-REVOKE'd), so it is selected directly in
+  // loadBaseData — unlike hourly_rate above, which must go through the entities route.
+  // Used to bucket invoice-detail lessons by the teacher's local month, matching
+  // invoices.amount_eur (recomputeAmounts.ts buckets in the teacher's timezone).
+  timezone: string | null
 }
 
 interface Company {
@@ -204,7 +210,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name')
+          .select('id, full_name, timezone')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
@@ -310,27 +316,30 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
     setLoadingLessons(key)
 
-    const d = new Date(billingMonth + 'T12:00:00Z')
-    const year = d.getUTCFullYear()
-    const month = d.getUTCMonth()
-
-    const fromDate = `${year}-${String(month + 1).padStart(2, '0')}-01`
-    const toDate = month === 11
-      ? `${year + 1}-01-01`
-      : `${year}-${String(month + 2).padStart(2, '0')}-01`
+    // Bucket the invoice's lessons by the TEACHER's local month — the same basis
+    // as invoices.amount_eur (recomputeAmounts.ts buckets via getMonthKeyInTz in
+    // the teacher's timezone). UTC month bounds would mis-bucket boundary lessons
+    // for non-UTC teachers, so the itemised total could disagree with the stored
+    // amount. billing_month is 'YYYY-MM-01'; T12:00:00Z lands in that calendar
+    // month in every real IANA offset. Falls back to 'UTC' when the teacher has no
+    // timezone — result-identical to the previous UTC bounds (the filter string
+    // differs, bare date vs UTC ISO, but Postgres casts both to the same instant;
+    // and amount_eur isn't recomputed for timezone-less teachers anyway).
+    const tz = teachers.find(t => t.id === teacherId)?.timezone || 'UTC'
+    const { startUtc, endUtc } = getMonthRangeInTz(new Date(billingMonth + 'T12:00:00Z'), tz)
 
     const { data: raw } = await supabase
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
       .eq('teacher_id', teacherId)
-      .gte('scheduled_at', fromDate)
-      .lt('scheduled_at', toDate)
+      .gte('scheduled_at', startUtc)
+      .lt('scheduled_at', endUtc)
       .order('scheduled_at', { ascending: true })
 
     const hydrated = await hydrateLessons(raw || [])
     setInvoiceLessons(prev => ({ ...prev, [key]: hydrated }))
     setLoadingLessons(null)
-  }, [invoiceLessons, hydrateLessons])
+  }, [invoiceLessons, hydrateLessons, teachers])
 
   // ── Mark invoice as paid ───────────────────────────────────────────────────
   const handleMarkPaid = async (invoiceId: string) => {
