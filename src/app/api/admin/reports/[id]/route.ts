@@ -172,7 +172,7 @@ export async function PATCH(
 
   const { error } = await supabase
     .from('reports')
-    .update({ status: 'pending', flagged_at: null, updated_at: new Date().toISOString() })
+    .update({ status: 'reopened', flagged_at: null, updated_at: new Date().toISOString() })
     .eq('id', id);
 
   if (error) {
