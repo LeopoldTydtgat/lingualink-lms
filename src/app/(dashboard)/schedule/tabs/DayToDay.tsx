@@ -269,15 +269,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // so it always fetches the week the user is currently viewing.
   const visibleRangeRef = useRef<{ start: string; end: string } | null>(null)
 
-  // Scroll to 08:00 on mount and on every entry into week view (the grid remounts when the
-  // month view unmounts it). Keyed on viewMode only, so ordinary week navigation (weekStart
-  // changes) does not re-scroll. 8:00 is 3 hours past START_HOUR = 6 slots * SLOT_HEIGHT.
-  useEffect(() => {
-    if (viewMode === 'week' && scrollRef.current) {
-      scrollRef.current.scrollTop = (8 - START_HOUR) * 2 * SLOT_HEIGHT
-    }
-  }, [viewMode])
-
   // Esc clears mode (and any in-flight drag preview).
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -421,6 +412,34 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     () => expandClassBlocks(classes, weekStart),
     [classes, weekStart]
   )
+
+  // NEW282: earliest event minute (since local midnight) in the visible week — the smallest
+  // start among booked classes and every availability/unavailability block. Holiday and
+  // full-day unavailable blocks start at 00:00, so they pull the default scroll to the top of
+  // the grid and keep their label in view. null when the week has nothing to show, so the
+  // scroll effect below falls back to 08:00.
+  const earliestEventMin = useMemo(() => {
+    const starts = [
+      ...classBlocksList.map(b => b.startMin),
+      ...generalBlocks.map(b => b.startMin),
+      ...greenBlocks.map(b => b.startMin),
+      ...redBlocks.map(b => b.startMin),
+    ]
+    return starts.length > 0 ? Math.min(...starts) : null
+  }, [classBlocksList, generalBlocks, greenBlocks, redBlocks])
+
+  // NEW282: position the vertical scroll so the earliest event of the visible week — and any
+  // holiday/unavailability label parked at the top of a day — is on screen at a glance. Target
+  // one hour before the earliest start; pxFromMin clamps it into the START_HOUR..END_HOUR grid.
+  // Falls back to 08:00 when the week is empty. Keyed on the fetched classes and the visible
+  // week (not just viewMode), so it re-scrolls on week navigation, on re-entry into week view,
+  // and after the async class fetch resolves — reading the freshest earliestEventMin each time.
+  useEffect(() => {
+    if (viewMode !== 'week' || !scrollRef.current) return
+    const targetMin = earliestEventMin !== null ? earliestEventMin - 60 : 8 * 60
+    scrollRef.current.scrollTop = pxFromMin(targetMin)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, weekStart, classes])
 
   // Wash label placement per weekly run, keyed `${dayIdx}-${index within that day}` to
   // match the render-time filter order. dragPreview is deliberately not an input:
