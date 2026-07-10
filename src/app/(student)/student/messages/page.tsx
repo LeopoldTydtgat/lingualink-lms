@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
 import StudentMessagesClient from './StudentMessagesClient'
 
 export default async function StudentMessagesPage() {
@@ -17,33 +19,26 @@ export default async function StudentMessagesPage() {
 
   if (!student) redirect('/student/login')
 
-  // Get all teachers assigned to this student via training_teachers
-  const { data: trainingTeachers } = await supabase
-    .from('training_teachers')
-    .select(`
-      teacher_id,
-      profiles!inner(id, full_name, photo_url, role)
-    `)
-    .in(
-      'training_id',
-      (
-        await supabase
-          .from('trainings')
-          .select('id')
-          .eq('student_id', student.id)
-      ).data?.map(t => t.id) ?? []
-    )
+  // Get all teachers assigned to this student via the SHARED training-assignment gate
+  // (NEW275) — identical rule to the one the send action enforces. The helper returns the
+  // distinct assigned teacher_ids (fail-closed to empty on any error); we then load their
+  // profiles for display. The id set is already distinct, so no manual dedup is needed.
+  const admin = createAdminClient()
+  let assignedTeacherIds: Set<string>
+  try {
+    assignedTeacherIds = await getAssignedTeacherIds(admin, student.id)
+  } catch {
+    // Render with no teacher contacts rather than crashing the page on a query error.
+    assignedTeacherIds = new Set<string>()
+  }
 
-  // Flatten and deduplicate assigned teachers
-  const seenIds = new Set<string>()
-  const assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string }[] = []
-
-  for (const row of trainingTeachers ?? []) {
-    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles
-    if (profile && !seenIds.has(profile.id)) {
-      seenIds.add(profile.id)
-      assignedTeachers.push(profile)
-    }
+  let assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string }[] = []
+  if (assignedTeacherIds.size > 0) {
+    const { data: teacherProfiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, photo_url, role')
+      .in('id', [...assignedTeacherIds])
+    assignedTeachers = teacherProfiles ?? []
   }
 
   // Get all messages involving this student to build the contacts list

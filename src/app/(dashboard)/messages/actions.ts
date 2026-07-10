@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentNewMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
-import { getBookedClassStudentIds } from '@/lib/access/bookedClass'
+import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
 
 export async function sendMessage(
   receiverId: string,
@@ -29,26 +29,25 @@ export async function sendMessage(
 
   const senderType = profile.role === 'admin' ? 'admin' : 'teacher'
 
-  // NEW262 item (a): server-side sender→receiver relationship gate. The messages RLS
-  // insert policy only checks sender identity, so without this any authenticated
-  // teacher could message any student/teacher/admin by POSTing an arbitrary receiverId.
-  // This mirrors the NEW260 booking assignment check and MUST stay in sync with the
-  // messages page's picker gating: teacher→student reuses the SAME Condition B
-  // getBookedClassStudentIds set that builds the new-message picker, so send permission
-  // exactly matches the list (never training_teachers here). Admin sender is ungated
-  // (may message anyone), matching existing behaviour. Fail closed — any verification
-  // lookup error returns rather than falling through to the insert.
+  // NEW275: server-side sender→receiver relationship gate. The messages RLS insert policy
+  // only checks sender identity, so without this any authenticated teacher could message
+  // any student/teacher/admin by POSTing an arbitrary receiverId. teacher→student reuses
+  // the SAME shared training-assignment set (getAssignedStudentIds) that builds the new-
+  // message picker, so send permission exactly matches the list: a teacher may message a
+  // student iff assigned to one of their trainings (bookings are irrelevant). Admin sender
+  // is ungated (may message anyone). Fail closed — any verification lookup error returns
+  // rather than falling through to the insert.
   if (senderType === 'teacher') {
     const accessDb = createAdminClient()
     if (receiverType === 'student') {
-      let bookedStudentIds: Set<string>
+      let assignedStudentIds: Set<string>
       try {
-        bookedStudentIds = await getBookedClassStudentIds(accessDb, user.id)
+        assignedStudentIds = await getAssignedStudentIds(accessDb, user.id)
       } catch {
         return { error: 'Could not verify access. Please try again.' }
       }
-      if (!bookedStudentIds.has(receiverId)) {
-        return { error: 'You can only message students you currently teach.' }
+      if (!assignedStudentIds.has(receiverId)) {
+        return { error: 'You can only message students assigned to you.' }
       }
     } else {
       // receiverType is 'teacher' or 'admin'. Confirm the recipient profile exists and

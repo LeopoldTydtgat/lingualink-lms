@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
+import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
 
 export async function sendMessage(
   receiverId: string,
@@ -27,35 +28,22 @@ export async function sendMessage(
 
   if (!student) return { error: 'Student not found' }
 
-  // NEW262 item (a): server-side sender→receiver relationship gate. The messages RLS
-  // insert policy only checks sender identity, so without this any authenticated student
-  // could message any teacher (or another student) by POSTing an arbitrary receiverId.
-  // This mirrors the SAME training_teachers rule the student messages page uses to build
-  // assignedTeachers, so send permission exactly matches the contact list; it also
-  // implicitly blocks student→student sends (a students.id never matches a teacher_id).
-  // Fail closed — a lookup error returns rather than falling through to the insert.
+  // NEW275: server-side sender→receiver relationship gate via the SHARED training-
+  // assignment helper. The messages RLS insert policy only checks sender identity, so
+  // without this any authenticated student could message any teacher (or another student)
+  // by POSTing an arbitrary receiverId. This is the SAME training_teachers rule the
+  // student messages page uses to build the contact list, so send permission exactly
+  // matches it; it also implicitly blocks student→student sends (a students.id never
+  // matches a teacher_id). Fail closed — a query error throws (→ "Could not verify
+  // access"), and an empty set (no assignments) denies an unassigned/unknown receiver.
   const accessDb = createAdminClient()
-  const { data: studentTrainings, error: trainingsError } = await accessDb
-    .from('trainings')
-    .select('id')
-    .eq('student_id', student.id)
-  if (trainingsError) {
+  let assignedTeacherIds: Set<string>
+  try {
+    assignedTeacherIds = await getAssignedTeacherIds(accessDb, student.id)
+  } catch {
     return { error: 'Could not verify access. Please try again.' }
   }
-  const trainingIds = (studentTrainings ?? []).map((t) => t.id)
-  // Multiple trainings can each assign the same teacher, so this can match several
-  // rows — use .limit(1) + a length check instead of .maybeSingle() (which throws on
-  // multiple rows). An empty trainingIds list yields no match and is blocked below.
-  const { data: assignmentRows, error: assignmentError } = await accessDb
-    .from('training_teachers')
-    .select('teacher_id')
-    .in('training_id', trainingIds)
-    .eq('teacher_id', receiverId)
-    .limit(1)
-  if (assignmentError) {
-    return { error: 'Could not verify access. Please try again.' }
-  }
-  if (!assignmentRows || assignmentRows.length === 0) {
+  if (!assignedTeacherIds.has(receiverId)) {
     return { error: 'You can only message teachers assigned to your training.' }
   }
 

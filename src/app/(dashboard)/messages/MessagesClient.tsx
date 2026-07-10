@@ -55,6 +55,9 @@ interface MessagesClientProps {
   currentUser: Profile
   contacts: Contact[]
   allStudents: Student[]
+  // NEW275: the teacher's currently-assigned student ids (mirrors the send-action gate).
+  // A student history thread whose id is absent here is read-only for this teacher.
+  assignedStudentIds: string[]
   initialContact?: Contact | null
 }
 
@@ -139,6 +142,7 @@ export default function MessagesClient({
   currentUser,
   contacts: initialContacts,
   allStudents,
+  assignedStudentIds,
   initialContact = null,
 }: MessagesClientProps) {
   const supabase = useMemo(() => createClient(), [])
@@ -367,6 +371,18 @@ export default function MessagesClient({
     s.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
 
+  // NEW275: a stale history thread can still be selected for a student this teacher is no
+  // longer assigned to (the history contact list is intentionally ungated so past
+  // conversations stay readable). The server send gate blocks such a send; reflect that
+  // here with a read-only composer instead of letting the send fail. Admins are ungated
+  // (never blocked); teacher↔teacher/admin threads are never assignment-gated.
+  const assignedStudentIdSet = useMemo(() => new Set(assignedStudentIds), [assignedStudentIds])
+  const isBlockedStudent =
+    !!selectedContact &&
+    currentUser.role !== 'admin' &&
+    selectedContact.type === 'student' &&
+    !assignedStudentIdSet.has(selectedContact.id)
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -547,7 +563,21 @@ export default function MessagesClient({
             {/* ── Message composer ──
                 The editor sits directly in the footer — no box-within-a-box.
                 The style tag below suppresses ProseMirror's own default focus border
-                which cannot be removed via Tailwind classes alone. */}
+                which cannot be removed via Tailwind classes alone.
+                NEW275: for a stale history thread whose student is no longer assigned to
+                this teacher, the composer is replaced by a read-only notice; the thread
+                above stays fully readable. */}
+            {isBlockedStudent ? (
+              <div className="border-t border-gray-200 flex-shrink-0 bg-white px-5 py-4">
+                <p className="text-sm font-medium text-gray-600">
+                  You can no longer message {selectedContact.name}.
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  This student is not currently assigned to you. Please contact an
+                  administrator if you need to reach them.
+                </p>
+              </div>
+            ) : (
             <div className="border-t border-gray-200 flex-shrink-0 bg-white">
               <style>{`
                 .messages-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
@@ -675,6 +705,7 @@ export default function MessagesClient({
                 </button>
               </div>
             </div>
+            )}
           </>
         )}
       </div>
