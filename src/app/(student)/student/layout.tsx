@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireTz } from '@/lib/time/requireTz'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -36,6 +37,12 @@ export default async function StudentDashboardLayout({
 
   if (!student) redirect('/student/login')
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')
+
+  // Resolve the student's account timezone once (fail-closed, same helper the My
+  // Classes page uses) so the right panel and reminder modal render class times in
+  // the student's zone rather than the viewer's browser zone.
+  const studentTimezone = requireTz(student.timezone, 'student-layout')
+
   const { data: nextLesson } = await supabase
     .from('lessons')
     .select(`
@@ -149,6 +156,7 @@ export default async function StudentDashboardLayout({
           </main>
           <StudentRightPanel
             studentId={student.id}
+            studentTimezone={studentTimezone}
             nextLesson={nextLesson ?? null}
             teacherName={nextLessonTeacherName}
             hoursRemaining={hoursRemaining}
@@ -161,7 +169,7 @@ export default async function StudentDashboardLayout({
       </div>
 
       {/* Class reminder modal — renders on all student pages */}
-      <ClassReminderModal studentId={student.id} />
+      <ClassReminderModal studentId={student.id} studentTimezone={studentTimezone} />
 
       <IdleTimeoutWatcher
         nextLessonStartIso={protectedLesson?.scheduled_at ?? null}
