@@ -8,6 +8,7 @@ import Image from 'next/image'
 import TimezoneSelect from '@/components/TimezoneSelect'
 import LanguageSelect from '@/components/LanguageSelect'
 import { Button } from '@/components/ui/button'
+import { validatePassword } from '@/lib/passwordValidation'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -262,8 +263,9 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       setPasswordError('Please fill in all three password fields.')
       return
     }
-    if (newPassword.length < 8) {
-      setPasswordError('New password must be at least 8 characters.')
+    const validationError = validatePassword(newPassword)
+    if (validationError) {
+      setPasswordError(validationError)
       return
     }
     if (newPassword !== confirmPassword) {
@@ -290,7 +292,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
     })
 
     if (updateError) {
-      setPasswordError('Failed to update password. Please try again.')
+      setPasswordError(updateError.message || 'Failed to update password. Please try again.')
     } else {
       setPasswordSaved(true)
       setCurrentPassword('')
@@ -732,7 +734,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
                 style={{ ...inputStyle, paddingRight: '44px' }}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="Minimum 8 characters"
+                placeholder="Enter new password"
               />
               <button
                 type="button"
@@ -743,6 +745,9 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
                 {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>
+              At least 8 characters, including an uppercase letter, a lowercase letter and a number.
+            </p>
           </div>
           <div style={{ marginBottom: '20px' }}>
             <label style={labelStyle}>Confirm New Password</label>
