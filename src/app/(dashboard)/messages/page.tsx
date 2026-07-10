@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
-import { getBookedClassStudentIds } from '@/lib/access/bookedClass'
+import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
 
 // Row from the messages select('*'); mirrors MessagesClient's Message so the
 // contacts prop stays assignable. Only created_at is read off latestMessage here.
@@ -47,10 +47,20 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const { openAdmin, adminId, studentId } = await searchParams
 
   const isAdmin = profile.role === 'admin'
-  // Condition B booked-class student set - the SOLE access key for this teacher's
-  // student-data reads here (deep-link resolve + new-message picker). Admin is ungated
-  // (null). The message-history contacts section below is intentionally NOT gated.
-  const bookedStudentIds = isAdmin ? null : await getBookedClassStudentIds(admin, user.id)
+  // NEW275: training-assignment student set - the SOLE access key for this teacher's
+  // student-data reads here (deep-link resolve + new-message picker). A teacher may message
+  // a student iff assigned to one of the student's trainings via training_teachers; bookings
+  // are irrelevant. Admin is ungated (null). The message-history contacts section below is
+  // intentionally NOT gated, so past conversations stay readable regardless of gate state.
+  let assignedStudentIds: Set<string> | null = null
+  if (!isAdmin) {
+    try {
+      assignedStudentIds = await getAssignedStudentIds(admin, user.id)
+    } catch {
+      // Render with an empty picker rather than crashing on a query error.
+      assignedStudentIds = new Set<string>()
+    }
+  }
 
   let adminContact: {
     id: string
@@ -90,7 +100,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     unreadCount: number
   } | null = null
 
-  if (studentId && (isAdmin || bookedStudentIds?.has(studentId))) {
+  if (studentId && (isAdmin || assignedStudentIds?.has(studentId))) {
     const { data: studentData } = await admin
       .from('students')
       .select('id, full_name, email, photo_url')
@@ -189,7 +199,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   )
 
   // New-message picker students. Admin sees all active students; a teacher sees ONLY
-  // students with an active booked-class relationship (Condition B), computed once above.
+  // students assigned to them via training_teachers (NEW275), computed once above.
   // The dead trainings.teacher_id column is no longer consulted.
   let allStudents: { id: string; full_name: string; email: string; photo_url: string | null }[] = []
 
@@ -202,11 +212,11 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     allStudents = data || []
   } else {
     // Use admin client — RLS blocks teacher role from reading these tables directly
-    if (bookedStudentIds && bookedStudentIds.size > 0) {
+    if (assignedStudentIds && assignedStudentIds.size > 0) {
       const { data } = await admin
         .from('students')
         .select('id, full_name, email, photo_url')
-        .in('id', [...bookedStudentIds])
+        .in('id', [...assignedStudentIds])
         .eq('is_active', true)
         .order('full_name')
       allStudents = data || []
@@ -218,6 +228,10 @@ export default async function MessagesPage({ searchParams }: PageProps) {
       currentUser={profile}
       contacts={contacts}
       allStudents={allStudents || []}
+      // The teacher's currently-assigned student ids (NEW275) — mirrors the send-action
+      // gate exactly. Used to disable the composer for a stale history thread whose
+      // student is no longer assigned (admin is ungated, so an empty array is fine there).
+      assignedStudentIds={assignedStudentIds ? [...assignedStudentIds] : []}
       // Pass the pre-resolved admin contact if the URL requested it.
       // MessagesClient will auto-select this conversation on mount.
       initialContact={adminContact ?? studentContact}
