@@ -16,6 +16,7 @@ interface NextLesson {
 
 interface StudentRightPanelProps {
   studentId: string
+  studentTimezone: string
   nextLesson: NextLesson | null
   teacherName: string | null
   hoursRemaining: number
@@ -54,13 +55,14 @@ function formatEndDate(isoDate: string): string {
   }).format(new Date(isoDate))
 }
 
-function formatDateTime(isoString: string): string {
-  const d = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoString))
+function formatDateTime(isoString: string, timezone: string): string {
+  const d = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: timezone }).format(new Date(isoString))
   return d
 }
 
 export default function StudentRightPanel({
   studentId: _studentId,
+  studentTimezone,
   nextLesson,
   teacherName,
   hoursRemaining,
@@ -144,7 +146,7 @@ export default function StudentRightPanel({
                 : '--:--:--'}
             </p>
             <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
-              {mounted ? formatDateTime(nextLesson.scheduled_at) : ''}
+              {mounted ? formatDateTime(nextLesson.scheduled_at, studentTimezone) : ''}
             </p>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '1px' }}>
               {nextLesson.duration_minutes} min class
