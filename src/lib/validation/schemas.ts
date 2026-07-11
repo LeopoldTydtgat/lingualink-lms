@@ -47,7 +47,6 @@ const CEFR_LEVELS = [
 export const CreateTeacherSchema = z.object({
   // Required account fields
   email: z.string().email('Must be a valid email address'),
-  temp_password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   full_name: z.string().min(1, 'Full name is required').max(100, 'Full name must be 100 characters or fewer'),
   timezone: z.string().min(1, 'Timezone is required').max(100),
   account_types: z
@@ -94,7 +93,6 @@ export type CreateTeacherInput = z.infer<typeof CreateTeacherSchema>
 export const CreateStudentSchema = z.object({
   // Required account fields
   email: z.string().email('Must be a valid email address'),
-  temp_password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   full_name: z.string().min(1, 'Full name is required').max(100, 'Full name must be 100 characters or fewer'),
   timezone: z.string().min(1, 'Timezone is required').max(100),
   status: z.enum(PROFILE_STATUS).default('current'),

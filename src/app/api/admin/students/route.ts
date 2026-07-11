@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { CreateStudentSchema } from '@/lib/validation/schemas'
 import { buildEmailTemplate } from '@/lib/email/templates'
+import { generateThrowawayPassword, sendAccountInviteEmail } from '@/lib/auth/inviteEmail'
 
 // ─── GET – list students (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
@@ -109,9 +110,11 @@ export async function POST(req: NextRequest) {
     // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createAdminClient()
 
+    // Throwaway password — never returned or logged. The student sets their
+    // own password via the invite email sent after all inserts succeed.
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email: data.email,
-      password: data.temp_password,
+      password: generateThrowawayPassword(),
       email_confirm: true,
     })
 
@@ -268,7 +271,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, id: studentId })
+    // ── 7. Send the account invite email (best-effort) ──────────────────────
+    // Never rolls anything back and never fails the request — the admin is
+    // told via inviteEmailSent so they can point the student at
+    // "Forgot password" if the email did not go out.
+    const { sent: inviteEmailSent } = await sendAccountInviteEmail(
+      adminClient,
+      data.email,
+      data.full_name,
+      'student'
+    )
+
+    return NextResponse.json({ success: true, id: studentId, inviteEmailSent })
   } catch (err) {
     console.error('Create student error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { CreateTeacherSchema } from '@/lib/validation/schemas'
+import { generateThrowawayPassword, sendAccountInviteEmail } from '@/lib/auth/inviteEmail'
 
 // ─── GET – list teachers (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
@@ -127,9 +128,11 @@ export async function POST(req: NextRequest) {
     // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createAdminClient()
 
+    // Throwaway password — never returned or logged. The teacher sets their
+    // own password via the invite email sent after the profile upsert succeeds.
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email: data.email,
-      password: data.temp_password,
+      password: generateThrowawayPassword(),
       email_confirm: true,
     })
 
@@ -190,7 +193,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ success: true, id: newUserId })
+    // ── 5. Send the account invite email (best-effort) ──────────────────────
+    // Never rolls anything back and never fails the request — the admin is
+    // told via inviteEmailSent so they can point the teacher at
+    // "Forgot password" if the email did not go out.
+    const { sent: inviteEmailSent } = await sendAccountInviteEmail(
+      adminClient,
+      data.email,
+      data.full_name,
+      'teacher'
+    )
+
+    return NextResponse.json({ success: true, id: newUserId, inviteEmailSent })
   } catch (err) {
     console.error('Create teacher error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })

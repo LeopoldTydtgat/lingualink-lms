@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Eye, EyeOff } from 'lucide-react'
 import { DatePartInput } from '../../_components/DatePartInput'
 import { toast } from 'sonner'
 
@@ -59,7 +58,6 @@ type FormData = {
   first_name: string
   last_name: string
   email: string
-  temp_password: string
   timezone: string
   account_types: string[]
   status: string
@@ -94,7 +92,7 @@ type FormData = {
 }
 
 const EMPTY_FORM: FormData = {
-  first_name: '', last_name: '', email: '', temp_password: '',
+  first_name: '', last_name: '', email: '',
   timezone: '', account_types: ['teacher'],
   status: 'current', contract_start: '', orientation_date: '',
   observed_lesson_date: '', title: '', date_of_birth: '', gender: '',
@@ -135,7 +133,6 @@ export default function CreateTeacherClient() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [activeSection, setActiveSection] = useState<'A' | 'B'>('A')
-  const [showTempPassword, setShowTempPassword] = useState(false)
 
   function set(field: keyof FormData, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -156,7 +153,6 @@ export default function CreateTeacherClient() {
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
     if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
     if (!form.email.trim()) { toast.error('Email is required.'); return }
-    if (!form.temp_password.trim()) { toast.error('Temporary password is required.'); return }
     if (!form.timezone) { toast.error('Timezone is required.'); return }
     if (form.account_types.length === 0) { toast.error('At least one account type is required.'); return }
 
@@ -176,7 +172,15 @@ export default function CreateTeacherClient() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to create teacher.')
 
-      toast.success('Teacher created!')
+      // Fail-safe: warn unless the API positively confirmed the invite went out.
+      if (data.inviteEmailSent !== true) {
+        toast.warning(
+          'Teacher created, but the invite email could not be sent. The teacher can use "Forgot password" on the login page, or contact support.',
+          { duration: 10000 }
+        )
+      } else {
+        toast.success('Teacher created — invite email sent!')
+      }
       setTimeout(() => { router.push('/admin/teachers'); router.refresh() }, 800)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
@@ -234,23 +238,8 @@ export default function CreateTeacherClient() {
           <Field label="Email Address">
             <input type="email" autoComplete="off" className={inputClass} value={form.email}
               onChange={(e) => set('email', e.target.value)} />
-          </Field>
-
-          <Field label="Temporary Password">
-            <div style={{ position: 'relative' }}>
-              <input type={showTempPassword ? 'text' : 'password'} autoComplete="new-password" className={inputClass + ' pr-10'} value={form.temp_password}
-                onChange={(e) => set('temp_password', e.target.value)} />
-              <button
-                type="button"
-                onClick={() => setShowTempPassword(v => !v)}
-                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
-                aria-label={showTempPassword ? 'Hide password' : 'Show password'}
-              >
-                {showTempPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-            </div>
             <p className="text-xs text-gray-400 mt-1">
-              Teacher will be prompted to set their own password on first login.
+              The teacher will receive an invite email at this address to set their own password.
             </p>
           </Field>
 
