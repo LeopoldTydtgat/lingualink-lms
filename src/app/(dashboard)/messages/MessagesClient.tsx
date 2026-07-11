@@ -163,6 +163,7 @@ export default function MessagesClient({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -259,6 +260,7 @@ export default function MessagesClient({
         (payload) => {
           const updated = payload.new as Message
           if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
             setMessages(prev =>
               prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
             )
@@ -290,7 +292,10 @@ export default function MessagesClient({
         return
       }
 
-      const optimisticMsg: Message = {
+      // NEW286: prefer the real inserted row (carries the DB id) so the Realtime
+      // read-receipt UPDATE — which matches on that id — can flip this message's
+      // read tick. Fall back to an optimistic entry only if the row is missing.
+      const sentMsg: Message = (result?.message as Message | undefined) ?? {
         id: crypto.randomUUID(),
         sender_id: currentUser.id,
         sender_type: currentUser.role,
@@ -302,9 +307,14 @@ export default function MessagesClient({
         created_at: new Date().toISOString(),
       }
 
-      setMessages(prev => [...prev, optimisticMsg])
+      const pendingReadAt = pendingReadsRef.current.get(sentMsg.id)
+      if (pendingReadAt) {
+        sentMsg.read_at = pendingReadAt
+        pendingReadsRef.current.delete(sentMsg.id)
+      }
+      setMessages(prev => [...prev, sentMsg])
       setContacts(prev =>
-        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
+        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: sentMsg } : c)
       )
       editor.commands.clearContent()
       setPendingAttachments([])

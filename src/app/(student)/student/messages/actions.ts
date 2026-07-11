@@ -49,14 +49,23 @@ export async function sendMessage(
 
   const safeContent = sanitizeHtml(content)
 
-  const { error } = await supabase.from('messages').insert({
-    sender_id: student.id,
-    sender_type: 'student',
-    receiver_id: receiverId,
-    receiver_type: receiverType,
-    content: safeContent,
-    attachments: attachments ?? [],
-  })
+  // Return the inserted row (real DB id) so the client renders THIS row instead of an
+  // optimistic crypto.randomUUID() entry — otherwise the Realtime read-receipt UPDATE
+  // (which carries the real id) never matches the optimistic row and the read tick never
+  // flips (NEW286). The sender may select their own row under the existing messages RLS
+  // (sender_id resolves via students.auth_user_id).
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      sender_id: student.id,
+      sender_type: 'student',
+      receiver_id: receiverId,
+      receiver_type: receiverType,
+      content: safeContent,
+      attachments: attachments ?? [],
+    })
+    .select()
+    .single()
 
   if (error) return { error: error.message }
 
@@ -90,7 +99,7 @@ export async function sendMessage(
   }
 
   revalidatePath('/student/messages')
-  return { success: true }
+  return { success: true, message: data }
 }
 
 export async function markMessagesAsRead(contactId: string) {
