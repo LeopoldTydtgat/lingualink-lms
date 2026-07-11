@@ -251,7 +251,12 @@ export default function StudentMessagesClient({
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
     const html = editor.getHTML()
-    if ((!html || html === '<p></p>') && pendingAttachments.length === 0) return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    // Attachment-only send: store clean '' rather than '<p></p>' so the renderer's
+    // hasContent guard hides the empty bubble.
+    const contentToSend = isEmpty ? '' : html
 
     setSending(true)
     setSendError(null)
@@ -260,7 +265,7 @@ export default function StudentMessagesClient({
       const result = await sendMessage(
         selectedContact.id,
         receiverType,
-        html,
+        contentToSend,
         pendingAttachments.length > 0 ? pendingAttachments : undefined
       )
 
@@ -278,7 +283,7 @@ export default function StudentMessagesClient({
         sender_type: 'student',
         receiver_id: selectedContact.id,
         receiver_type: receiverType,
-        content: html,
+        content: contentToSend,
         attachments: pendingAttachments,
         read_at: null,
         created_at: new Date().toISOString(),
@@ -469,6 +474,7 @@ export default function StudentMessagesClient({
               ) : (
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentStudent.id
+                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -492,6 +498,9 @@ export default function StudentMessagesClient({
                       )}
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
+                          {/* NEW302: hide the bubble entirely for an attachment-only
+                              (empty-content) message so it doesn't render a blank box. */}
+                          {hasContent && (
                           <div
                             className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -502,8 +511,9 @@ export default function StudentMessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-1 flex flex-col gap-1">
+                            <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
                               {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
                                 <a
                                   key={i}
