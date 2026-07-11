@@ -139,6 +139,9 @@ export default function ChatWidget({
   const [emojiPickerPos, setEmojiPickerPos] = useState<{ bottom: number; right: number } | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
+  // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
+  // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -174,6 +177,19 @@ export default function ChatWidget({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
+  // NEW300: mark all inbound admin messages read. Reusable so it can fire both on load and
+  // when an admin reply arrives live (previously reads only happened inside loadMessages, so
+  // a live-arriving reply never flipped the admin's tick because no UPDATE ever fired).
+  const markAdminMessagesRead = useCallback(async () => {
+    await supabase
+      .from('support_messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('participant_auth_id', participantAuthId)
+      .eq('sender_role', 'admin')
+      .is('read_at', null)
+    setUnreadCount(0)
+  }, [supabase, participantAuthId])
+
   // Load support messages for this participant
   const loadMessages = useCallback(async () => {
     if (messagesLoaded) return
@@ -186,16 +202,8 @@ export default function ChatWidget({
     setMessagesLoaded(true)
 
     // Mark admin messages as read now that the teacher has opened the widget
-    await supabase
-      .from('support_messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('participant_auth_id', participantAuthId)
-      .eq('sender_role', 'admin')
-      .is('read_at', null)
-
-    // Clear the unread badge
-    setUnreadCount(0)
-  }, [supabase, participantAuthId, messagesLoaded])
+    await markAdminMessagesRead()
+  }, [supabase, participantAuthId, messagesLoaded, markAdminMessagesRead])
 
   // Load FAQs for this portal type
   const loadFaqs = useCallback(async () => {
@@ -214,13 +222,16 @@ export default function ChatWidget({
     if (!isOpen) return
     if (activeTab === 'messages') {
       loadMessages()
+      // NEW300: loadMessages early-returns once loaded, so unread admin replies that arrived
+      // while on the FAQ tab would never be marked. Mark unconditionally on entering Messages.
+      markAdminMessagesRead()
       setTimeout(() => editor?.commands.focus(), 100)
     }
     if (activeTab === 'faq') {
       loadFaqs()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, activeTab, loadMessages, loadFaqs])
+  }, [isOpen, activeTab, loadMessages, loadFaqs, markAdminMessagesRead])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -255,6 +266,16 @@ export default function ChatWidget({
             if (prev.some(m => m.id === msg.id)) return prev
             return [...prev, msg]
           })
+          // NEW300: an admin reply arriving live must be marked read so its tick flips for the
+          // admin — but only if the user is actually looking at the Messages tab. On the FAQ
+          // tab, leave it unread and bump the badge instead.
+          if (msg.sender_role === 'admin') {
+            if (activeTab === 'messages') {
+              markAdminMessagesRead()
+            } else {
+              setUnreadCount(c => c + 1)
+            }
+          }
         }
       )
       .on(
@@ -267,15 +288,19 @@ export default function ChatWidget({
         },
         (payload) => {
           const updated = payload.new as SupportMessage
-          // Update read_at on the matching message so ticks flip live
-          setMessages(prev =>
-            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-          )
+          // Update read_at on the matching message so ticks flip live. Buffer the read_at first
+          // (NEW300) so a temp→real swap in handleSend can carry it over instead of losing it.
+          if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
+            setMessages(prev =>
+              prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+            )
+          }
         }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [isOpen, participantAuthId, supabase])
+  }, [isOpen, participantAuthId, supabase, activeTab, markAdminMessagesRead])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -351,8 +376,17 @@ export default function ChatWidget({
       // Replace temp message with real DB message so read_at updates work
       const data = await res.json()
       if (data.message) {
+        // NEW300: if the admin already read this message before the real row landed, the
+        // Realtime UPDATE buffered its read_at here — carry it over instead of hardcoding null
+        // (which stomped the read tick). Otherwise honour the DB row's own read_at.
+        const real = data.message as SupportMessage
+        const bufferedRead = pendingReadsRef.current.get(real.id)
+        if (bufferedRead) {
+          real.read_at = bufferedRead
+          pendingReadsRef.current.delete(real.id)
+        }
         setMessages(prev =>
-          prev.map(m => m.id === tempId ? { ...data.message, read_at: null } : m)
+          prev.map(m => m.id === tempId ? real : m)
         )
       }
     }
@@ -392,7 +426,7 @@ export default function ChatWidget({
                 <span className="w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white -ml-4 mt-4 flex-shrink-0" />
               </div>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => { setIsOpen(false); setMessagesLoaded(false) }}
                 className="text-white/80 hover:text-white transition-colors"
                 aria-label="Close chat"
               >
@@ -645,7 +679,11 @@ export default function ChatWidget({
           </span>
         )}
         <button
-          onClick={() => setIsOpen(prev => !prev)}
+          onClick={() => {
+            // NEW300: closing resets messagesLoaded so the next open refetches and re-marks reads.
+            if (isOpen) setMessagesLoaded(false)
+            setIsOpen(!isOpen)
+          }}
           className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
           style={{ backgroundColor: isOpen ? '#e06e00' : '#FF8303' }}
           aria-label={isOpen ? 'Close chat' : 'Open chat'}

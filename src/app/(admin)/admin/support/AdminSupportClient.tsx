@@ -106,6 +106,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
+  // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -118,17 +121,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     onTransaction: () => forceUpdate(n => n + 1),
   })
 
-  const loadMessages = useCallback(async (conv: Conversation) => {
-    setMessagesLoaded(false)
-    const { data } = await supabase
-      .from('support_messages')
-      .select('id, sender_role, content, attachments, created_at, read_at')
-      .eq('participant_auth_id', conv.participantAuthId)
-      .order('created_at', { ascending: true })
-    setMessages((data as SupportMessage[]) || [])
-    setMessagesLoaded(true)
-
-    // Mark all unread user messages as read now that Shannon has opened this conversation
+  // NEW300: mark all inbound user messages read for this conversation. Reusable so it fires
+  // both on load and when a user message arrives live (previously reads only happened inside
+  // loadMessages, so a live-arriving message never flipped the admin's tick — no UPDATE fired).
+  const markUserMessagesRead = useCallback(async (conv: Conversation) => {
     await supabase
       .from('support_messages')
       .update({ read_at: new Date().toISOString() })
@@ -141,6 +137,20 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       prev.map(c => c.participantId === conv.participantId ? { ...c, unreadCount: 0 } : c)
     )
   }, [supabase])
+
+  const loadMessages = useCallback(async (conv: Conversation) => {
+    setMessagesLoaded(false)
+    const { data } = await supabase
+      .from('support_messages')
+      .select('id, sender_role, content, attachments, created_at, read_at')
+      .eq('participant_auth_id', conv.participantAuthId)
+      .order('created_at', { ascending: true })
+    setMessages((data as SupportMessage[]) || [])
+    setMessagesLoaded(true)
+
+    // Mark all unread user messages as read now that Shannon has opened this conversation
+    await markUserMessagesRead(conv)
+  }, [supabase, markUserMessagesRead])
 
   useEffect(() => {
     if (selectedConv) loadMessages(selectedConv)
@@ -173,6 +183,11 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       }, (payload) => {
         const msg = payload.new as SupportMessage
         setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+        // NEW300: a user message arriving live in the open conversation must be marked read so
+        // its tick flips for the user. The subscription filter already scopes this to selectedConv.
+        if (msg.sender_role === 'user') {
+          markUserMessagesRead(selectedConv)
+        }
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -181,13 +196,18 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
       }, (payload) => {
         const updated = payload.new as SupportMessage
-        setMessages(prev =>
-          prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-        )
+        // Buffer the read_at first (NEW300) so a temp→real swap in handleSend can carry it over
+        // instead of losing it, then flip the tick live.
+        if (updated.read_at) {
+          pendingReadsRef.current.set(updated.id, updated.read_at)
+          setMessages(prev =>
+            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+          )
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [selectedConv, supabase])
+  }, [selectedConv, supabase, markUserMessagesRead])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -254,8 +274,17 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       // Replace temp message with real DB message so read_at updates work
       const json = await res.json()
       if (json.message) {
+        // NEW300: if the user already read this reply before the real row landed, the Realtime
+        // UPDATE buffered its read_at here — carry it over instead of hardcoding null (which
+        // stomped the read tick). Otherwise honour the DB row's own read_at.
+        const real = json.message as SupportMessage
+        const bufferedRead = pendingReadsRef.current.get(real.id)
+        if (bufferedRead) {
+          real.read_at = bufferedRead
+          pendingReadsRef.current.delete(real.id)
+        }
         setMessages(prev =>
-          prev.map(m => m.id === tempId ? { ...json.message, read_at: null } : m)
+          prev.map(m => m.id === tempId ? real : m)
         )
       }
     }
