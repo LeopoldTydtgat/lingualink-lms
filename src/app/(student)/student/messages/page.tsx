@@ -44,7 +44,7 @@ export default async function StudentMessagesPage() {
   // Get all messages involving this student to build the contacts list
   const { data: allMessages } = await supabase
     .from('messages')
-    .select('*')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
     .or(`sender_id.eq.${student.id},receiver_id.eq.${student.id}`)
     .order('created_at', { ascending: false })
 

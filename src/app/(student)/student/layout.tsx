@@ -101,7 +101,7 @@ export default async function StudentDashboardLayout({
 
   const { count: unreadMessageCount } = await supabase
     .from('messages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('receiver_id', student.id)
     .is('read_at', null)
 

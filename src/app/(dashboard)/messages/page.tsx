@@ -122,7 +122,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // Fetch all messages involving this user, newest first
   const { data: messages } = await supabase
     .from('messages')
-    .select('*')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
     .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
     .order('created_at', { ascending: false })
 
