@@ -1,3 +1,25 @@
+## Session 188 - 11 July 2026 - Messaging integrity: admin oversight read state isolated from recipients
+### What was built
+- Fixed the admin Messages nav badge counting every unread message platform-wide. The server count and both Realtime handlers now filter to student-involving messages only, matching the admin messages page semantics (commit ba46641).
+- That fix exposed a worse defect underneath: when the admin opened a teacher-student conversation in the oversight view, the code stamped those messages as read using the same read_at field the teacher and student portals rely on for unread badges and read ticks. The real recipient's badge cleared and senders saw read ticks for messages nobody had read. Fixed by adding a dedicated admin_read_at column so "seen by admin" and "read by recipient" are two separate facts. All admin surfaces switched to the new column, read_at is recipient-only again, admin-sent messages are stamped as seen at insert, and historical admin-sent rows were backfilled (commit 161353f).
+- The security auditor then flagged that recipient-side queries fetched all message columns with select('*'), so the new admin_read_at timestamps were visible to teachers and students through browser dev tools - against the client's requirement that oversight leaves no visible trace. Replaced the wildcard selects with explicit column lists across all eight recipient-path queries on both portals, then reduced the database grants to column level so the oversight column carries zero privileges for regular users (commit fd956b4).
+- All database changes were applied live first, verified by reading the resulting grant posture, then captured in a catch-up migration so the repo matches the database (commit a1ef392).
+### Break/Fix Log
+**Issue 1**
+- Symptom: Teachers and students saw phantom read ticks and cleared unread badges on messages the recipient never opened.
+- Cause: The admin oversight view reused the recipient read_at field to track which threads the admin had reviewed, silently overwriting recipient read state.
+- Fix: New admin_read_at column; admin surfaces read and write only that column, recipient portals never see it.
+- Lesson: A column means one thing. Reusing a state field for a second audience silently corrupts the first audience's view - separate facts get separate columns.
+**Issue 2**
+- Symptom: After revoking the oversight column from regular users, the fix order mattered: revoking before updating the code would have broken all teacher and student messaging.
+- Cause: select('*') hard-fails when any single column lacks privilege - a wildcard query is all-or-nothing against column-level grants.
+- Fix: Mandatory two-step order enforced: explicit column lists committed and deployed first, grant revoke second.
+- Lesson: Wildcard selects and column-level security cannot coexist. Explicit column lists are a prerequisite for column-level grants, not a style preference.
+### Session result
+The messaging system now keeps admin oversight fully invisible to teachers and students: no read-state side effects, no visible timestamps, no queryable trace. Recipient read semantics are correct on both portals, the admin badge counts the right things, and the database grant posture is captured in a committed migration. Follow-up items (a cosmetic badge staleness on the admin layout and a verification pass on Realtime frames) are logged for their own sessions.
+
+---
+
 ## Session 187 - 11 July 2026 - Support surfaces aligned and unread badge accuracy
 
 ### What was built
