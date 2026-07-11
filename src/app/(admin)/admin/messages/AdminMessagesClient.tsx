@@ -23,7 +23,7 @@ interface AdminMessage {
   receiver_id: string
   receiver_type: string
   content: string
-  attachments: any[]
+  attachments: Array<{ url: string; filename: string; size: number }>
   read_at: string | null
   admin_read_at: string | null
   created_at: string
@@ -443,6 +443,22 @@ export default function AdminMessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className="mt-1 flex flex-col gap-1">
+                              {msg.attachments.map((att, i) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
+                                  style={{ color: '#4b5563' }}
+                                >
+                                  📎 {att.filename}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className={`flex items-center gap-1 mt-1 ${isRight ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">
                               {formatTime(msg.created_at)}
