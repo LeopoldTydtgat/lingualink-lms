@@ -12,6 +12,7 @@ import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
+import BillingRealtimeRefresher from '@/components/layout/BillingRealtimeRefresher'
 
 export default async function DashboardLayout({
   children,
@@ -240,6 +241,8 @@ export default async function DashboardLayout({
         nextLessonDurationMinutes={protectedLesson?.duration_minutes ?? null}
         loginPath="/login"
       />
+
+      <BillingRealtimeRefresher teacherId={profile.id} />
     </div>
   )
 }
