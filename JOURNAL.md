@@ -1,3 +1,52 @@
+## Session 189 - 11 July 2026 - Realtime leak verification and messaging emoji fix
+
+### What was built
+
+Closed out two messaging-related items across the admin and chat surfaces.
+
+First, I completed the live verification of NEW293, a suspected data leak
+where Supabase Realtime UPDATE frames might expose the revoked admin_read_at
+column to teacher subscribers. Using browser dev-tools WebSocket inspection
+on a plain teacher session (separate browser sessions, after discovering
+that incognito windows share a session and invalidate the test), I confirmed
+the UPDATE frame arrives with the full message record but no admin_read_at
+field in record, old_record, or columns. Realtime enforces the column-level
+revoke for authenticated subscribers. Closed as no-fix: the protection
+already works as intended (commit 8477c74 from the previous session had
+already moved the admin unread badge to a count refetch on UPDATE events
+rather than reading the revoked column directly).
+
+Second, I fixed NEW297: sending a digit-only chat message such as "1"
+rendered at 2rem with no bubble, styled as if it were a large emoji. The
+emoji-only detection helper, duplicated identically in five components, used
+the Unicode \p{Emoji} property, which matches the digits 0-9, # and *
+because they are keycap base characters. Short digit-only messages therefore
+false-positived as emoji. The fix extracts a single shared helper at
+src/lib/messages/isEmojiOnly.ts built on \p{Extended_Pictographic} with
+explicit handling for variation selectors, skin-tone modifiers, ZWJ compound
+sequences, and regional-indicator flag pairs. The regex was validated
+against 14 true/false test cases via a throwaway Node script importing the
+actual on-disk module before any component was touched. All five components
+(admin messages, admin support, teacher messages, student messages, chat
+widget) now import the shared helper.
+
+### Break/Fix Log
+
+- Incognito browser windows share a single session, which invalidated the
+  first NEW293 WebSocket test; re-ran with fully separate browser sessions.
+- A stale .next/dev/types cache produced an unrelated TS2306 error during
+  typecheck; cleared the generated directory and the full build passed
+  cleanly (exit 0, all 83 pages).
+
+### Session result
+
+NEW293 closed no-fix with live WebSocket evidence; NEW297 fixed and deployed
+to dev (commit 2e07aa6): digit messages render as normal bubbles, genuine
+emoji retain the large display. Emoji detection logic now lives in one
+shared, tested module instead of five duplicates.
+
+---
+
 ## Session 188 - 11 July 2026 - Messaging integrity: admin oversight read state isolated from recipients
 ### What was built
 - Fixed the admin Messages nav badge counting every unread message platform-wide. The server count and both Realtime handlers now filter to student-involving messages only, matching the admin messages page semantics (commit ba46641).
