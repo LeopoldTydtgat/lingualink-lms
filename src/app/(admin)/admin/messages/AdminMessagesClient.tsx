@@ -24,6 +24,7 @@ interface AdminMessage {
   content: string
   attachments: any[]
   read_at: string | null
+  admin_read_at: string | null
   created_at: string
 }
 

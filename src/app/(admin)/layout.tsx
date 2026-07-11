@@ -106,7 +106,7 @@ export default async function AdminLayout({
     adminDb
       .from('messages')
       .select('id', { count: 'exact', head: true })
-      .is('read_at', null)
+      .is('admin_read_at', null)
       .or('sender_type.eq.student,receiver_type.eq.student'),
 
     // Unread support messages count for the Support nav badge
