@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sanitizeHtml } from '@/lib/sanitize-server'
+import { validateAttachments } from '@/lib/messages/validateAttachments'
 
 export async function POST(request: Request) {
   try {
@@ -18,42 +19,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
-    // Validate attachments (optional). Strip any extra keys — only { url, filename, size }
-    // are persisted, mirroring the main-messages attachment contract.
-    let safeAttachments: Array<{ url: string; filename: string; size: number }> = []
-    if (attachments !== undefined && attachments !== null) {
-      if (!Array.isArray(attachments) || attachments.length > 5) {
-        return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
-      }
-      // Pin attachment URLs to the Supabase project host so a caller can't plant a
-      // link to an arbitrary domain (phishing) in the persisted thread.
-      const supabaseHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).host
-      for (const att of attachments) {
-        if (
-          !att || typeof att !== 'object' ||
-          typeof att.url !== 'string' || !att.url.startsWith('https://') ||
-          typeof att.filename !== 'string' || att.filename.length === 0 || att.filename.length > 255 ||
-          typeof att.size !== 'number' || !Number.isFinite(att.size) || att.size < 0 || att.size > 10485760
-        ) {
-          return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
-        }
-        // Wrap the parse so a malformed URL also 400s rather than throwing.
-        let attHost: string
-        try {
-          attHost = new URL(att.url).host
-        } catch {
-          return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
-        }
-        if (attHost !== supabaseHost) {
-          return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
-        }
-      }
-      safeAttachments = attachments.map((att: { url: string; filename: string; size: number }) => ({
-        url: att.url,
-        filename: att.filename,
-        size: att.size,
-      }))
+    // Validate attachments (optional) via the shared helper. Strips any extra keys —
+    // only { url, filename, size } is persisted — and pins each URL to the Supabase
+    // project host (phishing guard), mirroring the main-messages attachment contract.
+    const validation = validateAttachments(attachments)
+    if (!validation.ok) {
+      return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
     }
+    const safeAttachments = validation.attachments
 
     // Security: non-admin users can only send for themselves
     const admin = createAdminClient()

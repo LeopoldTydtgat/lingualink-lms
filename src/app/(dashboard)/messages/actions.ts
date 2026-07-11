@@ -7,6 +7,7 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentNewMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
+import { validateAttachments } from '@/lib/messages/validateAttachments'
 
 export async function sendMessage(
   receiverId: string,
@@ -72,6 +73,11 @@ export async function sendMessage(
     }
   }
 
+  // NEW299: pin/strip attachment URLs (phishing vector) — the RLS insert policy checks
+  // only sender identity, so an arbitrary attachment URL would otherwise persist unchecked.
+  const validation = validateAttachments(attachments)
+  if (!validation.ok) return { error: 'Invalid attachments.' }
+
   const safeContent = sanitizeHtml(content)
 
   // Save the message to the database. Return the inserted row (real DB id) so the
@@ -87,7 +93,7 @@ export async function sendMessage(
       receiver_id: receiverId,
       receiver_type: receiverType,
       content: safeContent,
-      attachments: attachments ?? [],
+      attachments: validation.attachments,
     })
     .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
     .single()
