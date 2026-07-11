@@ -10,6 +10,7 @@ import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'luci
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -47,12 +48,6 @@ function formatTime(dateStr: string): string {
   const h = date.getHours().toString().padStart(2, '0')
   const m = date.getMinutes().toString().padStart(2, '0')
   return `${h}:${m}`
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {

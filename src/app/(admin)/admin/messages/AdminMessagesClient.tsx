@@ -9,6 +9,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { getAdminThreadMessages, sendAdminMessage, markAdminThreadRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -74,12 +75,6 @@ function formatTime(dateStr: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
