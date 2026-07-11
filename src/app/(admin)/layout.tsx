@@ -101,11 +101,13 @@ export default async function AdminLayout({
       .limit(1)
       .maybeSingle(),
 
-    // Platform-wide unread message count for the nav badge
+    // Unread message count for the nav badge — student-involving conversations only,
+    // mirroring the admin Messages page's own unread computation
     adminDb
       .from('messages')
       .select('id', { count: 'exact', head: true })
-      .is('read_at', null),
+      .is('read_at', null)
+      .or('sender_type.eq.student,receiver_type.eq.student'),
 
     // Unread support messages count for the Support nav badge
     adminDb
