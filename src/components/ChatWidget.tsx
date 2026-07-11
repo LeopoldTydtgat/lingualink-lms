@@ -6,11 +6,12 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
-import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'lucide-react'
+import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle, Paperclip } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { toast } from 'sonner'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -20,6 +21,7 @@ interface SupportMessage {
   id: string
   sender_role: 'user' | 'admin'
   content: string
+  attachments: Array<{ url: string; filename: string; size: number }>
   created_at: string
   read_at: string | null
 }
@@ -128,8 +130,11 @@ export default function ChatWidget({
   const [messagesLoaded, setMessagesLoaded] = useState(false)
   const [faqsLoaded, setFaqsLoaded] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{ url: string; filename: string; size: number }>>([])
+  const [uploading, setUploading] = useState(false)
   const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [emojiPickerPos, setEmojiPickerPos] = useState<{ bottom: number; right: number } | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
@@ -174,7 +179,7 @@ export default function ChatWidget({
     if (messagesLoaded) return
     const { data } = await supabase
       .from('support_messages')
-      .select('id, sender_role, content, created_at, read_at')
+      .select('id, sender_role, content, attachments, created_at, read_at')
       .eq('participant_auth_id', participantAuthId)
       .order('created_at', { ascending: true })
     setMessages((data as SupportMessage[]) || [])
@@ -272,11 +277,44 @@ export default function ChatWidget({
     return () => { supabase.removeChannel(channel) }
   }, [isOpen, participantAuthId, supabase])
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File must be under 10MB.', { duration: 6000 })
+      e.target.value = ''
+      return
+    }
+
+    setUploading(true)
+    const form = new FormData()
+    form.append('file', file)
+
+    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+    const json = await res.json()
+
+    if (!res.ok) {
+      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
+    } else {
+      setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+    }
+
+    setUploading(false)
+    e.target.value = ''
+  }
+
   const handleSend = async () => {
     if (!editor || sending) return
     const html = editor.getHTML()
-    if (!html || html === '<p></p>') return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    const attachmentsToSend = pendingAttachments
+    // Attachment-only send: store clean '' rather than '<p></p>'.
+    const contentToSend = isEmpty ? '' : html
     editor.commands.clearContent()
+    setPendingAttachments([])
     setSending(true)
 
     // Optimistic update
@@ -284,7 +322,8 @@ export default function ChatWidget({
     setMessages(prev => [...prev, {
       id: tempId,
       sender_role: 'user',
-      content: html,
+      content: contentToSend,
+      attachments: attachmentsToSend,
       created_at: new Date().toISOString(),
       read_at: null,
     }])
@@ -296,13 +335,18 @@ export default function ChatWidget({
         participantId,
         participantType,
         participantAuthId,
-        content: html,
+        content: contentToSend,
+        attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
       }),
     })
 
     if (!res.ok) {
-      // Roll back optimistic update on failure
+      // Roll back optimistic update on failure. Restore the pending attachments so a
+      // failed send doesn't silently discard the user's already-uploaded file, and
+      // surface an error instead of failing quietly.
       setMessages(prev => prev.filter(m => m.id !== tempId))
+      setPendingAttachments(attachmentsToSend)
+      toast.error('Message failed to send. Please try again.', { duration: 6000 })
     } else {
       // Replace temp message with real DB message so read_at updates work
       const data = await res.json()
@@ -393,6 +437,7 @@ export default function ChatWidget({
                 ) : (
                   messages.map(msg => {
                     const isFromMe = msg.sender_role === 'user'
+                    const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                     return (
                       <div
                         key={msg.id}
@@ -402,6 +447,7 @@ export default function ChatWidget({
                           <Avatar name={adminName} photoUrl={adminPhotoUrl} size={7} />
                         )}
                         <div className="max-w-[75%]">
+                          {hasContent && (
                           <div
                             className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -412,6 +458,23 @@ export default function ChatWidget({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className={`flex flex-col gap-0.5 ${hasContent ? 'mt-1' : ''} ${isFromMe ? 'items-end' : 'items-start'}`}>
+                              {msg.attachments.map((att, i) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs underline max-w-full"
+                                  style={{ color: '#4b5563' }}
+                                >
+                                  <span className="truncate">📎 {att.filename}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isFromMe && (
@@ -472,7 +535,39 @@ export default function ChatWidget({
                       </div>
                     )}
                   </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    title="Attach file"
+                    aria-label="Attach file"
+                    className="px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
+                  </button>
                 </div>
+                {pendingAttachments.length > 0 && (
+                  <div className="px-3 pb-1 flex flex-col gap-1">
+                    {pendingAttachments.map((att, i) => (
+                      <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-600">
+                        <span className="truncate max-w-[240px]">📎 {att.filename}</span>
+                        <button
+                          onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                          className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                          aria-label="Remove attachment"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-2 px-3 pb-3">
                   <div
                     className="widget-composer flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus-within:border-orange-400 bg-gray-50 min-h-[36px] max-h-[80px] overflow-y-auto cursor-text transition-colors"
@@ -558,12 +653,7 @@ export default function ChatWidget({
           {isOpen ? (
             <X size={22} className="text-white" />
           ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path
-                d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z"
-                stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              />
-            </svg>
+            <img src="/lingualink-chat-icon.svg" alt="LinguaLink chat" width={36} height={36} />
           )}
         </button>
       </div>
