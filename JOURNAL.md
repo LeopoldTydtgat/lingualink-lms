@@ -1,3 +1,55 @@
+## Session 190 - 11 July 2026 - Support Messaging Attachments and Admin Oversight Attachment Rendering
+
+### What was built
+
+Two commits completing attachment support across the platform's messaging surfaces.
+
+Commit aaf3e2f (NEW295): the admin oversight thread view fetched the attachments
+column but never rendered it, so file links sent between teachers and students were
+invisible to the admin. Added an attachment link block below each message bubble,
+mirroring the established StudentDetailClient chip pattern, and tightened the
+message interface type from any[] to a proper attachment shape.
+
+Commit ddf7506 (NEW296): built file attachments for the support messaging system
+end to end. The support_messages table gained an attachments jsonb column (DDL via
+the Supabase SQL Editor; existing table grants and the Realtime publication already
+covered it). The send API route now validates attachments server-side: maximum of
+five per message, URL host pinned to the Supabase project host so arbitrary
+external URLs cannot be injected, filename length and file size limits, and
+unknown keys stripped. It also permits empty text content when attachments are
+present. Both support clients (the teacher/student chat widget and the admin
+Support page) gained a paperclip upload reusing the existing messages upload
+route, a pending attachment list with remove buttons, attachment chip rendering,
+and rollback handling: a failed send restores the pending attachments and surfaces
+a toast instead of silently discarding the uploaded file. Attachment-only sends
+store an empty string rather than editor placeholder markup, and the message
+bubble is hidden when there is no text so lone attachments render flush. The same
+commit swapped the chat widget's generic inline SVG bubble icon for the LinguaLink
+brand chat mark, with the SVG viewBox cropped to the artwork so it renders at full
+size inside the trigger button.
+
+### Break/Fix Log
+
+The code-reviewer subagent ran on the NEW296 changes before commit; findings were
+addressed in the same work. Investigation during this session also diagnosed (but
+did not fix) the support chat read-receipt bug: replica identity on the table was
+verified FULL via pg_class, ruling out the suspected Realtime cause, and the true
+root cause was traced to the clients never marking incoming messages read while
+the thread is open, plus a missing pending-reads buffer for the optimistic-send
+race. Logged as NEW300 with the full diagnosis for a dedicated fix session.
+Follow-up items NEW298 (signed attachment URLs expire after seven days), NEW299
+(audit the main messages send path for the same URL host pinning), and NEW301
+(time-windowed message editing, post-go-live) were logged as well.
+
+### Session result
+
+NEW295 and NEW296 closed and pushed. Support messaging now has full attachment
+parity with the main messaging system, with server-side validation stricter than
+the original. Four follow-up items logged with root-cause detail, including a
+fully diagnosed read-receipt fix ready to execute next session.
+
+---
+
 ## Session 189 - 11 July 2026 - Realtime leak verification and messaging emoji fix
 
 ### What was built
