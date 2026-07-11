@@ -123,8 +123,10 @@ export default function AdminLayoutClient({
         event: 'INSERT',
         schema: 'public',
         table: 'support_messages',
-      }, () => {
-        setLiveUnreadSupport(prev => prev + 1)
+      }, (payload) => {
+        if (payload.new.sender_role === 'user') {
+          setLiveUnreadSupport(prev => prev + 1)
+        }
       })
       .subscribe()
 
