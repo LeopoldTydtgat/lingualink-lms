@@ -126,7 +126,7 @@ export default function ChatWidget({
   const supabase = useMemo(() => createClient(), [])
 
   const [isOpen, setIsOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'messages' | 'faq'>('messages')
+  const [activeTab, setActiveTab] = useState<'messages' | 'faq'>('faq')
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [faqs, setFaqs] = useState<FaqItem[]>([])
   const [sending, setSending] = useState(false)
@@ -136,7 +136,9 @@ export default function ChatWidget({
   const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [emojiPickerPos, setEmojiPickerPos] = useState<{ bottom: number; right: number } | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const emojiButtonRef = useRef<HTMLButtonElement>(null)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -162,6 +164,15 @@ export default function ChatWidget({
     }
     checkUnread()
   }, [supabase, participantAuthId])
+
+  // FAQ is the default landing tab, but unread admin replies take priority:
+  // land on Messages so they are seen and marked read.
+  useEffect(() => {
+    if (isOpen && unreadCount > 0) {
+      setActiveTab('messages')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
 
   // Load support messages for this participant
   const loadMessages = useCallback(async () => {
@@ -310,6 +321,17 @@ export default function ChatWidget({
     setSending(false)
   }
 
+  const handleEmojiButtonClick = () => {
+    if (!showEmojiPicker && emojiButtonRef.current) {
+      const rect = emojiButtonRef.current.getBoundingClientRect()
+      setEmojiPickerPos({
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      })
+    }
+    setShowEmojiPicker(v => !v)
+  }
+
   const tabStyle = (tab: 'messages' | 'faq') =>
     activeTab === tab
       ? { backgroundColor: 'rgba(255,255,255,0.25)', color: 'white', borderRadius: '6px' }
@@ -342,14 +364,6 @@ export default function ChatWidget({
             <p className="text-white/75 text-xs mb-3">We typically reply within an hour.</p>
             <div className="flex gap-1 pb-3">
               <button
-                onClick={() => setActiveTab('messages')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
-                style={tabStyle('messages')}
-              >
-                <MessageSquare size={13} />
-                Messages
-              </button>
-              <button
                 onClick={() => setActiveTab('faq')}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
                 style={tabStyle('faq')}
@@ -357,13 +371,21 @@ export default function ChatWidget({
                 <HelpCircle size={13} />
                 FAQ
               </button>
+              <button
+                onClick={() => setActiveTab('messages')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
+                style={tabStyle('messages')}
+              >
+                <MessageSquare size={13} />
+                Messages
+              </button>
             </div>
           </div>
 
           {/* Messages tab */}
           {activeTab === 'messages' && (
             <>
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
                 {!messagesLoaded ? (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-xs text-gray-400">Loading...</p>
@@ -391,7 +413,7 @@ export default function ChatWidget({
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
+                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
@@ -448,9 +470,9 @@ export default function ChatWidget({
                     style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                   >•≡</button>
                   <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
-                    <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>😊</button>
-                    {showEmojiPicker && (
-                      <div style={{ position: 'absolute', bottom: '32px', right: 0, zIndex: 50 }}>
+                    <button ref={emojiButtonRef} onClick={handleEmojiButtonClick} title="Emoji" style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>😊</button>
+                    {showEmojiPicker && emojiPickerPos && (
+                      <div style={{ position: 'fixed', bottom: emojiPickerPos.bottom, right: emojiPickerPos.right, zIndex: 9999 }}>
                         <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
                       </div>
                     )}
