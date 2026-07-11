@@ -145,6 +145,23 @@ export async function sendAdminMessage(
   return { success: true, message: inserted }
 }
 
+export async function getUnreadAdminMessagesCount() {
+  await assertAdmin()
+
+  const adminDb = createAdminClient()
+
+  // Mirrors src/app/(admin)/layout.tsx's nav badge query exactly — student-involving
+  // conversations only, admin_read_at is null. Must run via admin client: the browser
+  // role has zero column grants on admin_read_at, so Realtime payloads never carry it.
+  const { count } = await adminDb
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .is('admin_read_at', null)
+    .or('sender_type.eq.student,receiver_type.eq.student')
+
+  return count ?? 0
+}
+
 export async function markAdminThreadRead(teacherSideId: string, studentId: string) {
   await assertAdmin()
 
