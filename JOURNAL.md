@@ -1,3 +1,25 @@
+## Session 191 - 11 Jul 2026 - Messaging hardening: attachment validation, live read receipts, empty bubbles, live admin support list
+
+### What was built
+Four messaging bugs closed across two working sessions, all in the messaging and support chat systems.
+
+NEW299 (commit c9ee2e0): attachment URL validation is now shared across every send path. An audit found that both main sendMessage server actions accepted caller-supplied attachment arrays without any checks, while the support send route had inline validation. I extracted that validation into a shared helper, src/lib/messages/validateAttachments.ts, which enforces a maximum of five attachments, https-only URLs pinned to the Supabase project host, filename and size limits, and strips each item down to url, filename and size. All three send paths now use it. Live tested, including a doctored URL pointing at a foreign host, which was correctly rejected with a 400.
+
+NEW300 (commit 133660e): support chat read-receipt ticks now flip live. Marking inbound messages as read was extracted into a reusable callback that fires both on conversation load and when a message arrives via Realtime, and a buffering ref carries read timestamps that arrive before the optimistic message has been swapped for the real database row, so ticks are no longer stomped back to unread. Live tested in all four sender and reader combinations.
+
+NEW302 (commit 6c4c451): attachment-only messages no longer render an empty dark bubble in the three main messaging UIs. The fix mirrors the pattern already proven in the support widget: senders treat tag-only HTML as empty and store a clean empty string instead of an empty paragraph tag, and all three renderers wrap the bubble in a content guard so attachments render on their own. The guard also hides legacy empty rows already in the database, so no migration was needed.
+
+NEW303 (commit 9a930bd): the admin support conversation list now updates in real time. Previously only the open conversation had a Realtime subscription, so a message from anyone else never updated the list and a first-time sender was invisible until a full page reload. A component-lifetime subscription now keeps the whole list live: previews refresh, unread counts bump for non-open threads, conversations reorder, and first-time senders appear immediately via a new admin-gated server action that resolves their name and photo. Two stale-prop bugs in the same component were fixed along the way. The change passed both the RLS auditor and code reviewer gates before commit.
+
+### Break/Fix Log
+- The code reviewer caught a race in the first-time-sender path of NEW303 where a second rapid message from a brand-new participant would be silently dropped from the list state. Fixed before commit by merging into the existing row instead of discarding the update.
+- The review also surfaced a pre-existing transient duplicate-key race from NEW300 in the admin support thread. Logged as its own backlog item rather than bundled into this commit.
+
+### Session result
+Four bugs closed, committed and pushed. The messaging layer is now consistent on attachment validation, live read receipts, attachment-only rendering and real-time list updates across all portals.
+
+---
+
 ## Session 190 - 11 July 2026 - Support Messaging Attachments and Admin Oversight Attachment Rendering
 
 ### What was built
