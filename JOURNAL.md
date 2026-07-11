@@ -1,3 +1,25 @@
+## Session 193 - 12 July 2026 - Day to Day calendar timezone frame unification
+
+### What was built
+
+Fixed the root cause of the recurring "calendar broken" bug class. The teacher Day to Day calendar saved availability blocks correctly in the teacher's profile timezone but rendered them in the browser's local timezone. For any viewer whose browser timezone differed from the teacher's, saved blocks appeared shifted by the timezone delta or vanished off the grid entirely. The bug was invisible whenever the tester and the teacher shared a timezone, which is exactly why it kept resurfacing.
+
+The fix unified the entire grid on a single frame: the teacher's validated profile timezone. A new pure helper, utcInstantToTzParts, converts stored UTC instants to wall-clock parts in a named IANA timezone via Intl.DateTimeFormat, with a companion isValidTimeZone probe. Every render-side consumer in DayToDay.tsx now goes through it: availability blocks, lesson blocks, the now indicator, the today column, month-grid counts, past-slot drag guards, and week navigation anchors. The legend now reports the timezone the grid actually uses.
+
+The same commit hardened the surface: the timezone conversion in the save handler is guarded so an invalid account timezone surfaces a visible error instead of an unhandled exception and a stuck saving state; an invalid timezone degrades rendering to UTC with a warning banner instead of blanking the tab; week and month fetch windows are now true UTC instants of the profile-timezone week with a half-open end bound, fixing silently shifted query windows and a boundary duplicate; and the add success path uses a functional state update so two quick additions can no longer drop the first.
+
+Thirteen new unit tests cover the helper, including DST transitions in both directions, midnight boundaries, and a round-trip invariant against the existing localToUtc. Full suite green at 120 of 120. Both review subagents passed: code-reviewer SHIP, timezone-date-auditor PASS.
+
+### Break/Fix Log
+
+The session began with a Fable 5 read-only forensic audit of every file touching the calendar, availability, and booking after a live report that adding availability showed "Saving" with nothing appearing. Network and database evidence proved the write path correct, narrowing the defect to the render side, which the audit then pinned to the mixed timezone frame. Verified in the browser with a South Africa timezone teacher and a New York timezone teacher: both render blocks at the clicked times.
+
+### Session result
+
+Commit 25ef8f3 pushed to dev. Seven follow-up findings from the audit logged for future sessions, including a student booking grid day-key shift affecting UTC-negative timezones, admin booking validation gaps, and Holidays tab date display defects.
+
+---
+
 ## Session 192 - 11 July 2026 - Invite email flow for admin-created accounts
 
 ### What was built
