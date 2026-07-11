@@ -64,7 +64,7 @@ export async function sendMessage(
       content: safeContent,
       attachments: attachments ?? [],
     })
-    .select()
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
     .single()
 
   if (error) return { error: error.message }

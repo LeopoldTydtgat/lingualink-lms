@@ -156,7 +156,7 @@ export default async function DashboardLayout({
 
   const { count: unreadCount } = await supabase
     .from('messages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('receiver_id', user.id)
     .is('read_at', null)
 

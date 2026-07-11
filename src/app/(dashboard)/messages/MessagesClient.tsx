@@ -194,7 +194,7 @@ export default function MessagesClient({
     setLoadingMessages(true)
     const { data } = await supabase
       .from('messages')
-      .select('*')
+      .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
       .or(
         `and(sender_id.eq.${currentUser.id},receiver_id.eq.${contact.id}),` +
         `and(sender_id.eq.${contact.id},receiver_id.eq.${currentUser.id}),` +
