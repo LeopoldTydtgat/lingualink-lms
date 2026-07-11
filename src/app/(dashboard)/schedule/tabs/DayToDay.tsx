@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localTimeToUtcMs } from '@/lib/availability'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { getMondayWeekStart, addDays, getWeekDays, formatWeekLabel } from '@/lib/utils/week'
+import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string; timezone: string }
@@ -12,7 +13,7 @@ interface Profile { id: string; full_name: string; role: string; timezone: strin
 interface Props {
   profile: Profile
   availability: AvailabilityRecord[]
-  onAvailabilityChange: (records: AvailabilityRecord[]) => void
+  onAvailabilityChange: Dispatch<SetStateAction<AvailabilityRecord[]>>
 }
 
 interface ClassEvent {
@@ -66,6 +67,39 @@ function startOfDayLocal(d: Date): number {
   const x = new Date(d)
   x.setHours(0, 0, 0, 0)
   return x.getTime()
+}
+
+// ─── Profile-timezone frame helpers ───────────────────────────────────────────
+// The whole grid operates in ONE frame: the teacher's profile timezone. Day
+// columns are profile-tz calendar dates carried as browser-local Date "holders"
+// (local midnight of that calendar date). Holders are used ONLY for calendar
+// math (getMondayWeekStart / addDays / day diffs / labels) — never as instants.
+// Every stored instant (scheduled_at, start_at/end_at, now) is converted to
+// profile-tz wall-clock parts via utcInstantToTzParts before touching the grid,
+// so a block dragged at 09:00 renders at 09:00 for every viewer in every
+// browser timezone — matching the write path, which already stores through
+// profile.timezone.
+
+// Day index (0–6) of a calendar-date holder within the visible week, or -1
+// outside it. Math.round (not floor) absorbs the ±1h that a browser-local DST
+// transition inside the week puts between local midnights.
+function dayIndexInWeek(dateHolder: Date, weekStart: Date): number {
+  const idx = Math.round((startOfDayLocal(dateHolder) - startOfDayLocal(weekStart)) / 86_400_000)
+  return idx >= 0 && idx <= 6 ? idx : -1
+}
+
+// Holder for the calendar date currently showing in `tz`. Throws on an invalid
+// tz (Intl) — call with the validated display timezone.
+function tzTodayDate(tz: string): Date {
+  const p = utcInstantToTzParts(new Date(), tz)
+  return new Date(p.year, p.month - 1, p.day)
+}
+
+// YYYY-MM-DD calendar date of a stored UTC instant in `tz` — the profile-tz
+// counterpart of toLocalDateStr, for keying instants against holder dates.
+function tzDateStr(instant: string | Date, tz: string): string {
+  const p = utcInstantToTzParts(instant, tz)
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`
 }
 
 // Convert a "minutes since local midnight" value into a vertical pixel offset within the grid.
@@ -133,15 +167,13 @@ interface ClassBlock {
   startMin: number
   endMin: number
   studentName: string
+  endMs: number  // true end instant (ms since epoch) — past-ness is an instant comparison, frame-free
 }
 
-function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date): SpecificBlock[] {
-  const wsMid = startOfDayLocal(weekStart)
+function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date, tz: string): SpecificBlock[] {
   const blocks: SpecificBlock[] = []
   for (const r of records) {
     if (!r.start_at || !r.end_at) continue
-    const start = new Date(r.start_at)
-    const end = new Date(r.end_at)
 
     // Holidays are always whole-day and may span multiple calendar days. Emit a
     // full-column block for every visible-week day whose local midnight falls within
@@ -170,27 +202,40 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date): S
       continue
     }
 
-    const startSod = startOfDayLocal(start)
-    const dayIdx = Math.floor((startSod - wsMid) / 86_400_000)
-    if (dayIdx < 0 || dayIdx > 6) continue
-    const startMin = start.getHours() * 60 + start.getMinutes()
-    const endMin = startOfDayLocal(end) === startSod
-      ? end.getHours() * 60 + end.getMinutes()
+    // Timed 'specific' blocks: convert the stored UTC instants to PROFILE-TZ
+    // wall-clock parts (never browser-local getHours) so the block renders at
+    // the wall-clock it was dragged at, for every viewer. The write path in
+    // the commit handler already stores through profile.timezone — this makes
+    // the render frame match it.
+    const s = utcInstantToTzParts(r.start_at, tz)
+    const e = utcInstantToTzParts(r.end_at, tz)
+    const dayIdx = dayIndexInWeek(new Date(s.year, s.month - 1, s.day), weekStart)
+    if (dayIdx === -1) continue
+    const startMin = s.hour * 60 + s.minute
+    const sameDay = s.year === e.year && s.month === e.month && s.day === e.day
+    const endMin = sameDay
+      ? e.hour * 60 + e.minute
       : 24 * 60  // event spans midnight — clamp to end of day
     blocks.push({ dayIdx, startMin, endMin, recordId: r.id })
   }
   return blocks
 }
 
-function expandClassBlocks(classes: ClassEvent[], weekStart: Date): ClassBlock[] {
-  const wsMid = startOfDayLocal(weekStart)
+function expandClassBlocks(classes: ClassEvent[], weekStart: Date, tz: string): ClassBlock[] {
   const blocks: ClassBlock[] = []
   for (const c of classes) {
-    const start = new Date(c.scheduled_at)
-    const dayIdx = Math.floor((startOfDayLocal(start) - wsMid) / 86_400_000)
-    if (dayIdx < 0 || dayIdx > 6) continue
-    const startMin = start.getHours() * 60 + start.getMinutes()
-    blocks.push({ dayIdx, startMin, endMin: startMin + c.duration_minutes, studentName: c.student_name })
+    // Profile-tz wall-clock placement, matching expandSpecificBlocks above.
+    const p = utcInstantToTzParts(c.scheduled_at, tz)
+    const dayIdx = dayIndexInWeek(new Date(p.year, p.month - 1, p.day), weekStart)
+    if (dayIdx === -1) continue
+    const startMin = p.hour * 60 + p.minute
+    blocks.push({
+      dayIdx,
+      startMin,
+      endMin: startMin + c.duration_minutes,
+      studentName: c.student_name,
+      endMs: new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000,
+    })
   }
   return blocks
 }
@@ -242,10 +287,23 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const scrollRef = useRef<HTMLDivElement>(null)
   const isDraggingRef = useRef(false)
 
+  // The grid's single render frame. Falls back to UTC (with a visible banner
+  // below) when profiles.timezone holds an invalid IANA value — the column is
+  // unconstrained TEXT, and an unguarded Intl call would blank the whole tab.
+  // Writes never use the fallback: the commit handler converts through
+  // profile.timezone and fails closed with an error instead.
+  const displayTz = useMemo(
+    () => (isValidTimeZone(profile.timezone) ? profile.timezone : 'UTC'),
+    [profile.timezone]
+  )
+  const tzInvalid = displayTz !== profile.timezone
+
   const [classes, setClasses] = useState<ClassEvent[]>([])
   const [isSaving, setIsSaving] = useState(false)
   const [mode, setMode] = useState<null | 'available' | 'unavailable'>(null)
-  const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(new Date()))
+  // Week of "today" in the PROFILE timezone, not the browser's — near midnight
+  // the two can disagree by a day.
+  const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(tzTodayDate(displayTz)))
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [classDetail, setClassDetail] = useState<{
     studentName: string
@@ -259,8 +317,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [now, setNow] = useState<Date>(() => new Date())
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
   const [monthAnchor, setMonthAnchor] = useState<Date>(() => {
-    const n = new Date()
-    return new Date(n.getFullYear(), n.getMonth(), 1)
+    const t = tzTodayDate(displayTz)
+    return new Date(t.getFullYear(), t.getMonth(), 1)
   })
   const [monthClasses, setMonthClasses] = useState<ClassEvent[]>([])
 
@@ -297,17 +355,24 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     }
   }, [mode])
 
-  // Visible range derived from weekStart, in the same local-naive shape the original FC
-  // datesSet callback produced — fetchClassesForRange is fed strings without TZ markers.
+  // Visible range as TRUE UTC instants: profile-tz Monday 00:00 up to (but not
+  // including) next Monday 00:00. The old offset-less local strings were read
+  // as UTC by PostgREST, silently shifting the fetch window by the tz offset
+  // and dropping boundary classes for far-from-UTC teachers; the half-open end
+  // (gte/lt) also kills the inclusive-lte duplicate of a class at exactly next
+  // Monday midnight.
   const visibleRange = useMemo(() => ({
-    start: `${toLocalDateStr(weekStart)}T00:00:00`,
-    end: `${toLocalDateStr(addDays(weekStart, 7))}T00:00:00`,
-  }), [weekStart])
+    start: new Date(localTimeToUtcMs(toLocalDateStr(weekStart), '00:00', displayTz)).toISOString(),
+    end: new Date(localTimeToUtcMs(toLocalDateStr(addDays(weekStart, 7)), '00:00', displayTz)).toISOString(),
+  }), [weekStart, displayTz])
 
   useEffect(() => {
     visibleRangeRef.current = visibleRange
   }, [visibleRange])
 
+  // startStr/endStr are UTC ISO instants; the end bound is EXCLUSIVE (lt) so
+  // adjacent windows never double-count a boundary class. The export path
+  // passes no endStr and is unaffected.
   async function fetchClassesInRange(startStr: string, endStr?: string): Promise<ClassEvent[]> {
     let query = supabase
       .from('lessons')
@@ -315,7 +380,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
-    if (endStr !== undefined) query = query.lte('scheduled_at', endStr)
+    if (endStr !== undefined) query = query.lt('scheduled_at', endStr)
     const { data } = await query
 
     if (!data) return []
@@ -396,21 +461,22 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   )
 
   const greenBlocks = useMemo(
-    () => expandSpecificBlocks(availability.filter(a => a.type === 'specific' && a.is_available), weekStart),
-    [availability, weekStart]
+    () => expandSpecificBlocks(availability.filter(a => a.type === 'specific' && a.is_available), weekStart, displayTz),
+    [availability, weekStart, displayTz]
   )
 
   const redBlocks = useMemo(
     () => expandSpecificBlocks(
       availability.filter(a => (a.type === 'specific' || a.type === 'holiday') && !a.is_available),
-      weekStart
+      weekStart,
+      displayTz
     ),
-    [availability, weekStart]
+    [availability, weekStart, displayTz]
   )
 
   const classBlocksList = useMemo(
-    () => expandClassBlocks(classes, weekStart),
-    [classes, weekStart]
+    () => expandClassBlocks(classes, weekStart, displayTz),
+    [classes, weekStart, displayTz]
   )
 
   // NEW282: earliest event minute (since local midnight) in the visible week — the smallest
@@ -462,12 +528,18 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     return map
   }, [generalBlocks, greenBlocks, redBlocks, classBlocksList])
 
+  // Profile-tz wall clock of the 60s `now` tick — drives the now-indicator, the
+  // today column, and the month grid's today cell, all in the same frame as the
+  // blocks. Re-derives each tick, so the today column rolls over at PROFILE-TZ
+  // midnight rather than freezing on the mount-time value.
+  const nowParts = useMemo(() => utcInstantToTzParts(now, displayTz), [now, displayTz])
+  const todayHolder = useMemo(
+    () => new Date(nowParts.year, nowParts.month - 1, nowParts.day),
+    [nowParts]
+  )
+
   // Today's column index, or -1 if today is outside the visible week.
-  const todayIdx = useMemo(() => {
-    const t = startOfDayLocal(new Date())
-    const idx = Math.floor((t - startOfDayLocal(weekStart)) / 86_400_000)
-    return idx >= 0 && idx <= 6 ? idx : -1
-  }, [weekStart])
+  const todayIdx = useMemo(() => dayIndexInWeek(todayHolder, weekStart), [todayHolder, weekStart])
 
   // Month grid geometry: the Monday-first cell span covering monthAnchor's month.
   // weekCount is the exact number of week-rows (4-6) so no fully-adjacent-month row shows.
@@ -482,34 +554,47 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     return { gridStart, days }
   }, [monthAnchor])
 
-  // Booked-class counts per local day (YYYY-MM-DD) for the month grid, bucketed in the
-  // same browser-local frame the week view uses in expandClassBlocks.
+  // Booked-class counts per PROFILE-TZ day (YYYY-MM-DD) for the month grid,
+  // bucketed in the same frame the week view uses in expandClassBlocks; the
+  // holder-keyed lookup in the cell render (toLocalDateStr(day)) emits the same
+  // YYYY-MM-DD shape, so the two key spaces always line up.
   const monthClassCounts = useMemo(() => {
     const map = new Map<string, number>()
     for (const c of monthClasses) {
-      const key = toLocalDateStr(new Date(c.scheduled_at))
+      const key = tzDateStr(c.scheduled_at, displayTz)
       map.set(key, (map.get(key) ?? 0) + 1)
     }
     return map
-  }, [monthClasses])
+  }, [monthClasses, displayTz])
 
   // Month-mode data: fetch the full visible grid span so leading/trailing cells show
   // truthful counts. Separate from the week fetch path, which stays unchanged.
   useEffect(() => {
     if (viewMode !== 'month') return
     const { gridStart, days } = monthGrid
-    const startStr = `${toLocalDateStr(gridStart)}T00:00:00`
-    const endStr = `${toLocalDateStr(addDays(gridStart, days.length))}T00:00:00`
+    // Same UTC-instant window shape as visibleRange: [grid start 00:00, day
+    // after grid end 00:00) in the profile timezone.
+    const startStr = new Date(localTimeToUtcMs(toLocalDateStr(gridStart), '00:00', displayTz)).toISOString()
+    const endStr = new Date(localTimeToUtcMs(toLocalDateStr(addDays(gridStart, days.length)), '00:00', displayTz)).toISOString()
     let cancelled = false
     fetchClassesInRange(startStr, endStr).then(data => { if (!cancelled) setMonthClasses(data) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, monthGrid])
+  }, [viewMode, monthGrid, displayTz])
+
+  // True instant a slot starts: the column's profile-tz calendar date + the
+  // slot's wall-clock label, converted through the display timezone (DST-exact
+  // via localTimeToUtcMs). Never holder-midnight + minute maths — that instant
+  // lives in the browser's frame, not the grid's. Max slot label is 23:30, so
+  // the HH:MM form never reaches 24:00.
+  function slotStartMs(dayIdx: number, slotIdx: number): number {
+    const min = START_HOUR * 60 + slotIdx * 30
+    return localTimeToUtcMs(toLocalDateStr(weekDays[dayIdx]), formatTime(min), displayTz)
+  }
 
   function startDrag(dayIdx: number, slotIdx: number) {
     if (!mode) return
-    const slotMs = weekDays[dayIdx].getTime() + (START_HOUR * 60 + slotIdx * 30) * 60_000
-    if (slotMs < Date.now()) return
+    if (slotStartMs(dayIdx, slotIdx) < Date.now()) return
     isDraggingRef.current = true
     setDrag({ dayIdx, startSlot: slotIdx, endSlot: slotIdx })
   }
@@ -517,8 +602,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   function extendDrag(dayIdx: number, slotIdx: number) {
     if (!isDraggingRef.current || !drag) return
     if (dayIdx !== drag.dayIdx) return
-    const slotMs = weekDays[dayIdx].getTime() + (START_HOUR * 60 + slotIdx * 30) * 60_000
-    if (slotMs < Date.now()) return
+    if (slotStartMs(dayIdx, slotIdx) < Date.now()) return
     if (slotIdx === drag.endSlot) return
     setDrag({ ...drag, endSlot: slotIdx })
   }
@@ -536,40 +620,67 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       const lo = Math.min(d.startSlot, d.endSlot)
       const hi = Math.max(d.startSlot, d.endSlot) + 1
       const date = weekDays[d.dayIdx]
-      const dateStr = toLocalDateStr(date)
+      const dateStr = toLocalDateStr(date)  // profile-tz calendar date of the column
       const startMin = START_HOUR * 60 + lo * 30
       const endMin = START_HOUR * 60 + hi * 30
       const startStr = `${dateStr}T${pad(Math.floor(startMin / 60))}:${pad(startMin % 60)}:00`
       const endStr = `${dateStr}T${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`
 
-      if (dateStr < toLocalDateStr(new Date())) return
+      if (dateStr < toLocalDateStr(tzTodayDate(displayTz))) return
 
       setIsSaving(true)
       setActionError('')
 
-      const res = await fetch('/api/teacher/availability', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teacher_id: profile.id,
-          type: 'specific',
-          start_at: localIsoToUtcIso(startStr, profile.timezone),
-          end_at: localIsoToUtcIso(endStr, profile.timezone),
-          is_available: m === 'available',
-        }),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        if (data) onAvailabilityChange([...availability, data as AvailabilityRecord])
-      } else {
-        const body = await res.json().catch(() => ({}))
-        setActionError(body.error ?? 'Failed to save. Please try again.')
+      // The tz conversion throws (RangeError) on an invalid account timezone.
+      // Fail closed with a visible error — never an unhandled rejection or a
+      // stuck "Saving…" state. Deliberately profile.timezone rather than the
+      // UTC display fallback: writing through a substitute frame would store
+      // shifted instants.
+      let startAtUtc: string
+      let endAtUtc: string
+      try {
+        startAtUtc = localIsoToUtcIso(startStr, profile.timezone)
+        endAtUtc = localIsoToUtcIso(endStr, profile.timezone)
+      } catch {
+        setActionError('Could not save — the timezone on this account is invalid. Please contact admin.')
+        setIsSaving(false)
+        return
       }
-      setIsSaving(false)
+
+      try {
+        const res = await fetch('/api/teacher/availability', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            teacher_id: profile.id,
+            type: 'specific',
+            start_at: startAtUtc,
+            end_at: endAtUtc,
+            is_available: m === 'available',
+          }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          // Functional update: a second drag committed while this await was in
+          // flight must merge into the LATEST state — the spread-from-closure
+          // form resurrected the pre-add array and silently dropped the first
+          // block. Mirrors GeneralAvailability's pattern.
+          if (data) onAvailabilityChange(prev => [...prev, data as AvailabilityRecord])
+        } else {
+          const body = await res.json().catch(() => ({}))
+          setActionError(body.error ?? 'Failed to save. Please try again.')
+        }
+      } catch {
+        // Network failure or malformed response body — surface it rather than
+        // leaving an unhandled rejection behind.
+        setActionError('Failed to save. Please try again.')
+      } finally {
+        setIsSaving(false)
+      }
     }
     window.addEventListener('mouseup', onMouseUp)
     return () => window.removeEventListener('mouseup', onMouseUp)
-  }, [drag, mode, weekDays, availability, profile.id, profile.timezone, onAvailabilityChange])
+  }, [drag, mode, weekDays, displayTz, profile.id, profile.timezone, onAvailabilityChange])
 
   async function confirmDelete() {
     if (!pendingDelete) return
@@ -644,16 +755,17 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     ).length
   }, [dragPreview, mode, classBlocksList])
 
-  const nowMin = now.getHours() * 60 + now.getMinutes()
+  // Now-indicator position from the PROFILE-TZ wall clock, matching the frame
+  // the blocks render in.
+  const nowMin = nowParts.hour * 60 + nowParts.minute
   const nowPx = (nowMin >= START_HOUR * 60 && nowMin <= END_HOUR * 60 + 30)
     ? pxFromMin(nowMin)
     : null
 
-  // Today's local midnight (month-grid today treatment) and whether the month view is on
-  // the current month (Today button disabled state in month mode). Same local basis as todayIdx.
-  const nowDate = new Date()
-  const todayMid = startOfDayLocal(nowDate)
-  const viewingCurrentMonth = monthAnchor.getFullYear() === nowDate.getFullYear() && monthAnchor.getMonth() === nowDate.getMonth()
+  // Profile-tz today (month-grid today treatment) and whether the month view is on
+  // the current month (Today button disabled state in month mode). Same basis as todayIdx.
+  const todayMid = todayHolder.getTime()
+  const viewingCurrentMonth = monthAnchor.getFullYear() === todayHolder.getFullYear() && monthAnchor.getMonth() === todayHolder.getMonth()
 
   function gotoWeek(delta: number) {
     setDrag(null)
@@ -664,7 +776,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   function goToToday() {
     setDrag(null)
     isDraggingRef.current = false
-    setWeekStart(getMondayWeekStart(new Date()))
+    setWeekStart(getMondayWeekStart(tzTodayDate(displayTz)))
   }
 
   function gotoMonth(delta: number) {
@@ -672,8 +784,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   }
 
   function goToThisMonth() {
-    const n = new Date()
-    setMonthAnchor(new Date(n.getFullYear(), n.getMonth(), 1))
+    const t = tzTodayDate(displayTz)
+    setMonthAnchor(new Date(t.getFullYear(), t.getMonth(), 1))
   }
 
   // Week -> Month anchors to today's month when today falls inside the displayed week
@@ -682,7 +794,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // re-clicking Month while already in month mode does not re-anchor.
   function switchToMonth() {
     if (viewMode === 'month') return
-    const today = new Date()
+    const today = tzTodayDate(displayTz)
     const todaySod = startOfDayLocal(today)
     const weekStartSod = startOfDayLocal(weekStart)
     const weekEndSod = startOfDayLocal(addDays(weekStart, 7))
@@ -787,6 +899,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </p>
       )}
 
+      {tzInvalid && (
+        <p style={{ fontSize: '13px', color: '#92400E', marginBottom: '8px', padding: '8px 12px', backgroundColor: '#FFF6E6', borderRadius: '6px', border: '1px solid #FFB942' }}>
+          The timezone on this account ({profile.timezone}) is not recognised — times are shown in UTC. Please contact admin to fix it before adding availability.
+        </p>
+      )}
+
       {dragClassOverlapCount > 0 && (
         <p style={{ fontSize: '13px', color: '#92400E', marginBottom: '8px', padding: '8px 12px', backgroundColor: '#FFF6E6', borderRadius: '6px', border: '1px solid #FFB942' }}>
           This selection overlaps {dragClassOverlapCount} booked class{dragClassOverlapCount === 1 ? '' : 'es'}. Booked classes are not cancelled by unavailability.
@@ -810,7 +928,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             <span style={{ fontSize: '12px', color: '#374151' }}>{item.label}</span>
           </div>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {profile.timezone}</span>
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {displayTz}</span>
       </div>
       )}
 
@@ -957,7 +1075,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           </div>
 
           {/* Day columns */}
-          {weekDays.map((day, dayIdx) => {
+          {weekDays.map((_day, dayIdx) => {
             const isToday = dayIdx === todayIdx
             return (
               <div key={`d-${dayIdx}`} style={{
@@ -1110,8 +1228,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
-                  // Past classes mute to grey - end instant compared to the 60s now tick.
-                  const isPastClass = day.getTime() + b.endMin * 60_000 < now.getTime()
+                  // Past classes mute to grey - true end instant compared to the
+                  // 60s now tick. Instant vs instant: frame-free, so it needs no
+                  // tz conversion (the old holder-midnight + minutes sum mixed
+                  // the browser frame into profile-tz minutes).
+                  const isPastClass = b.endMs < now.getTime()
                   return (
                     <div key={`cl-${i}`} title={b.studentName} onClick={() => setClassDetail({ studentName: b.studentName, dayIdx: b.dayIdx, startMin: b.startMin, endMin: b.endMin })} style={{
                       position: 'absolute',
