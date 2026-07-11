@@ -61,6 +61,7 @@ export const CreateTeacherSchema = z.object({
   tax_number: z.string().max(100).optional().nullable(),
   banking_details: z.string().max(2000).optional().nullable(),
   paypal_email: optionalEmail,
+  preferred_payment_type: z.string().max(50).optional().nullable(),
 
   // Admin-only HR fields
   contract_start: dateString,
@@ -72,6 +73,7 @@ export const CreateTeacherSchema = z.object({
 
   // Profile/public fields
   bio: z.string().max(2000).optional().nullable(),
+  qualifications: z.string().max(2000).optional().nullable(),
   street_address: z.string().max(200).optional().nullable(),
   area_code: z.string().max(20).optional().nullable(),
   city: z.string().max(100).optional().nullable(),
