@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
+import { getUnreadAdminMessagesCount } from './admin/messages/actions'
 
 interface Profile {
   id: string
@@ -78,6 +79,8 @@ export default function AdminLayoutClient({
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
 
   const supabaseRef = useRef(createClient())
+  const messagesRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messagesRefetchInFlightRef = useRef(false)
 
   const adminPanelRef = useRef<HTMLElement>(null)
 
@@ -92,6 +95,27 @@ export default function AdminLayoutClient({
 
   useEffect(() => {
     const supabase = supabaseRef.current
+
+    // authenticated has zero column grants on messages.admin_read_at, so Realtime UPDATE
+    // payloads never carry it — refetch the true count via the admin-client server action
+    // instead of inspecting payload.new.admin_read_at. Debounced so a mark-all-read burst
+    // of UPDATEs collapses into a single refetch.
+    const refetchUnreadMessages = () => {
+      if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
+      messagesRefetchTimerRef.current = setTimeout(async () => {
+        if (messagesRefetchInFlightRef.current) return
+        messagesRefetchInFlightRef.current = true
+        try {
+          const count = await getUnreadAdminMessagesCount()
+          setLiveUnreadMessages(count)
+        } catch {
+          // Badge just skips this update; next INSERT/UPDATE or navigation will resync.
+        } finally {
+          messagesRefetchInFlightRef.current = false
+        }
+      }, 300)
+    }
+
     const channel = supabase
       .channel('admin-nav-unread')
       .on('postgres_changes', {
@@ -99,11 +123,8 @@ export default function AdminLayoutClient({
         schema: 'public',
         table: 'messages',
       }, (payload) => {
-        if (
-          payload.new.admin_read_at && !payload.old.admin_read_at &&
-          (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
-        ) {
-          setLiveUnreadMessages(prev => Math.max(0, prev - 1))
+        if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+          refetchUnreadMessages()
         }
       })
       .on('postgres_changes', {
@@ -138,7 +159,10 @@ export default function AdminLayoutClient({
       })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      supabase.removeChannel(channel)
+      if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
+    }
   }, [])
 
   const handleLogout = async () => {
