@@ -1,3 +1,35 @@
+## Session 187 - 11 July 2026 - Support surfaces aligned and unread badge accuracy
+
+### What was built
+- Admin support conversation view aligned with the shared messages look used on the teacher and student portals: warm cream thread background, received bubbles in white with a grey border, and contact-list previews now show plain text instead of raw HTML tags (commit d6aee4d).
+- Fixed the Support nav badge counting the admin's own replies as unread. The live counter now only increments for messages sent by teachers or students, not for admin-sent rows (commit c2b1c33).
+- Support chat widget (shared by teacher and student portals) reworked: FAQ tab now sits first and is the default landing tab, steering users to self-serve answers before messaging the admin. Unread admin replies override that default so the widget lands on Messages and the unread badge still clears. Same styling alignment as the admin view, and the emoji picker no longer gets clipped by the widget's edges (commit 677a52b).
+
+### Break/Fix Log
+
+**Issue 1**
+Symptom: The Support nav badge in the admin portal went up every time the admin sent a reply, showing unread counts for messages the admin had written personally.
+Cause: The server-side count on page load filtered correctly for user-sent messages, but the live real-time counter incremented on every new message row regardless of who sent it.
+Fix: The live counter now checks the sender before incrementing, matching the server-side rule.
+Lesson: When the same number is computed in two places (initial load and live updates), both must apply the same filter or they drift apart in front of the user.
+
+**Issue 2**
+Symptom: Making the FAQ tab the default landing tab risked burying unread admin replies, since messages are only marked read when the Messages tab is opened - the unread badge would never clear.
+Cause: Read-marking is tied to the Messages tab loading, so a different default tab silently breaks it.
+Fix: On opening the widget with unread replies waiting, it lands on Messages instead of FAQ. With nothing unread, FAQ remains the default.
+Lesson: Changing a default view can break behaviour that was quietly attached to it. Trace what runs when the old default loads before changing it.
+
+**Issue 3**
+Symptom: The emoji picker in the support chat widget opened partially outside the widget and was cut off.
+Cause: The picker was positioned relative to its small container, which clips overflowing content.
+Fix: The picker now positions itself against the screen using the emoji button's on-screen location, opening leftwards since the widget sits at the right edge of the screen.
+Lesson: Pop-ups inside small scrollable containers need screen-relative positioning, not container-relative.
+
+### Session result
+This session brought all three support surfaces (admin conversation view, admin nav badge, and the shared teacher/student chat widget) in line with the platform's shared messaging look, made the unread counters accurate, and restructured the widget so users see the FAQ before reaching for a direct message to the admin. Three commits, all verified live on both portals before push.
+
+---
+
 ## Session 186 - 07 July 2026 - Closing student-side booking security gaps
 
 ### What was built
