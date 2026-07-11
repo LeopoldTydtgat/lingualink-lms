@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight, Maximize2, Minimize2, RotateCcw } from 'lucide-react'
 import PdfViewer from '@/components/pdf/PdfViewer'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -195,6 +195,7 @@ export default function StudySheetClient({
   const words: VocabWord[] = sheet.content?.words ?? []
   const currentExercise = exercises[currentExerciseIdx]
   const totalExercises = exercises.length
+  const scorePct = totalExercises > 0 ? Math.round((correctCount / totalExercises) * 100) : 100
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -255,6 +256,18 @@ export default function StudySheetClient({
     } finally {
       setSaving(false)
     }
+  }
+
+  // Reset the in-progress exercise run only — never touches exercise_completions.
+  function handleTryAgain() {
+    setCurrentExerciseIdx(0)
+    setSelectedAnswer(null)
+    setAnsweredCorrectly(null)
+    setShowExplanation(false)
+    setCorrectCount(0)
+    setCompletedExercises(new Set())
+    setSessionComplete(false)
+    setSaveError('')
   }
 
   // Mark the whole sheet as done — independent of the exercise flow. Works for
@@ -448,8 +461,17 @@ export default function StudySheetClient({
           ) : sessionComplete ? (
             /* ── Completion screen ── */
             <div className="text-center py-12">
-              <CheckCircle size={48} className="mx-auto mb-4 text-green-500" />
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Well done!</h2>
+              {scorePct >= 60 ? (
+                <>
+                  <CheckCircle size={48} className="mx-auto mb-4 text-green-500" />
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Well done!</h2>
+                </>
+              ) : (
+                <>
+                  <RotateCcw size={48} className="mx-auto mb-4" style={{ color: '#FFB942' }} />
+                  <h2 className="text-xl font-bold text-gray-900 mb-2">Keep practising!</h2>
+                </>
+              )}
               <p className="text-sm text-gray-500 mb-1">
                 You answered{' '}
                 <strong>
@@ -457,19 +479,33 @@ export default function StudySheetClient({
                 </strong>{' '}
                 correctly.
               </p>
-              <p className="text-sm text-gray-500 mb-6">
+              <p className={`text-sm text-gray-500 ${scorePct < 60 ? 'mb-1' : 'mb-6'}`}>
                 Score:{' '}
                 <strong style={{ color: '#FF8303' }}>
-                  {Math.round((correctCount / totalExercises) * 100)}%
+                  {scorePct}%
                 </strong>
               </p>
-              <button
-                onClick={() => router.back()}
-                className="px-6 py-2.5 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#FF8303' }}
-              >
-                Back to Study
-              </button>
+              {scorePct < 60 && (
+                <p className="text-sm text-gray-500 mb-6">
+                  Review the sheet and try again — practice makes progress.
+                </p>
+              )}
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={handleTryAgain}
+                  className="px-6 py-2.5 rounded-lg text-sm font-semibold"
+                  style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#FF8303' }}
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={() => router.back()}
+                  className="px-6 py-2.5 rounded-lg text-sm font-semibold text-white"
+                  style={{ backgroundColor: '#FF8303' }}
+                >
+                  Back to Study
+                </button>
+              </div>
             </div>
           ) : alreadyCompleted ? (
             /* ── Already completed notice ── */
@@ -566,10 +602,21 @@ export default function StudySheetClient({
               {showExplanation && currentExercise.explanation && (
                 <div
                   className="p-4 rounded-xl mb-4 text-sm"
-                  style={{ backgroundColor: '#fffbeb', borderLeft: '3px solid #FFB942' }}
+                  style={
+                    answeredCorrectly
+                      ? { backgroundColor: '#f0fdf4', borderLeft: '3px solid #bbf7d0' }
+                      : { backgroundColor: '#FFF5F0', borderLeft: '3px solid #FD5602' }
+                  }
                 >
-                  <p className="font-semibold text-amber-800 mb-1">Explanation</p>
-                  <p className="text-amber-900">{currentExercise.explanation}</p>
+                  <p
+                    className="font-semibold mb-1"
+                    style={{ color: answeredCorrectly ? '#15803d' : '#FD5602' }}
+                  >
+                    {answeredCorrectly
+                      ? 'Correct!'
+                      : `Not quite — the answer is '${currentExercise.correct_answer}'`}
+                  </p>
+                  <p className="text-gray-700">{currentExercise.explanation}</p>
                 </div>
               )}
 
