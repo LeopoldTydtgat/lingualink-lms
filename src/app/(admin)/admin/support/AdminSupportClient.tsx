@@ -12,6 +12,7 @@ import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { toast } from 'sonner'
+import { getSupportParticipant } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -109,6 +110,16 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
   // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
   const pendingReadsRef = useRef<Map<string, string>>(new Map())
+  // NEW303: mirrors selectedConv so the component-lifetime list subscription (which must NOT
+  // resubscribe on every selection change) can read the currently-open conversation without
+  // being keyed to it. Kept in sync by the tiny effect below.
+  const selectedConvRef = useRef<Conversation | null>(null)
+  useEffect(() => { selectedConvRef.current = selectedConv }, [selectedConv])
+  // NEW303: mirrors the conversation list so the same lifetime subscription can tell a
+  // first-time sender (no row yet → look up name/photo) from an existing conversation
+  // (update in place) without a stale closure or resubscribing.
+  const conversationsRef = useRef<Conversation[]>(initialConversations)
+  useEffect(() => { conversationsRef.current = conversations }, [conversations])
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -208,6 +219,85 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [selectedConv, supabase, markUserMessagesRead])
+
+  // NEW303: component-lifetime subscription that keeps the conversation LIST live for every
+  // thread, not just the open one. It listens to unfiltered INSERTs on support_messages and
+  // reads the current selection via selectedConvRef, so it never resubscribes on selection
+  // change. The open-conversation channel above is left untouched (it drives the thread view
+  // and read receipts); this one only maintains the list preview / ordering / unread badges.
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-support-list')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_messages',
+      }, async (payload) => {
+        const msg = payload.new as {
+          participant_id: string
+          participant_type: 'teacher' | 'student'
+          participant_auth_id: string
+          sender_role: 'user' | 'admin'
+          content: string
+          created_at: string
+        }
+        const isOpen = selectedConvRef.current?.participantId === msg.participant_id
+        const latestMessage = { content: msg.content, created_at: msg.created_at, sender_role: msg.sender_role }
+
+        if (conversationsRef.current.some(c => c.participantId === msg.participant_id)) {
+          // Existing conversation: refresh its preview + unread, then float it to the top
+          // (the incoming message is the newest, so move-to-top == re-sort by created_at desc).
+          // A user message bumps unread only when the thread isn't currently open — the open
+          // thread is marked read live by the open-conversation subscription; admin's own
+          // sends never count as unread.
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.participantId === msg.participant_id)
+            if (idx === -1) return prev
+            const bump = msg.sender_role === 'user' && !isOpen
+            const updated: Conversation = {
+              ...prev[idx],
+              latestMessage,
+              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+            }
+            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+          })
+          return
+        }
+
+        // First-time sender: no conversation row exists yet, so resolve the participant's
+        // name/photo server-side, then prepend. A second message for the SAME brand-new
+        // participant can race this await (both handlers saw no row before either committed),
+        // so re-check inside the updater: if a row now exists, MERGE into it (refresh preview,
+        // bump unread, move to top — same logic as the existing-conversation branch) rather
+        // than returning prev unchanged, which would silently drop this message's unread/preview.
+        const result = await getSupportParticipant(msg.participant_id, msg.participant_type)
+        if ('error' in result) return
+        setConversations(prev => {
+          const idx = prev.findIndex(c => c.participantId === msg.participant_id)
+          if (idx !== -1) {
+            const bump = msg.sender_role === 'user' && !isOpen
+            const updated: Conversation = {
+              ...prev[idx],
+              latestMessage,
+              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+            }
+            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+          }
+          const newConv: Conversation = {
+            participantId: msg.participant_id,
+            participantType: msg.participant_type,
+            participantAuthId: msg.participant_auth_id,
+            participantName: result.name,
+            participantPhotoUrl: result.photoUrl,
+            latestMessage,
+            unreadCount: msg.sender_role === 'user' ? 1 : 0,
+          }
+          return [newConv, ...prev]
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -351,9 +441,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
           className="pb-3 text-sm font-medium transition-colors"
           style={tabStyle('conversations')}
         >
-          Conversations {initialConversations.some(c => c.unreadCount > 0) && (
+          Conversations {conversations.some(c => c.unreadCount > 0) && (
             <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs text-white" style={{ backgroundColor: '#FF8303' }}>
-              {initialConversations.reduce((acc, c) => acc + c.unreadCount, 0)}
+              {conversations.reduce((acc, c) => acc + c.unreadCount, 0)}
             </span>
           )}
         </button>
@@ -371,7 +461,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         <div className="flex gap-4" style={{ height: '600px' }}>
           {/* Conversation list */}
           <div className="w-72 flex-shrink-0 border border-gray-200 rounded-lg overflow-y-auto bg-white thin-scroll">
-            {initialConversations.length === 0 ? (
+            {conversations.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <MessageSquare size={32} className="text-gray-200 mb-3" />
                 <p className="text-sm text-gray-500">No support messages yet</p>
