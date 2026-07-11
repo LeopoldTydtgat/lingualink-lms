@@ -63,6 +63,10 @@ function isEmojiOnly(html: string): boolean {
   return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').slice(0, 60)
+}
+
 function Avatar({ name, photoUrl, size = 9 }: { name: string; photoUrl?: string | null; size?: number }) {
   if (photoUrl) {
     return (
@@ -322,7 +326,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                         {conv.participantType}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-400 truncate mt-0.5">{conv.latestMessage.content}</p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">{stripHtml(conv.latestMessage.content)}</p>
                   </div>
                   {conv.unreadCount > 0 && (
                     <span className="w-5 h-5 rounded-full text-white text-xs flex items-center justify-center flex-shrink-0"
@@ -352,7 +356,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
+                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
                   {!messagesLoaded ? (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-xs text-gray-400">Loading...</p>
@@ -369,7 +373,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isAdmin
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
+                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
