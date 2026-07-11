@@ -99,7 +99,10 @@ export default function AdminLayoutClient({
         schema: 'public',
         table: 'messages',
       }, (payload) => {
-        if (payload.new.read_at && !payload.old.read_at) {
+        if (
+          payload.new.read_at && !payload.old.read_at &&
+          (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
+        ) {
           setLiveUnreadMessages(prev => Math.max(0, prev - 1))
         }
       })
@@ -107,8 +110,10 @@ export default function AdminLayoutClient({
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => {
-        setLiveUnreadMessages(prev => prev + 1)
+      }, (payload) => {
+        if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+          setLiveUnreadMessages(prev => prev + 1)
+        }
       })
       .on('postgres_changes', {
         event: 'UPDATE',
