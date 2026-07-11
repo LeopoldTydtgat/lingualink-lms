@@ -11,6 +11,7 @@ interface RawMessage {
   receiver_type: string
   content: string
   read_at: string | null
+  admin_read_at: string | null
   created_at: string
   attachments: any
 }
@@ -33,7 +34,7 @@ export default async function AdminMessagesPage() {
   // Fetch all messages newest-first — service role bypasses RLS
   const { data: allMessages } = await adminDb
     .from('messages')
-    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, read_at, created_at, attachments')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, read_at, admin_read_at, created_at, attachments')
     .order('created_at', { ascending: false })
 
   // Build conversation map keyed by "teacherSideId:studentId"
@@ -64,7 +65,7 @@ export default async function AdminMessagesPage() {
     if (!convMap.has(key)) {
       convMap.set(key, { teacherSideId, studentId, latestMessage: msg, unreadCount: 0 })
     }
-    if (!msg.read_at) {
+    if (!msg.admin_read_at) {
       convMap.get(key)!.unreadCount++
     }
   }

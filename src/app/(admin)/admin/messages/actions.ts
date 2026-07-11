@@ -32,7 +32,7 @@ export async function getAdminThreadMessages(teacherSideId: string, studentId: s
 
   const { data } = await adminDb
     .from('messages')
-    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, admin_read_at, created_at')
     .or(
       `and(sender_id.eq.${teacherSideId},receiver_id.eq.${studentId}),` +
       `and(sender_id.eq.${studentId},receiver_id.eq.${teacherSideId}),` +
@@ -89,6 +89,7 @@ export async function sendAdminMessage(
     receiver_type: receiverType,
     content:       safeContent,
     attachments:   [],
+    admin_read_at: new Date().toISOString(),
   }).select().single()
 
   if (error) return { error: error.message }
@@ -151,10 +152,10 @@ export async function markAdminThreadRead(teacherSideId: string, studentId: stri
 
   await adminDb
     .from('messages')
-    .update({ read_at: new Date().toISOString() })
+    .update({ admin_read_at: new Date().toISOString() })
     .or(
       `and(sender_id.eq.${teacherSideId},receiver_id.eq.${studentId}),` +
       `and(sender_id.eq.${studentId},receiver_id.eq.${teacherSideId})`
     )
-    .is('read_at', null)
+    .is('admin_read_at', null)
 }

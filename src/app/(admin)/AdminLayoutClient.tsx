@@ -100,7 +100,7 @@ export default function AdminLayoutClient({
         table: 'messages',
       }, (payload) => {
         if (
-          payload.new.read_at && !payload.old.read_at &&
+          payload.new.admin_read_at && !payload.old.admin_read_at &&
           (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
         ) {
           setLiveUnreadMessages(prev => Math.max(0, prev - 1))
@@ -111,7 +111,10 @@ export default function AdminLayoutClient({
         schema: 'public',
         table: 'messages',
       }, (payload) => {
-        if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+        if (
+          payload.new.sender_type !== 'admin' &&
+          (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
+        ) {
           setLiveUnreadMessages(prev => prev + 1)
         }
       })
