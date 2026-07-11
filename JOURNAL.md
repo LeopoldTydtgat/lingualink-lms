@@ -1,3 +1,58 @@
+## Session 192 - 11 July 2026 - Invite email flow for admin-created accounts
+
+### What was built
+
+Replaced the admin-set temporary password with a proper invite email flow
+for both teachers and students (commit 0938600). When an admin creates an
+account, the auth user is now created with a random throwaway password
+that is never shown, returned, or logged. After all database inserts
+succeed, the system generates a Supabase recovery link and sends a branded
+invite email via Resend with a "Set My Password" button. The new user sets
+their own password, logs in, and is caught by the existing
+profile-completion gate to finish their profile.
+
+New shared helper src/lib/auth/inviteEmail.ts holds the throwaway password
+generator and the invite send. The temporary password field was removed
+from both admin create forms, both validation schemas, and both API
+routes. Email sending is best-effort: a send failure never rolls back
+account creation, and the admin sees a warning toast telling them the user
+can fall back to "Forgot password" on the login page. The success toast
+confirms when the invite went out.
+
+One design decision worth recording: invite links for BOTH portals point
+at the teacher-domain reset-password page, because it is the only page
+that consumes the recovery token. It verifies the token and silently
+forwards students to the student reset page on the shared domain cookie -
+the exact same chain the existing forgot-password emails already use.
+Linking student invites directly to the student reset page would have
+dead-ended, since that page ignores query parameters entirely.
+
+The Supabase email OTP expiry was raised from 1 hour to 24 hours in the
+dashboard so invite links survive a normal working day.
+
+### Break/Fix Log
+
+The original plan assumed both reset-password pages consume the recovery
+token from the URL. Reading the actual code showed only the teacher page
+does, which reshaped the link-building logic before any code was written.
+No breakage during the build: TypeScript, ESLint, and the full test suite
+stayed clean throughout, and both the supabase-rls-auditor and
+code-reviewer subagent gates passed with no critical findings. One
+reviewer suggestion was applied: the admin-side toast check uses a
+fail-safe comparison so any response that does not positively confirm the
+invite was sent shows the warning.
+
+### Session result
+
+Full smoke test passed for both roles: teacher and student invite emails
+delivered, password set via the link, login successful, and the
+profile-completion gate engaged as designed. Committed as 0938600 and
+pushed. Four unrelated issues spotted during testing were logged to the
+bug backlog for future sessions, including a plan to run a structured test
+pass over the whole account-creation flow.
+
+---
+
 ## Session 191 - 11 Jul 2026 - Messaging hardening: attachment validation, live read receipts, empty bubbles, live admin support list
 
 ### What was built
