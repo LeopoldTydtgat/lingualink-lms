@@ -155,8 +155,9 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
               min={todayStr()}
               onChange={e => {
                 setFromDate(e.target.value)
-                // If to date is now before from date, reset it
-                if (toDate && e.target.value > toDate) setToDate('')
+                // Default TO to match FROM when empty; otherwise clear it if it's now before FROM
+                if (!toDate) setToDate(e.target.value)
+                else if (e.target.value > toDate) setToDate('')
               }}
               style={{
                 padding: '8px 12px',
