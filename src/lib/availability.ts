@@ -57,7 +57,8 @@ export async function isSlotAvailable(
   }
   const teacherTimezone = teacherProfile.timezone
 
-  const dateStr = scheduledAtUtc.slice(0, 10) // YYYY-MM-DD in UTC; only used to scope UTC-stored 'specific' overrides
+  const requestedStartMs = new Date(scheduledAtUtc).getTime()
+  const requestedEndMs = requestedStartMs + durationMinutes * 60 * 1000
 
   // NEW175 (addresses M5, S81/S91): the teacher's general availability and holidays are
   // expressed in the teacher's LOCAL calendar (local weekday, local dates). A booking
@@ -114,8 +115,16 @@ export async function isSlotAvailable(
       available: true,
     }))
 
-  // Add specific is_available=true override slots for this UTC date
-  const addOverrides = overrideRecords.filter((o) => o.is_available && o.start_at!.startsWith(dateStr))
+  // NEW322: add specific is_available=true override slots selected by instant
+  // overlap with the requested booking window [start, start + duration). The
+  // old UTC-date prefix match on start_at missed overrides straddling UTC
+  // midnight, which the display grid (slotEngine) selects by overlap since
+  // NEW317 — the grid could offer a slot this gate then rejected.
+  const addOverrides = overrideRecords.filter(
+    (o) =>
+      o.is_available &&
+      rangesOverlap(new Date(o.start_at!).getTime(), new Date(o.end_at!).getTime(), requestedStartMs, requestedEndMs)
+  )
   for (const o of addOverrides) {
     let cursor = new Date(o.start_at!).getTime()
     const overrideEnd = new Date(o.end_at!).getTime()
@@ -151,7 +160,6 @@ export async function isSlotAvailable(
 
   // Every 30-min segment of the requested duration must map to an available slot
   const slotsNeeded = durationMinutes / 30
-  const requestedStartMs = new Date(scheduledAtUtc).getTime()
   for (let i = 0; i < slotsNeeded; i++) {
     const segmentStart = new Date(requestedStartMs + i * 30 * 60 * 1000).toISOString()
     const slot = slots.find((s) => s.startIso === segmentStart)
