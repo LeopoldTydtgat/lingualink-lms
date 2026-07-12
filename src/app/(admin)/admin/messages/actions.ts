@@ -103,7 +103,7 @@ export async function sendAdminMessage(
       .single()
 
     if (student?.email) {
-      const subject = `Lingualink Online — New message from ${adminProfile.full_name}`
+      const subject = `Lingualink Online - New message from ${adminProfile.full_name}`
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
@@ -125,7 +125,7 @@ export async function sendAdminMessage(
       .single()
 
     if (teacher?.email) {
-      const subject = `Lingualink Online — New message from ${adminProfile.full_name}`
+      const subject = `Lingualink Online - New message from ${adminProfile.full_name}`
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,

@@ -409,9 +409,9 @@ export async function POST(request: NextRequest) {
         requireTz(teacherProfile.timezone, 'admin-book:teacher')
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacherProfile.email,
-        subject: `Lingualink Online — New class booked with ${studentData?.full_name ?? 'a student'}`,
+        subject: `Lingualink Online - New class booked with ${studentData?.full_name ?? 'a student'}`,
         html: buildEmailTemplate({
           recipientName: teacherProfile.full_name ?? 'Teacher',
           recipientFallback: 'Teacher',
@@ -430,9 +430,9 @@ export async function POST(request: NextRequest) {
         requireTz(studentData.timezone, 'admin-book:student')
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: studentData.email,
-        subject: 'Lingualink Online — Your class is confirmed',
+        subject: 'Lingualink Online - Your class is confirmed',
         html: buildEmailTemplate({
           recipientName: studentData.full_name ?? 'Student',
           recipientFallback: 'Student',

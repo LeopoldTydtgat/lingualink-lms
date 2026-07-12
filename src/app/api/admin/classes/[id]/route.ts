@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
@@ -220,9 +220,9 @@ export async function PATCH(
           cancellation_reason ?? undefined
         )
         await resend.emails.send({
-          from: 'no-reply@lingualinkonline.com',
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: studentData.email,
-          subject: 'Lingualink Online — Your class has been cancelled',
+          subject: 'Lingualink Online - Your class has been cancelled',
           html: buildEmailTemplate({
             recipientName: studentData.full_name ?? 'Student',
             recipientFallback: 'Student',
@@ -535,9 +535,9 @@ export async function PATCH(
           studentTz
         )
         await resend.emails.send({
-          from: 'no-reply@lingualinkonline.com',
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: studentEmail,
-          subject: 'Lingualink Online — Your class has been rescheduled',
+          subject: 'Lingualink Online - Your class has been rescheduled',
           html: buildEmailTemplate({
             recipientName: studentName,
             recipientFallback: 'Student',
@@ -558,7 +558,7 @@ export async function PATCH(
       console.warn('Reschedule email skipped: teacher has no email', { lesson_id: id })
     } else {
       try {
-        const emailBody = studentRescheduledEmailContent(
+        const emailBody = teacherRescheduledEmailContent(
           studentName,
           existing.scheduled_at,
           newScheduledAt,
@@ -566,9 +566,9 @@ export async function PATCH(
           teacherTz
         )
         await resend.emails.send({
-          from: 'no-reply@lingualinkonline.com',
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacherEmail,
-          subject: 'Lingualink Online — Your class has been rescheduled',
+          subject: 'Lingualink Online - Your class has been rescheduled',
           html: buildEmailTemplate({
             recipientName: teacherName,
             recipientFallback: 'Teacher',

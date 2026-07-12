@@ -65,7 +65,7 @@ export async function GET(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
-        subject: `Lingualink Online — Please upload your invoice for ${monthYear}`,
+        subject: `Lingualink Online - Please upload your invoice for ${monthYear}`,
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
           recipientFallback: 'Teacher',

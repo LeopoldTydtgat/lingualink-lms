@@ -85,7 +85,7 @@ export async function sendMessage(
         .single()
 
       if (teacher?.email) {
-        const subject = `Lingualink Online — New message from ${student.full_name}`
+        const subject = `Lingualink Online - New message from ${student.full_name}`
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacher.email,

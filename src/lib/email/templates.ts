@@ -1,6 +1,9 @@
 // Builds a branded HTML email — all styles are inline because
 // most email clients strip <style> blocks and ignore class names
 
+// Hosted logo (white wordmark on transparent, sits on the orange header band).
+// Hardcoded so the email never depends on a runtime env var to render its header.
+const LOGO_URL = 'https://varrxikjrbycpobydlev.supabase.co/storage/v1/object/public/templates/lingualink-logo-onorange.png'
 
 interface EmailTemplateOptions {
   recipientName: string | null | undefined
@@ -22,17 +25,12 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F3F4F6;padding:40px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border-radius:8px;overflow:hidden;max-width:600px;width:100%;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#FFFFFF;border:1px solid #E5E7EB;max-width:600px;width:100%;">
 
-          <!-- Header: orange accent strip -->
+          <!-- Header: orange band with logo -->
           <tr>
-            <td height="6" style="height:6px;line-height:6px;font-size:0;background-color:#FF8303;">&nbsp;</td>
-          </tr>
-
-          <!-- Header: white logo block -->
-          <tr>
-            <td style="background-color:#FFFFFF;padding:22px;text-align:center;border-bottom:1px solid #E5E7EB;">
-              <img src="${process.env.NEXT_PUBLIC_TEACHER_URL}/lingualink-logo-email.png" alt="Lingualink Online" width="160" style="display:block;margin:0 auto;" />
+            <td style="background-color:#FF8303;padding:24px;text-align:center;">
+              <img src="${LOGO_URL}" alt="Lingualink Online" width="160" style="display:block;margin:0 auto;" />
             </td>
           </tr>
 
@@ -48,7 +46,7 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
 
           <!-- Footer -->
           <tr>
-            <td style="padding:24px 40px;border-top:1px solid #E5E7EB;text-align:center;">
+            <td style="padding:24px 40px;border-top:1px solid #E5E7EB;background-color:#F9FAFB;text-align:center;">
               <p style="margin:0;font-size:13px;color:#6B7280;">
                 If you have any questions, contact us at
                 <a href="mailto:${contactEmail}" style="color:#FF8303;text-decoration:none;">
@@ -112,7 +110,7 @@ function formatClassTime(isoString: string, timezone: string, durationMinutes?: 
 // other clients (via a standard <a> tag). Outlook ignores CSS border-radius on
 // anchor tags entirely — VML roundrect is the only reliable fix.
 // Width of 240px accommodates the longest button label used in these templates.
-function buildButton(href: string, label: string): string {
+export function buildButton(href: string, label: string): string {
   return `
 <table cellpadding="0" cellspacing="0" style="margin:0;">
   <tr>
@@ -125,6 +123,25 @@ function buildButton(href: string, label: string): string {
   </tr>
 </table>
   `.trim()
+}
+
+// Builds the bordered, zebra-striped details table shared by the transactional
+// emails. Fixed row shape { label, value }; a row's `value` may carry inline
+// markup (e.g. a coloured <span>) when that single row needs emphasis.
+export function buildDetailsTable(heading: string, rows: { label: string; value: string }[]): string {
+  const dataRows = rows
+    .map((row, i) => `
+      <tr>
+        <td style="background-color:${i % 2 === 0 ? '#FFFFFF' : '#F9FAFB'};padding:10px 16px;font-size:14px;color:#111827;"><strong>${row.label}:</strong> ${row.value}</td>
+      </tr>`)
+    .join('')
+  return `
+    <table cellpadding="0" cellspacing="0" style="width:100%;border:1px solid #E5E7EB;margin:0 0 24px;">
+      <tr>
+        <td style="background-color:#F3F4F6;padding:10px 16px;font-size:12px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">${heading}</td>
+      </tr>${dataRows}
+    </table>
+  `
 }
 
 // ─── Teacher email content builders ───────────────────────────────────────────
@@ -157,11 +174,11 @@ export function teacherClassReminderEmailContent(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${studentName}</strong> is in ${timeLabel}.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
-    </table>
+    ${buildDetailsTable('Class details', [
+      { label: 'Date &amp; Time', value: formattedTime },
+      { label: 'Duration', value: `${durationMinutes} minutes` },
+      { label: 'Student', value: studentName },
+    ])}
     ${teamsJoinUrl ? `
       <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
         Join your class on Teams:<br>
@@ -182,11 +199,11 @@ export function teacherNewBookingEmailContent(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       A new class has been booked with <strong style="color:#FF8303;">${studentName}</strong>.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
-    </table>
+    ${buildDetailsTable('Class details', [
+      { label: 'Date &amp; Time', value: formattedTime },
+      { label: 'Duration', value: `${durationMinutes} minutes` },
+      { label: 'Student', value: studentName },
+    ])}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View Upcoming Classes')}
   `
 }
@@ -199,12 +216,12 @@ export function teacherCancellationEmailContent(
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled.
+      Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled. Your schedule has been updated.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Student:</strong> ${studentName}</td></tr>
-    </table>
+    ${buildDetailsTable('Cancellation details', [
+      { label: 'Cancelled class', value: formattedTime },
+      { label: 'Student', value: studentName },
+    ])}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}
   `
 }
@@ -217,11 +234,37 @@ export function teacherReportForfeitedEmailContent(
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      The 12-hour window to submit your report for your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime} has now closed.
+      The 12-hour window to submit your class report for your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime} has now closed.
     </p>
     <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">
-      As the report was not submitted in time, payment for this class has been forfeited in line with our reporting policy.
+      Because the report was not submitted within the deadline, payment for this class has been forfeited in line with the reporting policy. Please make sure future reports are completed within 12 hours of the class ending.
     </p>
+  `
+}
+
+export function teacherRescheduledEmailContent(
+  studentName: string,
+  oldScheduledAt: string | null,
+  newScheduledAt: string,
+  durationMinutes: number,
+  teacherTimezone: string
+): string {
+  const newTime = formatClassTime(newScheduledAt, teacherTimezone, durationMinutes)
+  const rows: { label: string; value: string }[] = []
+  if (oldScheduledAt) {
+    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, teacherTimezone) })
+    rows.push({ label: 'New time', value: newTime })
+  } else {
+    rows.push({ label: 'Class time', value: newTime })
+  }
+  rows.push({ label: 'Duration', value: `${durationMinutes} minutes` })
+  rows.push({ label: 'Student', value: studentName })
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      Your class with <strong style="color:#FF8303;">${studentName}</strong> has been rescheduled.
+    </p>
+    ${buildDetailsTable('Class details', rows)}
+    ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View Upcoming Classes')}
   `
 }
 
@@ -238,11 +281,11 @@ export function studentBookingConfirmationEmailContent(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class has been confirmed. Here are your details:
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
-    </table>
+    ${buildDetailsTable('Class details', [
+      { label: 'Teacher', value: teacherName },
+      { label: 'Date &amp; Time', value: formattedTime },
+      { label: 'Duration', value: `${durationMinutes} minutes` },
+    ])}
     <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
       The Join Class button in your portal activates 10 minutes before the class starts.
     </p>
@@ -256,18 +299,18 @@ export function studentCancellationByStudentEmailContent(
   studentTimezone: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, studentTimezone)
-  const refundLine = hoursRefunded
-    ? `<tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>`
-    : `<tr><td style="font-size:14px;color:#DC2626;padding:4px 0;"><strong>Note:</strong> No hours refunded — cancellation within 24 hours of class</td></tr>`
+  const refundRow = hoursRefunded
+    ? { label: 'Hours returned', value: `${hoursRefunded}h added back to your balance` }
+    : { label: 'Note', value: '<span style="color:#DC2626;">No hours refunded — cancellation within 24 hours of class</span>' }
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class has been cancelled as requested.
+      Your class has been cancelled as requested. The details are below.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
-      ${refundLine}
-    </table>
+    ${buildDetailsTable('Cancellation details', [
+      { label: 'Teacher', value: teacherName },
+      { label: 'Cancelled class', value: formattedTime },
+      refundRow,
+    ])}
     ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'Book Another Class')}
   `
 }
@@ -284,13 +327,13 @@ export function studentCancellationByTeacherEmailContent(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Unfortunately your class has been cancelled by your teacher. Your hours have been returned to your balance.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>
-    </table>
+    ${buildDetailsTable('Cancellation details', [
+      { label: 'Teacher', value: teacherName },
+      { label: 'Cancelled class', value: formattedTime },
+      { label: 'Hours returned', value: `${hoursRefunded}h added back to your balance` },
+    ])}
     ${teacherMessage ? `
-    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;">
       <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Message from your teacher</p>
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${teacherMessage}</p>
     </div>
@@ -307,19 +350,19 @@ export function studentRescheduledEmailContent(
   studentTimezone: string
 ): string {
   const newTime = formatClassTime(newScheduledAt, studentTimezone, durationMinutes)
-  const timeRowsHtml = oldScheduledAt
-    ? `
-      <tr><td style="font-size:14px;color:#6B7280;padding:4px 0;"><strong>Previous time:</strong> ${formatClassTime(oldScheduledAt, studentTimezone)}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>New time:</strong> ${newTime}</td></tr>`
-    : `
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Class time:</strong> ${newTime}</td></tr>`
+  const rows: { label: string; value: string }[] = []
+  if (oldScheduledAt) {
+    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, studentTimezone) })
+    rows.push({ label: 'New time', value: newTime })
+  } else {
+    rows.push({ label: 'Class time', value: newTime })
+  }
+  rows.push({ label: 'Duration', value: `${durationMinutes} minutes` })
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">${timeRowsHtml}
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
-    </table>
+    ${buildDetailsTable('Class details', rows)}
   `
 }
 
@@ -337,11 +380,11 @@ export function studentClassReminderEmailContent(
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${teacherName}</strong> is in ${timeLabel}.
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Date &amp; Time:</strong> ${formattedTime}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Duration:</strong> ${durationMinutes} minutes</td></tr>
-    </table>
+    ${buildDetailsTable('Class details', [
+      { label: 'Teacher', value: teacherName },
+      { label: 'Date &amp; Time', value: formattedTime },
+      { label: 'Duration', value: `${durationMinutes} minutes` },
+    ])}
     ${teamsJoinUrl ? `
       <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
         Join your class on Teams:<br>
@@ -377,7 +420,7 @@ export function studentLowHoursEmailContent(
       You have <strong style="color:#FF8303;">${hoursRemaining} hour${hoursRemaining === 1 ? '' : 's'}</strong> remaining in your training package.
     </p>
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      To continue booking classes without interruption, please contact us to purchase more hours.
+      To keep booking classes without interruption, please contact us to arrange more hours.
     </p>
     ${buildButton('mailto:support@lingualinkonline.com', 'Contact Us')}
   `
@@ -399,14 +442,13 @@ export function studentNewMessageEmailContent(teacherName: string): string {
 export function studentTrainingEndingSoonEmailContent(endDate: string): string {
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      This is a friendly reminder that your current training package is ending on
-      <strong style="color:#FF8303;">${endDate}</strong>.
+      Your current training package ends on <strong style="color:#FF8303;">${endDate}</strong>.
     </p>
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      If you'd like to continue your language learning journey, please reach out to our support team — they'll be happy to help you set up a new package.
+      Any remaining hours must be used before this date - you can book classes directly from your portal.
     </p>
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      Don't forget to use any remaining hours before your training ends — you can book classes directly from your student portal.
+      If you would like to continue after your package ends, contact our support team and they will be happy to help you arrange a new one.
     </p>
     ${buildButton('mailto:support@lingualinkonline.com', 'Contact Support')}
   `
@@ -424,17 +466,20 @@ export function studentCancellationByAdminEmailContent(
   const openingSentence = refunded
     ? "We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience."
     : "We're sorry to let you know that your upcoming class has been cancelled. Please reach out to us if you have any questions."
+  const rows: { label: string; value: string }[] = [
+    { label: 'Teacher', value: teacherName },
+    { label: 'Cancelled class', value: formattedTime },
+  ]
+  if (refunded) {
+    rows.push({ label: 'Hours returned', value: `${hoursRefunded}h added back to your balance` })
+  }
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       ${openingSentence}
     </p>
-    <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#FFF7ED;border-radius:8px;padding:16px 20px;width:100%;">
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Teacher:</strong> ${teacherName}</td></tr>
-      <tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Cancelled class:</strong> ${formattedTime}</td></tr>
-      ${refunded ? `<tr><td style="font-size:14px;color:#111827;padding:4px 0;"><strong>Hours returned:</strong> ${hoursRefunded}h added back to your balance</td></tr>` : ''}
-    </table>
+    ${buildDetailsTable('Cancellation details', rows)}
     ${cancellationReason ? `
-    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;border-radius:4px;">
+    <div style="margin:0 0 24px;padding:16px 20px;background-color:#F9FAFB;border-left:4px solid #FF8303;">
       <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">Reason for cancellation</p>
       <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">${cancellationReason}</p>
     </div>

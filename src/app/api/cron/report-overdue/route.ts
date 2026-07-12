@@ -208,11 +208,11 @@ export async function GET(request: Request) {
         const { error: emailErr } = await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacher.email,
-          subject: 'Class report window missed',
+          subject: 'Lingualink Online - Class report deadline missed',
           html: buildEmailTemplate({
             recipientName: teacher.full_name,
             recipientFallback: 'Teacher',
-            subject: 'Class report window missed',
+            subject: 'Lingualink Online - Class report deadline missed',
             bodyHtml: teacherReportForfeitedEmailContent(
               student?.full_name ?? 'your student',
               lesson.scheduled_at,

@@ -70,15 +70,14 @@ export async function sendAccountInviteEmail(
         ? 'teachers@lingualinkonline.com'
         : 'support@lingualinkonline.com'
 
-    const subject = 'Lingualink Online — Welcome! Set up your account'
+    const subject = 'Lingualink Online - Welcome! Set up your account'
 
     const bodyHtml = `
       <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-        Welcome to <strong style="color:#FF8303;">Lingualink Online</strong>!
+        Welcome to Lingualink Online! An account has been created for you.
       </p>
       <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-        An account has been created for you on the Lingualink Online ${portal} portal.
-        To get started, please set your own password using the button below.
+        Click the button below to set your password and log in to your portal.
       </p>
       <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
         <tr>
@@ -91,14 +90,13 @@ export async function sendAccountInviteEmail(
         </tr>
       </table>
       <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
-        This link expires in 24 hours. If it has expired, you can request a new one
-        via the &quot;Forgot password&quot; link on the
-        <a href="${loginUrl}" style="color:#FF8303;">login page</a>.
+        This link expires after a limited time. If it has expired, use &quot;Forgot password&quot; on the
+        <a href="${loginUrl}" style="color:#6B7280;text-decoration:underline;">login page</a> to request a new one.
       </p>
     `
 
     const { error: sendError } = await resend.emails.send({
-      from: 'no-reply@lingualinkonline.com',
+      from: 'Lingualink Online <no-reply@lingualinkonline.com>',
       to: email,
       subject,
       html: buildEmailTemplate({
