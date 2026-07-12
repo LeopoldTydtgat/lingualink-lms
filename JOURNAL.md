@@ -1,3 +1,29 @@
+## Session 195 - 12 July 2026 - Student booking grid: per-slot timezone bucketing (NEW317)
+
+### What was built
+- Rewrote /api/student/availability day-keying. The old route formatted UTC midnight of each teacher-week date in the student's timezone, which shifted every day key one day back for any UTC-negative student and misaligned the admin booking advisory for UTC-negative teachers.
+- Extracted all slot generation, blocking, and bucketing into a new pure module slotEngine.ts (Next.js route files reject non-handler exports). The week is now a true instant window in the requested display timezone; candidate slots are generated over teacher-calendar dates covering the window plus one day of padding on each side, filtered to the window, and each slot is bucketed by the display-local date of its own start instant rather than by a whole-day container.
+- Booked-lessons fetch moved from naive UTC date-string bounds to true instant bounds, widened backwards by the maximum lesson duration so a lesson starting just before the window still blocks slots inside it.
+- Add-override selection in the route moved from UTC date-prefix matching to instant overlap with the window.
+- BookingClient week state changed from a browser-local Date to a student-timezone Monday YYYY-MM-DD key, with a new addDaysToDateKey helper in timezone.ts for pure calendar-date arithmetic. Columns, past-day pruning, week navigation, clamping, and the current-week check all operate on keys in the student frame; column Dates are noon-anchored and used for labels only.
+- 24 new unit tests covering UTC-negative and UTC-positive display zones, cross-timezone slot day shifts, DST transition weeks in both directions, override window spanning, all blocking layers, and the admin single-date key shape. Suite now 144 of 144 green.
+
+### Break/Fix Log
+Issue 1: Slots attached to the wrong day columns for UTC-negative student timezones, with the final column always empty.
+Cause: Day keys were derived by formatting UTC midnight of each date in the student's timezone; UTC midnight is the previous local day anywhere west of UTC. Whole-day bucketing was also structurally wrong, since a single slot can fall on a different student-local date than the teacher-calendar date that generated it.
+Fix: True instant week window plus per-slot bucketing by each slot's own start instant in the display timezone.
+Lesson: A day is not a safe unit across timezones. Bucket by the instant of the thing itself, formatted in the display frame, never by the container date it was generated from.
+
+Issue 2: The admin booking and edit-class availability advisories were silently wrong for UTC-negative teacher timezones.
+Cause: Same route, same keying defect; the admin clients pass the teacher timezone as the display parameter.
+Fix: Repaired automatically by the route fix with no admin-side edits.
+Lesson: One shared endpoint means one fix can heal several surfaces; map all callers before designing the change so the win is deliberate, not accidental.
+
+### Session result
+NEW317 closed at commit 03d7992 on dev. Both review subagents green (code-reviewer SHIP, timezone-date-auditor PASS), 144 of 144 tests, and browser verification across all three portals reconciled every slot count exactly for a New York student booking a Brussels teacher, including the admin 24-hour bypass. Two follow-ups logged: NEW322 raised to MEDIUM because the write gate's UTC-prefix override scoping is now a visible display/gate mismatch, and NEW324 filed for the fail-closed edge where a booking run straddling the student's local midnight is split across two columns and not offered.
+
+---
+
 ## Session 194 - 12 July 2026 - Teacher purge rewrite and repo hygiene
 
 ### What was built
