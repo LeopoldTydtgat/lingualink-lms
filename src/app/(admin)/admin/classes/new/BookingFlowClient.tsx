@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { isBookableStart } from '@/lib/bookingGrid'
 
 interface Teacher {
   id: string
@@ -129,10 +130,20 @@ export default function BookingFlowClient({ teachers, students }: Props) {
           return
         }
         const data = await res.json()
+        // Continuation slots of a run that crosses teacher-local midnight live
+        // under the NEXT day's key, so the bookable-start check needs a week-wide
+        // set of available start instants — not just the selected date's column.
+        const availableStartMs = new Set<number>()
+        for (const daySlots of Object.values(data.slots ?? {}) as { startIso: string; available: boolean }[][]) {
+          for (const s of daySlots) if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
+        }
         const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[selectedDate] ?? []
+        const slotsNeeded = selectedDuration ? selectedDuration / 30 : 1
         const times = new Set<string>()
         for (const slot of slotsForDate) {
-          if (slot.available) times.add(slotLocalTime(slot.startIso, teacherTz))
+          if (isBookableStart(slot.startIso, slotsNeeded, availableStartMs)) {
+            times.add(slotLocalTime(slot.startIso, teacherTz))
+          }
         }
         setAvailableTimes(times)
       } catch (err) {
@@ -146,7 +157,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
     void loadAvailability()
 
     return () => controller.abort()
-  }, [selectedTeacher?.id, selectedTeacher?.timezone, selectedDate])
+  }, [selectedTeacher?.id, selectedTeacher?.timezone, selectedDate, selectedDuration])
 
   async function handleContinue() {
     if (!selectedDate || !selectedTime || !selectedTeacher) return
@@ -166,10 +177,22 @@ export default function BookingFlowClient({ teachers, students }: Props) {
       )
       if (res.ok) {
         const data = await res.json()
+        // Week-wide set: a 60/90-min run's continuation slots may be under the
+        // next day's key (crosses teacher-local midnight).
+        const availableStartMs = new Set<number>()
+        for (const daySlots of Object.values(data.slots ?? {}) as { startIso: string; available: boolean }[][]) {
+          for (const s of daySlots) if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
+        }
         const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[selectedDate] ?? []
-        const isAvailable = slotsForDate.some(
-          (slot) => slot.available && slotLocalTime(slot.startIso, teacherTz) === selectedTime
+        const slotsNeeded = selectedDuration ? selectedDuration / 30 : 1
+        // Find the candidate start by wall-clock match (its own available flag is
+        // irrelevant — isBookableStart validates the whole run, start included).
+        const candidate = slotsForDate.find(
+          (slot) => slotLocalTime(slot.startIso, teacherTz) === selectedTime
         )
+        const isAvailable = candidate
+          ? isBookableStart(candidate.startIso, slotsNeeded, availableStartMs)
+          : false
         if (isAvailable) {
           setStep(5)
           return
