@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSlotAvailable } from './availability'
+import { isSlotAvailable, localTimeToUtcMs } from './availability'
 
 /**
  * NEW322 regression net for the booking write gate.
@@ -129,15 +129,42 @@ describe('isSlotAvailable — add-overrides straddling UTC midnight (NEW322)', (
   })
 })
 
+// ─── NEW326: localTimeToUtcMs is date-aware at exactly-±12h offsets ───────────
+
+describe('localTimeToUtcMs — date-aware offset derivation (NEW326)', () => {
+  // The old probe diffed local HOUR:MINUTE only; ±720 min is ambiguous (+12h and
+  // -12h share a wall clock) and the wrap clamp tie-broke it toward "no
+  // adjustment", landing UTC+12 afternoons (and all +13 NZDT times) a day off.
+  const at = (dateStr: string, timeStr: string, tz: string) =>
+    new Date(localTimeToUtcMs(dateStr, timeStr, tz)).toISOString()
+
+  it('Pacific/Auckland (NZST, UTC+12): afternoon and evening resolve on the requested date', () => {
+    expect(at('2026-06-09', '23:30:00', 'Pacific/Auckland')).toBe('2026-06-09T11:30:00.000Z')
+    expect(at('2026-06-09', '13:00:00', 'Pacific/Auckland')).toBe('2026-06-09T01:00:00.000Z')
+  })
+
+  it('Pacific/Auckland morning (already correct before the fix) is unchanged', () => {
+    expect(at('2026-06-09', '08:00:00', 'Pacific/Auckland')).toBe('2026-06-08T20:00:00.000Z')
+  })
+
+  it('UTC-negative zone is unchanged (America/New_York, EDT)', () => {
+    expect(at('2026-06-09', '23:30:00', 'America/New_York')).toBe('2026-06-10T03:30:00.000Z')
+  })
+
+  it('offsets beyond +12 resolve correctly (Pacific/Auckland NZDT, UTC+13, January)', () => {
+    expect(at('2026-01-15', '13:00:00', 'Pacific/Auckland')).toBe('2026-01-15T00:00:00.000Z')
+  })
+})
+
 // ─── NEW325: bookings crossing teacher-local midnight span two local dates ───
 
 describe('isSlotAvailable — bookings crossing teacher-local midnight (NEW325)', () => {
   // Tokyo is UTC+9 (no DST): Wed Jun 10 00:00 JST = Jun 9 15:00Z, so the
   // post-midnight half of the booking sits on a different teacher-local date
   // than its own UTC date — a UTC-date-keyed implementation fails these.
-  // (Pacific/Auckland deliberately avoided: localTimeToUtcMs has a pre-existing
-  // day-shift at exactly-±12h offsets — the diffMinutes clamp tie-breaks +720
-  // the wrong way for UTC+12 afternoons. Tracked as a separate follow-up.)
+  // (The Pacific/Auckland variants of these scenarios live in the NEW326 block
+  // below — they additionally exercise the exactly-UTC+12 offset that
+  // localTimeToUtcMs mis-resolved before its date-aware rewrite.)
   const CROSS_MIDNIGHT = [
     general(2, '23:00:00'),
     general(2, '23:30:00'), // Tue 23:00–24:00 JST
@@ -173,6 +200,46 @@ describe('isSlotAvailable — bookings crossing teacher-local midnight (NEW325)'
       override('2026-06-10T00:00:00.000Z', '2026-06-10T23:59:59.999Z', { type: 'holiday' }),
     ]
     await expect(check('Asia/Tokyo', records, '2026-06-09T22:00:00.000Z', 60)).resolves.toBe(false)
+  })
+})
+
+// ─── NEW326: the NEW325 cross-midnight scenarios at exactly UTC+12 ───────────
+
+describe('isSlotAvailable — cross-midnight at exactly UTC+12 (NEW325 × NEW326)', () => {
+  // Auckland is UTC+12 in June (NZST, no DST): Tue Jun 9 23:30 NZST = Jun 9
+  // 11:30Z and Wed Jun 10 00:00 NZST = Jun 9 12:00Z. Before NEW326 the
+  // pre-midnight general slots (23:00/23:30 local) resolved a UTC day late, so
+  // these scenarios could not even be expressed at this offset.
+  const CROSS_MIDNIGHT = [
+    general(2, '23:00:00'),
+    general(2, '23:30:00'), // Tue 23:00–24:00 NZST
+    general(3, '00:00:00'),
+    general(3, '00:30:00'), // Wed 00:00–01:00 NZST
+  ]
+
+  it('a 60-min general booking spanning two consecutive available days passes', async () => {
+    // Tue Jun 9 23:30 NZST; segments land Tue 23:30 (11:30Z) and Wed 00:00 (12:00Z).
+    await expect(check('Pacific/Auckland', CROSS_MIDNIGHT, '2026-06-09T11:30:00.000Z', 60)).resolves.toBe(true)
+  })
+
+  it('the same booking is rejected when the day it crosses INTO is a holiday', async () => {
+    const records = [
+      ...CROSS_MIDNIGHT,
+      override('2026-06-10T00:00:00.000Z', '2026-06-10T23:59:59.999Z', { type: 'holiday' }),
+    ]
+    await expect(check('Pacific/Auckland', records, '2026-06-09T11:30:00.000Z', 60)).resolves.toBe(false)
+  })
+
+  it('a booking starting ON a holiday date is still rejected', async () => {
+    // Wed Jun 10 10:00 NZST = Jun 9 22:00Z — the teacher-local date (the
+    // holiday), not the UTC date, drives the block.
+    const wednesdayMorning = [general(3, '10:00:00'), general(3, '10:30:00')]
+    await expect(check('Pacific/Auckland', wednesdayMorning, '2026-06-09T22:00:00.000Z', 60)).resolves.toBe(true)
+    const records = [
+      ...wednesdayMorning,
+      override('2026-06-10T00:00:00.000Z', '2026-06-10T23:59:59.999Z', { type: 'holiday' }),
+    ]
+    await expect(check('Pacific/Auckland', records, '2026-06-09T22:00:00.000Z', 60)).resolves.toBe(false)
   })
 })
 

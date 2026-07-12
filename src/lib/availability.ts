@@ -14,21 +14,32 @@ interface AvailabilityRecord {
 }
 
 // Convert a "HH:MM:SS" time on a specific YYYY-MM-DD date from a named timezone to UTC ms.
+// NEW326: the offset probe compares full local DATETIMEs (date + time), never the wall
+// clock alone. A bare hour:minute diff is ambiguous at exactly ±720 min (+12h and -12h
+// produce identical wall clocks) and the old wrap clamp mis-normalised every offset at
+// or beyond ±12h — UTC+12 (Pacific/Auckland NZST) afternoons and all NZDT (+13) times
+// resolved one day off. With the observed local DATE in the comparison the diff IS the
+// true offset, so no wrap clamp is needed. This is the same probe localToUtc in
+// @/lib/utils/timezone uses. Inside a DST spring-forward gap the requested wall time
+// does not exist; the single-pass probe then returns a best-effort instant that can be
+// off by the DST delta (same approximation as before the rewrite).
 export function localTimeToUtcMs(dateStr: string, timeStr: string, timezone: string): number {
+  const [y, mo, d] = dateStr.split('-').map(Number)
   const [h, m] = timeStr.split(':').map(Number)
-  const guessUtc = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`)
-  const localHour = Number(
-    new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hour12: false, timeZone: timezone }).format(guessUtc)
-  )
-  const localMinute = Number(
-    new Intl.DateTimeFormat('en-GB', { minute: '2-digit', timeZone: timezone }).format(guessUtc)
-  )
-  let diffMinutes = (h - localHour) * 60 + (m - localMinute)
-  // Normalise across midnight: any diff > 12h means we wrapped a day,
-  // any diff < -12h means we wrapped the other way.
-  if (diffMinutes > 12 * 60) diffMinutes -= 24 * 60
-  if (diffMinutes < -12 * 60) diffMinutes += 24 * 60
-  return guessUtc.getTime() + diffMinutes * 60 * 1000
+  const intendedLocalMs = Date.UTC(y, mo - 1, d, h, m, 0)
+  const guessUtc = new Date(intendedLocalMs)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(guessUtc)
+  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value)
+  const observedLocalMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
+  return guessUtc.getTime() + (intendedLocalMs - observedLocalMs)
 }
 
 // Check whether two time ranges overlap.
