@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
+import { isBookableStart } from '@/lib/bookingGrid'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -999,19 +1000,17 @@ function StepDateTime({
     weekDays.push(new Date(localToUtc(addDaysToDateKey(weekStartKey, i) + 'T12:00', studentTimezone)))
   }
 
-  // Check if a slot at index `slotIndex` within a day can be the start of a booking.
-  // Requires slotsNeeded consecutive 30-minute slots that are all available AND
-  // actually adjacent in time (no gaps — teacher might have non-contiguous availability).
-  function isBookableStart(daySlots: Slot[], slotIndex: number): boolean {
-    for (let i = 0; i < slotsNeeded; i++) {
-      const s = daySlots[slotIndex + i]
-      if (!s || !s.available) return false
-      if (i > 0) {
-        const expectedMs = new Date(daySlots[slotIndex + i - 1].startIso).getTime() + 30 * 60 * 1000
-        if (new Date(s.startIso).getTime() !== expectedMs) return false
-      }
+  // NEW324: week-wide set of available slot start instants, across ALL day
+  // columns. Since NEW317 each 30-min slot is bucketed by the student-local
+  // date of its own start instant, so a 60/90-min run crossing student-local
+  // midnight has its continuation slots in the NEXT day's column — a
+  // within-column walk can never assemble it. isBookableStart checks each
+  // 30-min step of the run against this set instead (pure instant math).
+  const availableStartMs = new Set<number>()
+  for (const daySlots of Object.values(slots)) {
+    for (const s of daySlots) {
+      if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
     }
-    return true
   }
 
   // Single source of truth: the bookable START slots of every visible day, keyed
@@ -1019,7 +1018,8 @@ function StepDateTime({
   // earliest-available hint ALL derive from this one structure, so a day's "N
   // slots" count can never disagree with the chips rendered for it. A day can be
   // picked iff it isn't past and a booking of the chosen duration can start
-  // somewhere in it (isBookableStart, reused verbatim).
+  // somewhere in it (isBookableStart against the week-wide instant set, so
+  // runs crossing student-local midnight still count for their start day).
   // Past-day prune in the STUDENT's frame: browser-local midnight can sit on a
   // different calendar day, so compare YYYY-MM-DD keys (safe as strings).
   const todayKey = getLocalDateKey(new Date(), studentTimezone)
@@ -1028,7 +1028,9 @@ function StepDateTime({
     const dateKey = getLocalDateKey(day, studentTimezone)
     const daySlots = slots[dateKey] ?? []
     startsByDay[dateKey] =
-      dateKey >= todayKey ? daySlots.filter((_, i) => isBookableStart(daySlots, i)) : []
+      dateKey >= todayKey
+        ? daySlots.filter((s) => isBookableStart(s.startIso, slotsNeeded, availableStartMs))
+        : []
   }
   const selectableDayKeys = weekDays
     .map((day) => getLocalDateKey(day, studentTimezone))
