@@ -199,27 +199,32 @@ export default function BookingFlowClient({ teachers, students }: Props) {
     const [hour, minute] = selectedTime.split(':').map(Number)
     const scheduledAt = buildLocalISOString(year, month, day, hour, minute)
 
-    const res = await fetch('/api/admin/classes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        teacher_id: selectedTeacher.id,
-        student_id: selectedStudent.id,
-        training_id: selectedStudent.training.id,
-        scheduled_at: scheduledAt,
-        duration_minutes: selectedDuration,
-      }),
-    })
+    try {
+      const res = await fetch('/api/admin/classes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teacher_id: selectedTeacher.id,
+          student_id: selectedStudent.id,
+          training_id: selectedStudent.training.id,
+          scheduled_at: scheduledAt,
+          duration_minutes: selectedDuration,
+        }),
+      })
 
-    const data = await res.json()
+      const data = await res.json().catch(() => null)
 
-    if (!res.ok) {
-      setError(data.error ?? 'Something went wrong. Please try again.')
+      if (!res.ok || !data) {
+        setError((data && data.error) ?? 'Something went wrong. Please try again.')
+        return
+      }
+
+      router.push(`/admin/classes/${data.lesson_id}`)
+    } catch {
+      setError('Network error. Please check your connection and try again.')
+    } finally {
       setSubmitting(false)
-      return
     }
-
-    router.push(`/admin/classes/${data.lesson_id}`)
   }
 
   // ── Step indicators ───────────────────────────────────────────────────────

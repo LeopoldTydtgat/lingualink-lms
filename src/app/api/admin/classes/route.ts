@@ -14,6 +14,7 @@ import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { adminClassesPostSchema } from '@/lib/validation/schemas'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -135,6 +136,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/classes
 // Admin creates a class manually, bypassing the 24hr and availability restrictions
 export async function POST(request: NextRequest) {
+  try {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -153,6 +155,15 @@ export async function POST(request: NextRequest) {
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
+
+  const parsed = adminClassesPostSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Invalid request data.', details: parsed.error.flatten() },
+      { status: 400 }
+    )
+  }
+
   const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = body
 
   if (!teacher_id || !student_id || !training_id || !scheduled_at || !duration_minutes) {
@@ -439,4 +450,8 @@ export async function POST(request: NextRequest) {
   revalidatePath('/student/my-classes')
   revalidatePath('/admin/classes')
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
+  } catch (err) {
+    console.error('POST /api/admin/classes error:', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
 }

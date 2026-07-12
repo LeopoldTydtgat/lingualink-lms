@@ -359,6 +359,23 @@ export const adminClassesPatchSchema = z.discriminatedUnion('action', [
   adminClassesPatchCancelSchema,
 ]);
 
+// ─── Admin classes POST (manual create) ───────────────────────────────────────
+
+export const adminClassesPostSchema = z.object({
+  teacher_id: z.string().uuid(),
+  student_id: z.string().uuid(),
+  duration_minutes: z.union([z.literal(30), z.literal(60), z.literal(90)]),
+  scheduled_at: z.string()
+    .regex(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/,
+      'scheduled_at must be naive local ISO format YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS, no timezone suffix'
+    )
+    .refine(
+      val => !isNaN(Date.parse(val + 'Z')),
+      { message: 'scheduled_at has invalid date components' }
+    ),
+});
+
 // ─── Join-class click log ─────────────────────────────────────────────────────
 
 export const JoinClickSchema = z.object({

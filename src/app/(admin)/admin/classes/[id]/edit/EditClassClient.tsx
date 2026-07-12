@@ -145,23 +145,28 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
       duration_minutes: duration,
     }
 
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
-    const data = await res.json()
+      const data = await res.json().catch(() => null)
 
-    if (!res.ok) {
-      toast.error(data.message ?? data.error ?? 'Failed to save. Please try again.', { duration: 6000 })
+      if (!res.ok || !data) {
+        toast.error((data && (data.message ?? data.error)) ?? 'Failed to save. Please try again.', { duration: 6000 })
+        setSaving(false)
+        return
+      }
+
+      setAvailabilityWarning(false)
+      toast.success('Changes saved!')
+      setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 800)
+    } catch {
+      toast.error('Failed to save. Please try again.', { duration: 6000 })
       setSaving(false)
-      return
     }
-
-    setAvailabilityWarning(false)
-    toast.success('Changes saved!')
-    setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 800)
   }
 
   // Pre-flight: check teacher availability before saving. Fail-safe fallbacks:
