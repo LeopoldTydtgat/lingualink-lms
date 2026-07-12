@@ -102,9 +102,8 @@ export async function PATCH(
       'updated_at',
       'created_at',
       // Accepted by UpdateTeacherSchema but intentionally NOT in updatePayload —
-      // these are never written by this route, so they must not generate history rows.
+      // never written by this route, so it must not generate history rows.
       'is_active',
-      'preferred_payment_type',
     ]
     const historyEntries = Object.entries(parsed.data)
       .filter(([key]) => !SKIP_FIELDS.includes(key))
@@ -141,6 +140,7 @@ export async function PATCH(
       street_address:        parsed.data.street_address        ?? null,
       area_code:             parsed.data.area_code             ?? null,
       city:                  parsed.data.city                  ?? null,
+      preferred_payment_type: parsed.data.preferred_payment_type ?? null,
       paypal_email:          parsed.data.paypal_email          ?? null,
       iban:                  parsed.data.iban                  ?? null,
       bic:                   parsed.data.bic                   ?? null,

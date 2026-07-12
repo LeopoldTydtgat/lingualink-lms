@@ -522,9 +522,13 @@ export default function BillingClient({
             <div className="space-y-3 text-sm">
               <div className="flex gap-2">
                 <span className="text-gray-500 w-44 flex-shrink-0">Preferred Payment Type:</span>
-                <span className="text-gray-900 font-medium">
-                  {billingInfo.preferred_payment_type === 'paypal' ? 'PayPal' : 'Bank Transfer'}
-                </span>
+                {billingInfo.preferred_payment_type === 'paypal' ? (
+                  <span className="text-gray-900 font-medium">PayPal</span>
+                ) : billingInfo.preferred_payment_type === 'bank' ? (
+                  <span className="text-gray-900 font-medium">Bank Transfer</span>
+                ) : (
+                  <span className="text-gray-400">Not set</span>
+                )}
               </div>
               {billingInfo.preferred_payment_type === 'paypal' && billingInfo.paypal_email && (
                 <div className="flex gap-2">

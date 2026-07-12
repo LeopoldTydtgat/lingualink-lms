@@ -170,7 +170,6 @@ export const UpdateTeacherSchema = z.object({
   quote: z.string().max(500).optional().nullable(),
   admin_notes: z.string().max(10_000).optional().nullable(),
   follow_up_reason: z.string().max(1000).optional().nullable(),
-  // Tolerated: sent by clients but not written by the route.
   preferred_payment_type: z.string().max(50).optional().nullable(),
   is_active: z.boolean().optional(),
 })
