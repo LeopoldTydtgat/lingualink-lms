@@ -129,6 +129,53 @@ describe('isSlotAvailable — add-overrides straddling UTC midnight (NEW322)', (
   })
 })
 
+// ─── NEW325: bookings crossing teacher-local midnight span two local dates ───
+
+describe('isSlotAvailable — bookings crossing teacher-local midnight (NEW325)', () => {
+  // Tokyo is UTC+9 (no DST): Wed Jun 10 00:00 JST = Jun 9 15:00Z, so the
+  // post-midnight half of the booking sits on a different teacher-local date
+  // than its own UTC date — a UTC-date-keyed implementation fails these.
+  // (Pacific/Auckland deliberately avoided: localTimeToUtcMs has a pre-existing
+  // day-shift at exactly-±12h offsets — the diffMinutes clamp tie-breaks +720
+  // the wrong way for UTC+12 afternoons. Tracked as a separate follow-up.)
+  const CROSS_MIDNIGHT = [
+    general(2, '23:00:00'),
+    general(2, '23:30:00'), // Tue 23:00–24:00 JST
+    general(3, '00:00:00'),
+    general(3, '00:30:00'), // Wed 00:00–01:00 JST
+  ]
+
+  it('a 60-min general booking spanning two consecutive available days passes', async () => {
+    // Tue Jun 9 23:30 JST = Jun 9 14:30Z; segments land Tue 23:30 and Wed 00:00
+    // teacher-local. The old single-start-date slot build never generated the
+    // Wednesday 00:00 slot and wrongly rejected what the display grid offers.
+    await expect(check('Asia/Tokyo', CROSS_MIDNIGHT, '2026-06-09T14:30:00.000Z', 60)).resolves.toBe(true)
+  })
+
+  it('the same booking is rejected when the day it crosses INTO is a holiday', async () => {
+    // Holiday date portion 2026-06-10 blocks the Wed 00:00 JST segment even
+    // though the request STARTS on Tue Jun 9 — the old start-date-only holiday
+    // check let this through.
+    const records = [
+      ...CROSS_MIDNIGHT,
+      override('2026-06-10T00:00:00.000Z', '2026-06-10T23:59:59.999Z', { type: 'holiday' }),
+    ]
+    await expect(check('Asia/Tokyo', records, '2026-06-09T14:30:00.000Z', 60)).resolves.toBe(false)
+  })
+
+  it('a booking starting ON a holiday date is still rejected', async () => {
+    // Wed Jun 10 07:00 JST = Jun 9 22:00Z — the teacher-local date (the
+    // holiday), not the UTC date, drives the block.
+    const wednesdayMorning = [general(3, '07:00:00'), general(3, '07:30:00')]
+    await expect(check('Asia/Tokyo', wednesdayMorning, '2026-06-09T22:00:00.000Z', 60)).resolves.toBe(true)
+    const records = [
+      ...wednesdayMorning,
+      override('2026-06-10T00:00:00.000Z', '2026-06-10T23:59:59.999Z', { type: 'holiday' }),
+    ]
+    await expect(check('Asia/Tokyo', records, '2026-06-09T22:00:00.000Z', 60)).resolves.toBe(false)
+  })
+})
+
 // ─── Regression: general availability, holidays, timed blocks unchanged ──────
 
 describe('isSlotAvailable — unchanged semantics', () => {

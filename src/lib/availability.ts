@@ -1,4 +1,5 @@
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { getLocalDateKey, addDaysToDateKey } from '@/lib/utils/timezone'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -60,19 +61,16 @@ export async function isSlotAvailable(
   const requestedStartMs = new Date(scheduledAtUtc).getTime()
   const requestedEndMs = requestedStartMs + durationMinutes * 60 * 1000
 
-  // NEW175 (addresses M5, S81/S91): the teacher's general availability and holidays are
-  // expressed in the teacher's LOCAL calendar (local weekday, local dates). A booking
-  // instant's UTC date can land on a different calendar day near UTC midnight for teachers
-  // far from UTC (e.g. Tokyo, New York), so keying off the UTC date silently mismatched.
-  // Derive the teacher-local calendar date of the requested instant and key the general
-  // weekday, the general slot build, and holiday blocking off THAT, so this gate agrees
-  // with the displayed booking calendar. Timed 'specific' overrides stay exact-instant.
-  const localDateStr = new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: teacherTimezone,
-  }).format(new Date(scheduledAtUtc))
+  // NEW175 + NEW325 (addresses M5, S81/S91): the teacher's general availability and
+  // holidays are expressed in the teacher's LOCAL calendar (local weekday, local dates).
+  // A booking instant's UTC date can land on a different calendar day near UTC midnight
+  // for teachers far from UTC (e.g. Tokyo, New York), and a 60/90-min booking can itself
+  // cross teacher-local midnight and span TWO local dates. So general slots are built
+  // for every teacher-local date the requested window [start, end) touches — each date
+  // contributing its own weekday's records — and holidays block per-slot by the
+  // teacher-local date of each slot's own start instant, mirroring slotEngine (NEW317).
+  // This keeps the gate in agreement with the displayed booking calendar. Timed
+  // 'specific' overrides stay exact-instant.
 
   const { data: availabilityData } = await adminClient
     .from('availability')
@@ -102,18 +100,28 @@ export async function isSlotAvailable(
     }
   }
 
-  // A bare calendar date's weekday is timezone-independent, so derive it from the
-  // teacher-local date string (NEW175).
-  const date = new Date(localDateStr + 'T00:00:00.000Z')
-  const dayOfWeek = date.getUTCDay()
-
-  // Build available slots from general weekly records for this day
-  const slots: { startIso: string; available: boolean }[] = generalRecords
-    .filter((r) => r.day_of_week === dayOfWeek && r.start_time && r.end_time)
-    .map((r) => ({
-      startIso: new Date(localTimeToUtcMs(localDateStr, r.start_time!, teacherTimezone)).toISOString(),
-      available: true,
-    }))
+  // Build available slots from general weekly records for every teacher-local
+  // date the requested window [start, end) touches — 1 or 2 dates for 30/90-min
+  // bookings, 2 when the booking crosses teacher-local midnight (NEW325).
+  const firstLocalDate = getLocalDateKey(new Date(requestedStartMs), teacherTimezone)
+  const lastLocalDate = getLocalDateKey(new Date(requestedEndMs - 1), teacherTimezone)
+  const slots: { startIso: string; available: boolean }[] = []
+  for (
+    let dateStr = firstLocalDate;
+    dateStr <= lastLocalDate; // YYYY-MM-DD compares safely as a string
+    dateStr = addDaysToDateKey(dateStr, 1)
+  ) {
+    // A bare calendar date's weekday is timezone-independent, so derive it from
+    // the UTC-anchored parse of the teacher-local date string (NEW175).
+    const dayOfWeek = new Date(dateStr + 'T00:00:00.000Z').getUTCDay()
+    for (const r of generalRecords) {
+      if (r.day_of_week !== dayOfWeek || !r.start_time || !r.end_time) continue
+      const startIso = new Date(localTimeToUtcMs(dateStr, r.start_time, teacherTimezone)).toISOString()
+      if (!slots.find((s) => s.startIso === startIso)) {
+        slots.push({ startIso, available: true })
+      }
+    }
+  }
 
   // NEW322: add specific is_available=true override slots selected by instant
   // overlap with the requested booking window [start, start + duration). The
@@ -152,10 +160,18 @@ export async function isSlotAvailable(
     }
   }
 
-  // NEW174 + NEW175: if the requested instant falls on a teacher-local holiday date,
-  // block the whole day (holiday wins).
-  if (holidayBlockedDates.has(localDateStr)) {
-    for (const slot of slots) slot.available = false
+  // NEW174 + NEW325: a slot is blocked when the teacher-local calendar date of
+  // its OWN start instant is a holiday (holiday wins over general and add-override
+  // slots). Per-slot, not whole-request-day: a booking crossing teacher-local
+  // midnight must be blocked when EITHER date it touches is a holiday, and the
+  // start date alone must not decide. Matches slotEngine's holiday block exactly.
+  if (holidayBlockedDates.size > 0) {
+    for (const slot of slots) {
+      if (!slot.available) continue
+      if (holidayBlockedDates.has(getLocalDateKey(new Date(slot.startIso), teacherTimezone))) {
+        slot.available = false
+      }
+    }
   }
 
   // Every 30-min segment of the requested duration must map to an available slot
