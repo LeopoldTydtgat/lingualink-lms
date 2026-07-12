@@ -86,6 +86,19 @@ export function utcInstantToTzParts(instant: string | Date, tz: string): TzParts
   }
 }
 
+/**
+ * Pure calendar-date arithmetic on a YYYY-MM-DD key: returns the key `days`
+ * days later (negative = earlier). Anchored on Date.UTC and read back through
+ * getUTC* fields, so the result can never shift with the process/browser
+ * timezone or DST, and no toISOString()-derived date ever escapes.
+ */
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d + days))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
+}
+
 // True iff `tz` is a timezone identifier Intl accepts. The one throw-free way
 // to probe validity; used by render paths to fall back to UTC instead of
 // crashing the component tree on a bad profiles.timezone value.

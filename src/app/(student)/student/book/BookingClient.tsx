@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info } from 'lucide-react'
-import { getLocalDateKey } from '@/lib/utils/timezone'
+import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,14 +66,15 @@ function formatHours(hours: number): string {
   return `${h}h ${m}min`
 }
 
-// Get the Monday of the week containing a given date
-function getWeekStart(date: Date): Date {
-  const d = new Date(date)
-  const day = d.getDay() // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day // adjust to Monday
-  d.setDate(d.getDate() + diff)
-  d.setHours(0, 0, 0, 0)
-  return d
+// Monday of the week containing "now", as a YYYY-MM-DD key in the given
+// timezone. Anchored on the tz-local today key, never browser-local Date math:
+// a browser-local Monday midnight can format to a Sunday or Tuesday key in a
+// distant profile timezone, desyncing the columns from the server's window.
+function getWeekStartKey(timezone: string): string {
+  const now = new Date()
+  const todayKey = getLocalDateKey(now, timezone)
+  const weekday = utcInstantToTzParts(now, timezone).weekday // 0=Sun
+  return addDaysToDateKey(todayKey, weekday === 0 ? -6 : 1 - weekday)
 }
 
 // Format a date as "Mon 7 Apr" in the student's timezone
@@ -875,7 +876,9 @@ function StepDateTime({
 }) {
   const slotsNeeded = durationMinutes / 30
 
-  const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()))
+  // Monday of the visible week as a YYYY-MM-DD key in the STUDENT timezone —
+  // the exact frame the server windows and buckets by (NEW317).
+  const [weekStartKey, setWeekStartKey] = useState<string>(() => getWeekStartKey(studentTimezone))
   const [slots, setSlots] = useState<Record<string, Slot[]>>({}) // keyed by YYYY-MM-DD
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -919,9 +922,9 @@ function StepDateTime({
     setError(null)
 
     const controller = new AbortController()
-    // weekStart is browser-local Monday midnight; format it in the STUDENT tz (not UTC) so the server's 7-day window matches the client's Mon–Sun columns. Formatting in UTC rolls positive-offset browsers back to Sunday and blanks the Sunday column.
-    const weekStartStr = getLocalDateKey(weekStart, studentTimezone)
-    const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartStr}&timezone=${encodeURIComponent(studentTimezone)}`
+    // weekStartKey is already a student-tz Monday key — the exact frame the
+    // server windows and buckets by (NEW317), so it goes on the wire as is.
+    const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}`
 
     // Immediate first attempt, then up to two retries with short back-off.
     const RETRY_DELAYS = [400, 800]
@@ -984,14 +987,16 @@ function StepDateTime({
     void load()
 
     return () => controller.abort()
-  }, [teacherId, weekStart, studentTimezone])
+  }, [teacherId, weekStartKey, studentTimezone])
 
-  // Build the 7 days of this week to display
+  // The 7 column dates: pure calendar arithmetic on weekStartKey — the same
+  // frame the server buckets by. Each column's Date is anchored at NOON
+  // student-local time purely for the Intl labels (all pinned to
+  // studentTimezone): noon sidesteps DST-shifted midnights, and
+  // getLocalDateKey(day, studentTimezone) round-trips to the column's key.
   const weekDays: Date[] = []
   for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart)
-    d.setDate(d.getDate() + i)
-    weekDays.push(d)
+    weekDays.push(new Date(localToUtc(addDaysToDateKey(weekStartKey, i) + 'T12:00', studentTimezone)))
   }
 
   // Check if a slot at index `slotIndex` within a day can be the start of a booking.
@@ -1015,13 +1020,15 @@ function StepDateTime({
   // slots" count can never disagree with the chips rendered for it. A day can be
   // picked iff it isn't past and a booking of the chosen duration can start
   // somewhere in it (isBookableStart, reused verbatim).
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
+  // Past-day prune in the STUDENT's frame: browser-local midnight can sit on a
+  // different calendar day, so compare YYYY-MM-DD keys (safe as strings).
+  const todayKey = getLocalDateKey(new Date(), studentTimezone)
   const startsByDay: Record<string, Slot[]> = {}
   for (const day of weekDays) {
     const dateKey = getLocalDateKey(day, studentTimezone)
     const daySlots = slots[dateKey] ?? []
     startsByDay[dateKey] =
-      day >= todayStart ? daySlots.filter((_, i) => isBookableStart(daySlots, i)) : []
+      dateKey >= todayKey ? daySlots.filter((_, i) => isBookableStart(daySlots, i)) : []
   }
   const selectableDayKeys = weekDays
     .map((day) => getLocalDateKey(day, studentTimezone))
@@ -1087,10 +1094,9 @@ function StepDateTime({
   // start is the earliest. Null when the whole visible week has none.
   //
   // weekdayLabel is taken from the day COLUMN (the same weekDays Date the strip
-  // and panel headers format), not the slot instant, so the hint always names the
-  // day it actually selects. These can differ when the route buckets a slot whose
-  // true student-local date falls on the adjacent day (large teacher/student tz
-  // offsets); the time still comes from the real instant below.
+  // and panel headers format). Since NEW317 the route buckets each slot by the
+  // student-local date of its own start instant, so the column day and the slot
+  // instant's day always agree; the time still comes from the real instant below.
   let earliest: { dateKey: string; startIso: string; weekdayLabel: string } | null = null
   for (const day of weekDays) {
     const dateKey = getLocalDateKey(day, studentTimezone)
@@ -1107,31 +1113,26 @@ function StepDateTime({
 
   const goBack = () => {
     cancelPendingAdvance() // browsing weeks is navigation, never a confirm
-    const prev = new Date(weekStart)
-    prev.setDate(prev.getDate() - 7)
-    // Don't allow going before current week
-    if (prev >= getWeekStart(new Date())) setWeekStart(prev)
-    else setWeekStart(getWeekStart(new Date()))
+    const prev = addDaysToDateKey(weekStartKey, -7)
+    const currentWeekKey = getWeekStartKey(studentTimezone)
+    // Don't allow going before the current week (YYYY-MM-DD compares as a string)
+    setWeekStartKey(prev >= currentWeekKey ? prev : currentWeekKey)
   }
 
   const goForward = () => {
     cancelPendingAdvance() // browsing weeks is navigation, never a confirm
-    const next = new Date(weekStart)
-    next.setDate(next.getDate() + 7)
-    setWeekStart(next)
+    setWeekStartKey(addDaysToDateKey(weekStartKey, 7))
   }
 
-  const isPrevDisabled = weekStart <= getWeekStart(new Date())
+  const isPrevDisabled = weekStartKey <= getWeekStartKey(studentTimezone)
   // The "Earliest available" hint only makes sense on the week that actually
   // contains today; on a future week the first open slot is not the soonest
-  // bookable time. Compare Monday-midnight instants via getTime(), never Date
-  // identity. Uses the existing getWeekStart helper + the existing new Date() ref.
-  const isCurrentWeek = weekStart.getTime() === getWeekStart(new Date()).getTime()
+  // bookable time. Monday keys are plain YYYY-MM-DD strings, so equality is safe.
+  const isCurrentWeek = weekStartKey === getWeekStartKey(studentTimezone)
 
-  // Week label e.g. "31 Mar – 6 Apr 2026"
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 6)
-  const weekLabel = `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(weekStart)} – ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(weekEnd)}`
+  // Week label e.g. "31 Mar – 6 Apr 2026" — formatted off the noon-anchored
+  // column Dates, pinned to the student tz like every other label in this step.
+  const weekLabel = `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone }).format(weekDays[0])} – ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone }).format(weekDays[6])}`
 
   return (
     <div>
