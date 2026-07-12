@@ -121,6 +121,9 @@ export default function RightPanel({
     ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
     : null
   const classEnded = classEndTime ? Date.now() > classEndTime : false
+  const remainingSeconds = classEndTime != null
+    ? Math.max(0, Math.floor((classEndTime - now) / 1000))
+    : 0
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
   return (
@@ -142,7 +145,9 @@ export default function RightPanel({
               {mounted && secondsUntil !== null && classEnded ? (
                 <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class has ended</p>
               ) : mounted && secondsUntil !== null && secondsUntil <= 0 ? (
-                <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class is starting now</p>
+                <p className="text-sm font-semibold leading-snug mb-1" style={{ color: '#FF8303' }}>
+                  In class — {formatCountdown(remainingSeconds)} remaining
+                </p>
               ) : (
                 <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums', lineHeight: '1.2', marginBottom: '4px' }}>
                   {mounted && secondsUntil !== null ? formatCountdown(secondsUntil) : '--:--:--'}
