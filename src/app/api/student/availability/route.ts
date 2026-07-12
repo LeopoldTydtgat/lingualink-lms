@@ -95,16 +95,18 @@ export async function GET(req: NextRequest) {
     .select('type, day_of_week, start_time, end_time, start_at, end_at, is_available')
     .eq('teacher_id', teacherId)
 
-  // Already booked lessons overlapping this week's instant window. The lower
-  // bound is widened by the longest lesson duration so a lesson that starts
-  // just before the window still blocks the slots it overlaps inside it.
+  // Already booked lessons overlapping this week's instant window. BOTH bounds
+  // are widened by the longest lesson duration: a lesson starting just before
+  // the window still blocks the slots it overlaps inside it, and a lesson
+  // starting at/after windowEndMs still blocks the NEW324 extended slots
+  // (up to 60 min past the window end) it overlaps.
   const { data: bookedLessons } = await admin
     .from('lessons')
     .select('scheduled_at, duration_minutes')
     .eq('teacher_id', teacherId)
     .eq('status', 'scheduled')
     .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
-    .lt('scheduled_at', new Date(windowEndMs).toISOString())
+    .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())
 
   const records: AvailabilityRecord[] = availabilityData ?? []
   const booked: BookedLesson[] = bookedLessons ?? []

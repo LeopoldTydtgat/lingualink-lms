@@ -26,8 +26,9 @@ export interface Slot {
 const SLOT_MS = 30 * 60 * 1000
 
 // Longest bookable lesson (30/60/90 min). The booked-lessons fetch must widen
-// its lower bound by this much so a lesson that STARTS just before the week
-// window still blocks the slots it overlaps inside it.
+// BOTH bounds by this much: a lesson that STARTS just before the week window
+// still blocks the slots it overlaps inside it, and one starting at/after the
+// window end still blocks the NEW324 extended slots past it.
 export const MAX_LESSON_MS = 90 * 60 * 1000
 
 // ─── Week window ──────────────────────────────────────────────────────────────
@@ -76,6 +77,12 @@ export interface BuildWeekSlotsInput {
  * true instant window, and each surviving slot is keyed by the display-local
  * date of ITS OWN start instant.
  *
+ * NEW324 (engine half): candidate acceptance extends past windowEndMs by
+ * MAX_LESSON_MS - SLOT_MS (60 min), so a 60/90-min lesson starting late on
+ * the week's LAST display day has its continuation instants emitted too.
+ * Those extended slots bucket under a day-8 display key — see the bucketing
+ * note at the bottom.
+ *
  * Blocking semantics are unchanged from the previous implementation:
  * - timed is_available=false overrides block by instant overlap;
  * - holidays block whole TEACHER-local calendar dates via the stored date
@@ -90,6 +97,11 @@ export function buildWeekSlots(input: BuildWeekSlotsInput): Record<string, Slot[
   const { weekStart, displayTimezone, teacherTimezone, records, booked, nowMs, isAdmin } = input
 
   const { windowStartMs, windowEndMs, displayDateKeys } = getWeekWindow(weekStart, displayTimezone)
+
+  // NEW324: accept candidates up to 60 min past the window end — the latest
+  // in-window start is windowEndMs - SLOT_MS, and a 90-min run from there
+  // needs instants up to windowEndMs + MAX_LESSON_MS - 2*SLOT_MS.
+  const candidateEndMs = windowEndMs + MAX_LESSON_MS - SLOT_MS
 
   const generalRecords = records.filter((r) => r.type === 'general')
   // Overrides use start_at/end_at which are already stored as UTC timestamps
@@ -132,7 +144,7 @@ export function buildWeekSlots(input: BuildWeekSlotsInput): Record<string, Slot[
     for (const r of generalRecords) {
       if (r.day_of_week !== dayOfWeek || !r.start_time || !r.end_time) continue
       const startMs = localTimeToUtcMs(dateStr, r.start_time, teacherTimezone)
-      if (startMs < windowStartMs || startMs >= windowEndMs) continue
+      if (startMs < windowStartMs || startMs >= candidateEndMs) continue
       const startIso = new Date(startMs).toISOString()
       if (!candidates.has(startIso)) candidates.set(startIso, { startIso, available: true })
     }
@@ -145,10 +157,10 @@ export function buildWeekSlots(input: BuildWeekSlotsInput): Record<string, Slot[
     if (!o.is_available) continue
     const overrideStart = new Date(o.start_at!).getTime()
     const overrideEnd = new Date(o.end_at!).getTime()
-    if (overrideStart >= windowEndMs || overrideEnd <= windowStartMs) continue
+    if (overrideStart >= candidateEndMs || overrideEnd <= windowStartMs) continue
     let cursor = overrideStart
     while (cursor + SLOT_MS <= overrideEnd) {
-      if (cursor >= windowStartMs && cursor < windowEndMs) {
+      if (cursor >= windowStartMs && cursor < candidateEndMs) {
         const startIso = new Date(cursor).toISOString()
         if (!candidates.has(startIso)) candidates.set(startIso, { startIso, available: true })
       }
@@ -210,8 +222,11 @@ export function buildWeekSlots(input: BuildWeekSlotsInput): Record<string, Slot[
   const slotsByDate: Record<string, Slot[]> = {}
   for (const key of displayDateKeys) slotsByDate[key] = []
   for (const slot of slots) {
-    // The window filter guarantees the key lands inside displayDateKeys; the
-    // fallback assignment is a pure belt-and-braces guard.
+    // In-window slots key inside displayDateKeys; NEW324 extended slots
+    // (start in [windowEndMs, candidateEndMs)) legitimately key under a
+    // day-8 date via the ??= fallback. Intended: the frontend derives its
+    // columns from its own 7 dates and reads these slots only for the
+    // week-wide instant set (isBookableStart).
     const key = getLocalDateKey(new Date(slot.startIso), displayTimezone)
     ;(slotsByDate[key] ??= []).push(slot)
   }

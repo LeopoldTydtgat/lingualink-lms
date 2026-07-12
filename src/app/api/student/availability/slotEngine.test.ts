@@ -244,6 +244,100 @@ describe('buildWeekSlots — is_available=true overrides', () => {
   })
 })
 
+// ─── buildWeekSlots — NEW324 extended candidates past the week window ────────
+
+describe('buildWeekSlots — NEW324 extended slots past windowEndMs', () => {
+  // UTC/UTC week Jun 8–14: windowEnd = Jun 15 00:00Z, candidateEnd = 01:00Z.
+  // Day 7 is Sunday Jun 14 (dow 0); day 8 is Monday Jun 15 (dow 1).
+
+  it('general availability crossing week-end midnight emits the day-8 continuation slots', () => {
+    // A 90-min run starting Sun 23:00 needs 23:00, 23:30, 00:00; starting
+    // 23:30 needs up to 00:30. All four instants must be present, the day-8
+    // ones keyed under the day-8 display date.
+    const result = buildWeekSlots(makeInput({
+      records: [
+        general(0, '23:00:00'), general(0, '23:30:00'),
+        general(1, '00:00:00'), general(1, '00:30:00'),
+      ],
+    }))
+    expect(availableIsos(result['2026-06-14'])).toEqual([
+      '2026-06-14T23:00:00.000Z',
+      '2026-06-14T23:30:00.000Z',
+    ])
+    expect(availableIsos(result['2026-06-15'])).toEqual([
+      '2026-06-15T00:00:00.000Z',
+      '2026-06-15T00:30:00.000Z',
+    ])
+  })
+
+  it('is_available=true override spanning week-end midnight emits the day-8 continuation slots', () => {
+    const result = buildWeekSlots(makeInput({
+      records: [override('2026-06-14T23:00:00.000Z', '2026-06-15T01:00:00.000Z', { available: true })],
+    }))
+    expect(availableIsos(result['2026-06-14'])).toEqual([
+      '2026-06-14T23:00:00.000Z',
+      '2026-06-14T23:30:00.000Z',
+    ])
+    expect(availableIsos(result['2026-06-15'])).toEqual([
+      '2026-06-15T00:00:00.000Z',
+      '2026-06-15T00:30:00.000Z',
+    ])
+  })
+
+  it('is_available=true override lying WHOLLY past windowEndMs still emits extended slots', () => {
+    // The override-selection prefilter must widen with the cursor bound: a
+    // day-8 00:00–01:00 override supplies the continuation instants for a run
+    // whose in-window start comes from a DIFFERENT record.
+    const result = buildWeekSlots(makeInput({
+      records: [override('2026-06-15T00:00:00.000Z', '2026-06-15T01:00:00.000Z', { available: true })],
+    }))
+    expect(availableIsos(result['2026-06-15'])).toEqual([
+      '2026-06-15T00:00:00.000Z',
+      '2026-06-15T00:30:00.000Z',
+    ])
+  })
+
+  it('a booked lesson starting exactly at windowEndMs blocks the extended slots it covers', () => {
+    // Engine-level proof that the route's widened UPPER fetch bound matters:
+    // a lesson at Jun 15 00:00Z (= windowEndMs) + 60min must mark 00:00 and
+    // 00:30 unavailable, leaving the in-window Sun 23:30 slot untouched.
+    const result = buildWeekSlots(makeInput({
+      records: [general(0, '23:30:00'), general(1, '00:00:00'), general(1, '00:30:00')],
+      booked: [{ scheduled_at: '2026-06-15T00:00:00.000Z', duration_minutes: 60 }],
+    }))
+    expect(availableIsos(result['2026-06-14'])).toEqual(['2026-06-14T23:30:00.000Z'])
+    expect(result['2026-06-15']).toEqual([
+      { startIso: '2026-06-15T00:00:00.000Z', available: false },
+      { startIso: '2026-06-15T00:30:00.000Z', available: false },
+    ])
+  })
+
+  it('a holiday on the extended slot\'s teacher-local date blocks it', () => {
+    // Holiday stored with date portion 2026-06-15 blocks the day-8 slot but
+    // not the same weekly record's in-window Mon Jun 8 slot.
+    const result = buildWeekSlots(makeInput({
+      records: [
+        general(1, '00:00:00'),
+        override('2026-06-15T00:00:00.000Z', '2026-06-15T23:59:59.999Z', { type: 'holiday' }),
+      ],
+    }))
+    expect(availableIsos(result['2026-06-08'])).toEqual(['2026-06-08T00:00:00.000Z'])
+    expect(result['2026-06-15']).toEqual([
+      { startIso: '2026-06-15T00:00:00.000Z', available: false },
+    ])
+  })
+
+  it('lower bound unchanged: no slots before windowStartMs appear', () => {
+    // Sunday 23:00 also matches Sun Jun 7, the day BEFORE the window — that
+    // instant must stay excluded; only the in-window Jun 14 one survives.
+    const result = buildWeekSlots(makeInput({
+      records: [general(0, '23:00:00')],
+    }))
+    expect(result['2026-06-07']).toBeUndefined()
+    expect(availableIsos(result['2026-06-14'])).toEqual(['2026-06-14T23:00:00.000Z'])
+  })
+})
+
 // ─── buildWeekSlots — blocking semantics (unchanged from the old route) ──────
 
 describe('buildWeekSlots — blocking', () => {
