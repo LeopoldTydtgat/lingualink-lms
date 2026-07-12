@@ -1,3 +1,19 @@
+## Session 200 - 12 July 2026 - NEW327: full email overhaul
+### What was built
+- Rebuilt the shared email wrapper: orange header band with the hosted logo (Supabase public templates bucket, hardcoded URL), flat white card with 1px border, shaded footer, no border-radius anywhere outside the VML button fallback. Outlook-safe throughout (commit 1e587fe).
+- Added a shared zebra-striped details table builder (buildDetailsTable, strip heading plus alternating rows) and converted all nine content builders off the old rounded orange boxes. buildButton and buildDetailsTable exported for reuse outside templates.ts (commit 1e587fe).
+- Normalised all 23 outbound email subjects to plain ASCII 'Lingualink Online - ...', killing the mixed en-dash/em-dash mojibake. Report-overdue subject gained the brand prefix; the two homework emails unified onto the brief's wording. From header standardised to 'Lingualink Online <no-reply@lingualinkonline.com>' at every send site (commit 1e587fe).
+- Created teacherRescheduledEmailContent and wired it into both reschedule paths (student book route and admin class edit), fixing the teacher email that showed the student's name in the Teacher row. The old start time is now captured before the reschedule RPC so Previous/New time rows render (commit 1e587fe).
+- Deleted three dead local email builders and a local date formatter from the student book route; its reschedule branch now uses the shared builders (commit 1e587fe).
+- Recopied the invite email onto the shared wrapper and applied approved wording updates to the forfeited-report, cancel-by-student, teacher cancellation, low hours and training-ending-soon emails. New-student teacher email button now targets the students page with the label View Student Profile (commit 1e587fe).
+### Break/Fix Log
+- Issue 1: Teacher reschedule emails read 'Teacher: <student name>'. Cause: the teacher notification reused the student-worded builder, stamping the student's name into the Teacher row. Fix: dedicated teacher-worded builder used on both reschedule paths. Lesson: never reuse a recipient-specific template for a different recipient; the field labels silently lie.
+- Issue 2: Plan was to deep-link the new-student email button to the student's detail page, but the teacher detail route is gated on an existing class history, so a freshly assigned student would guarantee a 404 for the exact teacher receiving the email. Fix: button targets the students list instead. Lesson: check a route's access gate before deep-linking to it from an email.
+- Issue 3: After the main pass, the new-student teacher email still carried the old rounded table and a hand-rolled button. Cause: its body lives inline in the route, not in templates.ts, so the builder conversion missed it. Fix: follow-up pass converted it to the shared helpers. Lesson: inline email bodies in routes escape template-wide changes; grep for the old styling after any wrapper change.
+### Session result
+All 23 outbound emails now share one Outlook-safe branded design with consistent subjects and sender, the mislabeled teacher reschedule email is fixed, and dead email code is gone from the book route. Full-diff code review returned SHIP WITH NITS, the suite is green at 187/187 with tsc and eslint clean, and the booking email pair was browser-verified in the inbox. Committed as 1e587fe and pushed; the manual 23-email go-live sweep (NEW328) is unblocked.
+---
+
 ## Session 199 - 12 July 2026 - NEW324 engine half: slot engine extends past the week window
 
 ### What was built
