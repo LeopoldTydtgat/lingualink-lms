@@ -1,3 +1,77 @@
+## Sessions 196-198 - 12 July 2026 - Cross-midnight booking fixes, offset math correction, bounce webhook
+
+### What was built
+- NEW325 (commit 4414a3b): booking gate rewrite in isSlotAvailable.
+  General slots now built for every teacher-local date the booking
+  window touches; whole-day holiday blocking replaced with per-slot
+  blocking by each slot's own teacher-local start date, matching the
+  slot engine exactly. 92 insertions across availability.ts and its
+  tests.
+- NEW326 (commit 93b7383): localTimeToUtcMs now derives the timezone
+  offset from the full local datetime via a formatToParts probe
+  instead of diffing wall-clock hour and minute. Fixes a full day
+  shift for all zones at or beyond +/-12h (Auckland, Chatham, +14,
+  -12) across the booking gate, slot engine grid, and DayToDay
+  calendar. 95 insertions.
+- NEW311 (commit 463b8c3): Resend bounce webhook at
+  /api/webhooks/resend with SDK signature verification,
+  permanent-bounce-only flagging, and an out-of-order delivered-event
+  guard. New email_bounced_at and email_bounce_reason columns on
+  profiles and students (DDL applied live, migration file saved). Red
+  undeliverable badge on admin teacher and student list and detail
+  views. Route added to proxy public API paths. 601 insertions
+  including 311 lines of webhook tests.
+- NEW324 frontend half (commit 9ad9d04): isBookableStart extracted
+  from BookingClient into src/lib/bookingGrid.ts as pure instant math
+  against a week-wide set of available slot start instants. 60 and 90
+  minute runs crossing the student's local midnight are now offered as
+  bookable starts. 113 insertions.
+
+### Break/Fix Log
+Issue 1: Booking gate rejected legitimate cross-midnight bookings and
+accepted bookings running into holidays.
+Cause: Gate keyed general slots and holiday blocking off the request
+start's teacher-local date only, so a 60/90 minute window touching a
+second date was judged on the wrong day.
+Fix: Build slots for every teacher-local date the window touches;
+block holidays per slot by that slot's own local date (NEW325).
+Lesson: Any logic keyed on "the date of the booking" is wrong the
+moment a booking can span two dates. Key on each instant's own date.
+
+Issue 2: All timezones at or beyond +/-12h resolved local times a full
+day off.
+Cause: Offset probe diffed local hour:minute only; +/-720 minutes is
+ambiguous because +12h and -12h share a wall clock, and the wrap clamp
+tie-broke it wrong.
+Fix: Derive the offset from the full local datetime in one
+formatToParts probe; clamp deleted (NEW326).
+Lesson: Wall-clock arithmetic cannot distinguish offsets that mirror
+each other. Always resolve offsets from a complete datetime.
+
+Issue 3: Booking grid never offered 60/90 minute starts near the
+student's midnight.
+Cause: Since NEW317, slots are bucketed by the student-local date of
+their own start instant, so a run crossing midnight has its
+continuation slots in the next day's column; the adjacency check
+walked only within one column.
+Fix: Week-wide set of available start instants; adjacency checked as
+pure instant math, column-agnostic (NEW324, frontend half).
+Lesson: Display grouping and availability math must never share a data
+structure. Columns are presentation; adjacency is instants.
+
+### Session result
+Three sessions closed four items: the booking gate and the shared
+offset function now handle cross-midnight and extreme-offset cases
+correctly with the gate mirroring slot engine semantics, bounced
+emails are detected automatically and surfaced to the admin, and the
+booking grid offers cross-midnight lesson starts. Test suite grew from
+120 to 181, all green, with code-reviewer and rls-auditor passes on
+the gated changes. Remaining on NEW324: the slot engine window filter
+still cuts continuation slots at the week boundary, queued for the
+next session.
+
+---
+
 ## Session 195 - 12 July 2026 - Student booking grid: per-slot timezone bucketing (NEW317)
 
 ### What was built
