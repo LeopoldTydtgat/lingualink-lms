@@ -21,7 +21,11 @@ export async function DELETE(
     .eq('id', id)
     .maybeSingle()
 
-  if (fetchError || !record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (fetchError) {
+    console.error('[DELETE /api/teacher/availability/[id]] fetch', fetchError)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
+  if (!record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   if (record.teacher_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

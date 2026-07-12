@@ -373,7 +373,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // startStr/endStr are UTC ISO instants; the end bound is EXCLUSIVE (lt) so
   // adjacent windows never double-count a boundary class. The export path
   // passes no endStr and is unaffected.
-  async function fetchClassesInRange(startStr: string, endStr?: string): Promise<ClassEvent[]> {
+  async function fetchClassesInRange(startStr: string, endStr?: string): Promise<ClassEvent[] | null> {
     let query = supabase
       .from('lessons')
       .select(`id, scheduled_at, duration_minutes, students ( full_name )`)
@@ -381,8 +381,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       .gte('scheduled_at', startStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
     if (endStr !== undefined) query = query.lt('scheduled_at', endStr)
-    const { data } = await query
+    const { data, error } = await query
 
+    if (error) {
+      console.error('[DayToDay fetchClassesInRange]', error)
+      return null
+    }
     if (!data) return []
     return data.map((c: any) => {
       const student = Array.isArray(c.students) ? c.students[0] : c.students
@@ -397,7 +401,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
   async function fetchClassesForRange(startStr: string, endStr: string) {
     const data = await fetchClassesInRange(startStr, endStr)
-    setClasses(data)
+    // null = query error: keep the previous week's state rather than blanking
+    // the view on a transient failure.
+    if (data !== null) setClasses(data)
   }
 
   // Refetch classes when the visible week changes.
@@ -577,7 +583,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     const startStr = new Date(localTimeToUtcMs(toLocalDateStr(gridStart), '00:00', displayTz)).toISOString()
     const endStr = new Date(localTimeToUtcMs(toLocalDateStr(addDays(gridStart, days.length)), '00:00', displayTz)).toISOString()
     let cancelled = false
-    fetchClassesInRange(startStr, endStr).then(data => { if (!cancelled) setMonthClasses(data) })
+    fetchClassesInRange(startStr, endStr).then(data => { if (!cancelled && data !== null) setMonthClasses(data) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, monthGrid, displayTz])
@@ -684,51 +690,71 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
   async function confirmDelete() {
     if (!pendingDelete) return
-    const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
-    if (res.ok) {
-      onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
-    } else {
-      const body = await res.json().catch(() => ({}))
-      setActionError(body.error ?? 'Failed to remove block. Please try again.')
+    const id = pendingDelete
+    try {
+      const res = await fetch(`/api/teacher/availability/${id}`, { method: 'DELETE' })
+      if (res.ok || res.status === 404) {
+        // 404 = already gone server-side; removing locally is the correct end state.
+        // Functional update: a save landing while this request was in flight must
+        // not be resurrected by a stale closure over `availability` — same bug
+        // shape as the add path above.
+        onAvailabilityChange(prev => prev.filter(a => a.id !== id))
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setActionError(body.error ?? 'Failed to remove block. Please try again.')
+      }
+    } catch {
+      setActionError('Failed to remove block. Please try again.')
+    } finally {
+      setPendingDelete(null)
     }
-    setPendingDelete(null)
   }
 
   async function exportClassesToCalendar() {
-    const nowIso = new Date().toISOString()
-    const upcoming = await fetchClassesInRange(nowIso)
-    if (upcoming.length === 0) {
-      setExportMsg('No upcoming classes to export')
+    try {
+      const nowIso = new Date().toISOString()
+      const upcoming = await fetchClassesInRange(nowIso)
+      if (upcoming === null) {
+        setExportMsg('Could not load classes — please try again')
+        setTimeout(() => setExportMsg(''), 3000)
+        return
+      }
+      if (upcoming.length === 0) {
+        setExportMsg('No upcoming classes to export')
+        setTimeout(() => setExportMsg(''), 3000)
+        return
+      }
+      const stamp = toIcsDate(new Date().toISOString())
+      const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//LinguaLink Online//Teacher Portal//EN',
+      ]
+      upcoming.forEach(c => {
+        const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString()
+        lines.push(
+          'BEGIN:VEVENT',
+          `UID:${c.id}@lingualinkonline.com`,
+          `DTSTAMP:${stamp}`,
+          `DTSTART:${toIcsDate(c.scheduled_at)}`,
+          `DTEND:${toIcsDate(endsAt)}`,
+          `SUMMARY:${escapeIcsText(c.student_name)}`,
+          `DESCRIPTION:${escapeIcsText(`Class with ${c.student_name}`)}`,
+          'END:VEVENT',
+        )
+      })
+      lines.push('END:VCALENDAR')
+      const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `lingualink-classes-${toLocalDateStr(new Date())}.ics`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setExportMsg('Could not load classes — please try again')
       setTimeout(() => setExportMsg(''), 3000)
-      return
     }
-    const stamp = toIcsDate(new Date().toISOString())
-    const lines = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//LinguaLink Online//Teacher Portal//EN',
-    ]
-    upcoming.forEach(c => {
-      const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString()
-      lines.push(
-        'BEGIN:VEVENT',
-        `UID:${c.id}@lingualinkonline.com`,
-        `DTSTAMP:${stamp}`,
-        `DTSTART:${toIcsDate(c.scheduled_at)}`,
-        `DTEND:${toIcsDate(endsAt)}`,
-        `SUMMARY:${escapeIcsText(c.student_name)}`,
-        `DESCRIPTION:${escapeIcsText(`Class with ${c.student_name}`)}`,
-        'END:VEVENT',
-      )
-    })
-    lines.push('END:VCALENDAR')
-    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `lingualink-classes-${toLocalDateStr(new Date())}.ics`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   const dragPreview = useMemo(() => {
