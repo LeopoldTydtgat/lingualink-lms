@@ -1,3 +1,22 @@
+## Session 199 - 12 July 2026 - NEW324 engine half: slot engine extends past the week window
+
+### What was built
+- Widened slot engine candidate acceptance 60 minutes past the week window (candidateEndMs = windowEndMs + MAX_LESSON_MS - SLOT_MS) so continuation slots for 60/90-minute lessons starting late on the last displayed day are emitted. Applied in the general availability loop, the override cursor loop, and the override selection prefilter (commit 41fbb1e).
+- Widened the booked-lessons fetch upper bound in the availability route to windowEndMs + MAX_LESSON_MS so a lesson starting at or after the week end still blocks the extended slots it overlaps (commit 41fbb1e).
+- Added 6 unit tests: general availability crossing week-end midnight, an override spanning it, an override lying wholly past the window, a booked lesson starting exactly at the window end blocking extended slots, a holiday blocking an extended slot, and the lower bound staying unchanged. Suite 187/187, tsc clean, code-reviewer SHIP (commit 41fbb1e).
+
+### Break/Fix Log
+Issue 1: 90-minute bookings starting 23:00 or 23:30 on the last day of the visible week were never offered.
+Symptom: the last day column showed no late-evening start chips even when the teacher was available across midnight.
+Cause: the slot engine filtered all candidate slots to the strict week window, so the next-day continuation instants were absent from the API response entirely; the frontend's week-wide instant check could never assemble the run.
+Fix: candidate acceptance extended 60 minutes past the window end in all three candidate paths, with the booked-lessons fetch bound widened to match so extended slots are still blocked by real lessons.
+Lesson: the initial fix sketch covered the two candidate loops but missed the override selection prefilter - an add-override lying wholly past the window end would have been discarded before its cursor loop ever ran. The implementation pass caught it and a test pins it. Sketches guide; the code decides.
+
+### Session result
+The NEW324 cross-midnight booking defect is fully closed across both halves. The engine now emits continuation instants past the week window, real lessons beyond the window still block them, and browser verification confirmed 90-minute Sunday 23:00 and 23:30 starts are offered with correct spans into Monday. A matching admin-side gap was found and logged as NEW330 for a later Sonnet pass.
+
+---
+
 ## Sessions 196-198 - 12 July 2026 - Cross-midnight booking fixes, offset math correction, bounce webhook
 
 ### What was built
