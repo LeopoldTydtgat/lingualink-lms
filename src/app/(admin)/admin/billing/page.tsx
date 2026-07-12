@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import BillingAdminClient from './BillingAdminClient'
 import { recomputeInvoiceAmountsForAllTeachers } from '@/lib/billing/recomputeAmounts'
+import { getExportTimezone } from '@/lib/exportTime'
 
 export default async function AdminBillingPage() {
   const supabase = await createClient()
@@ -27,5 +28,10 @@ export default async function AdminBillingPage() {
   // always matches the recomputed-from-lessons figure shown in expanded detail.
   await recomputeInvoiceAmountsForAllTeachers()
 
-  return <BillingAdminClient adminId={profile.id} />
+  // Settings-driven export timezone, resolved server-side and threaded to the
+  // client so its Student Billing CSV export renders instants in the same zone
+  // as the server-route exports. getExportTimezone is server-only.
+  const exportTz = await getExportTimezone()
+
+  return <BillingAdminClient adminId={profile.id} exportTz={exportTz} />
 }

@@ -6,10 +6,13 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
-import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X } from 'lucide-react'
+import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X, Paperclip } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { toast } from 'sonner'
+import { getSupportParticipant } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -27,6 +30,7 @@ interface SupportMessage {
   id: string
   sender_role: 'user' | 'admin'
   content: string
+  attachments: Array<{ url: string; filename: string; size: number }>
   created_at: string
   read_at: string | null
 }
@@ -57,10 +61,8 @@ function formatTime(dateStr: string) {
   return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
 }
 
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
 function Avatar({ name, photoUrl, size = 9 }: { name: string; photoUrl?: string | null; size?: number }) {
@@ -87,6 +89,8 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [messagesLoaded, setMessagesLoaded] = useState(false)
   const [sending, setSending] = useState(false)
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{ url: string; filename: string; size: number }>>([])
+  const [uploading, setUploading] = useState(false)
   const [faqs, setFaqs] = useState<Faq[]>(initialFaqs)
   const [newQuestion, setNewQuestion] = useState('')
   const [newAnswer, setNewAnswer] = useState('')
@@ -102,6 +106,20 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const emojiButtonRef = useRef<HTMLButtonElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
+  // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
+  // NEW303: mirrors selectedConv so the component-lifetime list subscription (which must NOT
+  // resubscribe on every selection change) can read the currently-open conversation without
+  // being keyed to it. Kept in sync by the tiny effect below.
+  const selectedConvRef = useRef<Conversation | null>(null)
+  useEffect(() => { selectedConvRef.current = selectedConv }, [selectedConv])
+  // NEW303: mirrors the conversation list so the same lifetime subscription can tell a
+  // first-time sender (no row yet → look up name/photo) from an existing conversation
+  // (update in place) without a stale closure or resubscribing.
+  const conversationsRef = useRef<Conversation[]>(initialConversations)
+  useEffect(() => { conversationsRef.current = conversations }, [conversations])
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -114,17 +132,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     onTransaction: () => forceUpdate(n => n + 1),
   })
 
-  const loadMessages = useCallback(async (conv: Conversation) => {
-    setMessagesLoaded(false)
-    const { data } = await supabase
-      .from('support_messages')
-      .select('id, sender_role, content, created_at, read_at')
-      .eq('participant_auth_id', conv.participantAuthId)
-      .order('created_at', { ascending: true })
-    setMessages((data as SupportMessage[]) || [])
-    setMessagesLoaded(true)
-
-    // Mark all unread user messages as read now that Shannon has opened this conversation
+  // NEW300: mark all inbound user messages read for this conversation. Reusable so it fires
+  // both on load and when a user message arrives live (previously reads only happened inside
+  // loadMessages, so a live-arriving message never flipped the admin's tick — no UPDATE fired).
+  const markUserMessagesRead = useCallback(async (conv: Conversation) => {
     await supabase
       .from('support_messages')
       .update({ read_at: new Date().toISOString() })
@@ -137,6 +148,20 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       prev.map(c => c.participantId === conv.participantId ? { ...c, unreadCount: 0 } : c)
     )
   }, [supabase])
+
+  const loadMessages = useCallback(async (conv: Conversation) => {
+    setMessagesLoaded(false)
+    const { data } = await supabase
+      .from('support_messages')
+      .select('id, sender_role, content, attachments, created_at, read_at')
+      .eq('participant_auth_id', conv.participantAuthId)
+      .order('created_at', { ascending: true })
+    setMessages((data as SupportMessage[]) || [])
+    setMessagesLoaded(true)
+
+    // Mark all unread user messages as read now that Shannon has opened this conversation
+    await markUserMessagesRead(conv)
+  }, [supabase, markUserMessagesRead])
 
   useEffect(() => {
     if (selectedConv) loadMessages(selectedConv)
@@ -169,6 +194,11 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       }, (payload) => {
         const msg = payload.new as SupportMessage
         setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+        // NEW300: a user message arriving live in the open conversation must be marked read so
+        // its tick flips for the user. The subscription filter already scopes this to selectedConv.
+        if (msg.sender_role === 'user') {
+          markUserMessagesRead(selectedConv)
+        }
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -177,23 +207,140 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
       }, (payload) => {
         const updated = payload.new as SupportMessage
-        setMessages(prev =>
-          prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-        )
+        // Buffer the read_at first (NEW300) so a temp→real swap in handleSend can carry it over
+        // instead of losing it, then flip the tick live.
+        if (updated.read_at) {
+          pendingReadsRef.current.set(updated.id, updated.read_at)
+          setMessages(prev =>
+            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+          )
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [selectedConv, supabase])
+  }, [selectedConv, supabase, markUserMessagesRead])
+
+  // NEW303: component-lifetime subscription that keeps the conversation LIST live for every
+  // thread, not just the open one. It listens to unfiltered INSERTs on support_messages and
+  // reads the current selection via selectedConvRef, so it never resubscribes on selection
+  // change. The open-conversation channel above is left untouched (it drives the thread view
+  // and read receipts); this one only maintains the list preview / ordering / unread badges.
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-support-list')
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'support_messages',
+      }, async (payload) => {
+        const msg = payload.new as {
+          participant_id: string
+          participant_type: 'teacher' | 'student'
+          participant_auth_id: string
+          sender_role: 'user' | 'admin'
+          content: string
+          created_at: string
+        }
+        const isOpen = selectedConvRef.current?.participantId === msg.participant_id
+        const latestMessage = { content: msg.content, created_at: msg.created_at, sender_role: msg.sender_role }
+
+        if (conversationsRef.current.some(c => c.participantId === msg.participant_id)) {
+          // Existing conversation: refresh its preview + unread, then float it to the top
+          // (the incoming message is the newest, so move-to-top == re-sort by created_at desc).
+          // A user message bumps unread only when the thread isn't currently open — the open
+          // thread is marked read live by the open-conversation subscription; admin's own
+          // sends never count as unread.
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.participantId === msg.participant_id)
+            if (idx === -1) return prev
+            const bump = msg.sender_role === 'user' && !isOpen
+            const updated: Conversation = {
+              ...prev[idx],
+              latestMessage,
+              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+            }
+            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+          })
+          return
+        }
+
+        // First-time sender: no conversation row exists yet, so resolve the participant's
+        // name/photo server-side, then prepend. A second message for the SAME brand-new
+        // participant can race this await (both handlers saw no row before either committed),
+        // so re-check inside the updater: if a row now exists, MERGE into it (refresh preview,
+        // bump unread, move to top — same logic as the existing-conversation branch) rather
+        // than returning prev unchanged, which would silently drop this message's unread/preview.
+        const result = await getSupportParticipant(msg.participant_id, msg.participant_type)
+        if ('error' in result) return
+        setConversations(prev => {
+          const idx = prev.findIndex(c => c.participantId === msg.participant_id)
+          if (idx !== -1) {
+            const bump = msg.sender_role === 'user' && !isOpen
+            const updated: Conversation = {
+              ...prev[idx],
+              latestMessage,
+              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+            }
+            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+          }
+          const newConv: Conversation = {
+            participantId: msg.participant_id,
+            participantType: msg.participant_type,
+            participantAuthId: msg.participant_auth_id,
+            participantName: result.name,
+            participantPhotoUrl: result.photoUrl,
+            latestMessage,
+            unreadCount: msg.sender_role === 'user' ? 1 : 0,
+          }
+          return [newConv, ...prev]
+        })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File must be under 10MB.', { duration: 6000 })
+      e.target.value = ''
+      return
+    }
+
+    setUploading(true)
+    const form = new FormData()
+    form.append('file', file)
+
+    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+    const json = await res.json()
+
+    if (!res.ok) {
+      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
+    } else {
+      setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+    }
+
+    setUploading(false)
+    e.target.value = ''
+  }
 
   const handleSend = async () => {
     if (!editor || !selectedConv || sending) return
     const html = editor.getHTML()
-    if (!html || html === '<p></p>') return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    const attachmentsToSend = pendingAttachments
+    // Attachment-only send: store clean '' rather than '<p></p>'.
+    const contentToSend = isEmpty ? '' : html
     editor.commands.clearContent()
+    setPendingAttachments([])
     setSending(true)
 
     const tempId = crypto.randomUUID()
-    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: html, created_at: new Date().toISOString(), read_at: null }])
+    setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: contentToSend, attachments: attachmentsToSend, created_at: new Date().toISOString(), read_at: null }])
 
     const res = await fetch('/api/support/send', {
       method: 'POST',
@@ -202,18 +349,32 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         participantId: selectedConv.participantId,
         participantType: selectedConv.participantType,
         participantAuthId: selectedConv.participantAuthId,
-        content: html,
+        content: contentToSend,
+        attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
       }),
     })
 
     if (!res.ok) {
+      // Restore the pending attachments so a failed send doesn't silently discard the
+      // already-uploaded file, and surface an error instead of failing quietly.
       setMessages(prev => prev.filter(m => m.id !== tempId))
+      setPendingAttachments(attachmentsToSend)
+      toast.error('Message failed to send. Please try again.', { duration: 6000 })
     } else {
       // Replace temp message with real DB message so read_at updates work
       const json = await res.json()
       if (json.message) {
+        // NEW300: if the user already read this reply before the real row landed, the Realtime
+        // UPDATE buffered its read_at here — carry it over instead of hardcoding null (which
+        // stomped the read tick). Otherwise honour the DB row's own read_at.
+        const real = json.message as SupportMessage
+        const bufferedRead = pendingReadsRef.current.get(real.id)
+        if (bufferedRead) {
+          real.read_at = bufferedRead
+          pendingReadsRef.current.delete(real.id)
+        }
         setMessages(prev =>
-          prev.map(m => m.id === tempId ? { ...json.message, read_at: null } : m)
+          prev.map(m => m.id === tempId ? real : m)
         )
       }
     }
@@ -280,9 +441,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
           className="pb-3 text-sm font-medium transition-colors"
           style={tabStyle('conversations')}
         >
-          Conversations {initialConversations.some(c => c.unreadCount > 0) && (
+          Conversations {conversations.some(c => c.unreadCount > 0) && (
             <span className="ml-1.5 px-1.5 py-0.5 rounded-full text-xs text-white" style={{ backgroundColor: '#FF8303' }}>
-              {initialConversations.reduce((acc, c) => acc + c.unreadCount, 0)}
+              {conversations.reduce((acc, c) => acc + c.unreadCount, 0)}
             </span>
           )}
         </button>
@@ -300,7 +461,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         <div className="flex gap-4" style={{ height: '600px' }}>
           {/* Conversation list */}
           <div className="w-72 flex-shrink-0 border border-gray-200 rounded-lg overflow-y-auto bg-white thin-scroll">
-            {initialConversations.length === 0 ? (
+            {conversations.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
                 <MessageSquare size={32} className="text-gray-200 mb-3" />
                 <p className="text-sm text-gray-500">No support messages yet</p>
@@ -322,7 +483,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                         {conv.participantType}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-400 truncate mt-0.5">{conv.latestMessage.content}</p>
+                    <p className="text-xs text-gray-400 truncate mt-0.5">{stripHtml(conv.latestMessage.content)}</p>
                   </div>
                   {conv.unreadCount > 0 && (
                     <span className="w-5 h-5 rounded-full text-white text-xs flex items-center justify-center flex-shrink-0"
@@ -352,27 +513,46 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
+                <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
                   {!messagesLoaded ? (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-xs text-gray-400">Loading...</p>
                     </div>
                   ) : messages.map(msg => {
                     const isAdmin = msg.sender_role === 'admin'
+                    const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                     return (
                       <div key={msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'} items-end gap-2`}>
                         {!isAdmin && <Avatar name={selectedConv.participantName} photoUrl={selectedConv.participantPhotoUrl} size={7} />}
                         <div className="max-w-[75%]">
+                          {hasContent && (
                           <div
                             className="admin-support-bubble px-3 py-2 rounded-2xl text-sm"
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isAdmin
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
+                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className={`flex flex-col gap-0.5 ${hasContent ? 'mt-1' : ''} ${isAdmin ? 'items-end' : 'items-start'}`}>
+                              {msg.attachments.map((att, i) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs underline max-w-full"
+                                  style={{ color: '#4b5563' }}
+                                >
+                                  <span className="truncate">📎 {att.filename}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className={`flex items-center gap-1 mt-0.5 ${isAdmin ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isAdmin && (
@@ -439,7 +619,39 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                         </div>
                       )}
                     </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      title="Attach file"
+                      aria-label="Attach file"
+                      className="px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                    >
+                      <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
+                    </button>
                   </div>
+                  {pendingAttachments.length > 0 && (
+                    <div className="px-3 pb-1 flex flex-col gap-1">
+                      {pendingAttachments.map((att, i) => (
+                        <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-600">
+                          <span className="truncate max-w-[240px]">📎 {att.filename}</span>
+                          <button
+                            onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                            className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                            aria-label="Remove attachment"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 px-3 pb-3">
                     <div
                       className="admin-support-composer flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus-within:border-orange-400 bg-gray-50 min-h-[36px] max-h-[80px] overflow-y-auto cursor-text transition-colors"

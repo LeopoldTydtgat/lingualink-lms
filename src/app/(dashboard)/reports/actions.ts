@@ -13,11 +13,31 @@ export async function reopenReport(reportId: string) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, account_types')
     .eq('id', user.id)
     .single()
 
-  if (profile?.role !== 'admin') return { error: 'Not authorised' }
+  // Mirror the admin route's exact admin check
+  // (src/app/api/admin/reports/[id]/route.ts):
+  //   role === 'admin' || account_types includes 'school_admin'
+  const isAdmin =
+    profile?.role === 'admin' ||
+    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
+
+  if (!isAdmin) return { error: 'Not authorised' }
+
+  // Only flagged reports may be reopened — matches the admin route's guard so
+  // both admin reopen paths behave identically (NEW270).
+  const { data: existing } = await supabase
+    .from('reports')
+    .select('id, status')
+    .eq('id', reportId)
+    .single()
+
+  if (!existing) return { error: 'Report not found' }
+  if (existing.status !== 'flagged') {
+    return { error: 'Only flagged reports can be reopened' }
+  }
 
   const { error } = await supabase
     .from('reports')

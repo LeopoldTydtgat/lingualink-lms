@@ -71,7 +71,7 @@ export async function GET(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
-        subject: 'Lingualink Online — Your class is in less than 24 hours',
+        subject: 'Lingualink Online - Your class is in less than 24 hours',
         html: buildEmailTemplate({
           recipientName: student.full_name,
           recipientFallback: 'Student',
@@ -92,7 +92,7 @@ export async function GET(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
-        subject: 'Lingualink Online — Your next class is in less than 24 hours',
+        subject: 'Lingualink Online - Your next class is in less than 24 hours',
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
           recipientFallback: 'Teacher',
@@ -166,7 +166,7 @@ export async function GET(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
-        subject: 'Lingualink Online — Your class is in less than one hour',
+        subject: 'Lingualink Online - Your class is in less than one hour',
         html: buildEmailTemplate({
           recipientName: student.full_name,
           recipientFallback: 'Student',
@@ -187,7 +187,7 @@ export async function GET(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
-        subject: 'Lingualink Online — Your next class is in less than one hour',
+        subject: 'Lingualink Online - Your next class is in less than one hour',
         html: buildEmailTemplate({
           recipientName: teacher.full_name,
           recipientFallback: 'Teacher',

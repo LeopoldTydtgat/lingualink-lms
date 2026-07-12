@@ -11,6 +11,7 @@ import data from '@emoji-mart/data'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { sendMessage, markMessagesAsRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -79,12 +80,6 @@ function formatTime(dateStr: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -157,6 +152,7 @@ export default function StudentMessagesClient({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -187,7 +183,7 @@ export default function StudentMessagesClient({
     setLoadingMessages(true)
     const { data } = await supabase
       .from('messages')
-      .select('*')
+      .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
       .or(
         `and(sender_id.eq.${currentStudent.id},receiver_id.eq.${contact.id}),` +
         `and(sender_id.eq.${contact.id},receiver_id.eq.${currentStudent.id})`
@@ -240,6 +236,7 @@ export default function StudentMessagesClient({
         (payload) => {
           const updated = payload.new as Message
           if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
             setMessages(prev =>
               prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
             )
@@ -254,7 +251,12 @@ export default function StudentMessagesClient({
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
     const html = editor.getHTML()
-    if ((!html || html === '<p></p>') && pendingAttachments.length === 0) return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    // Attachment-only send: store clean '' rather than '<p></p>' so the renderer's
+    // hasContent guard hides the empty bubble.
+    const contentToSend = isEmpty ? '' : html
 
     setSending(true)
     setSendError(null)
@@ -263,7 +265,7 @@ export default function StudentMessagesClient({
       const result = await sendMessage(
         selectedContact.id,
         receiverType,
-        html,
+        contentToSend,
         pendingAttachments.length > 0 ? pendingAttachments : undefined
       )
 
@@ -272,21 +274,29 @@ export default function StudentMessagesClient({
         return
       }
 
-      const optimisticMsg: Message = {
+      // NEW286: prefer the real inserted row (carries the DB id) so the Realtime
+      // read-receipt UPDATE — which matches on that id — can flip this message's
+      // read tick. Fall back to an optimistic entry only if the row is missing.
+      const sentMsg: Message = (result?.message as Message | undefined) ?? {
         id: crypto.randomUUID(),
         sender_id: currentStudent.id,
         sender_type: 'student',
         receiver_id: selectedContact.id,
         receiver_type: receiverType,
-        content: html,
+        content: contentToSend,
         attachments: pendingAttachments,
         read_at: null,
         created_at: new Date().toISOString(),
       }
 
-      setMessages(prev => [...prev, optimisticMsg])
+      const pendingReadAt = pendingReadsRef.current.get(sentMsg.id)
+      if (pendingReadAt) {
+        sentMsg.read_at = pendingReadAt
+        pendingReadsRef.current.delete(sentMsg.id)
+      }
+      setMessages(prev => [...prev, sentMsg])
       setContacts(prev =>
-        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
+        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: sentMsg } : c)
       )
       editor.commands.clearContent()
       setPendingAttachments([])
@@ -464,6 +474,7 @@ export default function StudentMessagesClient({
               ) : (
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentStudent.id
+                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -487,6 +498,9 @@ export default function StudentMessagesClient({
                       )}
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
+                          {/* NEW302: hide the bubble entirely for an attachment-only
+                              (empty-content) message so it doesn't render a blank box. */}
+                          {hasContent && (
                           <div
                             className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -497,8 +511,9 @@ export default function StudentMessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-1 flex flex-col gap-1">
+                            <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
                               {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
                                 <a
                                   key={i}

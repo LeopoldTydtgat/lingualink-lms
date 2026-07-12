@@ -14,6 +14,7 @@ import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { adminClassesPostSchema } from '@/lib/validation/schemas'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -135,6 +136,7 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/classes
 // Admin creates a class manually, bypassing the 24hr and availability restrictions
 export async function POST(request: NextRequest) {
+  try {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -153,6 +155,15 @@ export async function POST(request: NextRequest) {
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
+
+  const parsed = adminClassesPostSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Invalid request data.', details: parsed.error.flatten() },
+      { status: 400 }
+    )
+  }
+
   const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = body
 
   if (!teacher_id || !student_id || !training_id || !scheduled_at || !duration_minutes) {
@@ -249,7 +260,10 @@ export async function POST(request: NextRequest) {
   // Atomic hours deduction via RPC — locks the training row, re-checks balance,
   // and increments hours_consumed in a single transaction. Closes the TOCTOU
   // window on the previous read-then-write pattern.
-  const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+  // NEW257: book_class_atomic now RETURNS the id of the 'class_booking'
+  // hours_log row it inserted. Capture it for the lesson_id backfill after the
+  // lesson insert succeeds below.
+  const { data: hoursLogId, error: deductError } = await adminClient.rpc('book_class_atomic', {
     p_training_id: training_id,
     p_hours_needed: hoursRequested,
   })
@@ -341,6 +355,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
   }
 
+  // NEW257: backfill hours_log.lesson_id. book_class_atomic returned the id of
+  // the 'class_booking' ledger row; now that the lesson exists, link the two.
+  // Non-blocking: the booking already succeeded and the ledger row exists, so a
+  // failure only leaves the link unset — log it and continue. Uses adminClient
+  // (hours_log UPDATE runs under the service role / bypasses RLS).
+  if (hoursLogId) {
+    const { error: backfillError } = await adminClient
+      .from('hours_log')
+      .update({ lesson_id: lesson.id })
+      .eq('id', hoursLogId)
+    if (backfillError) {
+      console.error('[NEW257] hours_log.lesson_id backfill failed (admin create):', {
+        hours_log_id: hoursLogId,
+        lesson_id: lesson.id,
+        error: backfillError,
+      })
+    }
+  }
+
   // NEW178: create the paired 'pending' report row the teacher later completes
   // via complete_report_atomic. Non-blocking: a failure must not stop the 201.
   const classEndsAtIso = new Date(new Date(scheduledAtUtc).getTime() + duration_minutes * 60 * 1000).toISOString()
@@ -376,9 +409,9 @@ export async function POST(request: NextRequest) {
         requireTz(teacherProfile.timezone, 'admin-book:teacher')
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacherProfile.email,
-        subject: `Lingualink Online — New class booked with ${studentData?.full_name ?? 'a student'}`,
+        subject: `Lingualink Online - New class booked with ${studentData?.full_name ?? 'a student'}`,
         html: buildEmailTemplate({
           recipientName: teacherProfile.full_name ?? 'Teacher',
           recipientFallback: 'Teacher',
@@ -397,9 +430,9 @@ export async function POST(request: NextRequest) {
         requireTz(studentData.timezone, 'admin-book:student')
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: studentData.email,
-        subject: 'Lingualink Online — Your class is confirmed',
+        subject: 'Lingualink Online - Your class is confirmed',
         html: buildEmailTemplate({
           recipientName: studentData.full_name ?? 'Student',
           recipientFallback: 'Student',
@@ -417,4 +450,8 @@ export async function POST(request: NextRequest) {
   revalidatePath('/student/my-classes')
   revalidatePath('/admin/classes')
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
+  } catch (err) {
+    console.error('POST /api/admin/classes error:', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
 }

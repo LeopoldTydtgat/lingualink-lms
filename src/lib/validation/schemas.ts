@@ -47,7 +47,6 @@ const CEFR_LEVELS = [
 export const CreateTeacherSchema = z.object({
   // Required account fields
   email: z.string().email('Must be a valid email address'),
-  temp_password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   full_name: z.string().min(1, 'Full name is required').max(100, 'Full name must be 100 characters or fewer'),
   timezone: z.string().min(1, 'Timezone is required').max(100),
   account_types: z
@@ -62,6 +61,7 @@ export const CreateTeacherSchema = z.object({
   tax_number: z.string().max(100).optional().nullable(),
   banking_details: z.string().max(2000).optional().nullable(),
   paypal_email: optionalEmail,
+  preferred_payment_type: z.string().max(50).optional().nullable(),
 
   // Admin-only HR fields
   contract_start: dateString,
@@ -73,6 +73,7 @@ export const CreateTeacherSchema = z.object({
 
   // Profile/public fields
   bio: z.string().max(2000).optional().nullable(),
+  qualifications: z.string().max(2000).optional().nullable(),
   street_address: z.string().max(200).optional().nullable(),
   area_code: z.string().max(20).optional().nullable(),
   city: z.string().max(100).optional().nullable(),
@@ -94,7 +95,6 @@ export type CreateTeacherInput = z.infer<typeof CreateTeacherSchema>
 export const CreateStudentSchema = z.object({
   // Required account fields
   email: z.string().email('Must be a valid email address'),
-  temp_password: z.string().min(8, 'Password must be at least 8 characters').max(128),
   full_name: z.string().min(1, 'Full name is required').max(100, 'Full name must be 100 characters or fewer'),
   timezone: z.string().min(1, 'Timezone is required').max(100),
   status: z.enum(PROFILE_STATUS).default('current'),
@@ -170,7 +170,6 @@ export const UpdateTeacherSchema = z.object({
   quote: z.string().max(500).optional().nullable(),
   admin_notes: z.string().max(10_000).optional().nullable(),
   follow_up_reason: z.string().max(1000).optional().nullable(),
-  // Tolerated: sent by clients but not written by the route.
   preferred_payment_type: z.string().max(50).optional().nullable(),
   is_active: z.boolean().optional(),
 })
@@ -358,3 +357,28 @@ export const adminClassesPatchSchema = z.discriminatedUnion('action', [
   adminClassesPatchEditSchema,
   adminClassesPatchCancelSchema,
 ]);
+
+// ─── Admin classes POST (manual create) ───────────────────────────────────────
+
+export const adminClassesPostSchema = z.object({
+  teacher_id: z.string().uuid(),
+  student_id: z.string().uuid(),
+  duration_minutes: z.union([z.literal(30), z.literal(60), z.literal(90)]),
+  scheduled_at: z.string()
+    .regex(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/,
+      'scheduled_at must be naive local ISO format YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS, no timezone suffix'
+    )
+    .refine(
+      val => !isNaN(Date.parse(val + 'Z')),
+      { message: 'scheduled_at has invalid date components' }
+    ),
+});
+
+// ─── Join-class click log ─────────────────────────────────────────────────────
+
+export const JoinClickSchema = z.object({
+  lesson_id: z.string().uuid(),
+})
+
+export type JoinClickInput = z.infer<typeof JoinClickSchema>

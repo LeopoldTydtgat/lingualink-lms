@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sanitizeHtml } from '@/lib/sanitize-server'
+import { validateAttachments } from '@/lib/messages/validateAttachments'
 
 export async function POST(request: Request) {
   try {
@@ -9,11 +10,23 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { participantId, participantType, participantAuthId, content } = await request.json()
+    const { participantId, participantType, participantAuthId, content, attachments } = await request.json()
 
-    if (!participantId || !participantType || !participantAuthId || !content?.trim()) {
+    // Content may be empty when a non-empty attachments array is present
+    // (attachment-only message). The attachments array is fully validated below.
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0
+    if (!participantId || !participantType || !participantAuthId || (!content?.trim() && !hasAttachments)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
+
+    // Validate attachments (optional) via the shared helper. Strips any extra keys —
+    // only { url, filename, size } is persisted — and pins each URL to the Supabase
+    // project host (phishing guard), mirroring the main-messages attachment contract.
+    const validation = validateAttachments(attachments)
+    if (!validation.ok) {
+      return NextResponse.json({ error: 'Invalid attachments' }, { status: 400 })
+    }
+    const safeAttachments = validation.attachments
 
     // Security: non-admin users can only send for themselves
     const admin = createAdminClient()
@@ -29,7 +42,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const safeContent = sanitizeHtml(content)
+    const safeContent = sanitizeHtml(content ?? '')
 
     const { data: newMessage, error } = await admin
       .from('support_messages')
@@ -39,8 +52,9 @@ export async function POST(request: Request) {
         participant_auth_id: participantAuthId,
         sender_role: isAdmin ? 'admin' : 'user',
         content: safeContent,
+        attachments: safeAttachments,
       })
-      .select('id, sender_role, content, created_at')
+      .select('id, sender_role, content, attachments, created_at')
       .single()
 
     if (error) {

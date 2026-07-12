@@ -3,6 +3,16 @@ import { createClient } from '@/lib/supabase/server'
 import BookingClient from './BookingClient'
 import { requireTz } from '@/lib/time/requireTz'
 
+// One row from the get_teacher_reviews_summary RPC. Postgres numeric can arrive as
+// a string over the wire, so avg_rating/review_count are coerced with Number() at
+// the point of use rather than trusted as numbers here.
+interface TeacherReviewSummary {
+  teacher_id: string
+  avg_rating: number | string | null
+  review_count: number | string | null
+  recent_reviews: Array<{ rating: number; text: string; submitted_at: string }> | null
+}
+
 export default async function BookPage({
   searchParams,
 }: {
@@ -43,37 +53,8 @@ export default async function BookPage({
     redirect('/student/my-classes')
   }
 
-  // Hours remaining
-  const hoursRemaining = training.total_hours - training.hours_consumed
-
-  // Get teachers assigned to this training via training_teachers
-  const { data: rawAssignments } = await supabase
-    .from('training_teachers')
-    .select(`
-      teacher_id,
-      teacher:profiles!teacher_id (
-        id,
-        full_name,
-        photo_url,
-        bio,
-        timezone
-      )
-    `)
-    .eq('training_id', training.id)
-
-  const teachers = (rawAssignments ?? [])
-    .map((row) => {
-      const t = Array.isArray(row.teacher) ? row.teacher[0] : row.teacher
-      return t ?? null
-    })
-    .filter(Boolean)
-
-  if (teachers.length === 0) {
-    // No teachers assigned yet — redirect back
-    redirect('/student/my-classes')
-  }
-
-  // If rescheduling, fetch the original lesson
+  // If rescheduling, fetch the original lesson. This must resolve before the
+  // effective-balance calc below, which adds the lesson's own hours back in.
   let rescheduleLesson: {
     id: string
     scheduled_at: string
@@ -92,12 +73,90 @@ export default async function BookPage({
     rescheduleLesson = lesson ?? null
   }
 
+  // Hours remaining
+  const hoursRemaining = training.total_hours - training.hours_consumed
+  // Rescheduling adds the lesson's own hours back in because those hours are not
+  // actually being spent again — the original booking already consumed them and a
+  // reschedule neither refunds nor re-charges. Downstream steps gate and display
+  // against this effective balance, not the raw consumed-inclusive number.
+  const effectiveHoursRemaining = rescheduleLesson
+    ? hoursRemaining + rescheduleLesson.duration_minutes / 60
+    : hoursRemaining
+
+  // Get teachers assigned to this training via training_teachers
+  const { data: rawAssignments } = await supabase
+    .from('training_teachers')
+    .select(`
+      teacher_id,
+      teacher:profiles!teacher_id (
+        id,
+        full_name,
+        photo_url,
+        bio,
+        timezone,
+        nationality,
+        qualifications,
+        specialties,
+        quote,
+        native_languages,
+        speaking_languages,
+        teaching_languages,
+        video_url
+      )
+    `)
+    .eq('training_id', training.id)
+
+  const flatTeachers = (rawAssignments ?? [])
+    .map((row) => {
+      const t = Array.isArray(row.teacher) ? row.teacher[0] : row.teacher
+      return t ?? null
+    })
+    .filter(Boolean)
+
+  if (flatTeachers.length === 0) {
+    // No teachers assigned yet — redirect back
+    redirect('/student/my-classes')
+  }
+
+  // Public review stats for the assigned teachers, via a SECURITY DEFINER RPC that
+  // returns anonymised aggregates (no student names). Stats are STRICTLY ADDITIVE:
+  // any failure here must still render the full booking flow with zero stats —
+  // never throw, never block the booking.
+  const teacherIds = flatTeachers.map((t) => t.id)
+  const reviewsById = new Map<string, TeacherReviewSummary>()
+  const { data: reviewSummaries, error: reviewError } = await supabase.rpc(
+    'get_teacher_reviews_summary',
+    { p_teacher_ids: teacherIds }
+  )
+  if (reviewError) {
+    console.error('book: get_teacher_reviews_summary failed', reviewError)
+  } else if (Array.isArray(reviewSummaries)) {
+    for (const row of reviewSummaries as TeacherReviewSummary[]) {
+      reviewsById.set(row.teacher_id, row)
+    }
+  }
+
+  const teachers = flatTeachers.map((t) => {
+    const summary = reviewsById.get(t.id)
+    if (!summary) {
+      // The RPC left-joins every id passed in, so a missing row is anomalous —
+      // log it and fall back to zero stats for this teacher.
+      console.error(`book: no review summary for teacher ${t.id}; defaulting to zero stats`)
+      return { ...t, avgRating: null, reviewCount: 0, recentReviews: [] }
+    }
+    const reviewCount = Number(summary.review_count) || 0
+    const avgRaw = Number(summary.avg_rating)
+    const avgRating = reviewCount > 0 && !Number.isNaN(avgRaw) ? avgRaw : null
+    const recentReviews = Array.isArray(summary.recent_reviews) ? summary.recent_reviews : []
+    return { ...t, avgRating, reviewCount, recentReviews }
+  })
+
   return (
     <BookingClient
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'book:student')}
       trainingId={training.id}
-      hoursRemaining={hoursRemaining}
+      hoursRemaining={effectiveHoursRemaining}
       teachers={teachers}
       rescheduleLesson={rescheduleLesson}
     />

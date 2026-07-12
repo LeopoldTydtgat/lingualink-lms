@@ -1,0 +1,33 @@
+-- Migration: add attachment_name to lesson_annotations for stable-filename resolution
+-- Date: 2026-07-03
+--
+-- WHY: lesson_annotations rows are keyed by attachment_index = the PDF's POSITION in
+-- study_sheets.attachments (a JSON array of {name,url,type}). If an admin reorders or
+-- removes an attachment AFTER a lesson was annotated, that stored index resolves to a
+-- DIFFERENT PDF within the SAME sheet, so the read paths (student Past Class view; teacher
+-- review) would serve the wrong PDF under the teacher's marks.
+--
+-- FIX: record the annotated attachment's stable FILENAME (the `name` field on each
+-- study_sheets.attachments entry) alongside the positional index. Read paths resolve the
+-- served file by matching this name against the sheet's CURRENT attachments; only rows with
+-- a NULL attachment_name (legacy rows predating this column) fall back to position.
+--
+-- SCOPE: additive only. attachment_index and the lesson_annotations_unique_pdf uniqueness
+-- constraint (lesson_id, study_sheet_id, attachment_index) are UNCHANGED -- attachment_index
+-- remains the upsert conflict key and the row-lookup key. attachment_name is nullable and is
+-- used only for read-time file resolution. The table currently has zero rows.
+--
+-- No GRANT change: the table-level grants from migration 20260630120000
+-- (GRANT SELECT, INSERT, UPDATE ... TO authenticated / service_role) already cover new
+-- columns. No RLS change: no policy references this column; the ownership + cutoff +
+-- sheet-access gates are unaffected.
+--
+-- DEPLOY ORDER: apply this migration BEFORE deploying the code that references
+-- attachment_name. BOTH paths reference it: the teacher write path sets it (else every
+-- annotation upsert fails on the undefined column and the autosave banner flips to "not
+-- saving"), and the student byte route selects it (else that gate SELECT errors, the row
+-- reads as absent, and every annotated PDF returns 403). Both fail closed, but the feature
+-- is broken until the column exists.
+
+ALTER TABLE public.lesson_annotations
+  ADD COLUMN attachment_name text;

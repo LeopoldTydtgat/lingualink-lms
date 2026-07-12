@@ -30,6 +30,8 @@ interface Lesson {
   status: string
   cancelled_at: string | null
   students: { full_name: string } | { full_name: string }[] | null
+  // Per-lesson pay rate resolved server-side (snapshot ?? live profiles.hourly_rate).
+  rate: number
 }
 
 interface BillingInfoDisplay {
@@ -153,7 +155,7 @@ export default function BillingClient({
   const sym = currencySymbol(billingInfo?.currency)
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
-    { teacher: { id: string; full_name: string; email: string }; invoices: Invoice[] }[]
+    { teacher: { id: string; full_name: string }; invoices: Invoice[] }[]
   >([])
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
@@ -165,7 +167,7 @@ export default function BillingClient({
     // FIX: removed profiles fetch — use server-side data where possible
     const { data: teachers } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select('id, full_name')
       .in('role', ['teacher', 'admin'])
       .order('full_name')
 
@@ -383,7 +385,6 @@ export default function BillingClient({
                     {lessons.length === 0 ? (
                       <p className="text-sm text-gray-400">No billable classes for this month.</p>
                     ) : (() => {
-                      const rate = billingInfo?.hourly_rate ?? 0
                       const rows = lessons.map(lesson => ({
                         lesson,
                         bill: getBillability({
@@ -391,7 +392,9 @@ export default function BillingClient({
                           scheduledAt: lesson.scheduled_at,
                           cancelledAt: lesson.cancelled_at,
                           cancellationPolicy: null,
-                          hourlyRate: rate,
+                          // Per-lesson rate from lesson_rate_snapshots, resolved server-side
+                          // in billing/page.tsx (snapshot ?? live profiles.hourly_rate).
+                          hourlyRate: lesson.rate,
                           durationMinutes: lesson.duration_minutes,
                         }),
                       }))
@@ -519,9 +522,13 @@ export default function BillingClient({
             <div className="space-y-3 text-sm">
               <div className="flex gap-2">
                 <span className="text-gray-500 w-44 flex-shrink-0">Preferred Payment Type:</span>
-                <span className="text-gray-900 font-medium">
-                  {billingInfo.preferred_payment_type === 'paypal' ? 'PayPal' : 'Bank Transfer'}
-                </span>
+                {billingInfo.preferred_payment_type === 'paypal' ? (
+                  <span className="text-gray-900 font-medium">PayPal</span>
+                ) : billingInfo.preferred_payment_type === 'bank' ? (
+                  <span className="text-gray-900 font-medium">Bank Transfer</span>
+                ) : (
+                  <span className="text-gray-400">Not set</span>
+                )}
               </div>
               {billingInfo.preferred_payment_type === 'paypal' && billingInfo.paypal_email && (
                 <div className="flex gap-2">
@@ -577,7 +584,6 @@ export default function BillingClient({
               <div key={teacher.id} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <div className="p-4 border-b border-gray-100 flex items-center justify-between">
                   <h3 className="font-semibold text-gray-900">{teacher.full_name}</h3>
-                  <span className="text-sm text-gray-400">{teacher.email}</span>
                 </div>
                 {invoices.length === 0 ? (
                   <p className="p-4 text-sm text-gray-400">No invoices yet.</p>

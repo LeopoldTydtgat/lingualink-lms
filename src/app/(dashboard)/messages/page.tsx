@@ -3,6 +3,21 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
+import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
+
+// Row from the messages select('*'); mirrors MessagesClient's Message so the
+// contacts prop stays assignable. Only created_at is read off latestMessage here.
+type MessageRow = {
+  id: string
+  sender_id: string
+  sender_type: string
+  receiver_id: string
+  receiver_type: string
+  content: string
+  attachments: unknown[]
+  read_at: string | null
+  created_at: string
+}
 
 interface PageProps {
   // Next.js 15 â€” searchParams is a Promise, must be awaited
@@ -31,11 +46,26 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // profile so MessagesClient can auto-select the conversation immediately.
   const { openAdmin, adminId, studentId } = await searchParams
 
+  const isAdmin = profile.role === 'admin'
+  // NEW275: training-assignment student set - the SOLE access key for this teacher's
+  // student-data reads here (deep-link resolve + new-message picker). A teacher may message
+  // a student iff assigned to one of the student's trainings via training_teachers; bookings
+  // are irrelevant. Admin is ungated (null). The message-history contacts section below is
+  // intentionally NOT gated, so past conversations stay readable regardless of gate state.
+  let assignedStudentIds: Set<string> | null = null
+  if (!isAdmin) {
+    try {
+      assignedStudentIds = await getAssignedStudentIds(admin, user.id)
+    } catch {
+      // Render with an empty picker rather than crashing on a query error.
+      assignedStudentIds = new Set<string>()
+    }
+  }
+
   let adminContact: {
     id: string
     type: string
     name: string
-    email: string
     photo_url: string | null
     latestMessage: null
     unreadCount: number
@@ -53,7 +83,6 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         id: adminProfile.id,
         type: adminProfile.role, // 'admin'
         name: adminProfile.full_name,
-        email: '',
         photo_url: adminProfile.photo_url ?? null,
         latestMessage: null,
         unreadCount: 0,
@@ -66,25 +95,22 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     id: string
     type: string
     name: string
-    email: string
     photo_url: string | null
     latestMessage: null
     unreadCount: number
   } | null = null
 
-  if (studentId) {
-    const adminClient = createAdminClient()
-    const { data: studentData } = await adminClient
+  if (studentId && (isAdmin || assignedStudentIds?.has(studentId))) {
+    const { data: studentData } = await admin
       .from('students')
       .select('id, full_name, email, photo_url')
       .eq('id', studentId)
-      .single()
+      .maybeSingle()
     if (studentData) {
       studentContact = {
         id: studentData.id,
         type: 'student',
         name: studentData.full_name,
-        email: studentData.email ?? '',
         photo_url: studentData.photo_url ?? null,
         latestMessage: null,
         unreadCount: 0,
@@ -96,7 +122,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // Fetch all messages involving this user, newest first
   const { data: messages } = await supabase
     .from('messages')
-    .select('*')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
     .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
     .order('created_at', { ascending: false })
 
@@ -105,7 +131,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const contactMap = new Map<string, {
     id: string
     type: string
-    latestMessage: any
+    latestMessage: MessageRow
     unreadCount: number
   }>()
 
@@ -146,24 +172,22 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     : { data: [] }
 
   // Fetch profile details for teacher/admin contacts
-  // email is included so the union type with studentDetails is consistent
   const { data: profileDetails } = profileContactIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, full_name, role, photo_url, email')
+        .select('id, full_name, role, photo_url')
         .in('id', profileContactIds)
     : { data: [] }
 
   // Combine contact map with display details
   const contacts = Array.from(contactMap.values()).map(contact => {
     const details = contact.type === 'student'
-      ? (studentDetails || []).find((s: any) => s.id === contact.id)
-      : (profileDetails || []).find((p: any) => p.id === contact.id)
+      ? (studentDetails || []).find((s: { id: string; auth_user_id: string; full_name: string; email: string | null; photo_url: string | null }) => s.id === contact.id)
+      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null }) => p.id === contact.id)
 
     return {
       ...contact,
       name: details?.full_name || 'Unknown',
-      email: details?.email || '',
       photo_url: details?.photo_url || null,
     }
   })
@@ -174,11 +198,12 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     new Date(a.latestMessage.created_at).getTime()
   )
 
-  // Only students assigned to this teacher via active trainings
-  // Admin sees all students; teachers only see their own
+  // New-message picker students. Admin sees all active students; a teacher sees ONLY
+  // students assigned to them via training_teachers (NEW275), computed once above.
+  // The dead trainings.teacher_id column is no longer consulted.
   let allStudents: { id: string; full_name: string; email: string; photo_url: string | null }[] = []
 
-  if (profile.role === 'admin') {
+  if (isAdmin) {
     const { data } = await supabase
       .from('students')
       .select('id, full_name, email, photo_url')
@@ -187,18 +212,11 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     allStudents = data || []
   } else {
     // Use admin client — RLS blocks teacher role from reading these tables directly
-    const { data: assignedTrainings } = await admin
-      .from('trainings')
-      .select('student_id')
-      .eq('teacher_id', profile.id)
-
-    const assignedIds = (assignedTrainings ?? []).map((t: { student_id: string }) => t.student_id)
-
-    if (assignedIds.length > 0) {
+    if (assignedStudentIds && assignedStudentIds.size > 0) {
       const { data } = await admin
         .from('students')
         .select('id, full_name, email, photo_url')
-        .in('id', assignedIds)
+        .in('id', [...assignedStudentIds])
         .eq('is_active', true)
         .order('full_name')
       allStudents = data || []
@@ -210,6 +228,10 @@ export default async function MessagesPage({ searchParams }: PageProps) {
       currentUser={profile}
       contacts={contacts}
       allStudents={allStudents || []}
+      // The teacher's currently-assigned student ids (NEW275) — mirrors the send-action
+      // gate exactly. Used to disable the composer for a stale history thread whose
+      // student is no longer assigned (admin is ungated, so an empty array is fine there).
+      assignedStudentIds={assignedStudentIds ? [...assignedStudentIds] : []}
       // Pass the pre-resolved admin contact if the URL requested it.
       // MessagesClient will auto-select this conversation on mount.
       initialContact={adminContact ?? studentContact}

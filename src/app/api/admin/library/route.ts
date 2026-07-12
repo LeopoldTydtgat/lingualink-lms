@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { buildExerciseRows } from './exercises'
 
 // GET /api/admin/library — returns all study sheets
 export async function GET() {
@@ -52,20 +53,36 @@ export async function POST(request: Request) {
 
   const body = await request.json()
 
-  const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments } = body
+  const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments, audience } = body
 
   if (!title || !category) {
     return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
   }
 
+  // Exercises live in the exercises table, never in study_sheets.content. Capture
+  // the authored exercises for the table, then store content with words preserved
+  // (vocabulary sheets) and an empty exercises array.
+  const contentObj: Record<string, unknown> =
+    content && typeof content === 'object' && !Array.isArray(content)
+      ? (content as Record<string, unknown>)
+      : {}
+  const incomingExercises = contentObj.exercises
+  const storedContent = {
+    words: Array.isArray(contentObj.words) ? contentObj.words : [],
+    exercises: [],
+  }
+
   const insert: Record<string, unknown> = {
     title,
     category,
-    level: level || null,
+    level: level || '',
     difficulty: difficulty ?? null,
     intro_text: intro_text ?? null,
-    content: content ?? { words: [], exercises: [] },
+    content: storedContent,
     allowed_roles: allowed_roles ?? ['teacher', 'teacher_exam'],
+    // Audience is an access boundary: only 'student' or 'staff'. Absent/invalid
+    // coerces to the fail-safe 'staff' so an unlabelled sheet never reaches students.
+    audience: audience === 'student' ? 'student' : 'staff',
     is_active: is_active ?? true,
     attachments: Array.isArray(attachments) ? attachments : [],
   }
@@ -86,6 +103,25 @@ export async function POST(request: Request) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // data is the freshly inserted row; guard the no-row case before its exercises.
+  if (!data) return NextResponse.json({ error: 'Sheet was not created.' }, { status: 500 })
+
+  // Persist authored exercises into the exercises table (the source the student
+  // and teacher readers query). Shared translation keeps create/edit in lockstep.
+  const exerciseRows = buildExerciseRows(data.id, incomingExercises)
+  if (exerciseRows.length > 0) {
+    const { error: exError } = await adminClient
+      .from('exercises')
+      .insert(exerciseRows)
+
+    if (exError) {
+      return NextResponse.json(
+        { error: `Sheet created, but its exercises failed to save: ${exError.message}` },
+        { status: 500 }
+      )
+    }
+  }
 
   return NextResponse.json(data, { status: 201 })
 }

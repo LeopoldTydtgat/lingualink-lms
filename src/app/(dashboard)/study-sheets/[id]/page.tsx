@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect, notFound } from 'next/navigation'
+import { loadStudySheetDetail } from '@/lib/study-sheets/loadStudySheetDetail'
 import StudySheetDetailClient from './StudySheetDetailClient'
 
 export default async function StudySheetDetailPage({
@@ -8,36 +7,14 @@ export default async function StudySheetDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single()
-
-  const { data: sheet } = await supabase
-    .from('study_sheets')
-    .select('id, title, category, level, difficulty, content, attachments')
-    .eq('id', id)
-    .single()
-
-  if (!sheet) notFound()
-
-  const { data: exercises } = await supabase
-    .from('exercises')
-    .select('*')
-    .eq('study_sheet_id', id)
-    .order('created_at', { ascending: true })
+  const { sheet, exercises, isAdmin, annotationsByName } = await loadStudySheetDetail(id)
 
   return (
     <StudySheetDetailClient
       sheet={sheet}
-      exercises={exercises ?? []}
-      isAdmin={profile?.role === 'admin'}
+      exercises={exercises}
+      isAdmin={isAdmin}
+      annotationsByName={annotationsByName}
     />
   )
 }

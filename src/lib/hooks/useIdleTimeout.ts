@@ -8,7 +8,6 @@ import {
   CLASS_SUPPRESSION_MS,
   ACTIVITY_THROTTLE_MS,
   LAST_ACTIVITY_KEY,
-  MAX_HIDDEN_MS,
 } from '@/lib/config/idle-timeout'
 
 interface UseIdleTimeoutArgs {
@@ -54,7 +53,6 @@ export function useIdleTimeout({
   const lastWriteRef = useRef<number>(0)
   const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const hiddenSinceRef = useRef<number | null>(null)        // when tab last became hidden
-  const cumulativeHiddenMsRef = useRef<number>(0)            // total ms tab has been hidden
 
   // Reset activity (called on user input + on "Stay logged in" click)
   const recordActivity = () => {
@@ -121,20 +119,10 @@ export function useIdleTimeout({
         // Tab just became visible
         if (hiddenSinceRef.current !== null) {
           const hiddenDuration = Date.now() - hiddenSinceRef.current
-          cumulativeHiddenMsRef.current += hiddenDuration
           // Shift lastActivity forward by the hidden duration so the idle counter resumes
           // from where it was when the tab was hidden, not from when it was hidden
           lastActivityRef.current += hiddenDuration
           hiddenSinceRef.current = null
-
-          // If cumulative hidden time exceeds the cap, force logout immediately
-          if (cumulativeHiddenMsRef.current >= MAX_HIDDEN_MS) {
-            const supabase = createClient()
-            supabase.auth.signOut().finally(() => {
-              window.location.href = `${loginPath}?reason=idle`
-            })
-            if (tickIntervalRef.current) clearInterval(tickIntervalRef.current)
-          }
         }
       }
     }

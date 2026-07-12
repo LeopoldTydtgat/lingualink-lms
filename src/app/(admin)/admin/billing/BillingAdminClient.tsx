@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
+import { getMonthRangeInTz } from '@/lib/billing/monthRange'
+import { formatInstantInTz, tzLabel } from '@/lib/exportTime'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -24,7 +26,11 @@ interface Invoice {
 interface TeacherProfile {
   id: string
   full_name: string
-  email: string
+  // timezone is non-sensitive (not column-REVOKE'd), so it is selected directly in
+  // loadBaseData — unlike hourly_rate above, which must go through the entities route.
+  // Used to bucket invoice-detail lessons by the teacher's local month, matching
+  // invoices.amount_eur (recomputeAmounts.ts buckets in the teacher's timezone).
+  timezone: string | null
 }
 
 interface Company {
@@ -132,26 +138,28 @@ function escapeCSV(val: unknown): string {
 
 async function fetchBillingEntities(
   teacherIds: string[],
-  studentIds: string[]
+  studentIds: string[],
+  lessonIds: string[]
 ): Promise<{
   teachers: { id: string; full_name: string; hourly_rate: number | null; currency: string | null }[]
   students: { id: string; full_name: string; company_id: string | null; cancellation_policy: string | null }[]
+  lessonRates: { lesson_id: string; hourly_rate: number }[]
 }> {
   const res = await fetch('/api/admin/billing/entities', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ teacherIds, studentIds }),
+    body: JSON.stringify({ teacherIds, studentIds, lessonIds }),
   })
   if (!res.ok) {
     console.error('fetchBillingEntities failed:', res.status)
-    return { teachers: [], students: [] }
+    return { teachers: [], students: [], lessonRates: [] }
   }
   return res.json()
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function BillingAdminClient({ adminId }: { adminId: string }) {
+export default function BillingAdminClient({ adminId, exportTz }: { adminId: string; exportTz: string }) {
   const supabase = createClient()
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
@@ -203,11 +211,14 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, email')
+          .select('id, full_name, timezone')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
-        supabase.from('invoices').select('*').order('billing_month', { ascending: false }),
+        supabase
+          .from('invoices')
+          .select('id, teacher_id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number')
+          .order('billing_month', { ascending: false }),
         supabase.from('settings').select('value').eq('key', 'invoice_template_path').maybeSingle(),
       ])
 
@@ -250,9 +261,15 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
     const teacherIds = [...new Set(rawLessons.map(l => l.teacher_id))]
     const studentIds = [...new Set(rawLessons.map(l => l.student_id))]
+    const lessonIds = [...new Set(rawLessons.map(l => l.id))]
 
-    // Fetch sensitive fields via server-side API route
-    const { teachers: tProfiles, students: sRows } = await fetchBillingEntities(teacherIds, studentIds)
+    // Fetch sensitive fields via server-side API route (incl. per-lesson rate snapshots)
+    const { teachers: tProfiles, students: sRows, lessonRates } = await fetchBillingEntities(teacherIds, studentIds, lessonIds)
+
+    // Snapshot rates keyed by lesson. Absence (missing row or null rate) means fall
+    // back to the teacher's live profiles.hourly_rate below (NEW268 D1).
+    const snapMap: Record<string, number> = {}
+    for (const r of lessonRates) snapMap[r.lesson_id] = r.hourly_rate
 
     // Fetch company names directly — companies table has no sensitive columns
     const companyIds = [...new Set(sRows.map(s => s.company_id).filter(Boolean))] as string[]
@@ -273,11 +290,21 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       const s = studentMap[l.student_id] || { full_name: 'Unknown', company_id: null, cancellation_policy: null }
       const companyId = s.company_id
       const companyName = companyId ? (companyMap[companyId] || null) : null
+
+      // Per-lesson pay rate: the booking-time snapshot when present, else the teacher's
+      // live profiles.hourly_rate (NEW268 D1). The snapshot READ is server-side in
+      // /api/admin/billing/entities; here we only compose the fallback + log the miss.
+      const snapRate = snapMap[l.id]
+      if (snapRate == null) {
+        console.error('[billing] no rate snapshot for lesson; falling back to live profiles.hourly_rate', { lesson_id: l.id })
+      }
+      const hourlyRate = snapRate != null ? snapRate : t.hourly_rate
+
       return {
         ...l,
         teacherName: t.full_name,
         studentName: s.full_name,
-        hourlyRate: t.hourly_rate,
+        hourlyRate,
         teacherCurrency: t.currency,
         cancellationPolicy: s.cancellation_policy,
         companyId,
@@ -293,27 +320,30 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
 
     setLoadingLessons(key)
 
-    const d = new Date(billingMonth + 'T12:00:00Z')
-    const year = d.getUTCFullYear()
-    const month = d.getUTCMonth()
-
-    const fromDate = `${year}-${String(month + 1).padStart(2, '0')}-01`
-    const toDate = month === 11
-      ? `${year + 1}-01-01`
-      : `${year}-${String(month + 2).padStart(2, '0')}-01`
+    // Bucket the invoice's lessons by the TEACHER's local month — the same basis
+    // as invoices.amount_eur (recomputeAmounts.ts buckets via getMonthKeyInTz in
+    // the teacher's timezone). UTC month bounds would mis-bucket boundary lessons
+    // for non-UTC teachers, so the itemised total could disagree with the stored
+    // amount. billing_month is 'YYYY-MM-01'; T12:00:00Z lands in that calendar
+    // month in every real IANA offset. Falls back to 'UTC' when the teacher has no
+    // timezone — result-identical to the previous UTC bounds (the filter string
+    // differs, bare date vs UTC ISO, but Postgres casts both to the same instant;
+    // and amount_eur isn't recomputed for timezone-less teachers anyway).
+    const tz = teachers.find(t => t.id === teacherId)?.timezone || 'UTC'
+    const { startUtc, endUtc } = getMonthRangeInTz(new Date(billingMonth + 'T12:00:00Z'), tz)
 
     const { data: raw } = await supabase
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
       .eq('teacher_id', teacherId)
-      .gte('scheduled_at', fromDate)
-      .lt('scheduled_at', toDate)
+      .gte('scheduled_at', startUtc)
+      .lt('scheduled_at', endUtc)
       .order('scheduled_at', { ascending: true })
 
     const hydrated = await hydrateLessons(raw || [])
     setInvoiceLessons(prev => ({ ...prev, [key]: hydrated }))
     setLoadingLessons(null)
-  }, [invoiceLessons, hydrateLessons])
+  }, [invoiceLessons, hydrateLessons, teachers])
 
   // ── Mark invoice as paid ───────────────────────────────────────────────────
   const handleMarkPaid = async (invoiceId: string) => {
@@ -473,13 +503,17 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
   }
 
   // ── Student Billing CSV (client-side) ───────────────────────────────────────
-  // Serializes the lessons CURRENTLY on screen (sbLessons) so the exported CSV is
-  // provably identical to the table: the same getBillability call, the same
-  // per-row currency, the same status labels. Deliberately NOT a server-route
+  // Serializes the lessons CURRENTLY on screen (sbLessons) so the exported CSV's
+  // BILLING figures mirror the table exactly: the same getBillability call, the
+  // same per-row currency, the same status labels. Deliberately NOT a server-route
   // export - that would recompute billing in a second place and risk drifting
   // from the numbers the admin sees here.
+  // NEW271: the Date & Time column is the one intentional exception — it renders in
+  // the settings-driven export timezone (formatInstantInTz + exportTz) to agree with
+  // the server-route exports, so it can differ from the on-screen column, which
+  // stays in the admin's own browser timezone. The billing numbers still match 1:1.
   const buildStudentBillingCSV = (): string => {
-    const headers = ['Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
+    const headers = ['Student', 'Teacher', `Date & Time (${tzLabel(exportTz)})`, 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
     const rows = sbLessons.map(l => {
       const bill = getBillability({
         status: l.status,
@@ -492,7 +526,7 @@ export default function BillingAdminClient({ adminId }: { adminId: string }) {
       return [
         l.studentName,
         l.teacherName,
-        formatDateTime(l.scheduled_at),
+        formatInstantInTz(l.scheduled_at, exportTz),
         l.duration_minutes,
         getLessonStatusLabel(l.status),
         bill.label,

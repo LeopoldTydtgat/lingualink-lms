@@ -6,10 +6,12 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
-import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle } from 'lucide-react'
+import { X, Send, ChevronDown, ChevronUp, MessageSquare, HelpCircle, Paperclip } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { toast } from 'sonner'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -19,6 +21,7 @@ interface SupportMessage {
   id: string
   sender_role: 'user' | 'admin'
   content: string
+  attachments: Array<{ url: string; filename: string; size: number }>
   created_at: string
   read_at: string | null
 }
@@ -47,12 +50,6 @@ function formatTime(dateStr: string): string {
   const h = date.getHours().toString().padStart(2, '0')
   const m = date.getMinutes().toString().padStart(2, '0')
   return `${h}:${m}`
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -126,17 +123,25 @@ export default function ChatWidget({
   const supabase = useMemo(() => createClient(), [])
 
   const [isOpen, setIsOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'messages' | 'faq'>('messages')
+  const [activeTab, setActiveTab] = useState<'messages' | 'faq'>('faq')
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [faqs, setFaqs] = useState<FaqItem[]>([])
   const [sending, setSending] = useState(false)
   const [messagesLoaded, setMessagesLoaded] = useState(false)
   const [faqsLoaded, setFaqsLoaded] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{ url: string; filename: string; size: number }>>([])
+  const [uploading, setUploading] = useState(false)
   const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [emojiPickerPos, setEmojiPickerPos] = useState<{ bottom: number; right: number } | null>(null)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const emojiButtonRef = useRef<HTMLButtonElement>(null)
+  // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
+  // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -163,28 +168,42 @@ export default function ChatWidget({
     checkUnread()
   }, [supabase, participantAuthId])
 
-  // Load support messages for this participant
-  const loadMessages = useCallback(async () => {
-    if (messagesLoaded) return
-    const { data } = await supabase
-      .from('support_messages')
-      .select('id, sender_role, content, created_at, read_at')
-      .eq('participant_auth_id', participantAuthId)
-      .order('created_at', { ascending: true })
-    setMessages((data as SupportMessage[]) || [])
-    setMessagesLoaded(true)
+  // FAQ is the default landing tab, but unread admin replies take priority:
+  // land on Messages so they are seen and marked read.
+  useEffect(() => {
+    if (isOpen && unreadCount > 0) {
+      setActiveTab('messages')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
 
-    // Mark admin messages as read now that the teacher has opened the widget
+  // NEW300: mark all inbound admin messages read. Reusable so it can fire both on load and
+  // when an admin reply arrives live (previously reads only happened inside loadMessages, so
+  // a live-arriving reply never flipped the admin's tick because no UPDATE ever fired).
+  const markAdminMessagesRead = useCallback(async () => {
     await supabase
       .from('support_messages')
       .update({ read_at: new Date().toISOString() })
       .eq('participant_auth_id', participantAuthId)
       .eq('sender_role', 'admin')
       .is('read_at', null)
-
-    // Clear the unread badge
     setUnreadCount(0)
-  }, [supabase, participantAuthId, messagesLoaded])
+  }, [supabase, participantAuthId])
+
+  // Load support messages for this participant
+  const loadMessages = useCallback(async () => {
+    if (messagesLoaded) return
+    const { data } = await supabase
+      .from('support_messages')
+      .select('id, sender_role, content, attachments, created_at, read_at')
+      .eq('participant_auth_id', participantAuthId)
+      .order('created_at', { ascending: true })
+    setMessages((data as SupportMessage[]) || [])
+    setMessagesLoaded(true)
+
+    // Mark admin messages as read now that the teacher has opened the widget
+    await markAdminMessagesRead()
+  }, [supabase, participantAuthId, messagesLoaded, markAdminMessagesRead])
 
   // Load FAQs for this portal type
   const loadFaqs = useCallback(async () => {
@@ -203,13 +222,16 @@ export default function ChatWidget({
     if (!isOpen) return
     if (activeTab === 'messages') {
       loadMessages()
+      // NEW300: loadMessages early-returns once loaded, so unread admin replies that arrived
+      // while on the FAQ tab would never be marked. Mark unconditionally on entering Messages.
+      markAdminMessagesRead()
       setTimeout(() => editor?.commands.focus(), 100)
     }
     if (activeTab === 'faq') {
       loadFaqs()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, activeTab, loadMessages, loadFaqs])
+  }, [isOpen, activeTab, loadMessages, loadFaqs, markAdminMessagesRead])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -244,6 +266,16 @@ export default function ChatWidget({
             if (prev.some(m => m.id === msg.id)) return prev
             return [...prev, msg]
           })
+          // NEW300: an admin reply arriving live must be marked read so its tick flips for the
+          // admin — but only if the user is actually looking at the Messages tab. On the FAQ
+          // tab, leave it unread and bump the badge instead.
+          if (msg.sender_role === 'admin') {
+            if (activeTab === 'messages') {
+              markAdminMessagesRead()
+            } else {
+              setUnreadCount(c => c + 1)
+            }
+          }
         }
       )
       .on(
@@ -256,21 +288,58 @@ export default function ChatWidget({
         },
         (payload) => {
           const updated = payload.new as SupportMessage
-          // Update read_at on the matching message so ticks flip live
-          setMessages(prev =>
-            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-          )
+          // Update read_at on the matching message so ticks flip live. Buffer the read_at first
+          // (NEW300) so a temp→real swap in handleSend can carry it over instead of losing it.
+          if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
+            setMessages(prev =>
+              prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
+            )
+          }
         }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [isOpen, participantAuthId, supabase])
+  }, [isOpen, participantAuthId, supabase, activeTab, markAdminMessagesRead])
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File must be under 10MB.', { duration: 6000 })
+      e.target.value = ''
+      return
+    }
+
+    setUploading(true)
+    const form = new FormData()
+    form.append('file', file)
+
+    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+    const json = await res.json()
+
+    if (!res.ok) {
+      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
+    } else {
+      setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+    }
+
+    setUploading(false)
+    e.target.value = ''
+  }
 
   const handleSend = async () => {
     if (!editor || sending) return
     const html = editor.getHTML()
-    if (!html || html === '<p></p>') return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    const attachmentsToSend = pendingAttachments
+    // Attachment-only send: store clean '' rather than '<p></p>'.
+    const contentToSend = isEmpty ? '' : html
     editor.commands.clearContent()
+    setPendingAttachments([])
     setSending(true)
 
     // Optimistic update
@@ -278,7 +347,8 @@ export default function ChatWidget({
     setMessages(prev => [...prev, {
       id: tempId,
       sender_role: 'user',
-      content: html,
+      content: contentToSend,
+      attachments: attachmentsToSend,
       created_at: new Date().toISOString(),
       read_at: null,
     }])
@@ -290,24 +360,49 @@ export default function ChatWidget({
         participantId,
         participantType,
         participantAuthId,
-        content: html,
+        content: contentToSend,
+        attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
       }),
     })
 
     if (!res.ok) {
-      // Roll back optimistic update on failure
+      // Roll back optimistic update on failure. Restore the pending attachments so a
+      // failed send doesn't silently discard the user's already-uploaded file, and
+      // surface an error instead of failing quietly.
       setMessages(prev => prev.filter(m => m.id !== tempId))
+      setPendingAttachments(attachmentsToSend)
+      toast.error('Message failed to send. Please try again.', { duration: 6000 })
     } else {
       // Replace temp message with real DB message so read_at updates work
       const data = await res.json()
       if (data.message) {
+        // NEW300: if the admin already read this message before the real row landed, the
+        // Realtime UPDATE buffered its read_at here — carry it over instead of hardcoding null
+        // (which stomped the read tick). Otherwise honour the DB row's own read_at.
+        const real = data.message as SupportMessage
+        const bufferedRead = pendingReadsRef.current.get(real.id)
+        if (bufferedRead) {
+          real.read_at = bufferedRead
+          pendingReadsRef.current.delete(real.id)
+        }
         setMessages(prev =>
-          prev.map(m => m.id === tempId ? { ...data.message, read_at: null } : m)
+          prev.map(m => m.id === tempId ? real : m)
         )
       }
     }
 
     setSending(false)
+  }
+
+  const handleEmojiButtonClick = () => {
+    if (!showEmojiPicker && emojiButtonRef.current) {
+      const rect = emojiButtonRef.current.getBoundingClientRect()
+      setEmojiPickerPos({
+        bottom: window.innerHeight - rect.top + 4,
+        right: window.innerWidth - rect.right,
+      })
+    }
+    setShowEmojiPicker(v => !v)
   }
 
   const tabStyle = (tab: 'messages' | 'faq') =>
@@ -331,7 +426,7 @@ export default function ChatWidget({
                 <span className="w-2.5 h-2.5 rounded-full bg-green-400 border-2 border-white -ml-4 mt-4 flex-shrink-0" />
               </div>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => { setIsOpen(false); setMessagesLoaded(false) }}
                 className="text-white/80 hover:text-white transition-colors"
                 aria-label="Close chat"
               >
@@ -342,14 +437,6 @@ export default function ChatWidget({
             <p className="text-white/75 text-xs mb-3">We typically reply within an hour.</p>
             <div className="flex gap-1 pb-3">
               <button
-                onClick={() => setActiveTab('messages')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
-                style={tabStyle('messages')}
-              >
-                <MessageSquare size={13} />
-                Messages
-              </button>
-              <button
                 onClick={() => setActiveTab('faq')}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
                 style={tabStyle('faq')}
@@ -357,13 +444,21 @@ export default function ChatWidget({
                 <HelpCircle size={13} />
                 FAQ
               </button>
+              <button
+                onClick={() => setActiveTab('messages')}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-all"
+                style={tabStyle('messages')}
+              >
+                <MessageSquare size={13} />
+                Messages
+              </button>
             </div>
           </div>
 
           {/* Messages tab */}
           {activeTab === 'messages' && (
             <>
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 bg-gray-50 thin-scroll">
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
                 {!messagesLoaded ? (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-xs text-gray-400">Loading...</p>
@@ -376,6 +471,7 @@ export default function ChatWidget({
                 ) : (
                   messages.map(msg => {
                     const isFromMe = msg.sender_role === 'user'
+                    const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                     return (
                       <div
                         key={msg.id}
@@ -385,16 +481,34 @@ export default function ChatWidget({
                           <Avatar name={adminName} photoUrl={adminPhotoUrl} size={7} />
                         )}
                         <div className="max-w-[75%]">
+                          {hasContent && (
                           <div
                             className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#f3f4f6', color: '#1f2937', borderBottomLeftRadius: '4px' }
+                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className={`flex flex-col gap-0.5 ${hasContent ? 'mt-1' : ''} ${isFromMe ? 'items-end' : 'items-start'}`}>
+                              {msg.attachments.map((att, i) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1 text-xs underline max-w-full"
+                                  style={{ color: '#4b5563' }}
+                                >
+                                  <span className="truncate">📎 {att.filename}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isFromMe && (
@@ -448,14 +562,46 @@ export default function ChatWidget({
                     style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                   >•≡</button>
                   <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
-                    <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>😊</button>
-                    {showEmojiPicker && (
-                      <div style={{ position: 'absolute', bottom: '32px', right: 0, zIndex: 50 }}>
+                    <button ref={emojiButtonRef} onClick={handleEmojiButtonClick} title="Emoji" style={{ padding: '2px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 16 }}>😊</button>
+                    {showEmojiPicker && emojiPickerPos && (
+                      <div style={{ position: 'fixed', bottom: emojiPickerPos.bottom, right: emojiPickerPos.right, zIndex: 9999 }}>
                         <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
                       </div>
                     )}
                   </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    title="Attach file"
+                    aria-label="Attach file"
+                    className="px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                  >
+                    <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
+                  </button>
                 </div>
+                {pendingAttachments.length > 0 && (
+                  <div className="px-3 pb-1 flex flex-col gap-1">
+                    {pendingAttachments.map((att, i) => (
+                      <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-600">
+                        <span className="truncate max-w-[240px]">📎 {att.filename}</span>
+                        <button
+                          onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                          className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                          aria-label="Remove attachment"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-2 px-3 pb-3">
                   <div
                     className="widget-composer flex-1 text-sm px-3 py-2 rounded-lg border border-gray-200 focus-within:border-orange-400 bg-gray-50 min-h-[36px] max-h-[80px] overflow-y-auto cursor-text transition-colors"
@@ -533,7 +679,11 @@ export default function ChatWidget({
           </span>
         )}
         <button
-          onClick={() => setIsOpen(prev => !prev)}
+          onClick={() => {
+            // NEW300: closing resets messagesLoaded so the next open refetches and re-marks reads.
+            if (isOpen) setMessagesLoaded(false)
+            setIsOpen(!isOpen)
+          }}
           className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
           style={{ backgroundColor: isOpen ? '#e06e00' : '#FF8303' }}
           aria-label={isOpen ? 'Close chat' : 'Open chat'}
@@ -541,12 +691,7 @@ export default function ChatWidget({
           {isOpen ? (
             <X size={22} className="text-white" />
           ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path
-                d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z"
-                stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              />
-            </svg>
+            <img src="/lingualink-chat-icon.svg" alt="LinguaLink chat" width={36} height={36} />
           )}
         </button>
       </div>

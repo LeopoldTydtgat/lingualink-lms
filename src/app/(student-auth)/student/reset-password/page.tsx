@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { validatePassword } from '@/lib/passwordValidation'
 
 function ResetPasswordContent() {
   const router = useRouter()
@@ -39,8 +40,9 @@ function ResetPasswordContent() {
     e.preventDefault()
     setError(null)
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+    const validationError = validatePassword(password)
+    if (validationError) {
+      setError(validationError)
       return
     }
 
@@ -56,7 +58,7 @@ function ResetPasswordContent() {
       await supabase.auth.getUser() // refreshes session state from cookies before updateUser
       const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) {
-        setError('Something went wrong. Your reset link may have expired. Please request a new one.')
+        setError(updateError.message || 'Something went wrong. Your reset link may have expired. Please request a new one.')
         return
       }
 
@@ -234,7 +236,7 @@ function ResetPasswordContent() {
                     type={showPassword ? 'text' : 'password'}
                     required
                     autoComplete="new-password"
-                    placeholder="Minimum 8 characters"
+                    placeholder="Enter new password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     style={{
@@ -258,6 +260,9 @@ function ResetPasswordContent() {
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                <p style={{ fontSize: '12px', color: '#666666', marginTop: '6px', marginBottom: 0 }}>
+                  At least 8 characters, including an uppercase letter, a lowercase letter and a number.
+                </p>
               </div>
 
               <div style={{ marginBottom: '24px' }}>

@@ -1,12 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2 } from 'lucide-react'
-import { getLocalDateKey } from '@/lib/utils/timezone'
+import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info } from 'lucide-react'
+import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
+import { isBookableStart } from '@/lib/bookingGrid'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RecentReview {
+  rating: number
+  text: string
+  submitted_at: string
+}
 
 interface Teacher {
   id: string
@@ -14,6 +21,18 @@ interface Teacher {
   photo_url: string | null
   bio: string | null
   timezone: string | null
+  nationality: string | null
+  qualifications: string | null
+  specialties: string | null
+  quote: string | null
+  native_languages: string[] | null
+  speaking_languages: string[] | null
+  teaching_languages: string[] | null
+  video_url: string | null
+  // Additive review stats merged in by the server page — never block booking on them.
+  avgRating: number | null
+  reviewCount: number
+  recentReviews: RecentReview[]
 }
 
 interface RescheduleLesson {
@@ -48,14 +67,15 @@ function formatHours(hours: number): string {
   return `${h}h ${m}min`
 }
 
-// Get the Monday of the week containing a given date
-function getWeekStart(date: Date): Date {
-  const d = new Date(date)
-  const day = d.getDay() // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day // adjust to Monday
-  d.setDate(d.getDate() + diff)
-  d.setHours(0, 0, 0, 0)
-  return d
+// Monday of the week containing "now", as a YYYY-MM-DD key in the given
+// timezone. Anchored on the tz-local today key, never browser-local Date math:
+// a browser-local Monday midnight can format to a Sunday or Tuesday key in a
+// distant profile timezone, desyncing the columns from the server's window.
+function getWeekStartKey(timezone: string): string {
+  const now = new Date()
+  const todayKey = getLocalDateKey(now, timezone)
+  const weekday = utcInstantToTzParts(now, timezone).weekday // 0=Sun
+  return addDaysToDateKey(todayKey, weekday === 0 ? -6 : 1 - weekday)
 }
 
 // Format a date as "Mon 7 Apr" in the student's timezone
@@ -93,14 +113,24 @@ function getDayOfWeek(date: Date, timezone: string): number {
 function StepIndicator({
   currentStep,
   totalSteps,
+  skipTeacherStep,
+  skipDurationStep,
 }: {
   currentStep: number
   totalSteps: number
+  skipTeacherStep: boolean
+  skipDurationStep: boolean
 }) {
-  const labels =
-    totalSteps === 4
-      ? ['Teacher', 'Duration', 'Date & Time', 'Confirm']
-      : ['Duration', 'Date & Time', 'Confirm']
+  // The label SET, not just the count, depends on WHICH steps are skipped: the
+  // two 3-step shapes (skip Teacher vs skip Duration) differ, so totalSteps alone
+  // cannot disambiguate them. Build the visible labels from the flags — by
+  // construction labels.length === totalSteps.
+  const labels = [
+    ...(skipTeacherStep ? [] : ['Teacher']),
+    ...(skipDurationStep ? [] : ['Duration']),
+    'Date & Time',
+    'Confirm',
+  ]
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', marginBottom: '32px' }}>
@@ -110,7 +140,7 @@ function StepIndicator({
         const isActive = stepNum === currentStep
 
         return (
-          <div key={label} style={{ display: 'flex', alignItems: 'center', flex: i < labels.length - 1 ? 1 : 'none' }}>
+          <div key={label} style={{ display: 'flex', alignItems: 'center', flex: i < totalSteps - 1 ? 1 : 'none' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
               <div
                 style={{
@@ -139,7 +169,7 @@ function StepIndicator({
                 {label}
               </span>
             </div>
-            {i < labels.length - 1 && (
+            {i < totalSteps - 1 && (
               <div
                 style={{
                   flex: 1,
@@ -159,15 +189,354 @@ function StepIndicator({
 
 // ─── Step 1 — Teacher selection ───────────────────────────────────────────────
 
+// Read-only star row. Colours copied verbatim from the account page's StarRating
+// (src/app/(dashboard)/account/AccountClient.tsx) so ratings read identically
+// across portals.
+function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
+  return (
+    <div style={{ display: 'flex', gap: '2px' }}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          size={size}
+          style={{
+            fill: star <= rating ? '#FF8303' : 'none',
+            color: star <= rating ? '#FF8303' : '#d1d5db',
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// "4.8 (12 reviews)" with stars — rendered only when there is at least one review.
+function RatingLine({
+  avgRating,
+  reviewCount,
+  starSize,
+}: {
+  avgRating: number | null
+  reviewCount: number
+  starSize?: number
+}) {
+  if (reviewCount <= 0 || avgRating === null) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <StarRow rating={Math.round(avgRating)} size={starSize} />
+      <span style={{ fontSize: '13px', color: '#6b7280' }}>
+        {avgRating.toFixed(1)} ({reviewCount} {reviewCount === 1 ? 'review' : 'reviews'})
+      </span>
+    </div>
+  )
+}
+
+// Trim and drop blank entries from a nullable text[] column.
+function cleanList(arr: string[] | null): string[] {
+  return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string' && s.trim().length > 0) : []
+}
+
+// ─── Teacher profile modal ────────────────────────────────────────────────────
+// Mirrors the student-portal ClassReminderModal overlay/card/close pattern
+// (src/components/student/ClassReminderModal.tsx): fixed backdrop + centred card,
+// backdrop click closes, plus Esc. Body scrolls; footer stays put.
+function TeacherProfileModal({
+  teacher,
+  studentTimezone,
+  onClose,
+  onSelect,
+}: {
+  teacher: Teacher
+  studentTimezone: string
+  onClose: () => void
+  onSelect: (id: string) => void
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const languageRows = [
+    { label: 'Teaches', values: cleanList(teacher.teaching_languages) },
+    { label: 'Speaks', values: cleanList(teacher.speaking_languages) },
+    { label: 'Native', values: cleanList(teacher.native_languages) },
+  ].filter((row) => row.values.length > 0)
+
+  const reviewDateFormatter = new Intl.DateTimeFormat('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: studentTimezone,
+  })
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.45)',
+          zIndex: 999,
+        }}
+        onClick={onClose}
+      />
+
+      {/* Modal */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${teacher.full_name} profile`}
+        style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          zIndex: 1000,
+          backgroundColor: '#ffffff',
+          borderRadius: '16px',
+          width: 'calc(100% - 32px)',
+          maxWidth: '480px',
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+        }}
+      >
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          aria-label="Close profile"
+          style={{
+            position: 'absolute',
+            top: '16px',
+            right: '16px',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: '#9ca3af',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1,
+          }}
+        >
+          <X size={20} />
+        </button>
+
+        {/* Scrollable body */}
+        <div style={{ overflowY: 'auto', padding: '28px' }}>
+          {/* Header: photo + name + rating */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px', paddingRight: '20px' }}>
+            {teacher.photo_url ? (
+              <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <Image
+                  src={teacher.photo_url}
+                  alt={teacher.full_name}
+                  width={72}
+                  height={72}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  width: '72px',
+                  height: '72px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <User size={30} color="#9ca3af" />
+              </div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '6px' }}>
+                {teacher.full_name}
+              </h2>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} />
+              {teacher.nationality && teacher.nationality.trim().length > 0 && (
+                <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                  {teacher.nationality}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Languages */}
+          {languageRows.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '18px' }}>
+              {languageRows.map((row) => (
+                <div key={row.label} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                  <span style={{ fontWeight: '600', color: '#374151', minWidth: '64px', flexShrink: 0 }}>
+                    {row.label}
+                  </span>
+                  <span style={{ color: '#6b7280' }}>{row.values.join(', ')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Quote — italic per spec */}
+          {teacher.quote && teacher.quote.trim().length > 0 && (
+            <p style={{ fontSize: '14px', fontStyle: 'italic', color: '#4b5563', lineHeight: '1.6', marginBottom: '18px' }}>
+              {teacher.quote}
+            </p>
+          )}
+
+          {/* Full bio */}
+          {teacher.bio && teacher.bio.trim().length > 0 && (
+            <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', marginBottom: '18px', whiteSpace: 'pre-wrap' }}>
+              {teacher.bio}
+            </p>
+          )}
+
+          {/* Qualifications */}
+          {teacher.qualifications && teacher.qualifications.trim().length > 0 && (
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
+                Qualifications
+              </h3>
+              <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {teacher.qualifications}
+              </p>
+            </div>
+          )}
+
+          {/* Specialties */}
+          {teacher.specialties && teacher.specialties.trim().length > 0 && (
+            <div style={{ marginBottom: '18px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
+                Specialties
+              </h3>
+              <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                {teacher.specialties}
+              </p>
+            </div>
+          )}
+
+          {/* Intro video */}
+          {teacher.video_url && teacher.video_url.trim().length > 0 && (
+            <a
+              href={teacher.video_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#FF8303',
+                textDecoration: 'none',
+                marginBottom: '18px',
+              }}
+            >
+              Watch intro video
+            </a>
+          )}
+
+          {/* Recent reviews — up to 5, no student identity */}
+          {teacher.recentReviews.length > 0 && (
+            <div style={{ marginTop: '4px' }}>
+              <h3 style={{ fontSize: '12px', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px' }}>
+                Recent reviews
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {teacher.recentReviews.slice(0, 5).map((review, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      borderTop: i === 0 ? 'none' : '1px solid #f3f4f6',
+                      paddingTop: i === 0 ? '0' : '14px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px', gap: '8px' }}>
+                      <StarRow rating={review.rating} />
+                      <span style={{ fontSize: '12px', color: '#9ca3af', flexShrink: 0 }}>
+                        {reviewDateFormatter.format(new Date(review.submitted_at))}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                      {review.text}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            flexShrink: 0,
+            borderTop: '1px solid #E0DFDC',
+            padding: '16px 28px',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: '10px',
+          }}
+        >
+          <button
+            onClick={onClose}
+            style={{
+              padding: '10px 18px',
+              backgroundColor: '#ffffff',
+              border: '1px solid #E0DFDC',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '500',
+              color: '#4b5563',
+              cursor: 'pointer',
+            }}
+          >
+            Close
+          </button>
+          <button
+            onClick={() => {
+              onSelect(teacher.id)
+              onClose()
+            }}
+            style={{
+              padding: '10px 18px',
+              backgroundColor: '#FF8303',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#ffffff',
+              cursor: 'pointer',
+            }}
+          >
+            Select this teacher
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function StepTeacher({
   teachers,
   selectedTeacherId,
+  studentTimezone,
   onSelect,
 }: {
   teachers: Teacher[]
   selectedTeacherId: string | null
+  studentTimezone: string
   onSelect: (id: string) => void
 }) {
+  const [profileTeacher, setProfileTeacher] = useState<Teacher | null>(null)
+
   return (
     <div>
       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
@@ -180,10 +549,22 @@ function StepTeacher({
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {teachers.map((teacher) => {
           const isSelected = selectedTeacherId === teacher.id
+          const teaches = cleanList(teacher.teaching_languages)
           return (
-            <button
+            <div
               key={teacher.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
               onClick={() => onSelect(teacher.id)}
+              onKeyDown={(e) => {
+                // Ignore keydowns bubbling up from the nested "View profile" button.
+                if (e.target !== e.currentTarget) return
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelect(teacher.id)
+                }
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -192,26 +573,26 @@ function StepTeacher({
                 borderRadius: '10px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
-                backgroundColor: isSelected ? '#fff7ed' : '#ffffff',
+                backgroundColor: '#ffffff',
                 cursor: 'pointer',
                 textAlign: 'left',
               }}
             >
               {teacher.photo_url ? (
-                <div style={{ width: '48px', height: '48px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
                   <Image
                     src={teacher.photo_url}
                     alt={teacher.full_name}
-                    width={48}
-                    height={48}
+                    width={56}
+                    height={56}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 </div>
               ) : (
                 <div
                   style={{
-                    width: '48px',
-                    height: '48px',
+                    width: '56px',
+                    height: '56px',
                     borderRadius: '50%',
                     backgroundColor: '#f3f4f6',
                     display: 'flex',
@@ -220,18 +601,50 @@ function StepTeacher({
                     flexShrink: 0,
                   }}
                 >
-                  <User size={22} color="#9ca3af" />
+                  <User size={26} color="#9ca3af" />
                 </div>
               )}
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
                   {teacher.full_name}
                 </p>
-                {teacher.bio && (
-                  <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
-                    {teacher.bio.length > 120 ? teacher.bio.slice(0, 120) + '…' : teacher.bio}
+                {teacher.reviewCount > 0 && (
+                  <div style={{ marginBottom: '4px' }}>
+                    <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} />
+                  </div>
+                )}
+                {teaches.length > 0 && (
+                  <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '4px' }}>
+                    Teaches {teaches.join(', ')}
                   </p>
                 )}
+                {teacher.bio && teacher.bio.trim().length > 0 && (
+                  <p
+                    className="line-clamp-2"
+                    style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}
+                  >
+                    {teacher.bio}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setProfileTeacher(teacher)
+                  }}
+                  style={{
+                    marginTop: '8px',
+                    padding: '0',
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: '#FF8303',
+                    cursor: 'pointer',
+                  }}
+                >
+                  View profile
+                </button>
               </div>
               {isSelected && (
                 <div
@@ -249,10 +662,19 @@ function StepTeacher({
                   <Check size={14} color="#ffffff" />
                 </div>
               )}
-            </button>
+            </div>
           )
         })}
       </div>
+
+      {profileTeacher && (
+        <TeacherProfileModal
+          teacher={profileTeacher}
+          studentTimezone={studentTimezone}
+          onClose={() => setProfileTeacher(null)}
+          onSelect={onSelect}
+        />
+      )}
     </div>
   )
 }
@@ -269,19 +691,52 @@ function StepDuration({
   onSelect: (minutes: number) => void
 }) {
   const options = [
-    { minutes: 30, label: '30 minutes', hours: 0.5 },
-    { minutes: 60, label: '1 hour', hours: 1 },
-    { minutes: 90, label: '1.5 hours', hours: 1.5 },
+    { minutes: 30, label: '30 minutes', hours: 0.5, description: 'Great for quick practice and focused conversations.' },
+    { minutes: 60, label: '1 hour', hours: 1, description: 'Ideal for deeper learning and real progress.' },
+    { minutes: 90, label: '1.5 hours', hours: 1.5, description: 'Perfect for in-depth sessions and specialised topics.' },
   ]
 
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
-        Choose duration
-      </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-        You have <strong>{formatHours(hoursRemaining)}</strong> remaining in your training.
-      </p>
+      {/* Header row: title + subtitle on the left, training-balance chip on the right */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: '16px',
+          marginBottom: '24px',
+        }}
+      >
+        <div>
+          <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+            Choose your lesson duration
+          </h2>
+          <p style={{ fontSize: '14px', color: '#6b7280' }}>
+            Select the duration that works best for you.
+          </p>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            flexShrink: 0,
+            backgroundColor: '#ffffff',
+            border: '1px solid #E0DFDC',
+            borderRadius: '10px',
+            padding: '8px 14px',
+          }}
+        >
+          <Clock size={18} color="#FF8303" style={{ flexShrink: 0 }} />
+          <div>
+            <p style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.3' }}>Training balance</p>
+            <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827', lineHeight: '1.3' }}>
+              {formatHours(hoursRemaining)}
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {options.map((option) => {
@@ -296,55 +751,85 @@ function StepDuration({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
+                gap: '16px',
                 padding: '16px 20px',
                 borderRadius: '10px',
                 border: '2px solid',
-                borderColor: isSelected ? '#FF8303' : canBook ? '#E0DFDC' : '#f3f4f6',
-                backgroundColor: isSelected ? '#fff7ed' : canBook ? '#ffffff' : '#fafafa',
+                borderColor: isSelected ? '#FF8303' : '#E0DFDC',
+                backgroundColor: '#ffffff',
                 cursor: canBook ? 'pointer' : 'not-allowed',
                 opacity: canBook ? 1 : 0.5,
+                textAlign: 'left',
               }}
             >
-              <div>
-                <p
-                  style={{
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    color: canBook ? '#111827' : '#9ca3af',
-                    marginBottom: '2px',
-                  }}
-                >
+              {/* Icon holder — neutral grey circle with an orange clock */}
+              <div
+                style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  backgroundColor: '#f3f4f6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Clock size={20} color="#FF8303" />
+              </div>
+
+              {/* Title + one-line description */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: '15px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
                   {option.label}
                 </p>
-                <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  Uses {formatHours(option.hours)} from your balance
+                <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.5' }}>
+                  {option.description}
                 </p>
               </div>
-              {!canBook && (
+
+              {/* Right cluster: insufficient-hours message, or the per-option deduction + selection check */}
+              {!canBook ? (
                 <span
                   style={{
                     fontSize: '12px',
                     color: '#FD5602',
                     fontWeight: '500',
+                    flexShrink: 0,
                   }}
                 >
                   Not enough hours
                 </span>
-              )}
-              {isSelected && canBook && (
-                <div
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    backgroundColor: '#FF8303',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Check size={14} color="#ffffff" />
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+                  <div style={{ width: '1px', height: '36px', backgroundColor: '#E0DFDC' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Clock size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: '13px', fontWeight: '700', color: '#111827', lineHeight: '1.3' }}>
+                        Uses {formatHours(option.hours)}
+                      </p>
+                      <p style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.3' }}>
+                        from your balance
+                      </p>
+                    </div>
+                  </div>
+                  {isSelected && (
+                    <div
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        backgroundColor: '#FF8303',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Check size={14} color="#ffffff" />
+                    </div>
+                  )}
                 </div>
               )}
             </button>
@@ -374,25 +859,54 @@ function StepDuration({
 // ─── Step 3 — Date and time selection ────────────────────────────────────────
 
 function StepDateTime({
+  teacher,
   teacherId,
   studentTimezone,
   durationMinutes,
   onSelect,
+  onAdvance,
   selectedStartIso,
 }: {
+  teacher: Teacher
   teacherId: string
   studentTimezone: string
   durationMinutes: number
   onSelect: (isoString: string | null) => void
+  onAdvance: () => void
   selectedStartIso: string | null
 }) {
   const slotsNeeded = durationMinutes / 30
 
-  const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(new Date()))
+  // Monday of the visible week as a YYYY-MM-DD key in the STUDENT timezone —
+  // the exact frame the server windows and buckets by (NEW317).
+  const [weekStartKey, setWeekStartKey] = useState<string>(() => getWeekStartKey(studentTimezone))
   const [slots, setSlots] = useState<Record<string, Slot[]>>({}) // keyed by YYYY-MM-DD
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedDay, setSelectedDay] = useState<string | null>(null) // a YYYY-MM-DD dateKey
+  const [hoveredSlotIso, setHoveredSlotIso] = useState<string | null>(null) // green hover on available slot chips
+
+  // Pending auto-advance timer after a start-time click. The short delay lets the
+  // span-pill selection paint before the wizard moves on; the latest slot click
+  // always wins (the previous timer is cleared and restarted). Any in-step
+  // navigation — a day switch or a week arrow — cancels a pending advance: the
+  // user is still browsing, and a day switch runs onSelect(null), so a queued
+  // advance would otherwise fire into a null start and render a blank Confirm
+  // step. The timer is also cleared on unmount, which is every step change (this
+  // component only renders on the date-&-time step), so it can never fire after
+  // the user has navigated away.
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingAdvance = () => {
+    if (advanceTimerRef.current !== null) {
+      clearTimeout(advanceTimerRef.current)
+      advanceTimerRef.current = null
+    }
+  }
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current)
+    }
+  }, [])
 
   // Fetch availability slots from the API whenever week or teacher changes.
   //
@@ -409,9 +923,9 @@ function StepDateTime({
     setError(null)
 
     const controller = new AbortController()
-    // weekStart is browser-local Monday midnight; format it in the STUDENT tz (not UTC) so the server's 7-day window matches the client's Mon–Sun columns. Formatting in UTC rolls positive-offset browsers back to Sunday and blanks the Sunday column.
-    const weekStartStr = getLocalDateKey(weekStart, studentTimezone)
-    const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartStr}&timezone=${encodeURIComponent(studentTimezone)}`
+    // weekStartKey is already a student-tz Monday key — the exact frame the
+    // server windows and buckets by (NEW317), so it goes on the wire as is.
+    const url = `/api/student/availability?teacherId=${teacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}`
 
     // Immediate first attempt, then up to two retries with short back-off.
     const RETRY_DELAYS = [400, 800]
@@ -474,42 +988,53 @@ function StepDateTime({
     void load()
 
     return () => controller.abort()
-  }, [teacherId, weekStart, studentTimezone])
+  }, [teacherId, weekStartKey, studentTimezone])
 
-  // Build the 7 days of this week to display
+  // The 7 column dates: pure calendar arithmetic on weekStartKey — the same
+  // frame the server buckets by. Each column's Date is anchored at NOON
+  // student-local time purely for the Intl labels (all pinned to
+  // studentTimezone): noon sidesteps DST-shifted midnights, and
+  // getLocalDateKey(day, studentTimezone) round-trips to the column's key.
   const weekDays: Date[] = []
   for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart)
-    d.setDate(d.getDate() + i)
-    weekDays.push(d)
+    weekDays.push(new Date(localToUtc(addDaysToDateKey(weekStartKey, i) + 'T12:00', studentTimezone)))
   }
 
-  // Check if a slot at index `slotIndex` within a day can be the start of a booking.
-  // Requires slotsNeeded consecutive 30-minute slots that are all available AND
-  // actually adjacent in time (no gaps — teacher might have non-contiguous availability).
-  function isBookableStart(daySlots: Slot[], slotIndex: number): boolean {
-    for (let i = 0; i < slotsNeeded; i++) {
-      const s = daySlots[slotIndex + i]
-      if (!s || !s.available) return false
-      if (i > 0) {
-        const expectedMs = new Date(daySlots[slotIndex + i - 1].startIso).getTime() + 30 * 60 * 1000
-        if (new Date(s.startIso).getTime() !== expectedMs) return false
-      }
+  // NEW324: week-wide set of available slot start instants, across ALL day
+  // columns. Since NEW317 each 30-min slot is bucketed by the student-local
+  // date of its own start instant, so a 60/90-min run crossing student-local
+  // midnight has its continuation slots in the NEXT day's column — a
+  // within-column walk can never assemble it. isBookableStart checks each
+  // 30-min step of the run against this set instead (pure instant math).
+  const availableStartMs = new Set<number>()
+  for (const daySlots of Object.values(slots)) {
+    for (const s of daySlots) {
+      if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
     }
-    return true
   }
 
-  // A day can be picked iff it isn't past and a booking of the chosen
-  // duration can start somewhere in it.
-  const todayStart = new Date(new Date().setHours(0, 0, 0, 0))
-  const selectableDayKeys: string[] = []
+  // Single source of truth: the bookable START slots of every visible day, keyed
+  // by dateKey. The day-cell counts, the day strip, the time-group chips, and the
+  // earliest-available hint ALL derive from this one structure, so a day's "N
+  // slots" count can never disagree with the chips rendered for it. A day can be
+  // picked iff it isn't past and a booking of the chosen duration can start
+  // somewhere in it (isBookableStart against the week-wide instant set, so
+  // runs crossing student-local midnight still count for their start day).
+  // Past-day prune in the STUDENT's frame: browser-local midnight can sit on a
+  // different calendar day, so compare YYYY-MM-DD keys (safe as strings).
+  const todayKey = getLocalDateKey(new Date(), studentTimezone)
+  const startsByDay: Record<string, Slot[]> = {}
   for (const day of weekDays) {
     const dateKey = getLocalDateKey(day, studentTimezone)
     const daySlots = slots[dateKey] ?? []
-    if (day >= todayStart && daySlots.some((_, i) => isBookableStart(daySlots, i))) {
-      selectableDayKeys.push(dateKey)
-    }
+    startsByDay[dateKey] =
+      dateKey >= todayKey
+        ? daySlots.filter((s) => isBookableStart(s.startIso, slotsNeeded, availableStartMs))
+        : []
   }
+  const selectableDayKeys = weekDays
+    .map((day) => getLocalDateKey(day, studentTimezone))
+    .filter((dateKey) => startsByDay[dateKey].length > 0)
 
   // The active day is derived, never synced via an effect: keep the student's
   // pick while it stays selectable, otherwise fall back to the first open day.
@@ -523,29 +1048,29 @@ function StepDateTime({
       ? weekDays.find((d) => getLocalDateKey(d, studentTimezone) === activeDayKey)
       : undefined
 
-  // Bookable START slots of the active day, grouped by part of day. The hour
-  // comes from a formatter pinned to the student's timezone — Date.getHours()
-  // is browser-local and wrong for a student in another timezone.
+  // Bookable START slots of the active day, grouped by part of day — taken from
+  // the shared startsByDay structure so the chips shown always match the day's
+  // count. The hour comes from a formatter pinned to the student's timezone —
+  // Date.getHours() is browser-local and wrong for a student in another timezone.
   const hourFormatter = new Intl.DateTimeFormat('en-GB', {
     hour: '2-digit',
     hour12: false,
     timeZone: studentTimezone,
   })
-  const activeDaySlots = activeDayKey !== null ? slots[activeDayKey] ?? [] : []
+  const activeDayStarts = activeDayKey !== null ? startsByDay[activeDayKey] ?? [] : []
   const morningStarts: Slot[] = []
   const afternoonStarts: Slot[] = []
   const eveningStarts: Slot[] = []
-  activeDaySlots.forEach((slot, i) => {
-    if (!isBookableStart(activeDaySlots, i)) return
+  activeDayStarts.forEach((slot) => {
     const hour = Number(hourFormatter.format(new Date(slot.startIso)))
     if (hour < 12) morningStarts.push(slot)
     else if (hour < 17) afternoonStarts.push(slot)
     else eveningStarts.push(slot)
   })
   const partsOfDay = [
-    { label: 'Morning', starts: morningStarts },
-    { label: 'Afternoon', starts: afternoonStarts },
-    { label: 'Evening', starts: eveningStarts },
+    { label: 'Morning', starts: morningStarts, Icon: Sun },
+    { label: 'Afternoon', starts: afternoonStarts, Icon: Sunset },
+    { label: 'Evening', starts: eveningStarts, Icon: Moon },
   ]
 
   const longDayFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -560,39 +1085,142 @@ function StepDateTime({
     hour12: false,
     timeZone: studentTimezone,
   })
+  const weekdayFormatter = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    timeZone: studentTimezone,
+  })
+
+  // Earliest bookable start within the visible week (for the selected duration),
+  // read straight off the shared startsByDay structure. weekDays is chronological
+  // and each day's starts are time-sorted, so the first non-empty day's first
+  // start is the earliest. Null when the whole visible week has none.
+  //
+  // weekdayLabel is taken from the day COLUMN (the same weekDays Date the strip
+  // and panel headers format). Since NEW317 the route buckets each slot by the
+  // student-local date of its own start instant, so the column day and the slot
+  // instant's day always agree; the time still comes from the real instant below.
+  let earliest: { dateKey: string; startIso: string; weekdayLabel: string } | null = null
+  for (const day of weekDays) {
+    const dateKey = getLocalDateKey(day, studentTimezone)
+    const starts = startsByDay[dateKey]
+    if (starts.length > 0) {
+      earliest = { dateKey, startIso: starts[0].startIso, weekdayLabel: weekdayFormatter.format(day) }
+      break
+    }
+  }
+
   const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + durationMinutes * 60000) : null
 
   const goBack = () => {
-    const prev = new Date(weekStart)
-    prev.setDate(prev.getDate() - 7)
-    // Don't allow going before current week
-    if (prev >= getWeekStart(new Date())) setWeekStart(prev)
-    else setWeekStart(getWeekStart(new Date()))
+    cancelPendingAdvance() // browsing weeks is navigation, never a confirm
+    const prev = addDaysToDateKey(weekStartKey, -7)
+    const currentWeekKey = getWeekStartKey(studentTimezone)
+    // Don't allow going before the current week (YYYY-MM-DD compares as a string)
+    setWeekStartKey(prev >= currentWeekKey ? prev : currentWeekKey)
   }
 
   const goForward = () => {
-    const next = new Date(weekStart)
-    next.setDate(next.getDate() + 7)
-    setWeekStart(next)
+    cancelPendingAdvance() // browsing weeks is navigation, never a confirm
+    setWeekStartKey(addDaysToDateKey(weekStartKey, 7))
   }
 
-  const isPrevDisabled = weekStart <= getWeekStart(new Date())
+  const isPrevDisabled = weekStartKey <= getWeekStartKey(studentTimezone)
+  // The "Earliest available" hint only makes sense on the week that actually
+  // contains today; on a future week the first open slot is not the soonest
+  // bookable time. Monday keys are plain YYYY-MM-DD strings, so equality is safe.
+  const isCurrentWeek = weekStartKey === getWeekStartKey(studentTimezone)
 
-  // Week label e.g. "31 Mar – 6 Apr 2026"
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 6)
-  const weekLabel = `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(weekStart)} – ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(weekEnd)}`
+  // Week label e.g. "31 Mar – 6 Apr 2026" — formatted off the noon-anchored
+  // column Dates, pinned to the student tz like every other label in this step.
+  const weekLabel = `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone }).format(weekDays[0])} – ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone }).format(weekDays[6])}`
 
   return (
     <div>
       <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
         Choose date and time
       </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-        Times shown in your local timezone ({studentTimezone}).
-      </p>
+
+      {/* Context strip — teacher, the selected/locked duration, and the timezone
+          note. Non-interactive; always visible (it does not depend on the fetched
+          availability, so it stays put through loading and week navigation). */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '10px',
+          marginBottom: '20px',
+        }}
+      >
+        {teacher.photo_url ? (
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+            <Image
+              src={teacher.photo_url}
+              alt={teacher.full_name}
+              width={40}
+              height={40}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <User size={20} color="#9ca3af" />
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: '120px' }}>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+            {teacher.full_name}
+          </p>
+          {teacher.reviewCount > 0 && (
+            <div style={{ marginTop: '2px' }}>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
+            </div>
+          )}
+        </div>
+
+        {/* Duration chip — reads from durationMinutes, so it also shows the locked
+            duration on the reschedule path where the Duration step never renders. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            flexShrink: 0,
+            backgroundColor: '#ffffff',
+            border: '1px solid #E0DFDC',
+            borderRadius: '8px',
+            padding: '6px 12px',
+          }}
+        >
+          <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
+            {durationMinutes} min
+          </span>
+        </div>
+
+        {/* Timezone note — relocated here from the old subtitle line */}
+        <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+          Times shown in your local timezone ({studentTimezone})
+        </p>
+      </div>
 
       {/* Week navigation */}
       <div
@@ -657,18 +1285,57 @@ function StepDateTime({
 
       {!loading && !error && (
         <>
+          {earliest !== null && isCurrentWeek && (
+            <button
+              type="button"
+              onClick={() => {
+                // Mirrors a day-strip click: cancel any queued auto-advance and,
+                // if it's a different day, switch to it and drop a time picked on
+                // the old day. It deliberately never selects the SLOT — slot
+                // selection auto-advances, and this must not.
+                cancelPendingAdvance()
+                if (earliest && earliest.dateKey !== activeDayKey) {
+                  setSelectedDay(earliest.dateKey)
+                  onSelect(null)
+                }
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'none',
+                border: 'none',
+                padding: '0',
+                marginBottom: '14px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '500',
+                color: '#FF8303',
+              }}
+            >
+              <Clock size={14} style={{ flexShrink: 0 }} />
+              Earliest available: {earliest.weekdayLabel} at{' '}
+              {timeFormatter.format(new Date(earliest.startIso))}
+            </button>
+          )}
+
           {/* Week strip — pick a day */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
             {weekDays.map((day) => {
               const dateKey = getLocalDateKey(day, studentTimezone)
               const selectable = selectableDayKeys.includes(dateKey)
               const isActive = selectable && dateKey === activeDayKey
+              // Same source as the chips: a day can never show a count that
+              // disagrees with the start times rendered for it.
+              const count = startsByDay[dateKey]?.length ?? 0
 
               return (
                 <button
                   key={dateKey}
                   disabled={!selectable}
                   onClick={() => {
+                    // Touching the day strip is navigation, never a confirm — cancel any queued advance.
+                    cancelPendingAdvance()
                     if (selectable && dateKey !== activeDayKey) {
                       setSelectedDay(dateKey)
                       onSelect(null) // a time picked on the previous day no longer applies
@@ -679,8 +1346,8 @@ function StepDateTime({
                     padding: '9px 2px',
                     textAlign: 'center',
                     border: '1px solid',
-                    borderColor: selectable && !isActive ? '#E0DFDC' : 'transparent',
-                    backgroundColor: isActive ? '#FF8303' : selectable ? '#ffffff' : '#fafafa',
+                    borderColor: isActive ? '#FF8303' : selectable ? '#E0DFDC' : 'transparent',
+                    backgroundColor: isActive ? '#FFF0DC' : selectable ? '#ffffff' : '#fafafa',
                     cursor: selectable ? 'pointer' : 'default',
                   }}
                 >
@@ -690,7 +1357,7 @@ function StepDateTime({
                       fontWeight: '500',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
-                      color: isActive ? '#ffe7cf' : selectable ? '#6b7280' : '#d1d5db',
+                      color: selectable ? '#6b7280' : '#d1d5db',
                     }}
                   >
                     {formatDayLabel(day, studentTimezone).split(' ')[0]}
@@ -699,22 +1366,23 @@ function StepDateTime({
                     style={{
                       fontSize: '15px',
                       fontWeight: '500',
-                      color: isActive ? '#ffffff' : selectable ? '#111827' : '#d1d5db',
+                      color: selectable ? '#111827' : '#d1d5db',
                     }}
                   >
                     {new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }).format(day)}
                   </p>
-                  {selectable && (
-                    <div
-                      style={{
-                        width: '5px',
-                        height: '5px',
-                        borderRadius: '50%',
-                        backgroundColor: isActive ? '#ffffff' : '#FF8303',
-                        margin: '4px auto 0',
-                      }}
-                    />
-                  )}
+                  {/* "N slots" for pickable days; a blank spacer (no count) keeps
+                      disabled/past/no-availability cells the same height. */}
+                  <p
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: '500',
+                      marginTop: '3px',
+                      color: '#9ca3af',
+                    }}
+                  >
+                    {selectable ? `${count} ${count === 1 ? 'slot' : 'slots'}` : <>&nbsp;</>}
+                  </p>
                 </button>
               )
             })}
@@ -732,18 +1400,27 @@ function StepDateTime({
                   .filter((part) => part.starts.length > 0)
                   .map((part) => (
                     <div key={part.label}>
-                      <p
+                      <div
                         style={{
-                          fontSize: '11px',
-                          fontWeight: '500',
-                          color: '#9ca3af',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
                           marginBottom: '8px',
                         }}
                       >
-                        {part.label}
-                      </p>
+                        <part.Icon size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+                        <p
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: '500',
+                            color: '#9ca3af',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.06em',
+                          }}
+                        >
+                          {part.label}
+                        </p>
+                      </div>
                       <div
                         style={{
                           display: 'grid',
@@ -766,10 +1443,23 @@ function StepDateTime({
                             startMs < selMs + durationMinutes * 60000
                           if (isInsideSelection) return null
 
+                          const isHovered = hoveredSlotIso === slot.startIso
                           return (
                             <button
                               key={slot.startIso}
-                              onClick={() => onSelect(slot.startIso)}
+                              onMouseEnter={() => setHoveredSlotIso(slot.startIso)}
+                              onMouseLeave={() =>
+                                setHoveredSlotIso((cur) => (cur === slot.startIso ? null : cur))
+                              }
+                              onClick={() => {
+                                onSelect(slot.startIso)
+                                // Debounced Calendly-style auto-advance — the latest slot click wins.
+                                cancelPendingAdvance()
+                                advanceTimerRef.current = setTimeout(() => {
+                                  advanceTimerRef.current = null
+                                  onAdvance()
+                                }, 250)
+                              }}
                               style={{
                                 padding: '10px 2px',
                                 borderRadius: '8px',
@@ -780,8 +1470,17 @@ function StepDateTime({
                                 cursor: 'pointer',
                                 whiteSpace: 'nowrap',
                                 gridColumn: isSelected ? 'span 2' : 'auto',
-                                backgroundColor: isSelected ? '#FF8303' : '#FFF0DC',
-                                color: isSelected ? '#ffffff' : '#FF8303',
+                                // Available slot chips are green (the two approved greens:
+                                // #E8F5E9 base, #D7EEDD on hover). The selected chip softens
+                                // to white with #FF8303 text and a #FF8303 inset outline via
+                                // box-shadow — no dimension change vs the borderless chips.
+                                backgroundColor: isSelected
+                                  ? '#ffffff'
+                                  : isHovered
+                                    ? '#D7EEDD'
+                                    : '#E8F5E9',
+                                color: isSelected ? '#FF8303' : '#2E7D32',
+                                boxShadow: isSelected ? 'inset 0 0 0 1px #FF8303' : undefined,
                               }}
                             >
                               {isSelected
@@ -845,6 +1544,7 @@ function StepConfirm({
   startIso,
   studentTimezone,
   hoursRemaining,
+  isReschedule,
   isSubmitting,
   onConfirm,
 }: {
@@ -853,6 +1553,7 @@ function StepConfirm({
   startIso: string
   studentTimezone: string
   hoursRemaining: number
+  isReschedule: boolean
   isSubmitting: boolean
   onConfirm: () => void
 }) {
@@ -884,6 +1585,63 @@ function StepConfirm({
         Please review your class details before confirming.
       </p>
 
+      {/* Teacher context strip — mirrors the Step 3 strip: white card,
+          #E0DFDC border, 40px avatar, name + RatingLine. No duration chip
+          or timezone line here. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px',
+          flexWrap: 'wrap',
+          padding: '12px 16px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '10px',
+          marginBottom: '20px',
+        }}
+      >
+        {teacher.photo_url ? (
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+            <Image
+              src={teacher.photo_url}
+              alt={teacher.full_name}
+              width={40}
+              height={40}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: '#f3f4f6',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <User size={20} color="#9ca3af" />
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: '120px' }}>
+          <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+            {teacher.full_name}
+          </p>
+          {teacher.reviewCount > 0 && (
+            <div style={{ marginTop: '2px' }}>
+              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Details card — no orange header. Four icon rows + a cancellation
+          footnote. Icons: Calendar / Clock / Wallet / ChartNoAxesColumn. */}
       <div
         style={{
           backgroundColor: '#ffffff',
@@ -893,69 +1651,76 @@ function StepConfirm({
           marginBottom: '24px',
         }}
       >
-        {/* Orange header */}
-        <div style={{ backgroundColor: '#FF8303', padding: '12px 20px' }}>
-          <span style={{ color: '#ffffff', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Class Summary
-          </span>
-        </div>
-
-        <div style={{ padding: '20px' }}>
-          {/* Teacher */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            {teacher.photo_url ? (
-              <div style={{ width: '44px', height: '44px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
-                <Image
-                  src={teacher.photo_url}
-                  alt={teacher.full_name}
-                  width={44}
-                  height={44}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              </div>
-            ) : (
+        {[
+          { Icon: Calendar, label: 'Date & time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
+          { Icon: Clock, label: 'Duration', value: formatHours(durationMinutes / 60) },
+          { Icon: Wallet, label: 'Hours deducted', value: formatHours(isReschedule ? 0 : hoursUsed) },
+          { Icon: ChartNoAxesColumn, label: 'Remaining after booking', value: formatHours(hoursAfter) },
+        ].map(({ Icon, label, value }, idx) => (
+          <div
+            key={label}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '14px 20px',
+              borderTop: idx === 0 ? 'none' : '1px solid #f3f4f6',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '50%',
-                  backgroundColor: '#f3f4f6',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  backgroundColor: '#FFF0DC',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
-                <User size={20} color="#9ca3af" />
+                <Icon size={18} color="#FF8303" />
               </div>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
+                <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{value}</p>
+              </div>
+            </div>
+            {idx === 3 && (
+              <span
+                style={{
+                  flexShrink: 0,
+                  backgroundColor: '#FFF0DC',
+                  borderRadius: '999px',
+                  padding: '4px 12px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#FF8303',
+                }}
+              >
+                {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
+              </span>
             )}
-            <div>
-              <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{teacher.full_name}</p>
-              <p style={{ fontSize: '13px', color: '#9ca3af' }}>Your teacher</p>
-            </div>
           </div>
+        ))}
 
-          {/* Details rows */}
-          {[
-            { label: 'Date & Time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
-            { label: 'Duration', value: formatHours(durationMinutes / 60) },
-            { label: 'Hours deducted', value: formatHours(hoursUsed) },
-            { label: 'Remaining after booking', value: formatHours(hoursAfter) },
-          ].map(({ label, value }) => (
-            <div
-              key={label}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                paddingTop: '12px',
-                paddingBottom: '12px',
-                borderTop: '1px solid #f3f4f6',
-              }}
-            >
-              <span style={{ fontSize: '14px', color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{value}</span>
-            </div>
-          ))}
+        {/* Cancellation footnote */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 20px',
+            backgroundColor: '#f9fafb',
+            borderTop: '1px solid #f3f4f6',
+          }}
+        >
+          <Info size={16} color="#6b7280" style={{ flexShrink: 0 }} />
+          <span style={{ fontSize: '13px', color: '#6b7280' }}>
+            You can change or cancel up to 24 hours before your lesson.
+          </span>
         </div>
       </div>
 
@@ -1008,9 +1773,13 @@ export default function BookingClient({
 }: Props) {
   const router = useRouter()
 
-  // If only one teacher, skip teacher selection step — steps are 3 not 4
+  // Two steps can be skipped independently: the Teacher step (single-teacher
+  // trainings — currently never) and the Duration step (a reschedule locks the
+  // original duration in, so there is nothing to choose). The wizard therefore
+  // has 4, 3, or 2 steps.
   const skipTeacherStep = false
-  const totalSteps = skipTeacherStep ? 3 : 4
+  const skipDurationStep = rescheduleLesson !== null
+  const totalSteps = 4 - (skipTeacherStep ? 1 : 0) - (skipDurationStep ? 1 : 0)
 
   // Step numbering: if skipping teacher step, step 1=Duration, 2=DateTime, 3=Confirm
   // If not skipping: step 1=Teacher, 2=Duration, 3=DateTime, 4=Confirm
@@ -1033,13 +1802,23 @@ export default function BookingClient({
   function getLogicalStep(): 'teacher' | 'duration' | 'datetime' | 'confirm' {
     if (!skipTeacherStep) {
       if (step === 1) return 'teacher'
-      if (step === 2) return 'duration'
-      if (step === 3) return 'datetime'
-      return 'confirm'
+      if (!skipDurationStep) {
+        if (step === 2) return 'duration'
+        if (step === 3) return 'datetime'
+        return 'confirm'
+      } else {
+        if (step === 2) return 'datetime'
+        return 'confirm'
+      }
     } else {
-      if (step === 1) return 'duration'
-      if (step === 2) return 'datetime'
-      return 'confirm'
+      if (!skipDurationStep) {
+        if (step === 1) return 'duration'
+        if (step === 2) return 'datetime'
+        return 'confirm'
+      } else {
+        if (step === 1) return 'datetime'
+        return 'confirm'
+      }
     }
   }
 
@@ -1093,14 +1872,6 @@ export default function BookingClient({
     }
   }
 
-  // Can the user proceed to the next step?
-  function canProceed(): boolean {
-    if (logicalStep === 'teacher') return selectedTeacherId !== null
-    if (logicalStep === 'duration') return selectedDuration !== null
-    if (logicalStep === 'datetime') return selectedStartIso !== null
-    return true
-  }
-
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
       {/* Page header */}
@@ -1111,7 +1882,12 @@ export default function BookingClient({
       </div>
 
       {/* Step indicator */}
-      <StepIndicator currentStep={step} totalSteps={totalSteps} />
+      <StepIndicator
+        currentStep={step}
+        totalSteps={totalSteps}
+        skipTeacherStep={skipTeacherStep}
+        skipDurationStep={skipDurationStep}
+      />
 
       {/* Step content */}
       <div
@@ -1127,9 +1903,12 @@ export default function BookingClient({
           <StepTeacher
             teachers={teachers}
             selectedTeacherId={selectedTeacherId}
+            studentTimezone={studentTimezone}
             onSelect={(id) => {
+              // Reset the time only when the teacher actually changes, so Back-then-forward keeps the pick.
+              if (id !== selectedTeacherId) setSelectedStartIso(null)
               setSelectedTeacherId(id)
-              setSelectedStartIso(null) // reset time if teacher changes
+              handleNext() // Calendly-style: selecting a teacher advances to the next step
             }}
           />
         )}
@@ -1139,19 +1918,23 @@ export default function BookingClient({
             hoursRemaining={hoursRemaining}
             selectedDuration={selectedDuration}
             onSelect={(minutes) => {
+              // Reset the time only when the duration actually changes, so Back-then-forward keeps the pick.
+              if (minutes !== selectedDuration) setSelectedStartIso(null)
               setSelectedDuration(minutes)
-              setSelectedStartIso(null) // reset time if duration changes
+              handleNext() // Calendly-style: selecting a duration advances to the next step
             }}
           />
         )}
 
-        {logicalStep === 'datetime' && selectedTeacherId && selectedDuration && (
+        {logicalStep === 'datetime' && selectedTeacher && selectedDuration && (
           <StepDateTime
-            teacherId={selectedTeacherId}
+            teacher={selectedTeacher}
+            teacherId={selectedTeacher.id}
             studentTimezone={studentTimezone}
             durationMinutes={selectedDuration}
             selectedStartIso={selectedStartIso}
             onSelect={setSelectedStartIso}
+            onAdvance={handleNext}
           />
         )}
 
@@ -1165,6 +1948,7 @@ export default function BookingClient({
               startIso={selectedStartIso}
               studentTimezone={studentTimezone}
               hoursRemaining={hoursRemaining}
+              isReschedule={rescheduleLesson !== null}
               isSubmitting={isSubmitting}
               onConfirm={handleConfirm}
             />
@@ -1187,73 +1971,26 @@ export default function BookingClient({
         )}
       </div>
 
-      {/* Navigation buttons */}
-      {logicalStep !== 'confirm' && (
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <button
-            onClick={handleBack}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '10px 18px',
-              backgroundColor: '#ffffff',
-              border: '1px solid #E0DFDC',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '500',
-              color: '#4b5563',
-              cursor: 'pointer',
-            }}
-          >
-            <ChevronLeft size={16} />
-            Back
-          </button>
-          <button
-            onClick={handleNext}
-            disabled={!canProceed()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '10px 18px',
-              backgroundColor: canProceed() ? '#FF8303' : '#E0DFDC',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: '600',
-              color: canProceed() ? '#ffffff' : '#9ca3af',
-              cursor: canProceed() ? 'pointer' : 'not-allowed',
-            }}
-          >
-            Continue
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
-
-      {/* Back button on confirm step */}
-      {logicalStep === 'confirm' && (
-        <button
-          onClick={handleBack}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '10px 18px',
-            backgroundColor: '#ffffff',
-            border: '1px solid #E0DFDC',
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: '500',
-            color: '#4b5563',
-            cursor: 'pointer',
-          }}
-        >
-          <ChevronLeft size={16} />
-          Back
-        </button>
-      )}
+      {/* Steps auto-advance on selection, so there is no Continue button; Back stays on every step. */}
+      <button
+        onClick={handleBack}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          padding: '10px 18px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '8px',
+          fontSize: '14px',
+          fontWeight: '500',
+          color: '#4b5563',
+          cursor: 'pointer',
+        }}
+      >
+        <ChevronLeft size={16} />
+        Back
+      </button>
     </div>
   )
 }

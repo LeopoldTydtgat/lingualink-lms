@@ -28,7 +28,9 @@ export default async function AdminNewClassPage() {
     .eq('status', 'current')
     .order('full_name')
 
-  // Fetch all active students with their active training for hours check
+  // Fetch all current students with their active training for hours check.
+  // Gate on status='current' (the canonical active-account gate) to match how
+  // teachers are gated above and how the admin class POST route validates.
   const { data: students } = await supabase
     .from('students')
     .select(`
@@ -44,13 +46,17 @@ export default async function AdminNewClassPage() {
         status
       )
     `)
-    .eq('is_active', true)
+    .eq('status', 'current')
     .order('full_name')
 
-  // Flatten trainings — take the first active training per student
+  // Flatten trainings — take the active training per student. No fallback to the
+  // first training: a student whose only trainings are completed/cancelled has no
+  // active training, so activeTraining is null and the client renders them as a
+  // disabled "No active training" row (they would otherwise fail at confirm with
+  // training_not_active).
   const studentsWithTraining = (students ?? []).map((s) => {
     const trainingRaw = Array.isArray(s.trainings) ? s.trainings : [s.trainings]
-    const activeTraining = trainingRaw.find((t: any) => t?.status === 'active') ?? trainingRaw[0] ?? null
+    const activeTraining = trainingRaw.find((t: any) => t?.status === 'active') ?? null
     return {
       id: s.id,
       full_name: s.full_name,

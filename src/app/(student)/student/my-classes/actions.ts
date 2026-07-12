@@ -100,9 +100,9 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
 
     const emailPromises: Promise<unknown>[] = [
       resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
-        subject: 'Lingualink Online — Your class has been cancelled',
+        subject: 'Lingualink Online - Your class has been cancelled',
         html: buildEmailTemplate({
           recipientName: student.full_name,
           recipientFallback: 'Student',
@@ -121,9 +121,9 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
     if (teacher?.email) {
       emailPromises.push(
         resend.emails.send({
-          from: 'no-reply@lingualinkonline.com',
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacher.email,
-          subject: `Lingualink Online — Class cancelled by ${student.full_name}`,
+          subject: `Lingualink Online - Class cancelled by ${student.full_name}`,
           html: buildEmailTemplate({
             recipientName: teacher.full_name ?? 'Teacher',
             recipientFallback: 'Teacher',

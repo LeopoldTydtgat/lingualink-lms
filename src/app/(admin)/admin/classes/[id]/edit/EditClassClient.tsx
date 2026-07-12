@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { isBookableStart } from '@/lib/bookingGrid'
 
 interface Teacher {
   id: string
@@ -145,23 +146,28 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
       duration_minutes: duration,
     }
 
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
-    const data = await res.json()
+      const data = await res.json().catch(() => null)
 
-    if (!res.ok) {
-      toast.error(data.message ?? data.error ?? 'Failed to save. Please try again.', { duration: 6000 })
+      if (!res.ok || !data) {
+        toast.error((data && (data.message ?? data.error)) ?? 'Failed to save. Please try again.', { duration: 6000 })
+        setSaving(false)
+        return
+      }
+
+      setAvailabilityWarning(false)
+      toast.success('Changes saved!')
+      setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 800)
+    } catch {
+      toast.error('Failed to save. Please try again.', { duration: 6000 })
       setSaving(false)
-      return
     }
-
-    setAvailabilityWarning(false)
-    toast.success('Changes saved!')
-    setTimeout(() => { router.push(`/admin/classes/${lesson.id}`) }, 800)
   }
 
   // Pre-flight: check teacher availability before saving. Fail-safe fallbacks:
@@ -181,10 +187,22 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
       )
       if (res.ok) {
         const data = await res.json()
+        // Week-wide set: a 60/90-min run's continuation slots may be under the
+        // next day's key (crosses teacher-local midnight).
+        const availableStartMs = new Set<number>()
+        for (const daySlots of Object.values(data.slots ?? {}) as { startIso: string; available: boolean }[][]) {
+          for (const s of daySlots) if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
+        }
         const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[date] ?? []
-        const match = slotsForDate.some(
-          (slot) => slot.available && slotLocalTime(slot.startIso, selectedTeacherTz) === time
+        const slotsNeeded = duration / 30
+        // Find the candidate start by wall-clock match (its own available flag is
+        // irrelevant — isBookableStart validates the whole run, start included).
+        const candidate = slotsForDate.find(
+          (slot) => slotLocalTime(slot.startIso, selectedTeacherTz) === time
         )
+        const match = candidate
+          ? isBookableStart(candidate.startIso, slotsNeeded, availableStartMs)
+          : false
         if (match) {
           await executeSave()
           return

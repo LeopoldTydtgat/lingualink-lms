@@ -12,8 +12,11 @@ interface Props {
 }
 
 // Format a date string for display e.g. "2026-04-10" → "10 Apr 2026"
+// Construct from local parts so a YYYY-MM-DD is not parsed as UTC midnight
+// and rendered one day early in UTC-negative browsers.
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-GB', {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', {
     day: '2-digit', month: 'short', year: 'numeric'
   })
 }
@@ -32,6 +35,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
   const [toDate, setToDate] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   // Filter down to just holiday records for display
@@ -45,16 +49,16 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
       return
     }
 
-    if (toDate <= fromDate) {
-      setError('End date must be after start date.')
+    if (toDate < fromDate) {
+      setError('End date cannot be before start date.')
       return
     }
 
     setIsSaving(true)
 
-    // Store holiday as a full-day range.
-    // start_at = midnight on fromDate, end_at = midnight on the day after toDate
-    // This makes it easy to render as a full column block on the Day to Day calendar
+    // Store holiday as a full-day range in offset-less local format:
+    // start_at = fromDate at 00:00:00, end_at = toDate at 23:59:59.
+    // All three readers consume this same format consistently.
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
@@ -88,9 +92,12 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
 
   async function confirmDelete() {
     if (!pendingDelete) return
+    setDeleteError('')
     const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
     if (res.ok) {
       onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
+    } else {
+      setDeleteError('Failed to remove this holiday period. Please try again.')
     }
     setPendingDelete(null)
   }
@@ -148,8 +155,9 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
               min={todayStr()}
               onChange={e => {
                 setFromDate(e.target.value)
-                // If to date is now before from date, reset it
-                if (toDate && e.target.value >= toDate) setToDate('')
+                // Default TO to match FROM when empty; otherwise clear it if it's now before FROM
+                if (!toDate) setToDate(e.target.value)
+                else if (e.target.value > toDate) setToDate('')
               }}
               style={{
                 padding: '8px 12px',
@@ -215,6 +223,10 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
           <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
           <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Planned Unavailability</h2>
         </div>
+
+        {deleteError && (
+          <p style={{ fontSize: '12px', color: '#DC2626', marginBottom: '8px' }}>{deleteError}</p>
+        )}
 
         {holidays.length === 0 ? (
           <p style={{ fontSize: '13px', color: '#9CA3AF' }}>

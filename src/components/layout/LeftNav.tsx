@@ -1,6 +1,6 @@
 'use client'
 
-import Link from 'next/link'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
@@ -16,6 +16,7 @@ import {
   UserCircle,
   LogOut,
   ShieldCheck,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -43,6 +44,48 @@ type LeftNavProps = {
   userRole: string
   unreadMessageCount?: number
   userId?: string
+}
+
+// Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
+// state. While the clicked route loads, dim the row and swap the icon for a
+// spinner. `group` stays on the parent Link so hover-translate still works.
+function NavContent({
+  Icon,
+  label,
+  active,
+  unreadCount,
+}: {
+  Icon: React.ElementType
+  label: string
+  active: boolean
+  unreadCount: number
+}) {
+  const { pending } = useLinkStatus()
+  return (
+    <span
+      className="flex items-center gap-3 w-full transition-opacity"
+      style={{ opacity: pending ? 0.55 : 1 }}
+    >
+      {pending ? (
+        <Loader2 size={18} className={cn('animate-spin', active ? 'text-white' : 'text-gray-400')} />
+      ) : (
+        <Icon
+          size={18}
+          className={cn('transition-transform', active ? 'text-white' : 'text-gray-400 group-hover:translate-x-0.5')}
+        />
+      )}
+      {label}
+
+      {label === 'Messages' && unreadCount > 0 && (
+        <span
+          className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
+          style={{ backgroundColor: active ? '#ffffff' : '#FF8303', color: active ? '#FF8303' : '#ffffff', fontSize: '10px' }}
+        >
+          {unreadCount > 9 ? '9+' : unreadCount}
+        </span>
+      )}
+    </span>
+  )
 }
 
 export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: LeftNavProps) {
@@ -129,20 +172,12 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
                     : 'text-gray-600 hover:bg-brand-grey hover:text-gray-900'
                 )}
               >
-                <Icon
-                  size={18}
-                  className={cn('transition-transform', active ? 'text-white' : 'text-gray-400 group-hover:translate-x-0.5')}
+                <NavContent
+                  Icon={Icon}
+                  label={item.label}
+                  active={active}
+                  unreadCount={liveUnreadCount}
                 />
-                {item.label}
-
-                {item.label === 'Messages' && liveUnreadCount > 0 && (
-                  <span
-                    className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
-                    style={{ backgroundColor: active ? '#ffffff' : '#FF8303', color: active ? '#FF8303' : '#ffffff', fontSize: '10px' }}
-                  >
-                    {liveUnreadCount > 9 ? '9+' : liveUnreadCount}
-                  </span>
-                )}
               </Link>
             </li>
           )

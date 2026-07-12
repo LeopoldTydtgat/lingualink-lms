@@ -2,25 +2,19 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
-import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
-import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { getBillability } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import {
   recomputeInvoiceAmountsForTeacher,
   recomputeInvoiceAmountsForAllTeachers,
 } from '@/lib/billing/recomputeAmounts'
+import { getExportTimezone, formatInstantInTz, tzLabel } from '@/lib/exportTime'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
-function formatDateTimeCSV(dateStr: string): string {
-  const d = new Date(dateStr)
-  const day = String(d.getDate()).padStart(2, '0')
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const year = d.getFullYear()
-  const hours = String(d.getHours()).padStart(2, '0')
-  const mins = String(d.getMinutes()).padStart(2, '0')
-  return `${day}/${month}/${year} ${hours}:${mins}`
-}
-
+// Instant (timestamptz) columns render in the resolved export timezone via
+// formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
+// is NOT an instant, so it keeps its own month formatter.
 function formatMonthCSV(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00Z')
   return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
@@ -63,8 +57,13 @@ export async function GET(req: NextRequest) {
 
   if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // Resolve the settings-driven export timezone once per request. Every instant
+  // (timestamptz) column below renders in this zone; its header carries the label.
+  const exportTz = await getExportTimezone()
+  const exportTzLabel = tzLabel(exportTz)
+
   const { searchParams } = new URL(req.url)
-  const type = searchParams.get('type') // 'teacher_invoices' | 'teacher_earnings' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
+  const type = searchParams.get('type') // 'teacher_invoices' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
   const dateFrom = searchParams.get('dateFrom')
   const dateTo = searchParams.get('dateTo')
   const teacherId = searchParams.get('teacherId')
@@ -97,7 +96,11 @@ export async function GET(req: NextRequest) {
       await recomputeInvoiceAmountsForAllTeachers()
     }
 
-    let query = supabase
+    // The embedded profiles join exposes teacher email — read it on the admin
+    // client, never the RLS-bound server client (NEW262d). The isAdmin gate
+    // above authorises this export; `supabase` stays for that auth check only.
+    const adminClient = createAdminClient()
+    let query = adminClient
       .from('invoices')
       .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency)')
       .order('billing_month', { ascending: false })
@@ -108,7 +111,7 @@ export async function GET(req: NextRequest) {
     const { data: invoices, error: invoicesErr } = await query
     if (invoicesErr) throw invoicesErr
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', 'Uploaded At', 'Paid At']
+    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', `Uploaded At (${exportTzLabel})`, `Paid At (${exportTzLabel})`]
     const rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return [
@@ -119,118 +122,13 @@ export async function GET(req: NextRequest) {
         inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00',
         (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
         inv.status,
-        inv.uploaded_at ? formatDateTimeCSV(inv.uploaded_at) : '',
-        inv.paid_at ? formatDateTimeCSV(inv.paid_at) : '',
+        inv.uploaded_at ? formatInstantInTz(inv.uploaded_at, exportTz) : '',
+        inv.paid_at ? formatInstantInTz(inv.paid_at, exportTz) : '',
       ]
     })
 
     csv = toCSV(headers, rows)
     filename = 'teacher-invoices.csv'
-  }
-
-  // ── 2. Teacher Earnings Summary ───────────────────────────────────────────────────────
-  else if (type === 'teacher_earnings') {
-    // hourly_rate has a column-level REVOKE on `authenticated` — must use the
-    // admin client. Role check above has already gated access to this branch.
-    const adminClient = createAdminClient()
-    const { data: teachers, error: teachersErr } = await adminClient
-      .from('profiles')
-      .select('id, full_name, email, hourly_rate, timezone, currency')
-      .in('role', ['teacher', 'admin'])
-      .order('full_name')
-    if (teachersErr) throw teachersErr
-
-    let lessonsQuery = supabase
-      .from('lessons')
-      .select('id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at')
-      .in('status', MONTH_BILLING_PREFILTER_STATUSES)
-
-    if (teacherId) lessonsQuery = lessonsQuery.eq('teacher_id', teacherId)
-    if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
-    if (dateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', dateTo)
-
-    const { data: lessons, error: lessonsErr } = await lessonsQuery
-    if (lessonsErr) throw lessonsErr
-
-    // Group lessons by teacher × month (in the teacher's local timezone)
-    const earningsMap: Record<string, {
-      teacherName: string
-      teacherEmail: string
-      month: string
-      completed: number
-      noShows: number
-      totalHours: number
-      hourlyRate: number
-      currency: string
-      totalOwed: number
-    }> = {}
-
-    const missingTzTeachers = new Set<string>()
-
-    for (const lesson of (lessons || [])) {
-      const teacher = (teachers || []).find(t => t.id === lesson.teacher_id)
-      if (!teacher) continue
-
-      const bill = getBillability({
-        status: lesson.status,
-        scheduledAt: lesson.scheduled_at,
-        cancelledAt: lesson.cancelled_at,
-        cancellationPolicy: null,
-        hourlyRate: teacher.hourly_rate || 0,
-        durationMinutes: lesson.duration_minutes,
-      })
-      if (!bill.billableToTeacher) continue
-
-      if (!teacher.timezone) {
-        missingTzTeachers.add(teacher.id)
-        continue
-      }
-      const monthKey = getMonthKeyInTz(new Date(lesson.scheduled_at), teacher.timezone)
-      const mapKey = `${teacher.id}_${monthKey}`
-
-      if (!earningsMap[mapKey]) {
-        earningsMap[mapKey] = {
-          teacherName: teacher.full_name,
-          teacherEmail: teacher.email,
-          month: monthKey,
-          completed: 0,
-          noShows: 0,
-          totalHours: 0,
-          hourlyRate: teacher.hourly_rate || 0,
-          currency: teacher.currency || 'EUR',
-          totalOwed: 0,
-        }
-      }
-
-      const entry = earningsMap[mapKey]
-      if (lesson.status === 'completed') entry.completed++
-      if (lesson.status === 'student_no_show') entry.noShows++
-      entry.totalHours += lesson.duration_minutes / 60
-      entry.totalOwed += bill.amount
-    }
-
-    if (missingTzTeachers.size > 0) {
-      return NextResponse.json(
-        { error: 'TIMEZONE_MISSING', message: `Cannot export earnings: ${missingTzTeachers.size} teacher(s) have no timezone set. Set their timezones before exporting.` },
-        { status: 422 }
-      )
-    }
-
-    const headers = ['Teacher', 'Email', 'Month', 'Classes Taken', 'Student No-Shows', 'Total Hours', 'Hourly Rate', 'Total Owed', 'Currency']
-    const rows = Object.values(earningsMap).map(e => [
-      e.teacherName,
-      e.teacherEmail,
-      formatMonthCSV(e.month),
-      e.completed,
-      e.noShows,
-      e.totalHours.toFixed(2),
-      e.hourlyRate.toFixed(2),
-      e.totalOwed.toFixed(2),
-      e.currency,
-    ])
-
-    csv = toCSV(headers, rows)
-    filename = 'teacher-earnings.csv'
   }
 
   // ── 4. Company Billing Report ─────────────────────────────────────────────────────────
@@ -268,7 +166,11 @@ export async function GET(req: NextRequest) {
     const { data: lessons, error: lessonsErr } = await lessonsQuery
     if (lessonsErr) throw lessonsErr
 
-    const headers = ['Company', 'Student', 'Teacher', 'Date & Time', 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
+    // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+    // The teacher's live profiles.hourly_rate is used only as the fallback (NEW268 D1).
+    const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map(l => l.id))
+
+    const headers = ['Company', 'Student', 'Teacher', `Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
     const rows: (string | number | boolean | null)[][] = []
 
     for (const company of (companies || [])) {
@@ -285,7 +187,7 @@ export async function GET(req: NextRequest) {
             scheduledAt: lesson.scheduled_at,
             cancelledAt: lesson.cancelled_at,
             cancellationPolicy: student.cancellation_policy as '24hr' | '48hr' | null,
-            hourlyRate: teacher?.hourly_rate ?? 0,
+            hourlyRate: resolveLessonRate(rateMap, lesson.id, teacher?.hourly_rate ?? 0),
             durationMinutes: lesson.duration_minutes,
           })
 
@@ -296,7 +198,7 @@ export async function GET(req: NextRequest) {
             company.name,
             student.full_name,
             teacher?.full_name || '',
-            formatDateTimeCSV(lesson.scheduled_at),
+            formatInstantInTz(lesson.scheduled_at, exportTz),
             lesson.duration_minutes,
             lesson.status,
             bill.billableToTeacher ? 'Yes' : 'No',
@@ -326,7 +228,7 @@ export async function GET(req: NextRequest) {
     const { data: reports, error: reportsErr } = await reportsQuery
     if (reportsErr) throw reportsErr
 
-    const headers = ['Student', 'Class Date', 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
+    const headers = ['Student', `Class Date (${exportTzLabel})`, 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
     const rows = (reports || []).map(r => {
       const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
       // Use unknown as intermediate to safely bridge the array→object cast for nested profiles
@@ -338,7 +240,7 @@ export async function GET(req: NextRequest) {
       const ld = (r.level_data as Record<string, string>) || {}
       return [
         (student as { full_name: string } | null)?.full_name || '',
-        lessonWithProfiles?.scheduled_at ? formatDateTimeCSV(lessonWithProfiles.scheduled_at) : '',
+        lessonWithProfiles?.scheduled_at ? formatInstantInTz(lessonWithProfiles.scheduled_at, exportTz) : '',
         teacher?.full_name || '',
         ld.grammar || '',
         ld.expression || '',
@@ -401,13 +303,13 @@ export async function GET(req: NextRequest) {
     studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
     const now = Date.now()
-    const headers = ['Teacher', 'Student', 'Class Date & Time', 'Duration (min)', 'Status', 'Hours Since Class']
+    const headers = ['Teacher', 'Student', `Class Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Hours Since Class']
     const rows = (reports || []).map((r: any) => {
       const lesson = lessonMap[r.lesson_id]
       return [
         teacherMap[r.teacher_id] ?? '',
         lesson ? (studentMap[lesson.studentId] ?? '') : '',
-        lesson ? formatDateTimeCSV(lesson.scheduledAt) : '',
+        lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
         lesson ? lesson.durationMinutes : '',
         r.status,
         lesson ? Math.max(0, Math.floor((now - (new Date(lesson.scheduledAt).getTime() + lesson.durationMinutes * 60 * 1000)) / (1000 * 60 * 60))) : '',

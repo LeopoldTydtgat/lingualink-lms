@@ -32,6 +32,7 @@ export default async function StudySheetPage({ params, searchParams }: Props) {
     .select('id, title, category, level, difficulty, content, attachments')
     .eq('id', id)
     .eq('is_active', true)
+    .eq('audience', 'student')
     .single()
 
   if (!sheet) notFound()

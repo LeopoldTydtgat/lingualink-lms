@@ -16,9 +16,12 @@ import {
   X,
   ExternalLink,
   Eye,
+  EyeOff,
+  Lock,
 } from 'lucide-react'
 import TimezoneSelect from '@/components/TimezoneSelect'
 import { toast } from 'sonner'
+import { validatePassword } from '@/lib/passwordValidation'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,13 +75,14 @@ interface Props {
   userId: string
 }
 
-// ─── Tab definitions (Security removed — admin manages passwords) ─────────────
+// ─── Tab definitions ────────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'general',      label: 'General Info',      icon: User },
   { id: 'professional', label: 'Professional Info',  icon: Briefcase },
   { id: 'resources',    label: 'Useful Resources',   icon: BookOpen },
   { id: 'feedback',     label: 'Student Feedback',   icon: Star },
+  { id: 'security',     label: 'Security',           icon: Lock },
 ]
 
 // ─── Star display component ───────────────────────────────────────────────────
@@ -442,8 +446,9 @@ function PublicProfileModal({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AccountClient({ profile, resources, reviews, userId }: Props) {
-  // supabase browser client is used only for storage (photo upload/URL).
-  // All profile table writes go through /api/profile to bypass RLS.
+  // supabase browser client is used for storage (photo upload/URL) and for
+  // auth calls (password change re-auth + update). All profile table writes
+  // go through /api/profile to bypass RLS.
   const supabase = createClient()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -480,6 +485,17 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   const [speakingLanguages, setSpeakingLanguages] = useState<string[]>(
     profile.speaking_languages ?? []
   )
+
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordSaved, setPasswordSaved] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   // ── Photo upload ────────────────────────────────────────────────────────────
 
@@ -591,6 +607,56 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
     }
   }
 
+  // ── Change Password ─────────────────────────────────────────────────────────
+
+  async function handleChangePassword() {
+    setPasswordError('')
+    setPasswordSaved(false)
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError('Please fill in all three password fields.')
+      return
+    }
+    const validationError = validatePassword(newPassword)
+    if (validationError) {
+      setPasswordError(validationError)
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('New passwords do not match.')
+      return
+    }
+
+    setPasswordSaving(true)
+
+    // Verify current password by re-signing in
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: profile.email,
+      password: currentPassword,
+    })
+
+    if (signInError) {
+      setPasswordError('Current password is incorrect.')
+      setPasswordSaving(false)
+      return
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: newPassword,
+    })
+
+    if (updateError) {
+      setPasswordError(updateError.message || 'Failed to update password. Please try again.')
+    } else {
+      setPasswordSaved(true)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setTimeout(() => setPasswordSaved(false), 3000)
+    }
+    setPasswordSaving(false)
+  }
+
   // ── Average rating ──────────────────────────────────────────────────────────
 
   const avgRating =
@@ -648,7 +714,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
         </Button>
       </div>
 
-      {/* Tab bar — 4 tabs, no overflow */}
+      {/* Tab bar — 5 tabs, no overflow */}
       <div
         style={{
           display: 'flex',
@@ -870,6 +936,117 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab: Security ─────────────────────────────────────────────────── */}
+      {activeTab === 'security' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', maxWidth: '400px' }}>
+
+          <div>
+            <Label htmlFor="currentPassword" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+              Current Password
+            </Label>
+            <div style={{ position: 'relative' }}>
+              <Input
+                id="currentPassword"
+                type={showCurrentPassword ? 'text' : 'password'}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Enter current password"
+                style={{ fontSize: '14px', paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowCurrentPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                aria-label={showCurrentPassword ? 'Hide password' : 'Show password'}
+              >
+                {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="newPassword" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+              New Password
+            </Label>
+            <div style={{ position: 'relative' }}>
+              <Input
+                id="newPassword"
+                type={showNewPassword ? 'text' : 'password'}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+                style={{ fontSize: '14px', paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+              >
+                {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+              At least 8 characters, including an uppercase letter, a lowercase letter and a number.
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor="confirmPassword" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+              Confirm New Password
+            </Label>
+            <div style={{ position: 'relative' }}>
+              <Input
+                id="confirmPassword"
+                type={showConfirmPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repeat new password"
+                style={{ fontSize: '14px', paddingRight: '40px' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(v => !v)}
+                style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center' }}
+                aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+              >
+                {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <Button
+              onClick={handleChangePassword}
+              disabled={passwordSaving}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+              style={{
+                backgroundColor: '#FF8303',
+                color: 'white',
+                border: 'none',
+                fontSize: '14px',
+                fontWeight: 600,
+                cursor: passwordSaving ? 'not-allowed' : 'pointer',
+                opacity: passwordSaving ? 0.7 : 1,
+              }}
+            >
+              {passwordSaving ? 'Saving...' : 'Update Password'}
+            </Button>
+            {passwordSaved && (
+              <p style={{ fontSize: '13px', color: '#16a34a', fontWeight: 500, marginTop: '8px' }}>
+                ✓ Password updated
+              </p>
+            )}
+            {passwordError && (
+              <p style={{ fontSize: '13px', color: '#dc2626', marginTop: '8px' }}>
+                {passwordError}
+              </p>
+            )}
           </div>
         </div>
       )}

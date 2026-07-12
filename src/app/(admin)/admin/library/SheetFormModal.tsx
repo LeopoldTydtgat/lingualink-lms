@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { StudySheet, WordRow, ExerciseRow, SheetContent, Attachment } from './LibraryAdminClient'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -12,6 +13,8 @@ type Props = {
 }
 
 type FormTab = 'metadata' | 'vocabulary' | 'exercises' | 'files' | 'access'
+
+type SheetType = 'teaching_material' | 'study_sheet'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +42,27 @@ function newExerciseRow(): ExerciseRow {
     options: ['', '', '', ''],
     correct_index: 0,
     explanation: '',
+  }
+}
+
+// Inverse of the server's buildExerciseRows: map an exercises-table row back into
+// the modal's editing shape. correct_index is recovered by locating correct_answer
+// in options; options is padded to the four-slot tuple the editor expects.
+function rowToExerciseRow(row: {
+  id: string
+  question_text: string | null
+  options: unknown
+  correct_answer: string | null
+  explanation: string | null
+}): ExerciseRow {
+  const opts = Array.isArray(row.options) ? row.options.map(o => String(o ?? '')) : []
+  const correctIdx = row.correct_answer != null ? opts.indexOf(row.correct_answer) : -1
+  return {
+    id: row.id,
+    question: row.question_text ?? '',
+    options: [opts[0] ?? '', opts[1] ?? '', opts[2] ?? '', opts[3] ?? ''] as [string, string, string, string],
+    correct_index: correctIdx >= 0 ? correctIdx : 0,
+    explanation: row.explanation ?? '',
   }
 }
 
@@ -111,10 +135,27 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // ── Active tab ────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<FormTab>('metadata')
 
+  // ── Sheet type (Teaching Material vs Study Sheet → audience column) ────────
+  // CREATE defaults to Teaching Material (the fail-safe, staff-only side).
+  // EDIT derives from the saved audience: only an explicit 'student' resolves to
+  // Study Sheet; 'staff', null, undefined, or anything else → Teaching Material.
+  const existingAudience = (sheet as (StudySheet & { audience?: string | null }) | null)?.audience
+  const [type, setType] = useState<SheetType>(
+    existingAudience === 'student' ? 'study_sheet' : 'teaching_material'
+  )
+  const selectType = (next: SheetType) => {
+    setType(next)
+    // Teaching Material hides vocabulary/exercises/access — if one of those is the
+    // active tab when switching, fall back to Metadata so no orphaned tab shows.
+    if (next === 'teaching_material' && (activeTab === 'vocabulary' || activeTab === 'exercises' || activeTab === 'access')) {
+      setActiveTab('metadata')
+    }
+  }
+
   // ── Metadata fields ───────────────────────────────────────────────────────
   const [title, setTitle] = useState(sheet?.title ?? '')
-  const [category, setCategory] = useState<'Vocabulary' | 'Grammar' | 'Material'>(
-    (sheet?.category as 'Vocabulary' | 'Grammar' | 'Material') ?? 'Vocabulary'
+  const [category, setCategory] = useState<'vocabulary' | 'grammar'>(
+    (sheet?.category as 'vocabulary' | 'grammar') ?? 'vocabulary'
   )
   const [level, setLevel] = useState(sheet?.level ?? '')
   const [difficulty, setDifficulty] = useState<1 | 2 | 3 | null>(
@@ -129,10 +170,48 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   })
 
   // ── Exercise rows ─────────────────────────────────────────────────────────
-  const [exercises, setExercises] = useState<ExerciseRow[]>(() => {
-    const existing = sheet?.content?.exercises
-    return existing && existing.length > 0 ? existing : []
-  })
+  // Exercises live in the exercises table now (not content). Start empty and, in
+  // edit mode, load this sheet's rows from the table (see the effect below).
+  const [exercises, setExercises] = useState<ExerciseRow[]>([])
+  const [exercisesLoading, setExercisesLoading] = useState(isEdit)
+  // Set when the edit-mode load FAILS to read the table. Distinct from "genuinely
+  // empty": saving must be blocked, because a save would delete-then-reinsert an
+  // empty set and wipe rows we simply failed to read.
+  const [exercisesLoadError, setExercisesLoadError] = useState(false)
+
+  // Edit mode: load existing exercises from the exercises table. Mount-only — the
+  // modal remounts per edit, so this runs once and won't clobber in-progress edits.
+  useEffect(() => {
+    if (!isEdit) return
+    let cancelled = false
+    ;(async () => {
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, question_text, options, correct_answer, explanation')
+        .eq('study_sheet_id', sheetId)
+        .order('created_at', { ascending: true })
+      if (cancelled) return
+      if (error) {
+        // Couldn't read the authoritative rows. Show any legacy content for
+        // context, but flag the failure so saving is blocked — a save here would
+        // delete-then-reinsert and could wipe real exercises we failed to load.
+        const legacy = sheet?.content?.exercises
+        setExercises(Array.isArray(legacy) ? legacy : [])
+        setExercisesLoadError(true)
+      } else if (data && data.length > 0) {
+        setExercises(data.map(rowToExerciseRow))
+      } else {
+        // No table rows: genuinely empty, or a pre-migration sheet whose exercises
+        // still live in content.exercises — fall back so editing doesn't drop them
+        // (the next save migrates them into the table).
+        const legacy = sheet?.content?.exercises
+        setExercises(Array.isArray(legacy) && legacy.length > 0 ? legacy : [])
+      }
+      setExercisesLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // ── Attachments ───────────────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<Attachment[]>(() => {
@@ -142,6 +221,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Create mode only: files chosen but not yet uploaded. The study_sheets row
+  // doesn't exist until Save and the upload route rejects uploads for missing
+  // rows, so we stage Files here and upload them after the row is created.
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
 
   // ── Access control ────────────────────────────────────────────────────────
   const [rolesPreset, setRolesPreset] = useState<string>(
@@ -218,6 +302,14 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         continue
       }
 
+      // Create mode: the study_sheets row doesn't exist yet and the upload route
+      // rejects uploads for missing rows. Defer — stage the File and upload on Save.
+      if (!isEdit) {
+        setPendingFiles(prev => [...prev, file])
+        continue
+      }
+
+      // Edit mode: the row exists, so upload immediately (unchanged behaviour).
       setUploading(true)
       const formData = new FormData()
       formData.append('file', file)
@@ -256,15 +348,30 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     }).catch(() => {/* ignore */})
   }
 
+  // Create mode: drop a staged file. Nothing is on the server yet, so no fetch.
+  const removePendingFile = (index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    // Don't save until edit-mode exercises have loaded — a premature save would
+    // delete-then-reinsert with an empty set and wipe the sheet's exercises.
+    if (exercisesLoading) return
+    // Same hazard if the load FAILED: block the save so we don't persist an empty
+    // or partial exercise set over rows we couldn't read.
+    if (exercisesLoadError) {
+      setActiveTab('exercises')
+      setError("Couldn't load this sheet's exercises. Close and reopen before saving — saving now could erase them.")
+      return
+    }
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
 
     setSaving(true)
     setError(null)
 
     const content: SheetContent = {
-      words: category === 'Vocabulary' ? words.filter(w => w.word.trim()) : [],
+      words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
       exercises: exercises.filter(ex => ex.question.trim()),
     }
 
@@ -272,47 +379,114 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       title: title.trim(),
       category,
       level,
-      difficulty: difficulty ?? null,
+      difficulty: difficulty ?? 1,
       intro_text: introText.trim() || null,
       content,
       allowed_roles: presetToRoles(rolesPreset),
+      // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
+      // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
+      audience: type === 'study_sheet' ? 'student' : 'staff',
       is_active: true,
-      attachments,
+      // Edit mode persists the already-uploaded attachments; create mode uploads
+      // after the row exists (see below), so it sends none here.
+      attachments: isEdit ? attachments : [],
     }
 
-    // For create mode, supply the pre-generated ID so storage paths align
-    if (!isEdit) {
-      payload.id = sheetId
+    // Edit mode: single PATCH; files were uploaded inline on selection.
+    if (isEdit) {
+      const res = await fetch(`/api/admin/library/${sheet!.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error || 'Something went wrong. Please try again.')
+        setSaving(false)
+        return
+      }
+
+      setSaving(false)
+      await onSaved()
+      return
     }
 
-    const url = isEdit ? `/api/admin/library/${sheet!.id}` : '/api/admin/library'
-    const method = isEdit ? 'PATCH' : 'POST'
+    // Create mode: save first, then upload (the upload route rejects files for
+    // rows that don't exist yet). Order: (a) create the row, (b) upload staged
+    // files, (c) PATCH the resulting attachments onto the row, (d) finish.
+    payload.id = sheetId
 
-    const res = await fetch(url, {
-      method,
+    // (a) Create the row with no attachments. On failure nothing else ran, so the
+    // staged files and form state stay intact for a retry.
+    const createRes = await fetch('/api/admin/library', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
+    if (!createRes.ok) {
+      const body = await createRes.json().catch(() => ({}))
       setError(body.error || 'Something went wrong. Please try again.')
       setSaving(false)
       return
     }
 
+    // (b) The row exists now — upload each staged file. Keep going on a failure so
+    // one bad file doesn't drop the rest; remember that something failed.
+    const uploaded: Attachment[] = []
+    let anyFailed = false
+    for (const file of pendingFiles) {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('sheet_id', sheetId)
+
+      const upRes = await fetch('/api/admin/library/upload', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!upRes.ok) {
+        anyFailed = true
+        continue
+      }
+
+      const data: Attachment = await upRes.json()
+      uploaded.push(data)
+    }
+
+    // (c) Attach whatever uploaded successfully onto the new row.
+    if (uploaded.length > 0) {
+      await fetch(`/api/admin/library/${sheetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attachments: uploaded }),
+      })
+    }
+
     setSaving(false)
+
+    // (d) The row exists regardless. If a file failed, tell the user — they can
+    // reopen the sheet (edit mode) and add it again, since re-upload now works.
+    if (anyFailed) {
+      setError("Sheet created, but some files didn't upload. Open the sheet to add them again.")
+    }
     await onSaved()
   }
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
-  const tabs: { key: FormTab; label: string }[] = [
+  const allTabs: { key: FormTab; label: string }[] = [
     { key: 'metadata', label: 'Metadata' },
     { key: 'vocabulary', label: `Vocabulary (${words.length})` },
-    { key: 'exercises', label: `Exercises (${exercises.length})` },
-    { key: 'files', label: `Files (${attachments.length})` },
+    { key: 'exercises', label: `Exercises (${exercisesLoading ? '…' : exercises.length})` },
+    { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
     { key: 'access', label: 'Access' },
   ]
+  // Teaching Material is a staff-only resource: Title + Files only.
+  // Study Sheet keeps the full editor (metadata, vocabulary, exercises, files, access).
+  const tabs = type === 'study_sheet'
+    ? allTabs
+    : allTabs.filter(t => t.key === 'metadata' || t.key === 'files')
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -354,6 +528,47 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           {activeTab === 'metadata' && (
             <div className="space-y-5">
 
+              {/* Type — Teaching Material vs Study Sheet (drives the audience column) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    {
+                      value: 'teaching_material' as SheetType,
+                      label: 'Teaching Material',
+                      description: 'Staff-only resource for teachers. Title and files only.',
+                    },
+                    {
+                      value: 'study_sheet' as SheetType,
+                      label: 'Study Sheet',
+                      description: 'Student-facing sheet with vocabulary, exercises, and access tiers.',
+                    },
+                  ].map(opt => (
+                    <label
+                      key={opt.value}
+                      className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                      style={{
+                        borderColor: type === opt.value ? '#FF8303' : '#e5e7eb',
+                        backgroundColor: type === opt.value ? '#FF830308' : 'white',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="sheet-type"
+                        value={opt.value}
+                        checked={type === opt.value}
+                        onChange={() => selectType(opt.value)}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
                 <input
@@ -365,71 +580,74 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-                  <select
-                    value={category}
-                    onChange={e => setCategory(e.target.value as 'Vocabulary' | 'Grammar' | 'Material')}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
-                  >
-                    <option value="Vocabulary">Vocabulary</option>
-                    <option value="Grammar">Grammar</option>
-                    <option value="Material">Material</option>
-                  </select>
-                </div>
+              {type === 'study_sheet' && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
+                      <select
+                        value={category}
+                        onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                      >
+                        <option value="vocabulary">Vocabulary</option>
+                        <option value="grammar">Grammar</option>
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
-                  <select
-                    value={level}
-                    onChange={e => setLevel(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
-                  >
-                    <option value="">Not specified</option>
-                    {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                </div>
-              </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                      <select
+                        value={level}
+                        onChange={e => setLevel(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                      >
+                        <option value="">Not specified</option>
+                        {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty (optional)</label>
-                <div className="flex gap-2">
-                  {([1, 2, 3] as const).map(n => (
-                    <DifficultyButton
-                      key={n}
-                      value={n}
-                      selected={difficulty === n}
-                      onClick={() => setDifficulty(prev => prev === n ? null : n)}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Difficulty (optional)</label>
+                    <div className="flex gap-2">
+                      {([1, 2, 3] as const).map(n => (
+                        <DifficultyButton
+                          key={n}
+                          value={n}
+                          selected={difficulty === n}
+                          onClick={() => setDifficulty(prev => prev === n ? null : n)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Introduction / Learning Objectives
+                    </label>
+                    <textarea
+                      value={introText}
+                      onChange={e => setIntroText(e.target.value)}
+                      placeholder="Briefly describe what students will learn from this sheet…"
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-none"
                     />
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Introduction / Learning Objectives
-                </label>
-                <textarea
-                  value={introText}
-                  onChange={e => setIntroText(e.target.value)}
-                  placeholder="Briefly describe what students will learn from this sheet…"
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-none"
-                />
-              </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
           {/* ── VOCABULARY TAB ── */}
-          {activeTab === 'vocabulary' && (
+          {activeTab === 'vocabulary' && type === 'study_sheet' && (
             <div className="space-y-4">
-              {category !== 'Vocabulary' && (
+              {category !== 'vocabulary' && (
                 <p className="text-sm text-gray-400 italic">
                   Vocabulary lists are for Vocabulary sheets only. Switch the category on the Metadata tab if needed.
                 </p>
               )}
-              {category === 'Vocabulary' && (
+              {category === 'vocabulary' && (
                 <>
                   {/* Column headers */}
                   <div className="grid text-xs font-medium text-gray-400 uppercase gap-2"
@@ -513,9 +731,17 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           )}
 
           {/* ── EXERCISES TAB ── */}
-          {activeTab === 'exercises' && (
+          {activeTab === 'exercises' && type === 'study_sheet' && (
             <div className="space-y-6">
-              {exercises.length === 0 && (
+              {exercisesLoading && (
+                <p className="text-sm text-gray-400">Loading exercises…</p>
+              )}
+              {exercisesLoadError && (
+                <p className="text-sm text-red-600">
+                  Couldn&apos;t load this sheet&apos;s exercises. Close and reopen before saving — saving now could erase them.
+                </p>
+              )}
+              {!exercisesLoading && !exercisesLoadError && exercises.length === 0 && (
                 <p className="text-sm text-gray-400">
                   No exercises yet. Click Add Question to create the first one.
                 </p>
@@ -652,53 +878,92 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               </div>
 
               {/* Attachment list */}
-              {attachments.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+              {isEdit ? (
+                /* Edit mode: attachments live on the server — View link + storage-backed remove. */
+                attachments.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {attachments.map((att, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
+                      >
+                        {/* File type badge */}
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                          style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                        >
+                          {fileTypeLabel(att.type)}
+                        </span>
+
+                        {/* Name + view link */}
+                        <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
+                        <a
+                          href={`/api/library-file/${sheetId}/${idx}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs underline flex-shrink-0"
+                          style={{ color: '#FF8303' }}
+                        >
+                          View
+                        </a>
+
+                        {/* Remove */}
+                        <button
+                          type="button"
+                          onClick={() => handleFileRemove(att)}
+                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
               ) : (
-                <div className="space-y-2">
-                  {attachments.map((att, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
-                    >
-                      {/* File type badge */}
-                      <span
-                        className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
-                        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                /* Create mode: files are staged locally and uploaded on Save. No View
+                   link (nothing is on the server yet); remove just drops the staged File. */
+                pendingFiles.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {pendingFiles.map((file, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-3 px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
                       >
-                        {fileTypeLabel(att.type)}
-                      </span>
+                        {/* File type badge */}
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                          style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                        >
+                          {fileTypeLabel(file.type)}
+                        </span>
 
-                      {/* Name + view link */}
-                      <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{att.name}</span>
-                      <a
-                        href={`/api/library-file/${sheetId}/${idx}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs underline flex-shrink-0"
-                        style={{ color: '#FF8303' }}
-                      >
-                        View
-                      </a>
+                        {/* Name (no view link — not uploaded yet) */}
+                        <span className="flex-1 min-w-0 text-sm text-gray-700 truncate">{file.name}</span>
 
-                      {/* Remove */}
-                      <button
-                        type="button"
-                        onClick={() => handleFileRemove(att)}
-                        className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
-                        title="Remove file"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                        {/* Remove from the staged list only */}
+                        <button
+                          type="button"
+                          onClick={() => removePendingFile(idx)}
+                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          title="Remove file"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           )}
 
           {/* ── ACCESS TAB ── */}
-          {activeTab === 'access' && (
+          {activeTab === 'access' && type === 'study_sheet' && (
             <div className="space-y-4">
               <p className="text-sm text-gray-500">
                 Controls which teacher roles can see and assign this sheet on the Teacher Portal.
@@ -767,7 +1032,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || exercisesLoading || exercisesLoadError}
               className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
               style={{ backgroundColor: '#FF8303' }}
             >

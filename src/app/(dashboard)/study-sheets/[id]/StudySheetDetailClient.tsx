@@ -2,8 +2,10 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { type Annotation } from '@/components/pdf/PdfViewer'
+import AnnotatablePdf from '@/components/pdf/AnnotatablePdf'
 
 type Word = {
   word: string
@@ -41,6 +43,8 @@ type Props = {
   sheet: StudySheet
   exercises: Exercise[]
   isAdmin: boolean
+  annotationsByName: Record<string, Annotation[]>
+  live?: boolean
 }
 
 function DifficultyBars({ count }: { count: number }) {
@@ -138,7 +142,15 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
   )
 }
 
-function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[]; sheetId: string }) {
+function MaterialFileViewer({
+  attachments,
+  sheetId,
+  annotationsByName,
+}: {
+  attachments: Attachment[]
+  sheetId: string
+  annotationsByName: Record<string, Annotation[]>
+}) {
   const containerRefs = useRef<(HTMLDivElement | null)[]>([])
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
 
@@ -173,8 +185,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
       {attachments.map((att, idx) => {
         const isPdf = att.type === 'application/pdf'
         const isImage = att.type.startsWith('image/')
-        // Same-origin proxy URL. The teacher viewer KEEPS the native PDF toolbar
-        // (no #toolbar=0) so the teacher can zoom and fit while teaching.
+        // Same-origin proxy URL, served by the auth-gated /api/library-file route.
         const fileUrl = `/api/library-file/${sheetId}/${idx}`
         const isThisFullscreen = fullscreenIdx === idx
 
@@ -186,7 +197,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
           >
             <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
               <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
-              {(isPdf || isImage) && (
+              {isImage && (
                 <button
                   type="button"
                   onClick={() => handleFullscreen(idx)}
@@ -200,10 +211,15 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
               )}
             </div>
             {isPdf ? (
-              <iframe
-                src={fileUrl}
-                title={att.name}
-                style={{ width: '100%', height: '80vh', minHeight: '600px', border: 'none', display: 'block' }}
+              // AnnotatablePdf wraps PdfViewer with live-lesson autosave: it renders
+              // the PDF through the same proxy (its own toolbar, NO download/print)
+              // and, during a live class, silently persists the teacher's marks.
+              <AnnotatablePdf
+                fileUrl={fileUrl}
+                studySheetId={sheetId}
+                attachmentIndex={idx}
+                attachmentName={att.name}
+                initialAnnotations={annotationsByName[att.name]}
               />
             ) : isImage ? (
               <img
@@ -223,7 +239,7 @@ function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[
   )
 }
 
-export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Props) {
+export default function StudySheetDetailClient({ sheet, exercises, isAdmin, annotationsByName, live = false }: Props) {
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
   const attachments = sheet.attachments ?? []
@@ -231,14 +247,17 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
   return (
     <div className="p-6 max-w-4xl mx-auto">
 
-      {/* Back button */}
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Study Sheets
-      </button>
+      {/* Back button - hidden in the live window (NEW255 c-ii): in the chrome-free
+          (live) route it would navigate into the chromed dashboard mid-class. */}
+      {!live && (
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Back to Study Sheets
+        </button>
+      )}
 
       {/* Header */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
@@ -261,12 +280,31 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin }: Pr
               {sheet.difficulty != null && <DifficultyBars count={sheet.difficulty} />}
             </div>
           </div>
+          {/* Live window entry - prep page only (NEW255 d). Opens the chrome-free
+              (live) page in a named popup so the teacher can window-share just the
+              PDF in Teams. Hidden in the live window itself via the same {!live} gate. */}
+          {!live && (
+            <button
+              type="button"
+              onClick={() => window.open(`/live-annotate/${sheet.id}`, 'live-annotate', 'popup')}
+              className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+              style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+              title="Open this sheet in a separate window to screen-share in Teams"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Open Live Window
+            </button>
+          )}
         </div>
       </div>
 
       {/* Material file viewer — view-only, no download */}
       {attachments.length > 0 && (
-        <MaterialFileViewer attachments={attachments} sheetId={sheet.id} />
+        <MaterialFileViewer
+          attachments={attachments}
+          sheetId={sheet.id}
+          annotationsByName={annotationsByName}
+        />
       )}
 
       {/* Vocabulary table */}

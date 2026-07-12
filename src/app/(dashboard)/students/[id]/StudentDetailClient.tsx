@@ -10,6 +10,9 @@ type Student = {
   photo_url: string | null
   self_assessed_level: string | null
   timezone: string | null
+  learning_goals: string | null
+  interests: string | null
+  language_preference: string | null
 }
 
 type Training = {
@@ -76,8 +79,6 @@ function CategoryBadge({ category }: { category: string }) {
       ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
       : category.toLowerCase() === 'grammar'
       ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : category.toLowerCase() === 'material'
-      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
       : { backgroundColor: '#f3f4f6', color: '#374151' }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
@@ -187,6 +188,24 @@ export default function StudentDetailClient({
             <div>
               <p className="text-gray-500">Timezone</p>
               <p className="font-medium text-gray-900">{student?.timezone ?? '—'}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+          <h3 className="font-semibold text-gray-900">Learning Profile</h3>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-gray-500">Learning Goals</p>
+              <p className="font-medium text-gray-900">{student?.learning_goals ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Interests</p>
+              <p className="font-medium text-gray-900">{student?.interests ?? '—'}</p>
+            </div>
+            <div>
+              <p className="text-gray-500">Language Preference</p>
+              <p className="font-medium text-gray-900">{student?.language_preference ?? '—'}</p>
             </div>
           </div>
         </div>

@@ -56,11 +56,11 @@ export async function POST(request: Request) {
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
-        subject: 'Lingualink Online — New study sheets assigned',
+        subject: 'Lingualink Online - Your teacher has assigned new exercises',
         html: buildEmailTemplate({
           recipientName: student.full_name,
           recipientFallback: 'Student',
-          subject: 'New study sheets assigned',
+          subject: 'Lingualink Online - Your teacher has assigned new exercises',
           bodyHtml: studentHomeworkAssignedEmailContent(teacherName, sheetTitles),
           contactEmail: 'support@lingualinkonline.com',
         }),

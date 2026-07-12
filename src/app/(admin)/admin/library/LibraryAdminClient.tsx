@@ -38,7 +38,7 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string        // 'Vocabulary' | 'Grammar' | 'Material'
+  category: string        // 'Vocabulary' | 'Grammar'
   level: string           // A1, A1+, A2 … C2
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
@@ -90,15 +90,14 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function exerciseCount(sheet: StudySheet): number {
-  return sheet.content?.exercises?.length ?? 0
+function exerciseCount(sheet: StudySheet, counts: Record<string, number>): number {
+  return counts[sheet.id] ?? 0
 }
 
-function isSheetEmpty(sheet: StudySheet): boolean {
+function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
   const cat = sheet.category.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
-  if (cat === 'grammar') return !(sheet.content?.exercises?.length)
-  if (cat === 'material') return !(sheet.attachments?.length)
+  if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
   return false
 }
 
@@ -109,6 +108,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [sheets, setSheets] = useState<StudySheet[]>([])
+  // Per-sheet exercise counts sourced from the exercises table (not content).
+  const [exCounts, setExCounts] = useState<Record<string, number>>({})
   const [students, setStudents] = useState<StudentOption[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -144,6 +145,16 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       .select('*')
       .order('title', { ascending: true })
     setSheets(data || [])
+
+    // Exercise counts come from the exercises table — content.exercises is no
+    // longer written. One lightweight query, reduced to a per-sheet count map.
+    const { data: exRows } = await supabase.from('exercises').select('study_sheet_id')
+    const counts: Record<string, number> = {}
+    for (const r of exRows ?? []) {
+      counts[r.study_sheet_id] = (counts[r.study_sheet_id] ?? 0) + 1
+    }
+    setExCounts(counts)
+
     setLoading(false)
   }, [])
 
@@ -277,7 +288,6 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <option value="">All Categories</option>
           <option value="Vocabulary">Vocabulary</option>
           <option value="Grammar">Grammar</option>
-          <option value="Material">Material</option>
         </select>
         <select
           value={filterLevel}
@@ -417,7 +427,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {/* Rows */}
           <div className="divide-y divide-gray-50">
             {filtered.map(sheet => {
-              const empty = isSheetEmpty(sheet)
+              const empty = isSheetEmpty(sheet, exCounts)
               return (
                 <div
                   key={sheet.id}
@@ -461,7 +471,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   </span>
 
                   {/* Exercise count */}
-                  <span className="text-center text-gray-600">{exerciseCount(sheet)}</span>
+                  <span className="text-center text-gray-600">{exerciseCount(sheet, exCounts)}</span>
 
                   {/* Actions */}
                   <div className="flex items-center gap-3 flex-shrink-0">

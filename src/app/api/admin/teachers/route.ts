@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { CreateTeacherSchema } from '@/lib/validation/schemas'
+import { generateThrowawayPassword, sendAccountInviteEmail } from '@/lib/auth/inviteEmail'
 
 // ─── GET – list teachers (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
@@ -37,7 +38,13 @@ export async function GET(req: NextRequest) {
   const minimal = searchParams.get('minimal') === 'true'
   const search = searchParams.get('search') ?? ''
 
-  let query = supabase
+  // email + hourly_rate must not be read through the RLS-bound client.
+  // hourly_rate has no column SELECT grant for authenticated (per-column grant
+  // model) — reading it through an RLS-bound client fails. The isAdmin gate
+  // above already authorised this list — run it on the admin client. The
+  // auth/role check before the gate stays on the RLS client. (NEW262d)
+  const adminClient = createAdminClient()
+  let query = adminClient
     .from('profiles')
     .select(minimal ? 'id, full_name' : 'id, full_name, email, status, account_types, hourly_rate, photo_url')
     .not('account_types', 'is', null)
@@ -121,9 +128,11 @@ export async function POST(req: NextRequest) {
     // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createAdminClient()
 
+    // Throwaway password — never returned or logged. The teacher sets their
+    // own password via the invite email sent after the profile upsert succeeds.
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
       email: data.email,
-      password: data.temp_password,
+      password: generateThrowawayPassword(),
       email_confirm: true,
     })
 
@@ -147,13 +156,19 @@ export async function POST(req: NextRequest) {
         role: data.account_types.includes('school_admin') ? 'admin' : 'teacher',
         timezone: data.timezone,
         bio: data.bio ?? null,
+        qualifications: data.qualifications ?? null,
         teaching_languages: data.teaching_languages ?? [],
         speaking_languages: data.native_languages ?? [],
         is_active: true,
-        preferred_payment_type: null,
+        preferred_payment_type: data.preferred_payment_type ?? null,
         paypal_email: data.paypal_email ?? null,
         banking_details: data.banking_details ?? null,
         tax_number: data.tax_number ?? null,
+        title: data.title ?? null,
+        gender: data.gender ?? null,
+        nationality: data.nationality ?? null,
+        phone: data.phone ?? null,
+        date_of_birth: data.date_of_birth ?? null,
         street_address: data.street_address ?? null,
         area_code: data.area_code ?? null,
         city: data.city ?? null,
@@ -184,7 +199,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ success: true, id: newUserId })
+    // ── 5. Send the account invite email (best-effort) ──────────────────────
+    // Never rolls anything back and never fails the request — the admin is
+    // told via inviteEmailSent so they can point the teacher at
+    // "Forgot password" if the email did not go out.
+    const { sent: inviteEmailSent } = await sendAccountInviteEmail(
+      adminClient,
+      data.email,
+      data.full_name,
+      'teacher'
+    )
+
+    return NextResponse.json({ success: true, id: newUserId, inviteEmailSent })
   } catch (err) {
     console.error('Create teacher error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })

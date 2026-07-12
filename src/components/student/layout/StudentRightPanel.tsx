@@ -5,8 +5,10 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { isLessonJoinable } from '@/lib/billing/joinable'
+import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
 interface NextLesson {
+  id: string
   scheduled_at: string
   teams_join_url: string | null
   duration_minutes: number
@@ -15,6 +17,7 @@ interface NextLesson {
 
 interface StudentRightPanelProps {
   studentId: string
+  studentTimezone: string
   nextLesson: NextLesson | null
   teacherName: string | null
   hoursRemaining: number
@@ -53,13 +56,23 @@ function formatEndDate(isoDate: string): string {
   }).format(new Date(isoDate))
 }
 
-function formatDateTime(isoString: string): string {
-  const d = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(isoString))
-  return d
+// Format: "Mon 13 Jul, 10:30 – 11:30" in the student's account timezone.
+// Built from utcInstantToTzParts (same helper as the teacher schedule) — never
+// toLocaleTimeString(), so server and client render identical text.
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+function formatDateTimeRange(isoString: string, durationMinutes: number, timezone: string): string {
+  const startMs = new Date(isoString).getTime()
+  const s = utcInstantToTzParts(isoString, timezone)
+  const e = utcInstantToTzParts(new Date(startMs + durationMinutes * 60 * 1000), timezone)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${WEEKDAY_NAMES[s.weekday]} ${pad(s.day)} ${MONTH_NAMES[s.month - 1]}, ${pad(s.hour)}:${pad(s.minute)} – ${pad(e.hour)}:${pad(e.minute)}`
 }
 
 export default function StudentRightPanel({
   studentId: _studentId,
+  studentTimezone,
   nextLesson,
   teacherName,
   hoursRemaining,
@@ -94,6 +107,14 @@ export default function StudentRightPanel({
   const secondsUntilNext = nextLesson
     ? Math.max(0, Math.floor((new Date(nextLesson.scheduled_at).getTime() - now) / 1000))
     : null
+
+  const classEndMs = nextLesson
+    ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
+    : null
+  const classEnded = mounted && classEndMs !== null && now >= classEndMs
+  const remainingSeconds = classEndMs !== null
+    ? Math.max(0, Math.floor((classEndMs - now) / 1000))
+    : 0
 
   const exercisePercent = assignedExercises > 0
     ? Math.round((completedExercises / assignedExercises) * 100)
@@ -130,20 +151,30 @@ export default function StudentRightPanel({
 
         {nextLesson ? (
           <>
-            <p style={{
-              fontSize: '22px',
-              fontWeight: '700',
-              color: '#111827',
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: '1.2',
-              marginBottom: '4px',
-            }}>
-              {mounted && secondsUntilNext !== null
-                ? formatCountdown(secondsUntilNext)
-                : '--:--:--'}
-            </p>
+            {mounted && secondsUntilNext !== null && classEnded ? (
+              <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827', lineHeight: '1.3', marginBottom: '4px' }}>
+                Class has ended
+              </p>
+            ) : mounted && secondsUntilNext !== null && secondsUntilNext <= 0 ? (
+              <p style={{ fontSize: '14px', fontWeight: '600', lineHeight: '1.3', marginBottom: '4px', color: '#FF8303' }}>
+                In class — {formatCountdown(remainingSeconds)} remaining
+              </p>
+            ) : (
+              <p style={{
+                fontSize: '22px',
+                fontWeight: '700',
+                color: '#111827',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: '1.2',
+                marginBottom: '4px',
+              }}>
+                {mounted && secondsUntilNext !== null
+                  ? formatCountdown(secondsUntilNext)
+                  : '--:--:--'}
+              </p>
+            )}
             <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
-              {mounted ? formatDateTime(nextLesson.scheduled_at) : ''}
+              {mounted ? formatDateTimeRange(nextLesson.scheduled_at, nextLesson.duration_minutes, studentTimezone) : ''}
             </p>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '1px' }}>
               {nextLesson.duration_minutes} min class
@@ -164,6 +195,18 @@ export default function StudentRightPanel({
                   rel="noopener noreferrer"
                   onMouseEnter={() => setJoinHovered(true)}
                   onMouseLeave={() => setJoinHovered(false)}
+                  onClick={() => {
+                    // Fire-and-forget student join-click logging. Guarded to the
+                    // joinable state only, and never awaited / never throws —
+                    // logging must not block or break opening Teams.
+                    if (!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) || !nextLesson.teams_join_url) return
+                    fetch('/api/join-click', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ lesson_id: nextLesson.id }),
+                      keepalive: true,
+                    }).catch(() => {})
+                  }}
                   style={{
                     display: 'block',
                     padding: '7px 12px',

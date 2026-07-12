@@ -1,12 +1,14 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability, MONTH_BILLING_PREFILTER_STATUSES } from '@/lib/billing/billability'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 
 // Recomputes invoices.amount_eur for one teacher.
 //
 // - Skips invoices with status='paid' (paid amounts freeze as a historical figure).
 // - Skips rows whose computed value already matches the stored value (no-op write).
-// - hourly_rate ≤ 0 or missing → no-op.
+// - missing profile -> no-op. Rate <= 0 still recomputes: amounts are
+//   driven by per-lesson snapshots, live rate is fallback only (NEW268 D1).
 //
 // Month-boundary reschedules: lessons are re-bucketed by their current
 // scheduled_at in the teacher's timezone, so a class moved from April → May
@@ -24,7 +26,7 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
     .single()
 
   const hourlyRate = Number(teacher?.hourly_rate ?? 0)
-  if (!teacher || hourlyRate <= 0) return
+  if (!teacher) return
 
   if (!teacher.timezone) {
     throw new Error(`TIMEZONE_MISSING:${teacherId}`)
@@ -44,6 +46,10 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
     .eq('teacher_id', teacherId)
     .in('status', MONTH_BILLING_PREFILTER_STATUSES)
 
+  // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+  // `hourlyRate` above is the teacher's live rate, used only as the fallback.
+  const rateMap = await fetchLessonRateMap(admin, (lessons ?? []).map(l => l.id))
+
   const sumByMonth: Record<string, number> = {}
   for (const lesson of lessons || []) {
     const key = getMonthKeyInTz(new Date(lesson.scheduled_at), tz)
@@ -54,7 +60,7 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
       // The 48hr policy branch never pays the teacher (billableToTeacher=false),
       // so cancellation_policy is irrelevant to amount_eur. Avoid the students join.
       cancellationPolicy: null,
-      hourlyRate,
+      hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
       durationMinutes: lesson.duration_minutes,
     })
     if (bill.billableToTeacher) {

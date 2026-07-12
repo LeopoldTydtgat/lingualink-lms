@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 import { getBillability, projectedContribution } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import LeftNav from '@/components/layout/LeftNav'
 import TopHeader from '@/components/layout/TopHeader'
 import RightPanel from '@/components/layout/RightPanel'
@@ -11,6 +12,7 @@ import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
+import BillingRealtimeRefresher from '@/components/layout/BillingRealtimeRefresher'
 
 export default async function DashboardLayout({
   children,
@@ -32,15 +34,24 @@ export default async function DashboardLayout({
   // user somehow has no profiles row, fail safe.
   if (!profile) redirect('/login')
 
-  const { data: lessonRow } = await supabase
+  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+  // pay-withholding model, so a single-row fetch would let it shadow the real next
+  // class. Fetch a few candidates and pick the first that hasn't ended; an
+  // in-progress class (start <= now < end) must still be picked — the panel's
+  // "In class" state depends on it.
+  const { data: candidateLessons } = await supabase
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
     .eq('teacher_id', profile?.id)
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+    .limit(5)
+
+  const nextLessonNowMs = Date.now()
+  const lessonRow = (candidateLessons ?? []).find(
+    (l) => nextLessonNowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+  ) ?? null
 
   let nextLesson = null
 
@@ -49,7 +60,7 @@ export default async function DashboardLayout({
       .from('students')
       .select('full_name')
       .eq('id', lessonRow.student_id)
-      .single()
+      .maybeSingle()
 
     nextLesson = {
       id: lessonRow.id,
@@ -97,12 +108,17 @@ export default async function DashboardLayout({
 
     const { data: monthLessons } = await supabase
       .from('lessons')
-      .select('duration_minutes, status, cancelled_at, scheduled_at')
+      .select('id, duration_minutes, status, cancelled_at, scheduled_at')
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startUtc)
       .lt('scheduled_at', endUtc)
       // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
       .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
+
+    // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+    // `hourlyRate` is the teacher's live rate, used only as the fallback. Applies to
+    // both settled amounts and projected amounts (scheduled lessons have snapshots too).
+    const rateMap = await fetchLessonRateMap(admin, (monthLessons ?? []).map(l => l.id))
 
     const nowMs = now.getTime()
 
@@ -117,7 +133,7 @@ export default async function DashboardLayout({
           scheduledAt: lesson.scheduled_at,
           cancelledAt: lesson.cancelled_at,
           cancellationPolicy: null,
-          hourlyRate,
+          hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
         })
         if (bill.billableToTeacher) currentAmount += bill.amount
@@ -135,7 +151,7 @@ export default async function DashboardLayout({
           scheduledAt: lesson.scheduled_at,
           cancelledAt: lesson.cancelled_at,
           cancellationPolicy: null,
-          hourlyRate,
+          hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
         },
         nowMs
@@ -149,7 +165,7 @@ export default async function DashboardLayout({
 
   const { count: unreadCount } = await supabase
     .from('messages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('receiver_id', user.id)
     .is('read_at', null)
 
@@ -234,6 +250,8 @@ export default async function DashboardLayout({
         nextLessonDurationMinutes={protectedLesson?.duration_minutes ?? null}
         loginPath="/login"
       />
+
+      <BillingRealtimeRefresher teacherId={profile.id} />
     </div>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -12,6 +12,7 @@ import {
   BookOpen,
   User,
   LogOut,
+  Loader2,
 } from 'lucide-react'
 
 const navItems = [
@@ -26,6 +27,66 @@ const navItems = [
 interface StudentLeftNavProps {
   unreadMessageCount?: number
   userId?: string
+}
+
+// Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
+// state. While the clicked route loads, dim the row and swap the icon for a
+// spinner. `student-nav-icon` stays on the icon so hover-translate still works.
+function StudentNavContent({
+  Icon,
+  label,
+  active,
+  unreadCount,
+}: {
+  Icon: React.ElementType
+  label: string
+  active: boolean
+  unreadCount: number
+}) {
+  const { pending } = useLinkStatus()
+  return (
+    <span
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        width: '100%',
+        transition: 'opacity .18s ease',
+        opacity: pending ? 0.55 : 1,
+      }}
+    >
+      {pending ? (
+        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#ffffff' : '#9ca3af' }} />
+      ) : (
+        <Icon
+          size={18}
+          className={!active ? 'student-nav-icon' : undefined}
+          style={{ color: active ? '#ffffff' : '#9ca3af' }}
+        />
+      )}
+      {label}
+      {label === 'Messages' && unreadCount > 0 && (
+        <span
+          style={{
+            marginLeft: 'auto',
+            backgroundColor: active ? '#ffffff' : '#FF8303',
+            color: active ? '#FF8303' : '#ffffff',
+            fontSize: '10px',
+            fontWeight: 700,
+            minWidth: '18px',
+            height: '18px',
+            borderRadius: '9999px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '0 4px',
+          }}
+        >
+          {unreadCount > 9 ? '9+' : unreadCount}
+        </span>
+      )}
+    </span>
+  )
 }
 
 export default function StudentLeftNav({ unreadMessageCount = 0, userId }: StudentLeftNavProps) {
@@ -137,32 +198,12 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 clipPath: isActive ? 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' : undefined,
               }}
             >
-              <Icon
-                size={18}
-                className={!isActive ? 'student-nav-icon' : undefined}
-                style={{ color: isActive ? '#ffffff' : '#9ca3af' }}
+              <StudentNavContent
+                Icon={Icon}
+                label={item.label}
+                active={isActive}
+                unreadCount={liveUnreadCount}
               />
-              {item.label}
-              {item.label === 'Messages' && liveUnreadCount > 0 && (
-                <span
-                  style={{
-                    marginLeft: 'auto',
-                    backgroundColor: isActive ? '#ffffff' : '#FF8303',
-                    color: isActive ? '#FF8303' : '#ffffff',
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    minWidth: '18px',
-                    height: '18px',
-                    borderRadius: '9999px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: '0 4px',
-                  }}
-                >
-                  {liveUnreadCount > 9 ? '9+' : liveUnreadCount}
-                </span>
-              )}
             </Link>
           )
         })}

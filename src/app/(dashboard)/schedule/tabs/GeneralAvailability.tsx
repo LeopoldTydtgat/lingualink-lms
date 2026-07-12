@@ -150,14 +150,37 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
     return labels
   }, [dragPreview])
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      const rows = scrollRef.current.querySelectorAll('tr')
-      const targetRow = rows[8 * 2] // 08:00 = slot index 16
-      if (targetRow) {
-        scrollRef.current.scrollTop = (targetRow as HTMLElement).offsetTop - 40
-      }
+  // NEW282: earliest weekly-slot start (minutes since midnight) across all days, or null when
+  // no availability is set. Built from the local hour/minute parts of the TIME string — no
+  // Date/UTC conversion. Feeds the default scroll position below.
+  const earliestSlotMin = useMemo(() => {
+    let earliest: number | null = null
+    for (const a of generalSlots) {
+      if (!a.start_time) continue
+      const [h, m] = a.start_time.split(':').map(Number)
+      const min = h * 60 + m
+      if (earliest === null || min < earliest) earliest = min
     }
+    return earliest
+  }, [generalSlots])
+
+  // NEW282: default the grid scroll to one hour before the earliest weekly slot so early
+  // availability is visible without scrolling; fall back to 08:00 when nothing is set. Clamp
+  // to the 00:00–23:30 grid, then map to a 30-min row index — preserving the original
+  // offsetTop-based row-scroll mechanism. Runs once per mount: the tab remounts on entry and
+  // availability is present synchronously from the server, matching the prior behaviour (and
+  // avoiding a scroll jerk while the teacher edits slots).
+  useEffect(() => {
+    if (!scrollRef.current) return
+    const targetMin = earliestSlotMin !== null
+      ? Math.max(0, Math.min(23 * 60 + 30, earliestSlotMin - 60))
+      : 8 * 60
+    const rows = scrollRef.current.querySelectorAll('tr')
+    const targetRow = rows[Math.round(targetMin / 30)]
+    if (targetRow) {
+      scrollRef.current.scrollTop = (targetRow as HTMLElement).offsetTop - 40
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {

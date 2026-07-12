@@ -72,7 +72,13 @@ export default async function AdminReportsPage() {
   const { data: teachersData } = await supabase
     .from('profiles')
     .select('id, full_name')
-    .eq('role', 'teacher')
+    .in('role', ['teacher', 'admin'])
+    .order('full_name');
+
+  // Student list for export filter dropdown
+  const { data: allStudentsData } = await supabase
+    .from('students')
+    .select('id, full_name')
     .order('full_name');
 
   const initialReports = (reportsData ?? []).map((r) => {
@@ -114,6 +120,7 @@ export default async function AdminReportsPage() {
     <ReportsClient
       initialReports={initialReports}
       teachers={teachersData ?? []}
+      students={allStudentsData ?? []}
     />
   );
 }

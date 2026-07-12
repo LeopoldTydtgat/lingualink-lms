@@ -16,6 +16,7 @@ interface UpcomingLesson {
 
 interface ClassReminderModalProps {
   studentId: string
+  studentTimezone: string
 }
 
 const DISMISSED_KEY = 'lingualink_dismissed_reminders'
@@ -41,23 +42,30 @@ function addDismissed(lessonId: string) {
   }
 }
 
-// Manual time formatting — never use toLocaleTimeString() (hydration mismatch)
-function formatTime(isoString: string): string {
-  const d = new Date(isoString)
-  const h = String(d.getHours()).padStart(2, '0')
-  const m = String(d.getMinutes()).padStart(2, '0')
-  return `${h}:${m}`
+// Format in the student's account timezone via an explicit timeZone (SSR-safe;
+// never toLocaleTimeString(), which causes a hydration mismatch).
+function formatTime(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: timezone,
+  }).format(new Date(isoString))
 }
 
-function formatDate(isoString: string): string {
-  const d = new Date(isoString)
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`
+function formatDate(isoString: string, timezone: string): string {
+  // Reconstruct from parts to keep the exact "Fri 26 Jun" shape (no comma, no year).
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: timezone,
+  }).formatToParts(new Date(isoString))
+  const value = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${value('weekday')} ${value('day')} ${value('month')}`
 }
 
-export default function ClassReminderModal({ studentId }: ClassReminderModalProps) {
+export default function ClassReminderModal({ studentId, studentTimezone }: ClassReminderModalProps) {
   const [lesson, setLesson] = useState<UpcomingLesson | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const supabase = createClient()
@@ -225,14 +233,14 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: '#6b7280' }}>Date</span>
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
-                {formatDate(lesson.scheduled_at)}
+                {formatDate(lesson.scheduled_at, studentTimezone)}
               </span>
             </div>
             <div style={{ height: '1px', backgroundColor: '#E0DFDC' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '13px', color: '#6b7280' }}>Time</span>
               <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
-                {formatTime(lesson.scheduled_at)}
+                {formatTime(lesson.scheduled_at, studentTimezone)}
               </span>
             </div>
             <div style={{ height: '1px', backgroundColor: '#E0DFDC' }} />
@@ -252,6 +260,18 @@ export default function ClassReminderModal({ studentId }: ClassReminderModalProp
               href={lesson.teams_join_url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                // Fire-and-forget student join-click logging. Guarded to the
+                // joinable state only, and never awaited / never throws —
+                // logging must not block or break opening Teams.
+                if (!lesson.teams_join_url || !isLessonJoinable(lesson.scheduled_at, lesson.duration_minutes, lesson.status, now)) return
+                fetch('/api/join-click', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ lesson_id: lesson.id }),
+                  keepalive: true,
+                }).catch(() => {})
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

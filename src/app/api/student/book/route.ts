@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentBookingConfirmationEmailContent, teacherNewBookingEmailContent } from '@/lib/email/templates'
+import {
+  buildEmailTemplate,
+  studentBookingConfirmationEmailContent,
+  teacherNewBookingEmailContent,
+  studentRescheduledEmailContent,
+  teacherRescheduledEmailContent,
+} from '@/lib/email/templates'
 import { createTeamsMeeting, cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
@@ -10,107 +16,6 @@ import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
-
-// ── Email content builders ────────────────────────────────────────────────────
-
-function bookingConfirmationStudentEmail(
-  teacherName: string,
-  dateTimeFormatted: string,
-  durationMinutes: number,
-): string {
-  const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class has been confirmed. Here are your details:
-    </p>
-    <table cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:24px;">
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;width:40%;">Teacher</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${teacherName}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;">Date &amp; Time</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${dateTimeFormatted}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;font-size:14px;color:#6B7280;">Duration</td>
-        <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
-      </tr>
-    </table>
-    <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
-      The Join Class button in your portal activates 10 minutes before the class starts.
-    </p>
-  `
-}
-
-function bookingNotificationTeacherEmail(
-  studentName: string,
-  dateTimeFormatted: string,
-  durationMinutes: number,
-): string {
-  const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      A new class has been booked with you. Here are the details:
-    </p>
-    <table cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:24px;">
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;width:40%;">Student</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${studentName}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;">Date &amp; Time</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${dateTimeFormatted}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;font-size:14px;color:#6B7280;">Duration</td>
-        <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
-      </tr>
-    </table>
-  `
-}
-
-function rescheduleConfirmationStudentEmail(
-  teacherName: string,
-  dateTimeFormatted: string,
-  durationMinutes: number,
-): string {
-  const durationLabel = durationMinutes === 30 ? '30 minutes' : durationMinutes === 60 ? '1 hour' : '1.5 hours'
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class has been rescheduled. Here are your updated details:
-    </p>
-    <table cellpadding="0" cellspacing="0" style="width:100%;margin-bottom:24px;">
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;width:40%;">Teacher</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${teacherName}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#6B7280;">New Date &amp; Time</td>
-        <td style="padding:10px 0;border-bottom:1px solid #F3F4F6;font-size:14px;color:#111827;font-weight:600;">${dateTimeFormatted}</td>
-      </tr>
-      <tr>
-        <td style="padding:10px 0;font-size:14px;color:#6B7280;">Duration</td>
-        <td style="padding:10px 0;font-size:14px;color:#111827;font-weight:600;">${durationLabel}</td>
-      </tr>
-    </table>
-  `
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDateTime(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
 
 // ── POST /api/student/book ────────────────────────────────────────────────────
 
@@ -201,6 +106,34 @@ export async function POST(req: NextRequest) {
 
     const adminClient = createAdminClient()
 
+    // Verify the requested teacher is assigned to this training — assignment check, NEW260.
+    // The client only offers assigned teachers, but the API must enforce it too: without
+    // this, a student could POST any teacherId and book (or reschedule onto) a teacher who
+    // was never assigned to their training. Placed before the fresh-book/reschedule split so
+    // the single check gates both branches. adminClient because hours_log/junction reads are
+    // service-role here and this must not depend on the student's training_teachers RLS.
+    const { data: assignedTeacher, error: assignmentError } = await adminClient
+      .from('training_teachers')
+      .select('teacher_id')
+      .eq('training_id', trainingId)
+      .eq('teacher_id', teacherId)
+      .maybeSingle()
+
+    if (assignmentError) {
+      console.error('training_teachers assignment check failed:', assignmentError)
+      return NextResponse.json(
+        { error: 'Failed to verify teacher assignment. Please try again.' },
+        { status: 500 }
+      )
+    }
+
+    if (!assignedTeacher) {
+      return NextResponse.json(
+        { error: 'This teacher is not assigned to your training' },
+        { status: 403 }
+      )
+    }
+
     // ── 3c. Re-check teacher availability server-side ─────────────────────────
     const slotAvailable = await isSlotAvailable(teacherId, scheduledAt, durationMinutes, adminClient)
     if (!slotAvailable) {
@@ -211,7 +144,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4. Load the teacher's profile for emails ──────────────────────────────
-    const { data: teacher, error: teacherError } = await supabase
+    const { data: teacher, error: teacherError } = await adminClient
       .from('profiles')
       .select('id, full_name, email, timezone')
       .eq('id', teacherId)
@@ -254,11 +187,18 @@ export async function POST(req: NextRequest) {
     // transaction, closing the read-then-write TOCTOU window.
     let oldDurationHours = 0
     let oldTeamsMeetingId: string | null = null
+    // Original start time of the rescheduled-from lesson — captured before the RPC
+    // cancels it, so the reschedule emails can show "Previous time". Null on a fresh book.
+    let oldScheduledAt: string | null = null
+    // NEW257: id of the hours_log ledger row inserted by book_class_atomic.
+    // Set only on the fresh-book path below; stays null on the reschedule path
+    // (which uses reschedule_class_atomic and is not backfilled here).
+    let hoursLogId: string | null = null
 
     if (rescheduleId) {
       const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .select('duration_minutes, teams_meeting_id, teams_join_url')
+        .select('duration_minutes, teams_meeting_id, teams_join_url, scheduled_at')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
         .eq('status', 'scheduled')
@@ -273,6 +213,7 @@ export async function POST(req: NextRequest) {
 
       oldDurationHours = oldLesson.duration_minutes / 60
       oldTeamsMeetingId = oldLesson.teams_meeting_id ?? null
+      oldScheduledAt = oldLesson.scheduled_at ?? null
 
       const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
         p_old_lesson_id: rescheduleId,
@@ -306,10 +247,15 @@ export async function POST(req: NextRequest) {
         )
       }
     } else {
-      const { error: deductError } = await adminClient.rpc('book_class_atomic', {
+      const { data: deductData, error: deductError } = await adminClient.rpc('book_class_atomic', {
         p_training_id: trainingId,
         p_hours_needed: hoursNeeded,
       })
+      // NEW257: book_class_atomic now RETURNS the id of the 'class_booking'
+      // hours_log row it inserted. Capture it for the lesson_id backfill after
+      // the lesson insert succeeds below. (On deductError we return before it is
+      // used, so assigning here is safe.)
+      hoursLogId = deductData
 
       if (deductError) {
         const msg = (deductError.message || '').toLowerCase()
@@ -358,7 +304,7 @@ export async function POST(req: NextRequest) {
     // ── 6. Create the new lesson record ───────────────────────────────────────
     const startTime = new Date(scheduledAt)
 
-    const { data: newLesson, error: lessonError } = await supabase
+    const { data: newLesson, error: lessonError } = await adminClient
       .from('lessons')
       .insert({
         training_id: trainingId,
@@ -491,6 +437,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
     }
 
+    // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
+    // book_class_atomic returned the id of the 'class_booking' ledger row; now
+    // that the lesson exists, link the two. Fresh-book path only — hoursLogId is
+    // null on the reschedule path (reschedule_class_atomic writes its own paired
+    // ledger row and is not backfilled here). Non-blocking: the booking already
+    // succeeded and the ledger row exists, so a failure only leaves the link
+    // unset — log it and continue. Uses adminClient because hours_log grants
+    // students SELECT only (RLS would deny a student-session UPDATE).
+    if (hoursLogId) {
+      const { error: backfillError } = await adminClient
+        .from('hours_log')
+        .update({ lesson_id: newLesson.id })
+        .eq('id', hoursLogId)
+      if (backfillError) {
+        console.error('[NEW257] hours_log.lesson_id backfill failed (student book):', {
+          hours_log_id: hoursLogId,
+          lesson_id: newLesson.id,
+          error: backfillError,
+        })
+      }
+    }
+
     // H1i: After successful reschedule, the OLD lesson row (cancelled by
     // reschedule_class_atomic) still holds the deleted meeting's Teams
     // columns. NULL them inline so the row matches its 'cancelled' status.
@@ -583,28 +551,27 @@ export async function POST(req: NextRequest) {
     const studentTimezone = requireTz(studentRow.timezone, 'book:student')
     const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
 
-    const studentDateTime = formatDateTime(startTime.toISOString(), studentTimezone)
-    const teacherDateTime = formatDateTime(startTime.toISOString(), teacherTimezone)
+    const newScheduledAtIso = startTime.toISOString()
 
     const studentSubject = isReschedule
-      ? 'Lingualink Online – Your class has been rescheduled'
-      : 'Lingualink Online – Your class is confirmed'
+      ? 'Lingualink Online - Your class has been rescheduled'
+      : 'Lingualink Online - Your class is confirmed'
 
     const studentBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(teacher.full_name, studentDateTime, durationMinutes)
-      : studentBookingConfirmationEmailContent(teacher.full_name, startTime.toISOString(), durationMinutes, studentTimezone)
+      ? studentRescheduledEmailContent(teacher.full_name, oldScheduledAt, newScheduledAtIso, durationMinutes, studentTimezone)
+      : studentBookingConfirmationEmailContent(teacher.full_name, newScheduledAtIso, durationMinutes, studentTimezone)
 
     const teacherSubject = isReschedule
-      ? `Lingualink Online – Class rescheduled by ${studentRow.full_name}`
-      : `Lingualink Online – New class booked with ${studentRow.full_name}`
+      ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`
+      : `Lingualink Online - New class booked with ${studentRow.full_name}`
 
     const teacherBodyHtml = isReschedule
-      ? rescheduleConfirmationStudentEmail(studentRow.full_name, teacherDateTime, durationMinutes)
-      : teacherNewBookingEmailContent(studentRow.full_name, startTime.toISOString(), durationMinutes, teacherTimezone)
+      ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, newScheduledAtIso, durationMinutes, teacherTimezone)
+      : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
 
     await Promise.allSettled([
       resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: studentRow.email,
         subject: studentSubject,
         html: buildEmailTemplate({
@@ -616,7 +583,7 @@ export async function POST(req: NextRequest) {
         }),
       }),
       resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
         subject: teacherSubject,
         html: buildEmailTemplate({

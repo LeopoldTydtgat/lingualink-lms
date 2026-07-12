@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { localToUtc, getLocalDateKey } from '@/lib/utils/timezone'
+import { localToUtc, getLocalDateKey, utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 
 /**
  * Tests for src/lib/utils/timezone.ts — the single source of truth for
@@ -233,5 +233,105 @@ describe('booking availability — week keying alignment', () => {
     expect(fixedParam).toBe('2026-06-08')
     expect(oldParam).toBe('2026-06-08')
     expect(fixedParam).toBe(oldParam)  // identical — no regression
+  })
+})
+
+// ─── utcInstantToTzParts ──────────────────────────────────────────────────────
+//
+// The render frame of the teacher Day to Day calendar: every stored UTC instant
+// (availability start_at/end_at, lesson scheduled_at, the now tick) is turned
+// into profile-tz wall-clock parts through this function. A wrong part here
+// draws a block at the wrong grid position for every viewer — the exact
+// mixed-frame bug class this helper exists to close.
+
+describe('utcInstantToTzParts', () => {
+  it('UTC identity: parts equal the instant’s own UTC fields', () => {
+    expect(utcInstantToTzParts('2026-07-15T14:30:00Z', 'UTC')).toEqual({
+      year: 2026, month: 7, day: 15, hour: 14, minute: 30, weekday: 3, // 2026-07-15 is a Wednesday
+    })
+  })
+
+  it('positive offset (Asia/Tokyo, UTC+9, no DST): crosses the date boundary forward', () => {
+    // 2026-07-15T22:30Z = 2026-07-16 07:30 in Tokyo — next calendar day, Thursday.
+    expect(utcInstantToTzParts('2026-07-15T22:30:00Z', 'Asia/Tokyo')).toEqual({
+      year: 2026, month: 7, day: 16, hour: 7, minute: 30, weekday: 4,
+    })
+  })
+
+  it('negative offset (America/New_York, EDT UTC-4): crosses the date boundary backward', () => {
+    // 2026-07-15T02:00Z = 2026-07-14 22:00 EDT — previous calendar day, Tuesday.
+    expect(utcInstantToTzParts('2026-07-15T02:00:00Z', 'America/New_York')).toEqual({
+      year: 2026, month: 7, day: 14, hour: 22, minute: 0, weekday: 2,
+    })
+  })
+
+  // US spring-forward: America/New_York, Sunday 2026-03-08, 02:00 EST → 03:00 EDT.
+  it('US DST spring-forward: one minute before the jump is 01:59 EST', () => {
+    expect(utcInstantToTzParts('2026-03-08T06:59:00Z', 'America/New_York')).toEqual({
+      year: 2026, month: 3, day: 8, hour: 1, minute: 59, weekday: 0,
+    })
+  })
+
+  it('US DST spring-forward: the jump instant reads 03:00 EDT (02:xx never exists)', () => {
+    expect(utcInstantToTzParts('2026-03-08T07:00:00Z', 'America/New_York')).toEqual({
+      year: 2026, month: 3, day: 8, hour: 3, minute: 0, weekday: 0,
+    })
+  })
+
+  // EU fall-back: Europe/Brussels, Sunday 2026-10-25, 03:00 CEST → 02:00 CET.
+  it('EU DST fall-back: one minute before the repeat is 02:59 CEST', () => {
+    expect(utcInstantToTzParts('2026-10-25T00:59:00Z', 'Europe/Brussels')).toEqual({
+      year: 2026, month: 10, day: 25, hour: 2, minute: 59, weekday: 0,
+    })
+  })
+
+  it('EU DST fall-back: the repeat instant reads 02:00 again (CET this time)', () => {
+    expect(utcInstantToTzParts('2026-10-25T01:00:00Z', 'Europe/Brussels')).toEqual({
+      year: 2026, month: 10, day: 25, hour: 2, minute: 0, weekday: 0,
+    })
+  })
+
+  it('midnight in the target zone reports hour 0, never 24', () => {
+    // 2026-06-09T22:00Z = 2026-06-10 00:00 SAST (UTC+2). Also exercises the
+    // hour-"24" ICU normalisation path behaviourally.
+    expect(utcInstantToTzParts('2026-06-09T22:00:00Z', 'Africa/Johannesburg')).toEqual({
+      year: 2026, month: 6, day: 10, hour: 0, minute: 0, weekday: 3,
+    })
+  })
+
+  it('accepts a Date object as well as an ISO string', () => {
+    const iso = '2026-07-15T14:30:00Z'
+    expect(utcInstantToTzParts(new Date(iso), 'Europe/Madrid'))
+      .toEqual(utcInstantToTzParts(iso, 'Europe/Madrid'))
+  })
+
+  it('round-trips with localToUtc: parts re-encoded through the same tz give the original instant', () => {
+    const tzs = ['Europe/Madrid', 'Africa/Johannesburg', 'America/New_York', 'Asia/Tokyo', 'Pacific/Auckland']
+    const utcOriginal = '2026-07-15T11:30:00.000Z'
+    for (const tz of tzs) {
+      const p = utcInstantToTzParts(utcOriginal, tz)
+      const localIso = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`
+      expect(localToUtc(localIso, tz)).toBe(utcOriginal)
+    }
+  })
+
+  it('throws on an invalid timezone (Intl behaviour — callers must guard)', () => {
+    expect(() => utcInstantToTzParts('2026-07-15T14:30:00Z', 'Not/AZone')).toThrow(RangeError)
+  })
+})
+
+// ─── isValidTimeZone ──────────────────────────────────────────────────────────
+
+describe('isValidTimeZone', () => {
+  it('accepts real IANA identifiers and UTC', () => {
+    expect(isValidTimeZone('Europe/Madrid')).toBe(true)
+    expect(isValidTimeZone('Africa/Johannesburg')).toBe(true)
+    expect(isValidTimeZone('UTC')).toBe(true)
+  })
+
+  it('rejects garbage, empty, and whitespace-padded values', () => {
+    expect(isValidTimeZone('Not/AZone')).toBe(false)
+    expect(isValidTimeZone('')).toBe(false)
+    expect(isValidTimeZone(' Europe/Madrid')).toBe(false)
   })
 })

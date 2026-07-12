@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import Link from 'next/link'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -22,9 +22,11 @@ import {
   ArrowLeft,
   LogOut,
   Menu,
+  Loader2,
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
+import { getUnreadAdminMessagesCount } from './admin/messages/actions'
 
 interface Profile {
   id: string
@@ -64,6 +66,59 @@ const navItems = [
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ]
 
+// Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
+// state. While the clicked route loads, dim the row and swap the icon for a
+// spinner. Active styling (orange + colours) is passed in and preserved.
+function AdminNavContent({
+  Icon,
+  label,
+  active,
+  showBadge,
+  badgeCount,
+}: {
+  Icon: React.ElementType
+  label: string
+  active: boolean
+  showBadge: boolean
+  badgeCount: number
+}) {
+  const { pending } = useLinkStatus()
+  return (
+    <span
+      className="flex items-center gap-3 w-full transition-opacity"
+      style={{ opacity: pending ? 0.55 : 1 }}
+    >
+      {pending ? (
+        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#ffffff' : '#9ca3af' }} />
+      ) : (
+        <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
+      )}
+      <span className="flex-1">{label}</span>
+      {showBadge && (
+        <span
+          style={{
+            backgroundColor: active ? '#ffffff' : '#FF8303',
+            color: active ? '#FF8303' : '#ffffff',
+            fontSize: '11px',
+            minWidth: '18px',
+            height: '18px',
+            borderRadius: '9999px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingLeft: '4px',
+            paddingRight: '4px',
+            fontWeight: 600,
+            lineHeight: 1,
+          }}
+        >
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export default function AdminLayoutClient({
   profile,
   rightPanelStats,
@@ -78,6 +133,8 @@ export default function AdminLayoutClient({
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
 
   const supabaseRef = useRef(createClient())
+  const messagesRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const messagesRefetchInFlightRef = useRef(false)
 
   const adminPanelRef = useRef<HTMLElement>(null)
 
@@ -92,6 +149,27 @@ export default function AdminLayoutClient({
 
   useEffect(() => {
     const supabase = supabaseRef.current
+
+    // authenticated has zero column grants on messages.admin_read_at, so Realtime UPDATE
+    // payloads never carry it — refetch the true count via the admin-client server action
+    // instead of inspecting payload.new.admin_read_at. Debounced so a mark-all-read burst
+    // of UPDATEs collapses into a single refetch.
+    const refetchUnreadMessages = () => {
+      if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
+      messagesRefetchTimerRef.current = setTimeout(async () => {
+        if (messagesRefetchInFlightRef.current) return
+        messagesRefetchInFlightRef.current = true
+        try {
+          const count = await getUnreadAdminMessagesCount()
+          setLiveUnreadMessages(count)
+        } catch {
+          // Badge just skips this update; next INSERT/UPDATE or navigation will resync.
+        } finally {
+          messagesRefetchInFlightRef.current = false
+        }
+      }, 300)
+    }
+
     const channel = supabase
       .channel('admin-nav-unread')
       .on('postgres_changes', {
@@ -99,16 +177,21 @@ export default function AdminLayoutClient({
         schema: 'public',
         table: 'messages',
       }, (payload) => {
-        if (payload.new.read_at && !payload.old.read_at) {
-          setLiveUnreadMessages(prev => Math.max(0, prev - 1))
+        if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+          refetchUnreadMessages()
         }
       })
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-      }, () => {
-        setLiveUnreadMessages(prev => prev + 1)
+      }, (payload) => {
+        if (
+          payload.new.sender_type !== 'admin' &&
+          (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
+        ) {
+          setLiveUnreadMessages(prev => prev + 1)
+        }
       })
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -123,12 +206,17 @@ export default function AdminLayoutClient({
         event: 'INSERT',
         schema: 'public',
         table: 'support_messages',
-      }, () => {
-        setLiveUnreadSupport(prev => prev + 1)
+      }, (payload) => {
+        if (payload.new.sender_role === 'user') {
+          setLiveUnreadSupport(prev => prev + 1)
+        }
       })
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
+    return () => {
+      supabase.removeChannel(channel)
+      if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
+    }
   }, [])
 
   const handleLogout = async () => {
@@ -157,36 +245,20 @@ export default function AdminLayoutClient({
         href={item.href}
         prefetch={false}
         onClick={() => setSidebarOpen(false)}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-white/10'}`}
         style={
           active
             ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
             : { color: '#9ca3af' }
         }
       >
-        <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
-        <span className="flex-1">{item.label}</span>
-        {showBadge && (
-          <span
-            style={{
-              backgroundColor: active ? '#ffffff' : '#FF8303',
-              color: active ? '#FF8303' : '#ffffff',
-              fontSize: '11px',
-              minWidth: '18px',
-              height: '18px',
-              borderRadius: '9999px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingLeft: '4px',
-              paddingRight: '4px',
-              fontWeight: 600,
-              lineHeight: 1,
-            }}
-          >
-            {badgeCount > 99 ? '99+' : badgeCount}
-          </span>
-        )}
+        <AdminNavContent
+          Icon={Icon}
+          label={item.label}
+          active={active}
+          showBadge={showBadge}
+          badgeCount={badgeCount}
+        />
       </Link>
     )
   }

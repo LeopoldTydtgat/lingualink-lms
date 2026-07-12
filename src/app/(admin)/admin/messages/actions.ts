@@ -32,7 +32,7 @@ export async function getAdminThreadMessages(teacherSideId: string, studentId: s
 
   const { data } = await adminDb
     .from('messages')
-    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, admin_read_at, created_at')
     .or(
       `and(sender_id.eq.${teacherSideId},receiver_id.eq.${studentId}),` +
       `and(sender_id.eq.${studentId},receiver_id.eq.${teacherSideId}),` +
@@ -89,6 +89,7 @@ export async function sendAdminMessage(
     receiver_type: receiverType,
     content:       safeContent,
     attachments:   [],
+    admin_read_at: new Date().toISOString(),
   }).select().single()
 
   if (error) return { error: error.message }
@@ -102,7 +103,7 @@ export async function sendAdminMessage(
       .single()
 
     if (student?.email) {
-      const subject = `Lingualink Online — New message from ${adminProfile.full_name}`
+      const subject = `Lingualink Online - New message from ${adminProfile.full_name}`
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
@@ -124,7 +125,7 @@ export async function sendAdminMessage(
       .single()
 
     if (teacher?.email) {
-      const subject = `Lingualink Online — New message from ${adminProfile.full_name}`
+      const subject = `Lingualink Online - New message from ${adminProfile.full_name}`
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
@@ -144,6 +145,23 @@ export async function sendAdminMessage(
   return { success: true, message: inserted }
 }
 
+export async function getUnreadAdminMessagesCount() {
+  await assertAdmin()
+
+  const adminDb = createAdminClient()
+
+  // Mirrors src/app/(admin)/layout.tsx's nav badge query exactly — student-involving
+  // conversations only, admin_read_at is null. Must run via admin client: the browser
+  // role has zero column grants on admin_read_at, so Realtime payloads never carry it.
+  const { count } = await adminDb
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .is('admin_read_at', null)
+    .or('sender_type.eq.student,receiver_type.eq.student')
+
+  return count ?? 0
+}
+
 export async function markAdminThreadRead(teacherSideId: string, studentId: string) {
   await assertAdmin()
 
@@ -151,10 +169,10 @@ export async function markAdminThreadRead(teacherSideId: string, studentId: stri
 
   await adminDb
     .from('messages')
-    .update({ read_at: new Date().toISOString() })
+    .update({ admin_read_at: new Date().toISOString() })
     .or(
       `and(sender_id.eq.${teacherSideId},receiver_id.eq.${studentId}),` +
       `and(sender_id.eq.${studentId},receiver_id.eq.${teacherSideId})`
     )
-    .is('read_at', null)
+    .is('admin_read_at', null)
 }

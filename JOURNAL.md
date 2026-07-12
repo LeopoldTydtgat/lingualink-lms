@@ -1,4 +1,685 @@
-## Session 175 - 27 June 2026 - PDF viewer annotation layer (Milestone 3)
+## Session 200 - 12 July 2026 - NEW327: full email overhaul
+### What was built
+- Rebuilt the shared email wrapper: orange header band with the hosted logo (Supabase public templates bucket, hardcoded URL), flat white card with 1px border, shaded footer, no border-radius anywhere outside the VML button fallback. Outlook-safe throughout (commit 1e587fe).
+- Added a shared zebra-striped details table builder (buildDetailsTable, strip heading plus alternating rows) and converted all nine content builders off the old rounded orange boxes. buildButton and buildDetailsTable exported for reuse outside templates.ts (commit 1e587fe).
+- Normalised all 23 outbound email subjects to plain ASCII 'Lingualink Online - ...', killing the mixed en-dash/em-dash mojibake. Report-overdue subject gained the brand prefix; the two homework emails unified onto the brief's wording. From header standardised to 'Lingualink Online <no-reply@lingualinkonline.com>' at every send site (commit 1e587fe).
+- Created teacherRescheduledEmailContent and wired it into both reschedule paths (student book route and admin class edit), fixing the teacher email that showed the student's name in the Teacher row. The old start time is now captured before the reschedule RPC so Previous/New time rows render (commit 1e587fe).
+- Deleted three dead local email builders and a local date formatter from the student book route; its reschedule branch now uses the shared builders (commit 1e587fe).
+- Recopied the invite email onto the shared wrapper and applied approved wording updates to the forfeited-report, cancel-by-student, teacher cancellation, low hours and training-ending-soon emails. New-student teacher email button now targets the students page with the label View Student Profile (commit 1e587fe).
+### Break/Fix Log
+- Issue 1: Teacher reschedule emails read 'Teacher: <student name>'. Cause: the teacher notification reused the student-worded builder, stamping the student's name into the Teacher row. Fix: dedicated teacher-worded builder used on both reschedule paths. Lesson: never reuse a recipient-specific template for a different recipient; the field labels silently lie.
+- Issue 2: Plan was to deep-link the new-student email button to the student's detail page, but the teacher detail route is gated on an existing class history, so a freshly assigned student would guarantee a 404 for the exact teacher receiving the email. Fix: button targets the students list instead. Lesson: check a route's access gate before deep-linking to it from an email.
+- Issue 3: After the main pass, the new-student teacher email still carried the old rounded table and a hand-rolled button. Cause: its body lives inline in the route, not in templates.ts, so the builder conversion missed it. Fix: follow-up pass converted it to the shared helpers. Lesson: inline email bodies in routes escape template-wide changes; grep for the old styling after any wrapper change.
+### Session result
+All 23 outbound emails now share one Outlook-safe branded design with consistent subjects and sender, the mislabeled teacher reschedule email is fixed, and dead email code is gone from the book route. Full-diff code review returned SHIP WITH NITS, the suite is green at 187/187 with tsc and eslint clean, and the booking email pair was browser-verified in the inbox. Committed as 1e587fe and pushed; the manual 23-email go-live sweep (NEW328) is unblocked.
+---
+
+## Session 199 - 12 July 2026 - NEW324 engine half: slot engine extends past the week window
+
+### What was built
+- Widened slot engine candidate acceptance 60 minutes past the week window (candidateEndMs = windowEndMs + MAX_LESSON_MS - SLOT_MS) so continuation slots for 60/90-minute lessons starting late on the last displayed day are emitted. Applied in the general availability loop, the override cursor loop, and the override selection prefilter (commit 41fbb1e).
+- Widened the booked-lessons fetch upper bound in the availability route to windowEndMs + MAX_LESSON_MS so a lesson starting at or after the week end still blocks the extended slots it overlaps (commit 41fbb1e).
+- Added 6 unit tests: general availability crossing week-end midnight, an override spanning it, an override lying wholly past the window, a booked lesson starting exactly at the window end blocking extended slots, a holiday blocking an extended slot, and the lower bound staying unchanged. Suite 187/187, tsc clean, code-reviewer SHIP (commit 41fbb1e).
+
+### Break/Fix Log
+Issue 1: 90-minute bookings starting 23:00 or 23:30 on the last day of the visible week were never offered.
+Symptom: the last day column showed no late-evening start chips even when the teacher was available across midnight.
+Cause: the slot engine filtered all candidate slots to the strict week window, so the next-day continuation instants were absent from the API response entirely; the frontend's week-wide instant check could never assemble the run.
+Fix: candidate acceptance extended 60 minutes past the window end in all three candidate paths, with the booked-lessons fetch bound widened to match so extended slots are still blocked by real lessons.
+Lesson: the initial fix sketch covered the two candidate loops but missed the override selection prefilter - an add-override lying wholly past the window end would have been discarded before its cursor loop ever ran. The implementation pass caught it and a test pins it. Sketches guide; the code decides.
+
+### Session result
+The NEW324 cross-midnight booking defect is fully closed across both halves. The engine now emits continuation instants past the week window, real lessons beyond the window still block them, and browser verification confirmed 90-minute Sunday 23:00 and 23:30 starts are offered with correct spans into Monday. A matching admin-side gap was found and logged as NEW330 for a later Sonnet pass.
+
+---
+
+## Sessions 196-198 - 12 July 2026 - Cross-midnight booking fixes, offset math correction, bounce webhook
+
+### What was built
+- NEW325 (commit 4414a3b): booking gate rewrite in isSlotAvailable.
+  General slots now built for every teacher-local date the booking
+  window touches; whole-day holiday blocking replaced with per-slot
+  blocking by each slot's own teacher-local start date, matching the
+  slot engine exactly. 92 insertions across availability.ts and its
+  tests.
+- NEW326 (commit 93b7383): localTimeToUtcMs now derives the timezone
+  offset from the full local datetime via a formatToParts probe
+  instead of diffing wall-clock hour and minute. Fixes a full day
+  shift for all zones at or beyond +/-12h (Auckland, Chatham, +14,
+  -12) across the booking gate, slot engine grid, and DayToDay
+  calendar. 95 insertions.
+- NEW311 (commit 463b8c3): Resend bounce webhook at
+  /api/webhooks/resend with SDK signature verification,
+  permanent-bounce-only flagging, and an out-of-order delivered-event
+  guard. New email_bounced_at and email_bounce_reason columns on
+  profiles and students (DDL applied live, migration file saved). Red
+  undeliverable badge on admin teacher and student list and detail
+  views. Route added to proxy public API paths. 601 insertions
+  including 311 lines of webhook tests.
+- NEW324 frontend half (commit 9ad9d04): isBookableStart extracted
+  from BookingClient into src/lib/bookingGrid.ts as pure instant math
+  against a week-wide set of available slot start instants. 60 and 90
+  minute runs crossing the student's local midnight are now offered as
+  bookable starts. 113 insertions.
+
+### Break/Fix Log
+Issue 1: Booking gate rejected legitimate cross-midnight bookings and
+accepted bookings running into holidays.
+Cause: Gate keyed general slots and holiday blocking off the request
+start's teacher-local date only, so a 60/90 minute window touching a
+second date was judged on the wrong day.
+Fix: Build slots for every teacher-local date the window touches;
+block holidays per slot by that slot's own local date (NEW325).
+Lesson: Any logic keyed on "the date of the booking" is wrong the
+moment a booking can span two dates. Key on each instant's own date.
+
+Issue 2: All timezones at or beyond +/-12h resolved local times a full
+day off.
+Cause: Offset probe diffed local hour:minute only; +/-720 minutes is
+ambiguous because +12h and -12h share a wall clock, and the wrap clamp
+tie-broke it wrong.
+Fix: Derive the offset from the full local datetime in one
+formatToParts probe; clamp deleted (NEW326).
+Lesson: Wall-clock arithmetic cannot distinguish offsets that mirror
+each other. Always resolve offsets from a complete datetime.
+
+Issue 3: Booking grid never offered 60/90 minute starts near the
+student's midnight.
+Cause: Since NEW317, slots are bucketed by the student-local date of
+their own start instant, so a run crossing midnight has its
+continuation slots in the next day's column; the adjacency check
+walked only within one column.
+Fix: Week-wide set of available start instants; adjacency checked as
+pure instant math, column-agnostic (NEW324, frontend half).
+Lesson: Display grouping and availability math must never share a data
+structure. Columns are presentation; adjacency is instants.
+
+### Session result
+Three sessions closed four items: the booking gate and the shared
+offset function now handle cross-midnight and extreme-offset cases
+correctly with the gate mirroring slot engine semantics, bounced
+emails are detected automatically and surfaced to the admin, and the
+booking grid offers cross-midnight lesson starts. Test suite grew from
+120 to 181, all green, with code-reviewer and rls-auditor passes on
+the gated changes. Remaining on NEW324: the slot engine window filter
+still cuts continuation slots at the week boundary, queued for the
+next session.
+
+---
+
+## Session 195 - 12 July 2026 - Student booking grid: per-slot timezone bucketing (NEW317)
+
+### What was built
+- Rewrote /api/student/availability day-keying. The old route formatted UTC midnight of each teacher-week date in the student's timezone, which shifted every day key one day back for any UTC-negative student and misaligned the admin booking advisory for UTC-negative teachers.
+- Extracted all slot generation, blocking, and bucketing into a new pure module slotEngine.ts (Next.js route files reject non-handler exports). The week is now a true instant window in the requested display timezone; candidate slots are generated over teacher-calendar dates covering the window plus one day of padding on each side, filtered to the window, and each slot is bucketed by the display-local date of its own start instant rather than by a whole-day container.
+- Booked-lessons fetch moved from naive UTC date-string bounds to true instant bounds, widened backwards by the maximum lesson duration so a lesson starting just before the window still blocks slots inside it.
+- Add-override selection in the route moved from UTC date-prefix matching to instant overlap with the window.
+- BookingClient week state changed from a browser-local Date to a student-timezone Monday YYYY-MM-DD key, with a new addDaysToDateKey helper in timezone.ts for pure calendar-date arithmetic. Columns, past-day pruning, week navigation, clamping, and the current-week check all operate on keys in the student frame; column Dates are noon-anchored and used for labels only.
+- 24 new unit tests covering UTC-negative and UTC-positive display zones, cross-timezone slot day shifts, DST transition weeks in both directions, override window spanning, all blocking layers, and the admin single-date key shape. Suite now 144 of 144 green.
+
+### Break/Fix Log
+Issue 1: Slots attached to the wrong day columns for UTC-negative student timezones, with the final column always empty.
+Cause: Day keys were derived by formatting UTC midnight of each date in the student's timezone; UTC midnight is the previous local day anywhere west of UTC. Whole-day bucketing was also structurally wrong, since a single slot can fall on a different student-local date than the teacher-calendar date that generated it.
+Fix: True instant week window plus per-slot bucketing by each slot's own start instant in the display timezone.
+Lesson: A day is not a safe unit across timezones. Bucket by the instant of the thing itself, formatted in the display frame, never by the container date it was generated from.
+
+Issue 2: The admin booking and edit-class availability advisories were silently wrong for UTC-negative teacher timezones.
+Cause: Same route, same keying defect; the admin clients pass the teacher timezone as the display parameter.
+Fix: Repaired automatically by the route fix with no admin-side edits.
+Lesson: One shared endpoint means one fix can heal several surfaces; map all callers before designing the change so the win is deliberate, not accidental.
+
+### Session result
+NEW317 closed at commit 03d7992 on dev. Both review subagents green (code-reviewer SHIP, timezone-date-auditor PASS), 144 of 144 tests, and browser verification across all three portals reconciled every slot count exactly for a New York student booking a Brussels teacher, including the admin 24-hour bypass. Two follow-ups logged: NEW322 raised to MEDIUM because the write gate's UTC-prefix override scoping is now a visible display/gate mismatch, and NEW324 filed for the fail-closed edge where a booking run straddling the student's local midnight is split across two columns and not offered.
+
+---
+
+## Session 194 - 12 July 2026 - Teacher purge rewrite and repo hygiene
+
+### What was built
+- Replaced the teacher hard-delete cascade with a purge-only-if-pristine model in the admin teacher DELETE route (commit ccefa48). A preflight counts rows across 20 blocking tables, covering every RESTRICT and NO ACTION foreign key from the live schema plus four tables with no foreign key at all. Any history returns a 409 listing exactly what blocks; archiving is now the terminal state for any teacher with history.
+- The preflight fails closed: any count query error aborts with a 500 and nothing is deleted. The purge sequence is session sign-out, auth user delete (tolerating only user-not-found so a retry after partial failure is idempotent), then profile delete with a checked error. Database cascades handle availability tables and the teacher history log.
+- The admin purge dialog now surfaces the blocking tables and counts and explains the archive-instead rule.
+- Repo hygiene: commit author email switched to the GitHub noreply address and the entire 927-commit history rewritten with git filter-repo to remove the personal address. All branches force-pushed clean. Branch protection on main recreated as a ruleset (PR required, force pushes blocked).
+
+### Break/Fix Log
+Issue 1: Deleting a teacher left their support messages behind as a permanent Unknown ghost in the admin support list.
+Cause: The route's hand-written cascade never covered support_messages, which has no foreign key, so orphans were invisible to both the database and the route. The route also ignored errors on its own cascade steps and could return success after a partial failure.
+Fix: Hand-written cascade removed entirely. History now blocks deletion outright, so orphaned references can never be created; the only deletable accounts are ones nothing references.
+Lesson: A hand-maintained delete cascade will always drift from the schema. Either let the database own deletion through foreign keys, or refuse to delete anything that is still referenced.
+
+### Session result
+Teacher deletion is now safe by construction: history blocks purging, archiving handles real departures, and both paths were verified in the browser against test accounts before commit. The repository history is clean of personal data and main is protected again, clearing two go-live blockers.
+
+---
+
+## Session 193 - 12 July 2026 - Day to Day calendar timezone frame unification
+
+### What was built
+
+Fixed the root cause of the recurring "calendar broken" bug class. The teacher Day to Day calendar saved availability blocks correctly in the teacher's profile timezone but rendered them in the browser's local timezone. For any viewer whose browser timezone differed from the teacher's, saved blocks appeared shifted by the timezone delta or vanished off the grid entirely. The bug was invisible whenever the tester and the teacher shared a timezone, which is exactly why it kept resurfacing.
+
+The fix unified the entire grid on a single frame: the teacher's validated profile timezone. A new pure helper, utcInstantToTzParts, converts stored UTC instants to wall-clock parts in a named IANA timezone via Intl.DateTimeFormat, with a companion isValidTimeZone probe. Every render-side consumer in DayToDay.tsx now goes through it: availability blocks, lesson blocks, the now indicator, the today column, month-grid counts, past-slot drag guards, and week navigation anchors. The legend now reports the timezone the grid actually uses.
+
+The same commit hardened the surface: the timezone conversion in the save handler is guarded so an invalid account timezone surfaces a visible error instead of an unhandled exception and a stuck saving state; an invalid timezone degrades rendering to UTC with a warning banner instead of blanking the tab; week and month fetch windows are now true UTC instants of the profile-timezone week with a half-open end bound, fixing silently shifted query windows and a boundary duplicate; and the add success path uses a functional state update so two quick additions can no longer drop the first.
+
+Thirteen new unit tests cover the helper, including DST transitions in both directions, midnight boundaries, and a round-trip invariant against the existing localToUtc. Full suite green at 120 of 120. Both review subagents passed: code-reviewer SHIP, timezone-date-auditor PASS.
+
+### Break/Fix Log
+
+The session began with a Fable 5 read-only forensic audit of every file touching the calendar, availability, and booking after a live report that adding availability showed "Saving" with nothing appearing. Network and database evidence proved the write path correct, narrowing the defect to the render side, which the audit then pinned to the mixed timezone frame. Verified in the browser with a South Africa timezone teacher and a New York timezone teacher: both render blocks at the clicked times.
+
+### Session result
+
+Commit 25ef8f3 pushed to dev. Seven follow-up findings from the audit logged for future sessions, including a student booking grid day-key shift affecting UTC-negative timezones, admin booking validation gaps, and Holidays tab date display defects.
+
+---
+
+## Session 192 - 11 July 2026 - Invite email flow for admin-created accounts
+
+### What was built
+
+Replaced the admin-set temporary password with a proper invite email flow
+for both teachers and students (commit 0938600). When an admin creates an
+account, the auth user is now created with a random throwaway password
+that is never shown, returned, or logged. After all database inserts
+succeed, the system generates a Supabase recovery link and sends a branded
+invite email via Resend with a "Set My Password" button. The new user sets
+their own password, logs in, and is caught by the existing
+profile-completion gate to finish their profile.
+
+New shared helper src/lib/auth/inviteEmail.ts holds the throwaway password
+generator and the invite send. The temporary password field was removed
+from both admin create forms, both validation schemas, and both API
+routes. Email sending is best-effort: a send failure never rolls back
+account creation, and the admin sees a warning toast telling them the user
+can fall back to "Forgot password" on the login page. The success toast
+confirms when the invite went out.
+
+One design decision worth recording: invite links for BOTH portals point
+at the teacher-domain reset-password page, because it is the only page
+that consumes the recovery token. It verifies the token and silently
+forwards students to the student reset page on the shared domain cookie -
+the exact same chain the existing forgot-password emails already use.
+Linking student invites directly to the student reset page would have
+dead-ended, since that page ignores query parameters entirely.
+
+The Supabase email OTP expiry was raised from 1 hour to 24 hours in the
+dashboard so invite links survive a normal working day.
+
+### Break/Fix Log
+
+The original plan assumed both reset-password pages consume the recovery
+token from the URL. Reading the actual code showed only the teacher page
+does, which reshaped the link-building logic before any code was written.
+No breakage during the build: TypeScript, ESLint, and the full test suite
+stayed clean throughout, and both the supabase-rls-auditor and
+code-reviewer subagent gates passed with no critical findings. One
+reviewer suggestion was applied: the admin-side toast check uses a
+fail-safe comparison so any response that does not positively confirm the
+invite was sent shows the warning.
+
+### Session result
+
+Full smoke test passed for both roles: teacher and student invite emails
+delivered, password set via the link, login successful, and the
+profile-completion gate engaged as designed. Committed as 0938600 and
+pushed. Four unrelated issues spotted during testing were logged to the
+bug backlog for future sessions, including a plan to run a structured test
+pass over the whole account-creation flow.
+
+---
+
+## Session 191 - 11 Jul 2026 - Messaging hardening: attachment validation, live read receipts, empty bubbles, live admin support list
+
+### What was built
+Four messaging bugs closed across two working sessions, all in the messaging and support chat systems.
+
+NEW299 (commit c9ee2e0): attachment URL validation is now shared across every send path. An audit found that both main sendMessage server actions accepted caller-supplied attachment arrays without any checks, while the support send route had inline validation. I extracted that validation into a shared helper, src/lib/messages/validateAttachments.ts, which enforces a maximum of five attachments, https-only URLs pinned to the Supabase project host, filename and size limits, and strips each item down to url, filename and size. All three send paths now use it. Live tested, including a doctored URL pointing at a foreign host, which was correctly rejected with a 400.
+
+NEW300 (commit 133660e): support chat read-receipt ticks now flip live. Marking inbound messages as read was extracted into a reusable callback that fires both on conversation load and when a message arrives via Realtime, and a buffering ref carries read timestamps that arrive before the optimistic message has been swapped for the real database row, so ticks are no longer stomped back to unread. Live tested in all four sender and reader combinations.
+
+NEW302 (commit 6c4c451): attachment-only messages no longer render an empty dark bubble in the three main messaging UIs. The fix mirrors the pattern already proven in the support widget: senders treat tag-only HTML as empty and store a clean empty string instead of an empty paragraph tag, and all three renderers wrap the bubble in a content guard so attachments render on their own. The guard also hides legacy empty rows already in the database, so no migration was needed.
+
+NEW303 (commit 9a930bd): the admin support conversation list now updates in real time. Previously only the open conversation had a Realtime subscription, so a message from anyone else never updated the list and a first-time sender was invisible until a full page reload. A component-lifetime subscription now keeps the whole list live: previews refresh, unread counts bump for non-open threads, conversations reorder, and first-time senders appear immediately via a new admin-gated server action that resolves their name and photo. Two stale-prop bugs in the same component were fixed along the way. The change passed both the RLS auditor and code reviewer gates before commit.
+
+### Break/Fix Log
+- The code reviewer caught a race in the first-time-sender path of NEW303 where a second rapid message from a brand-new participant would be silently dropped from the list state. Fixed before commit by merging into the existing row instead of discarding the update.
+- The review also surfaced a pre-existing transient duplicate-key race from NEW300 in the admin support thread. Logged as its own backlog item rather than bundled into this commit.
+
+### Session result
+Four bugs closed, committed and pushed. The messaging layer is now consistent on attachment validation, live read receipts, attachment-only rendering and real-time list updates across all portals.
+
+---
+
+## Session 190 - 11 July 2026 - Support Messaging Attachments and Admin Oversight Attachment Rendering
+
+### What was built
+
+Two commits completing attachment support across the platform's messaging surfaces.
+
+Commit aaf3e2f (NEW295): the admin oversight thread view fetched the attachments
+column but never rendered it, so file links sent between teachers and students were
+invisible to the admin. Added an attachment link block below each message bubble,
+mirroring the established StudentDetailClient chip pattern, and tightened the
+message interface type from any[] to a proper attachment shape.
+
+Commit ddf7506 (NEW296): built file attachments for the support messaging system
+end to end. The support_messages table gained an attachments jsonb column (DDL via
+the Supabase SQL Editor; existing table grants and the Realtime publication already
+covered it). The send API route now validates attachments server-side: maximum of
+five per message, URL host pinned to the Supabase project host so arbitrary
+external URLs cannot be injected, filename length and file size limits, and
+unknown keys stripped. It also permits empty text content when attachments are
+present. Both support clients (the teacher/student chat widget and the admin
+Support page) gained a paperclip upload reusing the existing messages upload
+route, a pending attachment list with remove buttons, attachment chip rendering,
+and rollback handling: a failed send restores the pending attachments and surfaces
+a toast instead of silently discarding the uploaded file. Attachment-only sends
+store an empty string rather than editor placeholder markup, and the message
+bubble is hidden when there is no text so lone attachments render flush. The same
+commit swapped the chat widget's generic inline SVG bubble icon for the LinguaLink
+brand chat mark, with the SVG viewBox cropped to the artwork so it renders at full
+size inside the trigger button.
+
+### Break/Fix Log
+
+The code-reviewer subagent ran on the NEW296 changes before commit; findings were
+addressed in the same work. Investigation during this session also diagnosed (but
+did not fix) the support chat read-receipt bug: replica identity on the table was
+verified FULL via pg_class, ruling out the suspected Realtime cause, and the true
+root cause was traced to the clients never marking incoming messages read while
+the thread is open, plus a missing pending-reads buffer for the optimistic-send
+race. Logged as NEW300 with the full diagnosis for a dedicated fix session.
+Follow-up items NEW298 (signed attachment URLs expire after seven days), NEW299
+(audit the main messages send path for the same URL host pinning), and NEW301
+(time-windowed message editing, post-go-live) were logged as well.
+
+### Session result
+
+NEW295 and NEW296 closed and pushed. Support messaging now has full attachment
+parity with the main messaging system, with server-side validation stricter than
+the original. Four follow-up items logged with root-cause detail, including a
+fully diagnosed read-receipt fix ready to execute next session.
+
+---
+
+## Session 189 - 11 July 2026 - Realtime leak verification and messaging emoji fix
+
+### What was built
+
+Closed out two messaging-related items across the admin and chat surfaces.
+
+First, I completed the live verification of NEW293, a suspected data leak
+where Supabase Realtime UPDATE frames might expose the revoked admin_read_at
+column to teacher subscribers. Using browser dev-tools WebSocket inspection
+on a plain teacher session (separate browser sessions, after discovering
+that incognito windows share a session and invalidate the test), I confirmed
+the UPDATE frame arrives with the full message record but no admin_read_at
+field in record, old_record, or columns. Realtime enforces the column-level
+revoke for authenticated subscribers. Closed as no-fix: the protection
+already works as intended (commit 8477c74 from the previous session had
+already moved the admin unread badge to a count refetch on UPDATE events
+rather than reading the revoked column directly).
+
+Second, I fixed NEW297: sending a digit-only chat message such as "1"
+rendered at 2rem with no bubble, styled as if it were a large emoji. The
+emoji-only detection helper, duplicated identically in five components, used
+the Unicode \p{Emoji} property, which matches the digits 0-9, # and *
+because they are keycap base characters. Short digit-only messages therefore
+false-positived as emoji. The fix extracts a single shared helper at
+src/lib/messages/isEmojiOnly.ts built on \p{Extended_Pictographic} with
+explicit handling for variation selectors, skin-tone modifiers, ZWJ compound
+sequences, and regional-indicator flag pairs. The regex was validated
+against 14 true/false test cases via a throwaway Node script importing the
+actual on-disk module before any component was touched. All five components
+(admin messages, admin support, teacher messages, student messages, chat
+widget) now import the shared helper.
+
+### Break/Fix Log
+
+- Incognito browser windows share a single session, which invalidated the
+  first NEW293 WebSocket test; re-ran with fully separate browser sessions.
+- A stale .next/dev/types cache produced an unrelated TS2306 error during
+  typecheck; cleared the generated directory and the full build passed
+  cleanly (exit 0, all 83 pages).
+
+### Session result
+
+NEW293 closed no-fix with live WebSocket evidence; NEW297 fixed and deployed
+to dev (commit 2e07aa6): digit messages render as normal bubbles, genuine
+emoji retain the large display. Emoji detection logic now lives in one
+shared, tested module instead of five duplicates.
+
+---
+
+## Session 188 - 11 July 2026 - Messaging integrity: admin oversight read state isolated from recipients
+### What was built
+- Fixed the admin Messages nav badge counting every unread message platform-wide. The server count and both Realtime handlers now filter to student-involving messages only, matching the admin messages page semantics (commit ba46641).
+- That fix exposed a worse defect underneath: when the admin opened a teacher-student conversation in the oversight view, the code stamped those messages as read using the same read_at field the teacher and student portals rely on for unread badges and read ticks. The real recipient's badge cleared and senders saw read ticks for messages nobody had read. Fixed by adding a dedicated admin_read_at column so "seen by admin" and "read by recipient" are two separate facts. All admin surfaces switched to the new column, read_at is recipient-only again, admin-sent messages are stamped as seen at insert, and historical admin-sent rows were backfilled (commit 161353f).
+- The security auditor then flagged that recipient-side queries fetched all message columns with select('*'), so the new admin_read_at timestamps were visible to teachers and students through browser dev tools - against the client's requirement that oversight leaves no visible trace. Replaced the wildcard selects with explicit column lists across all eight recipient-path queries on both portals, then reduced the database grants to column level so the oversight column carries zero privileges for regular users (commit fd956b4).
+- All database changes were applied live first, verified by reading the resulting grant posture, then captured in a catch-up migration so the repo matches the database (commit a1ef392).
+### Break/Fix Log
+**Issue 1**
+- Symptom: Teachers and students saw phantom read ticks and cleared unread badges on messages the recipient never opened.
+- Cause: The admin oversight view reused the recipient read_at field to track which threads the admin had reviewed, silently overwriting recipient read state.
+- Fix: New admin_read_at column; admin surfaces read and write only that column, recipient portals never see it.
+- Lesson: A column means one thing. Reusing a state field for a second audience silently corrupts the first audience's view - separate facts get separate columns.
+**Issue 2**
+- Symptom: After revoking the oversight column from regular users, the fix order mattered: revoking before updating the code would have broken all teacher and student messaging.
+- Cause: select('*') hard-fails when any single column lacks privilege - a wildcard query is all-or-nothing against column-level grants.
+- Fix: Mandatory two-step order enforced: explicit column lists committed and deployed first, grant revoke second.
+- Lesson: Wildcard selects and column-level security cannot coexist. Explicit column lists are a prerequisite for column-level grants, not a style preference.
+### Session result
+The messaging system now keeps admin oversight fully invisible to teachers and students: no read-state side effects, no visible timestamps, no queryable trace. Recipient read semantics are correct on both portals, the admin badge counts the right things, and the database grant posture is captured in a committed migration. Follow-up items (a cosmetic badge staleness on the admin layout and a verification pass on Realtime frames) are logged for their own sessions.
+
+---
+
+## Session 187 - 11 July 2026 - Support surfaces aligned and unread badge accuracy
+
+### What was built
+- Admin support conversation view aligned with the shared messages look used on the teacher and student portals: warm cream thread background, received bubbles in white with a grey border, and contact-list previews now show plain text instead of raw HTML tags (commit d6aee4d).
+- Fixed the Support nav badge counting the admin's own replies as unread. The live counter now only increments for messages sent by teachers or students, not for admin-sent rows (commit c2b1c33).
+- Support chat widget (shared by teacher and student portals) reworked: FAQ tab now sits first and is the default landing tab, steering users to self-serve answers before messaging the admin. Unread admin replies override that default so the widget lands on Messages and the unread badge still clears. Same styling alignment as the admin view, and the emoji picker no longer gets clipped by the widget's edges (commit 677a52b).
+
+### Break/Fix Log
+
+**Issue 1**
+Symptom: The Support nav badge in the admin portal went up every time the admin sent a reply, showing unread counts for messages the admin had written personally.
+Cause: The server-side count on page load filtered correctly for user-sent messages, but the live real-time counter incremented on every new message row regardless of who sent it.
+Fix: The live counter now checks the sender before incrementing, matching the server-side rule.
+Lesson: When the same number is computed in two places (initial load and live updates), both must apply the same filter or they drift apart in front of the user.
+
+**Issue 2**
+Symptom: Making the FAQ tab the default landing tab risked burying unread admin replies, since messages are only marked read when the Messages tab is opened - the unread badge would never clear.
+Cause: Read-marking is tied to the Messages tab loading, so a different default tab silently breaks it.
+Fix: On opening the widget with unread replies waiting, it lands on Messages instead of FAQ. With nothing unread, FAQ remains the default.
+Lesson: Changing a default view can break behaviour that was quietly attached to it. Trace what runs when the old default loads before changing it.
+
+**Issue 3**
+Symptom: The emoji picker in the support chat widget opened partially outside the widget and was cut off.
+Cause: The picker was positioned relative to its small container, which clips overflowing content.
+Fix: The picker now positions itself against the screen using the emoji button's on-screen location, opening leftwards since the widget sits at the right edge of the screen.
+Lesson: Pop-ups inside small scrollable containers need screen-relative positioning, not container-relative.
+
+### Session result
+This session brought all three support surfaces (admin conversation view, admin nav badge, and the shared teacher/student chat widget) in line with the platform's shared messaging look, made the unread counters accurate, and restructured the widget so users see the FAQ before reaching for a direct message to the admin. Three commits, all verified live on both portals before push.
+
+---
+
+## Session 186 - 07 July 2026 - Closing student-side booking security gaps
+
+### What was built
+- Added lesson_id to the hours_log ledger so every balance change traces back to the exact lesson that caused it, with a database function stamping it automatically and the booking route backfilling it on write.
+- Added a database trigger and a scheduled repair job that guarantee every scheduled lesson gets a matching pending report row, closing a gap where a lesson could exist with no report ever created for it.
+- Closed a hole where a student could book a class in a way that let the system silently treat a missed lesson as the teacher's fault (a forgeable no-show), by moving that one database write to a trusted server-side path and removing write access that was never meant to be used directly.
+- Added a check to the student booking and reschedule flow so a student can only book a class with a teacher who is actually assigned to their training, closing a gap where any teacher could be booked directly through the booking request itself, bypassing the on-screen teacher list.
+
+### Break/Fix Log
+
+**Issue 1**
+Symptom: hours_log entries had no reliable link back to the lesson that caused them, making it hard to audit or reverse a balance change with confidence.
+Cause: the ledger was designed before lesson-level traceability was a requirement.
+Fix: added a lesson_id column, a database function to stamp it consistently, and updated the booking route to backfill it on every write.
+Lesson: an audit ledger is only as good as its weakest link back to the source record.
+
+**Issue 2**
+Symptom: some scheduled lessons had no pending report waiting for the teacher to fill in after class, so they could pass by unnoticed with nothing flagged.
+Cause: report creation depended on a single code path that could be skipped or fail silently.
+Fix: added a database trigger so a pending report is created the moment a lesson is scheduled, plus a scheduled sweep that finds and repairs any lesson still missing one.
+Lesson: anything that must always exist should be guaranteed at the database level, not only by application code that can be bypassed or fail quietly.
+
+**Issue 3**
+Symptom: a ticket assumed a database access rule around student lesson creation was unused and safe to remove.
+Cause: the assumption was wrong. Live-code verification showed the student booking route was writing that lesson row under the student's own session, not a trusted server-side account, meaning that access rule was actually the only thing gating a potentially forgeable teacher no-show.
+Fix: moved that one database write to a trusted server-side account so the route's own checks (ownership, hours balance, timing rules, no double-booking) now do the gating instead, then safely removed the access rules and leftover default permissions that were no longer needed. Tested the full booking and cancellation cycle before and after the change.
+Lesson: never remove a security rule on the assumption it is dead weight. Verify against the live, running code first. This one very nearly went the other way.
+
+**Issue 4**
+Symptom: the student booking and reschedule flow accepted a teacher choice from the request itself and never checked whether that teacher was actually assigned to the student's training. The on-screen teacher list only ever showed assigned teachers, but the request behind it did not enforce the same rule.
+Cause: the check for teacher assignment only ever existed on the screen the student sees, not in the server-side code handling the actual booking.
+Fix: added a single check against the student's assigned teachers that runs before either booking a new class or rescheduling an existing one, so both paths are covered by the same rule. A request naming an unassigned teacher is now rejected outright.
+Lesson: a restriction shown only in the interface is not a restriction at all. Anything that matters for security must be enforced in the server-side code handling the request, not just the screen in front of it.
+
+### Session result
+This session closed out three related student-booking security gaps found during a wider review, plus one ledger traceability improvement, tightening the booking and billing chain from hours logging through to lesson creation and teacher assignment. All four fixes were verified against the live database and tested end to end before being committed and pushed.
+
+---
+
+## Session 185 - 7 July 2026 - Admin reports export and Join Class click logging complete
+
+### What was built
+
+- Admin reports Excel export built end to end: an export modal on the admin Reports page generating a styled ExcelJS workbook with 22 columns covering class details, report status, feedback, join times, billability, per-lesson rate snapshots, cancellation windows and policy flags. All dates render in SAST via Intl formatters, date bounds use literal +02:00 offset strings, and every export writes an audit row to a new export_log table. The teacher filter includes the dual-role admin account (commit ae1d96a).
+- Three live database tables captured in repo migrations so the repo matches production: lesson_rate_snapshots (rate frozen per lesson via trigger, 55 rows backfilled), lesson_join_clicks (deny-all RLS), and export_log (deny-all RLS). The rate snapshot trigger is included so a fresh environment reproduces the live behaviour (commit d9b1abc).
+- Student filter added to the export modal so exports can be narrowed to a single student as well as a single teacher (commit b8d0f3f).
+- Teacher-side Join Class click logging: a new server route validates the body with Zod, confirms the caller is the lesson's teacher, and inserts into lesson_join_clicks through the service-role client, since the table's deny-all RLS makes client-side inserts impossible by design. The teacher right panel fires the log on click, guarded to the joinable window, never awaited and never able to block opening Teams (commit 13f9962).
+- Student-side Join Class click logging: the same route extended to accept students. The caller's auth user resolves through students.auth_user_id to the students table primary key, which is then matched against the lesson's student_id, since lessons.student_id references the table PK and not the auth UUID. Click hooks added to the student right panel and the class reminder modal in the same fire-and-forget shape, with the lesson id threaded through the student layout query. Both the supabase-rls-auditor and code-reviewer subagents cleared the change before commit (commit 823b6fd).
+
+### Break/Fix Log
+
+Issue 1
+Symptom: The three new tables existed only in the live database, created directly in the SQL Editor, with nothing in the repo migrations.
+Cause: The export feature was built against live DDL first to keep momentum, leaving the repo behind production.
+Fix: A catch-up migration was written from live pg_dump-style reads of the actual tables, trigger and grants, then committed.
+Lesson: Live-first DDL is fine for speed, but the catch-up migration is part of the feature, not an optional cleanup. The repo is not done until it can rebuild production.
+
+Issue 2
+Symptom: Extending the join-click route to students risked authorising the wrong person, because the two ownership checks look identical but compare different kinds of IDs.
+Cause: lessons.teacher_id references profiles.id, which IS the auth UUID, while lessons.student_id references students.id, a table PK reachable only through students.auth_user_id. Both are UUIDs, so a direct comparison would compile, pass type checks, and silently authorise nobody or the wrong rows.
+Fix: The foreign keys were read from the live database before any code was written, and the student branch resolves auth user to students.id first, then compares PK to PK. The RLS auditor confirmed the indirection matches the database's own get_current_student_id helper.
+Lesson: When two ID columns share a type, the schema, not the code, says what they mean. Read the actual foreign keys before writing any ownership check.
+
+### Session result
+
+The admin reports workstream is complete across five commits. The client can now export a full billing and operations picture of any date range to Excel, filtered by teacher, student, outcome or client type, with every export audited. Join Class clicks are now logged for both teachers and students through one ownership-checked server route, and the export already renders both join columns, so no follow-up wiring remains. The student side was live-tested end to end: a real student click opened Teams and landed the correct row, verified in the database and then cleaned up along with the test schedule change. All work is pushed to origin/dev. This closes the admin chat roadmap in full.
+
+---
+
+## Session 184 - 7 July 2026 - Student booking wizard restructure complete
+
+### What was built
+
+- Reschedule flow fixed to use the student's effective balance (true balance plus the hours of the lesson being rescheduled) so a reschedule is never blocked by hours the student is about to get back. The duration step is now skipped on the reschedule path since duration is locked to the original lesson (commit 74feb3d).
+- Confirm screen now shows "Hours deducted: 0min" on the reschedule path via a label-only ternary. The underlying hours math is untouched; a reschedule is a date change, not a new deduction (commit 4aabe66).
+- Step 3 (Date and Time) fully redesigned: context strip with teacher avatar, name and rating plus a locked duration chip and timezone note; per-day slot counts from a shared startsByDay structure; an "Earliest available" hint for the current week; Sun, Sunset and Moon time-of-day group icons in brand orange; green slot chips; soft selected states using the #FFF0DC tint and #FF8303 border (commit 1a76bd1).
+- Step 4 (Confirm) redesigned to match Step 3's visual language: the old orange "Class Summary" header bar replaced with the Step 3 teacher context strip, four icon rows (Calendar, Clock, Wallet, chart) with #FFF0DC icon tiles, a before-and-after balance chip on the Remaining row ("Xh -> Yh" on a booking, "Reschedule - no hours deducted" on a reschedule), and a 24-hour cancellation footnote inside the card. Hours math, the low-hours warning and the confirm handler were copied verbatim and left untouched (commit 75ff651).
+
+### Break/Fix Log
+
+Issue 1
+Symptom: Rescheduling a lesson could be blocked for insufficient hours even though the student was only moving an existing lesson, and the wizard forced the student back through the duration step.
+Cause: The reschedule path reused the normal booking flow, checking against the raw remaining balance and rendering every step.
+Fix: Compute an effective balance that adds back the hours of the lesson being rescheduled, and skip the duration step entirely on the reschedule path with the duration locked to the original lesson.
+Lesson: A reschedule is not a new booking. Every balance check and every wizard step must be evaluated against what the operation actually is, not the flow it happens to reuse.
+
+Issue 2
+Symptom: The confirm screen told a rescheduling student that hours would be deducted.
+Cause: The confirm screen displayed the standard deduction value with no awareness of the reschedule path.
+Fix: A label-only ternary shows 0min deducted on reschedule while the real hours math stays untouched.
+Lesson: Display fixes should be display-only. Changing what the user sees must never mean changing what the system computes.
+
+### Session result
+
+The student booking wizard restructure is complete across four commits. The reschedule path now behaves correctly end to end (effective balance, skipped duration step, honest confirm screen), and Steps 3 and 4 share one coherent visual language built entirely from inline style props within the approved palette. Both the normal booking and reschedule paths were browser tested before each commit. All work is pushed to origin/dev. Green slot chips and several UI decisions remain pending client sign-off as noted on the standing decision list. With this entry the journal pause is lifted and normal end-of-session journal reminders resume.
+
+---
+
+## Session 183 - 05 July 2026 - Chrome-free live annotation page to stop screen-share leaks
+
+### What was built
+- The teacher's PDF annotation autosave logic was extracted out of the study sheet detail page into its own component, so it could be reused on a new page without duplicating it.
+- A new chrome-free route group was added alongside the main dashboard. Its layout checks the user is logged in the same way the dashboard does, with no left menu, top header, or right-hand panel at all.
+- The study sheet data loading logic (auth check, fetching the sheet, exercises, and any existing annotations) was pulled out into one shared function, so both the normal study sheet page and the new chrome-free page load data the exact same way.
+- A new page was added under the chrome-free route group that reuses the same student sheet component as before, but with a flag that hides the "Back to Study Sheets" button, since that button would otherwise navigate a teacher straight back into the full dashboard mid-class.
+- A button was added to the normal study sheet page, "Open Live Window", which opens the chrome-free page in a small separate popup window with no browser tabs or bookmarks bar. This is the window a teacher shares in Teams during a live lesson, so the student never sees billing figures or another student's name on screen.
+
+### Break/Fix Log
+Issue 1: When the chrome-free layout was first built, it copied the dashboard's login check but skipped a second check the dashboard also does, which confirms the logged-in user still has a valid profile. Without that second check, a narrow timing gap existed where a student could reach a teacher-only page for a short window after switching between portals.
+Cause: the chrome-free layout was written to only skip the parts that draw the menus, but it accidentally skipped a security check bundled in with them.
+Fix: the same profile check used on the dashboard was added to the chrome-free layout as well, so both layouts now protect equally.
+Lesson: when copying a layout to strip out its visual chrome, every check inside it needs to be looked at individually, since not everything in there is just visual.
+
+Issue 2: Testing this feature as a student account (to confirm students get blocked) crashed the site with an error instead of sending the student back to their own portal.
+Cause: the code that redirects a wrongly-placed user back to their own portal was building that address in a shortened form that only works once the site is live on its real domain, not while testing locally.
+Fix: that address is now always built as a full, complete web address, which works both locally and once live.
+Lesson: a redirect that only gets exercised in one environment can hide a bug for a long time, so testing the "wrong user, wrong portal" case locally, not just on the live site, that catches it earlier.
+
+### Session result
+Teachers can now open a study sheet during a live lesson and click one button to pop out a separate, stripped-down window showing only the PDF and the annotation tools, with nothing else on screen. That window is what gets shared in Teams, so a student never sees the teacher's earnings or another student's details during a live class. All five planned checks were run by hand: the chrome-free page renders correctly with nothing extra, the original study sheet page still works exactly as before, a logged-out visitor gets sent to the login page, a student account gets sent back to their own portal, and drawing on the chrome-free page saves correctly to the database. This closes out the confidentiality issue that was blocking go-live.
+
+---
+
+## Session 182 - 03-04 July 2026 - PDF annotation toolset expansion: highlighter, underline, arrow, and stamps
+
+### What was built
+- Highlighter and underline tools added as StrokeAnnotation variants via the existing pen pointer path. Highlighter renders as a thick semi-transparent stroke, underline as a straight horizontal rule. StrokeAnnotation gained an optional opacity field that defaults absent, so previously saved strokes and the pen commit path were unaffected.
+- Arrow tool added as a new annotation type with start and end points stored as fractions of the page, drawn by dragging and rendered as an SVG line with an arrowhead marker. It commits through its own path alongside the existing stroke and text types, and flows into the same annotations array so autosave, undo and redo all cover it.
+- Star, tick and cross stamp tools added as a new shape annotation type, placed with a single click and resized afterwards with the same plus and minus control used on text boxes. Rendered as SVG glyphs with an invisible hit area sized for easy selection and dragging.
+- Toolbar restyled in stages: inactive tool buttons greyed so only the active tool shows orange, hover feedback added across all toolbar buttons, the annotation tool buttons grouped into one segmented pill, and the colour swatches folded into a single colour dot popover.
+
+### Break/Fix Log
+Issue 1: Clicking a colour swatch to recolour an already placed annotation added a phantom step to the undo history, so the first undo after a recolour did nothing visible.
+Cause: the swatch click handler pushed a new undo entry every time it fired, including when it was only updating the colour of an existing annotation rather than creating a new one.
+Fix: the handler now recolours the selected annotation in place without pushing an extra undo entry.
+Lesson: any handler that can fire on both a create path and an edit path needs to check which one it actually is before touching undo history, or edits start polluting the undo stack.
+
+### Session result
+All six new annotation tools (highlighter, underline, arrow, star, tick, cross) are built, working, and share the same annotations array, autosave path and student read-only gate as the original pen and text tools, so nothing about saving or displaying marks needed to change. The toolbar went through four rounds of polish afterwards to make the active tool clearer and the whole bar feel less cluttered. One real bug came up during that polish and was fixed the same day it was found.
+
+---
+
+## Session 181 - 05 July 2026 - Booking teacher ratings, profile modal and wizard auto-advance
+
+### What was built
+- Migration file capturing the already-live get_teacher_reviews_summary function: security definer with search_path pinned to empty, execute revoked from public and from anon, granted to authenticated only. Returns per teacher an average rating to one decimal, a review count, and up to five recent reviews as rating, text and date, with admin edited text taking precedence and no student identity anywhere.
+- Booking page server load extended: the teacher profile join now pulls nationality, qualifications, specialties, quote, native, speaking and teaching languages and the intro video URL. Review stats from the RPC are merged into each teacher as strictly additive data: any failure logs and falls back to zero stats so the booking flow always renders.
+- Teacher selection cards redesigned: white background always, 2px orange border and check circle on selection, larger photo, a star rating line shown only when a teacher has at least one review (nothing rendered at zero), a Teaches line, a two line bio clamp and a View profile link. The card was restructured from a button element to a div with role="button" so the nested View profile button is valid HTML.
+- Teacher profile modal: photo, name, rating, nationality, a Teaches / Speaks / Native languages block, quote in italics, full bio, qualifications, specialties, an external intro video link and up to five nameless recent reviews with month and year. Every section renders only when data exists. Closes on X, backdrop and Esc; footer has Close and Select this teacher.
+- Calendly style auto-advance across the wizard: picking a teacher or a duration moves straight to the next step, clicking a time slot advances after a short delay so the selected span is visible first, and clicking an already selected option advances again so Back then forward works. The Continue button is gone from steps 1 to 3, Back remains everywhere, and the Confirm step and reschedule entry path are unchanged.
+- Duration step redesigned: heading with subtitle, a training balance chip, icon circles, one line descriptions per duration, and a right hand cluster showing what each option uses from the balance. Selection uses the same white card, orange border and check vocabulary as step 1. Options the balance cannot cover stay disabled with the existing Not enough hours message.
+
+### Break/Fix Log
+
+Issue 1: anon could execute the new reviews RPC
+Symptom: after revoking execute from PUBLIC, the grants check on pg_proc still showed anon holding execute on the function, meaning anyone with the public anon key could call it unauthenticated.
+Cause: Supabase default privileges explicitly grant execute to anon, authenticated and service_role on every new function in the public schema. Revoking from PUBLIC removes only the implicit grant; the explicit anon grant survives.
+Fix: an explicit revoke execute from anon, verified by re-reading proacl, with the revoke baked into the captured migration so replays stay correct.
+Lesson: every new database function needs an explicit revoke from anon, and the check is reading the actual grants list, never assuming the PUBLIC revoke covered it.
+
+Issue 2: a pending auto-advance could fire into an empty Confirm step
+Symptom: caught in code review before it shipped. Click a time slot, then click a different day within the advance delay: the queued advance fires after the day switch has cleared the selected time and lands on a blank Confirm step.
+Cause: the timer cleanup only ran on unmount, which happens on step changes. Day strip clicks and week arrows navigate inside the step without unmounting it, and a day switch nulls the selected time, so a queued advance survived and fired into a null selection.
+Fix: a cancel helper invoked on day clicks and both week arrows, latest click wins on repeated slot clicks, and the unmount cleanup kept as the final backstop.
+Lesson: with auto-advance, every navigation control inside a step must cancel a pending advance. Unmount cleanup alone is not enough.
+
+### Session result
+The booking wizard now sells the teacher before the calendar and moves at Calendly speed. Step 1 shows real star ratings and a full anonymised profile per teacher, backed by a hardened definer function that exposes aggregates and review text without any student identity, and steps advance on selection instead of waiting for a Continue click. A full 60 minute booking and the reschedule entry path both passed end to end in the browser. Committed as 76e3564 and 93e42dc. Open items: the client decides whether reviewer names appear in the modal and whether new reviews display immediately or only after moderation; the most popular badge idea waits for real booking data; and a known edge where a reschedule preset to a duration the balance cannot cover now has no forward path on the duration step is queued as the next piece.
+
+---
+
+## Session 180 - 05 July 2026 - Calendar visual rebuild, ICS export, and class details card
+
+### What was built
+- Restyled the Day to Day calendar in four stages: booked blocks became cards with status dots and past classes muted to grey (b85b862); the calendar chrome got card headers, a today tint, a live now-dot, and a pill-style legend (05453ee); mode buttons became pills and the week nav arrows were grouped with the legend moved above the grid (18fa13e); and a read-only Month view was added alongside the existing week view (e21c917).
+- Rebuilt Export Classes (4518d65). It used to export only the classes visible in the currently viewed month. It now exports every upcoming non-cancelled class with no upper bound. Fixed three things that were quietly making the exported file invalid or unreliable: added a missing timestamp field, added proper escaping for commas, semicolons, and line breaks in the event text, and switched to a fixed ID per class so reimporting an updated export updates the existing calendar event instead of creating a duplicate. Tested by importing the real file into Outlook, the stricter of the common calendar apps, and it worked.
+- Added a class details card (3cdd2aa). Booked blocks in the week grid are narrow, so the student name was already truncating with an ellipsis by design. Clicking a block now opens a centered popup with the full name, date, time range, and duration. Chose a centered popup over one anchored to the block itself, because the calendar's scroll area clips in both directions and the block clips its own contents too, so an anchored version would get cut off. No new data was needed; the date, duration, and full name were all already available, just not all shown on the block.
+
+### Break/Fix Log
+
+Issue 1: Exported calendar file could duplicate itself on reimport
+Symptom: Exporting and reimporting the same calendar more than once could add a second copy of every class instead of updating the first, and some stricter calendar apps flagged the file as invalid.
+Cause: The file was missing a required timestamp field, some event text was not escaped for special characters, and the unique ID for each event was different every time the same class was exported, so the calendar app had no way to recognise "this is the same class as before."
+Fix: Added the missing timestamp, added proper text escaping, and made each event's ID a fixed value based on the class's own database ID rather than something regenerated on every export.
+Lesson: A calendar file needs to identify each event the same way every time it is generated, or "export it again later" quietly turns into "now there are two of everything."
+
+Issue 2: Reviewed, uncommitted work went missing from the working tree
+Symptom: The class details card had been built and fully reviewed in an earlier session, but at the start of this session the file showed no trace of it: clean git status, no diff, feature missing from the app.
+Cause: The change had never been committed. It was correct and reviewed on disk, but something overwrote the file back to its old state before it got committed, and because it was never committed there was nothing in git history or the stash to point to what happened.
+Fix: Checked git log, reflog, and stash to confirm nothing was hiding there, confirmed the full reviewed change still existed in the earlier session's written report, and had it reapplied exactly as reviewed rather than redesigned, so it did not need to go through review again.
+Lesson: A change that has been tested and reviewed but not committed is not actually safe yet. Testing a change and committing it now happen in the same sitting, never left for later.
+
+### Session result
+The calendar rebuild that started with the card-style blocks is finished end to end: new look, a working Month view, an export that survives a real reimport, and a details card that fixes the readability problem the new compact block size created. All six pieces are committed on dev. Nothing is pushed yet; the business stays on LearnCube until the whole project is tested.
+
+---
+## Session 179 - 03 July 2026 - Milestone 4 complete: teacher PDF annotation, end to end
+
+### What was built
+- Completed the whole PDF annotation feature for teaching material. A teacher can now draw on a Teaching Material PDF live during a class, those marks save automatically to that exact lesson in the background, and after the lesson ends the student sees the marked-up PDF read-only under their Past Classes. This closes Milestone 4. The engine and the teacher-side autosave were wired earlier (commits c25827d, and the inert engine before it); this session added the student-facing view, hardened the security boundary underneath it, and fixed a data-integrity flaw before any of it can go live. Nothing is pushed; the business stays on LearnCube until the entire project is tested.
+- Shipped the student read-only view (Piece 2, commit 85c642e). Under Past Classes a student sees the PDF(s) their own teacher marked up during their own lesson, seeded with the teacher's marks, read-only, and only those. The whole authorization is delegated to one database policy ("students read final lesson annotations after cutoff") through a user-scoped query: the annotation row is the permission slip, and ownership and the post-class cutoff are never re-checked in app code, so the two can never drift apart. A dedicated new file-serving route was built rather than touching the existing library-file route, so the general rule that students never reach Teaching Material anywhere else stays fully intact. Both review subagents passed it, and I re-reviewed after a late guard was added, because a change to a security path does not ship on self-assessment.
+- Hardened the annotation write policy at the source (NEW250, commit 9435542). The teacher insert/update policy only checked that the teacher owned the lesson and was inside the time window; it did not check that the teacher was actually allowed to see the study sheet the annotation pointed at. So a teacher could have minted an annotation row against a sheet they were walled off from (an admin-only or exam-only sheet) and, through the Piece 2 permission-slip mechanism, leaked it to their student. The fix requires the target sheet to pass the same visibility rule the live sheet-read policies already enforce, copied verbatim so annotation-write access can never diverge from sheet-read access. Designed against a live reading of the actual policies, applied by hand, then re-read live to confirm. A one-off data check confirmed zero annotation rows had ever been minted against a forbidden sheet, so there was nothing to clean up.
+- Fixed a data-integrity flaw that would have served the wrong PDF (NEW251, commits 7d120aa and 525a248). An annotation was remembered by an attachment's position in the sheet's file list, not by the file itself. If an admin reordered or removed files on a sheet after a lesson was annotated, that stored position would resolve to a different same-sheet PDF, and the student would see the teacher's marks over the wrong file (for example, an answer key). The fix records the attachment's stable filename alongside the position and resolves the served file by filename; if the annotated file was since removed or renamed, the student sees nothing rather than the wrong thing. The existing uniqueness constraint and the write path's conflict handling were deliberately left untouched (the filename is added beside the position, not in place of it), so a committed, working write path did not have to change shape. The table had zero rows, so there was no old data to migrate.
+- Applied the client's decision on empty annotations (Piece 2 hygiene, commit 39ae13a). A row where the teacher opened a PDF but drew nothing on it now does not appear in the student's view at all — the student only ever sees PDFs that actually carry marks, which is what the feature promises and keeps unmarked staff material out of the student's hands. Same commit tightened two record lookups on that page to the safer form for the "no row" case and hardened the annotations handling against a non-array value.
+
+### Break/Fix Log
+- Issue 1 (the source hole): A teacher could attach an annotation to a study sheet they had no right to see, and the student read path would then serve that forbidden sheet to the student. Symptom: none observed; the feature is not live. Cause: the annotation write policy checked lesson ownership and timing but not whether the teacher could see the target sheet. Fix: the write policy now also requires the target sheet to pass the exact visibility rule the sheet-read policies enforce, copied word for word. Lesson: when one feature (the student read) trusts a row created by another (the teacher write) as its permission slip, the write side has to be gated at least as tightly as the read side, or the read side inherits every gap in the write side.
+- Issue 2 (wrong-file risk): An admin reordering or removing a sheet's files after a lesson was annotated could make the student see the teacher's marks over a different PDF. Symptom: not triggered; found in review of the student read path. Cause: annotations were keyed to a file's position in the list, and positions are not stable. Fix: store and match on the file's stable filename; deny (show nothing) if the annotated file is gone, and never fall back to position when a name is present. Lesson: never use an array position as a durable identifier for something a person can reorder; if it can move, key on something that does not.
+- Issue 3 (process — a real slip): Claude Code ran git itself and committed the stable-filename work directly, and its default commit template stamped a "co-authored" trailer onto both commits, which this repo does not allow. Symptom: two commits landed with a trailer that must not be in a public repo's history, and the read-before-commit step was skipped. Cause: the terminal agent stepped outside its lane (it writes files; it does not run git). Fix: caught it on a live reading of the git state, and because nothing had been pushed, reset the two commits back to staging and re-committed them cleanly with correct messages. Lesson: git stays in one lane (my own, by hand), the terminal agent stays in another (files only); when that boundary slipped, the safeguard that caught it was reading the actual git state rather than trusting the agent's own report of what it did.
+- Issue 4 (self-inflicted, in the log): Closing the wrong-file item in the BUG_LOG the first time left the old open version of the entry dangling underneath the new closed one, because the edit anchored on only the title line. Symptom: the entry read as closed and then, a paragraph later, open again. Cause: the anchor was too narrow. Fix: a second guarded edit removed the leftover open block, anchored on the exact stale text. Lesson: when replacing an entry, anchor on the whole block being replaced, not just its heading, or the body is left behind.
+
+### Session result
+Milestone 4 is complete and the annotation feature is finished end to end on the code side, across six commits on the dev branch this session and earlier: c25827d (teacher autosave, earlier), 9435542 (write-policy hardening), 85c642e (student read-only view), 7d120aa and 525a248 (stable-filename write and read), and 39ae13a (empty-annotation hygiene and null handling). Nothing is pushed and nothing is live; the business stays on LearnCube until the whole project is tested. The two security items are closed in the BUG_LOG as NEW250 and NEW251, both designed against live database policies and re-verified live after applying, both reviewed by both subagents with the diffs read line by line before commit. Two things are deliberately carried forward and logged, neither a blocker: a go-live gate — the new database column must be applied to production before this code deploys, or both the save and the read fail closed until it exists — and a small deferred follow-up, that the teacher's own seeded view still keys by position (a narrow, mid-class, own-marks-only case that is not a leak). Next up is the pre-go-live test journeys, starting with the report lifecycle journey (J9).
+
+---
+## Session 178 - 02 July 2026 - Access tightening: booked-class rule for student profiles, reports, and messages
+
+### What was built
+- Tightened the rule for when a teacher can see a student's profile and reports. Before, a teacher could see a student two ways: if they were formally assigned to that student, OR if they had an active booked-class relationship (an upcoming scheduled lesson, or an open report on one of their own lessons). The client decided formal assignment alone is no longer enough. A teacher now sees a student's profile and reports ONLY when there is an actual booked class between them. A normal weekly student is unaffected, because next week's lesson is always on the calendar; the only people this hides are teachers who are assigned but have nothing booked (a student between class blocks, or a returning student whose last report is already closed). Access comes back automatically the moment a class is booked. Admin visibility is unchanged. Removed the assignment key from both the students list page and the student detail page; kept the assigned-teacher names on the detail page, since those are display only, not an access key. Commit 0c206a7.
+- Fixed a more serious leak found by both review subagents while doing the above: the messages page. Any teacher could type a student's ID into the messages URL and pull up that student's name, email, and photo, with no relationship check of any kind. The student detail page linked straight to it. This was a real exposure of student personal data to any teacher. Closed it: a teacher now resolves a student on the messages page only when that student is in their booked-class set, otherwise it quietly resolves to nothing. Commit e1ed36b.
+- Applied the same booked-class rule to the "new message" student picker on that page. It had been built off a dead legacy column (the old trainings.teacher_id), which was both wrong and inconsistent with the new rule. It now lists only students the teacher has a booked class with.
+- Left the existing-conversations list on the messages page untouched, by the client's explicit decision. If a teacher and student have messaged before, that thread stays visible even during a gap with no class booked. This exposes nothing new (they already spoke) and hiding old threads would just be confusing.
+- Pulled the booked-class rule out into a single shared helper (src/lib/access/bookedClass.ts) instead of copying it a third time. The logic now lived in the students list, the student detail page, and the messages page; three copies of a security rule is how they quietly drift apart. There is now one definition. The messages fix is its first caller. Migrating the two already-shipped students pages onto the same helper is left as a separate follow-up so their existing behaviour is not disturbed in this commit.
+- Confirmed a go-live security blocker is already handled: the storage bucket holding teaching material and student study sheets (library-files) is private, along with invoices and message attachments. Checked directly against the live storage settings.
+
+### Break/Fix Log
+- Issue 1: A teacher kept access to a correctly-assigned student even with no class booked. Cause: assignment on its own was treated as a valid access key. Fix: removed assignment as a key on both the list and detail pages, leaving only the booked-class relationship. Lesson: "assigned" and "actively teaching" are different things; for a privacy boundary, the client wanted the tighter one, and the two pages had to change together so a visible student card always opens.
+- Issue 2 (the serious one): Any teacher could read any student's name, email, and photo by putting a student ID in the messages page URL. Symptom: none reported, but the door was wide open and the student detail page linked to it. Cause: the deep-link fetched the student with the service-role client and never checked whether the teacher had any relationship to that student. Fix: gated the fetch behind the same booked-class rule, failing closed to nothing when there is no relationship. Lesson: any place that reads a specific record by an ID from the URL needs a relationship check; the fix we set out to do (profiles and reports) was not the worst hole, the review found a bigger one next door.
+- Issue 3: The "new message" picker used a dead legacy column that no other part of the code trusts any more. Symptom: it diverged from the new rule and leaned on a column already known to be dead. Fix: rebuilt it on the shared booked-class helper. Lesson: when a column is retired, hunt down every remaining reader of it, not just the one that prompted the change.
+- Issue 4: The booked-class rule was about to exist in three separate copies. Cause: the rule was written inline on each page as each was built. Fix: extracted it verbatim (no behaviour change) into one shared helper and pointed the messages page at it. Lesson: a security rule copied into three files is three chances to get it subtly different later; define it once.
+- Note on verification honesty: one existing broad query on the messages page (select star) was checked against the committed database schema file rather than the live database this session. Every source agreed it exposes only ordinary message fields the teacher is already party to, and both reviewers confirmed no sensitive columns are involved, but this was schema-file-verified, not live-verified, and is recorded as such in the BUG_LOG.
+
+### Session result
+Both pre-go-live access gaps are closed. Two commits on the dev branch this session (0c206a7 for student profiles and reports, e1ed36b for the messages page plus the shared helper), nothing pushed, nothing live. The business remains on its current platform. Both commits are access-boundary changes, so both were run through the plan-read-review flow and both review subagents before commit, with the diffs read line by line. Logged as BUG_LOG entries NEW247 and NEW248. Three small follow-ups were surfaced and logged, none urgent: migrate the two shipped students pages onto the new shared helper; add a log line so a transient database error on the helper is not silently read as "no students"; and a known pre-existing messaging property where a teacher who already has a student's ID could seed a conversation row. Still ahead from before: the admin form dropping the Level field on new Teaching Material; the annotation-on-report feature (Milestone 4 Piece C); and the go-live test journeys, which are the next thing to pick up.
+
+---
+## Session 177 - 02 July 2026 - 2d access holes: browse split and admin-flag fix
+
+### What was built
+- Closed the second of three "2d" access holes: the teacher study-sheet browse page. It used to show one mixed list of every sheet. It now splits into two clearly labelled sections, Teaching Material (staff-facing) and Study Sheets (student-facing), both shown to teachers. The page query now also reads the audience field so the list can be partitioned, and the table markup was pulled out into a single reusable component rendered twice, so both sections show the identical full column set (Title, Category, Level, Difficulty, and the open chevron). Commit c925e93.
+- Corrected a mistake from an earlier step in this piece: Level and Difficulty had been hidden on the Teaching Material section. That was wrong. A teacher must see the level of a piece of material to match it to a student (you cannot hand a B2 deck to an A1 learner), and every existing teaching sheet already carries a real level. The columns were restored so both sections are identical. The level-filter chips were left as-is, because filtering teaching material by level is now correct behaviour (a B2 deck should drop out when you filter to A1).
+- Closed the third access hole, the teacher study-sheet detail page, but not in the way the plan expected. The plan was to add a code-level tier gate so a regular teacher could not open an exam-only or admin-only sheet by pasting its URL. Reading the live database access policies proved that gate is not needed: the four SELECT policies are already tight, so a regular teacher who hits a restricted sheet by URL gets no row back and the existing not-found path fires. The database already shuts that door. Adding a second gate in code would be duplicate security that could later drift out of sync with the database, so none was built.
+- Fixed the real bug found on that same page instead. The page decided who counts as admin using a narrow check (role equals admin) that disagreed with the database's own definition of admin (role equals admin OR school_admin in account types). The client's account is a school_admin, so on this page she was being treated as a non-admin. The check now calls the database's own is_admin() function, so the page can never disagree with the database again, and it fails safe (anything other than a clear yes counts as not-admin). The now-unused profile lookup that fed the old check was removed. Commit 09fffa2.
+- Logged both closed holes and the reasoning as a new BUG_LOG entry (NEW245), and corrected an earlier BUG_LOG entry (NEW237) whose header said closed while its status line still said open.
+
+### Break/Fix Log
+- Issue 1: The teacher browse page showed teaching material and student homework in one undifferentiated list, with the audience wall invisible to the eye. Cause: the page was built before the staff/student split existed. Fix: split the list into two labelled sections driven by the audience field, sharing one table component so the two can never drift apart in layout. Lesson: when one component is rendered in two places that must look identical, build it once and call it twice rather than copying the markup.
+- Issue 2: An earlier step in this same piece hid Level and Difficulty from the Teaching Material section, on the assumption that teaching material carries no level. That assumption was false. Symptom: teachers would have lost the ability to see a material's CEFR level and match it to a student. Cause: the assumption was never checked against the actual data, where every teaching sheet already has a level. Fix: restored the full column set on both sections. Lesson: check an assumption against the live data before building on it; the data said the opposite of the guess.
+- Issue 3: The detail-page fix nearly built a tier gate that was not needed. Cause: the plan was written before anyone read the live database policies; it assumed the database left the door open. Fix: read the live policies first, confirmed they already block the case, and built no gate. This mirrors an earlier lesson from this project where a wide-open policy was found only by reading it directly. Lesson: read the live access rules before writing code that duplicates them; the plan can be stale, the database is the truth.
+- Issue 4: On the same page, the client (a school_admin) was silently treated as a non-admin. Symptom: none visible today, because the admin flag on that page is not yet wired to any control. Cause: the page's admin check was narrower than the database's own definition and excluded school_admin. Fix: switched the check to the database's is_admin() function so the two can never disagree. Note this is groundwork with no visible effect yet; when an admin-only control is added to that page it will correctly include the client. Lesson: define "who is an admin" in exactly one place (the database) and have the page ask it, rather than keeping a second, narrower copy of the rule in the page.
+
+### Session result
+Three of three "2d" access holes now closed (hole #1 shipped in the previous session). Three commits on the dev branch this session (fe6752f, c925e93, 09fffa2), five commits ahead of origin, nothing pushed, nothing live. The business remains on LearnCube. Every access-boundary change this session was reviewed by both subagents and had its diff read line by line before commit. Still ahead: the admin form drops the Level field on new Teaching Material and needs it restored as a required field; the early forced-logout bug (NEW244); the annotation-on-report feature; and the access-rule tightening so a teacher only sees a student's reports and profile when there is an actual booked class.
+
+---
+## Session 176 - 27 June 2026 - PDF viewer: clickable links, page-hold, typeable page box
+
+### What was built
+- Made hyperlinks already baked into an uploaded PDF clickable over the flat canvas (Milestone 3.5). Because the viewer renders each page to a canvas, the native clickable links are lost; they are re-derived from the file's own annotation data and drawn as transparent hotspots positioned in the same 0..1 fraction-of-page model as every other overlay. Hotspots are clickable in cursor mode only, so the pen and text tools can never have a link steal a stroke or a text placement. Only absolute http, https, and mailto URLs are accepted from the uploaded file; internal page-jump links and unsafe schemes are skipped.
+- Fixed the study sheet category form: it now saves the category in lowercase to match the database check constraint, the unused "Material" category option was removed, and difficulty now defaults to 1 so it is never null.
+- Made the PDF viewer hold the reader's page across rebuilds. Entering or leaving fullscreen, fitting to width, or zooming all rebuild the page canvases, which previously let the browser move the scroll position (often jumping to the last page, or one page early). The viewer now captures which page is crossing the middle of the viewport before the rebuild and restores it afterwards, ignores the transient scrolls the rebuild causes, and disables browser scroll anchoring on the scroll container.
+- Added a typeable page-number box to the toolbar. Previously there were only Prev and Next arrows and no clear page indicator. The box shows the live current page, accepts a typed page number, and jumps there on Enter (clamped to the valid range), with Escape to cancel.
+- Made fit-to-width a one-shot action rather than a sticky mode. It now fits once and hands back control, so it no longer re-asserts the scale in the background and fights a manual zoom.
+
+### Break/Fix Log
+- Issue 1: After clicking a baked-in link (which opens in a new tab) and returning to the portal tab, the viewer landed one page earlier than where the reader was. Symptom: came back to page 19 instead of 20, every time. Cause: the same page-capture rule used the wrong threshold (see Issue 2), so the captured page was off by one. Fix: corrected the capture rule. Lesson: a reproducible single-trigger bug (the fullscreen one below) was the same root cause as a flaky-looking one; chasing the flaky symptom first was the wrong order.
+- Issue 2: Entering fullscreen from a given page flipped to one page earlier. Symptom: on page 20, hit fullscreen, land on 19, every time. Cause: the page-capture loop counted a page only if its top edge was within 8 pixels of the viewport top; when the reader was on a page whose top edge sat just below that line, the loop counted the previous page. Fix: changed both capture loops to use the viewport-midline rule (the page covering the middle of the viewport) - the same rule the live page-counter already used - so capture and readout agree. Lesson: when two parts of the same component answer the same question ("which page is the reader on"), they must use the identical rule, or they drift apart by exactly the gap between the two rules.
+- Issue 3: After fitting to width, zooming in and out made the page counter crawl up and down regardless of zoom direction. Cause: fit-to-width stayed on as a sticky mode and kept re-applying its scale via a resize listener, overlapping with the manual zoom's scale change; two sources drove the scale at once, each forcing a rebuild. Fix: made fit-to-width one-shot - it applies once and does not linger, removing the resize listener entirely. Lesson: a "mode" that keeps re-asserting a value in the background will fight any direct user action on that same value; a one-shot action avoids the contention.
+- Issue 4 (not fully solved): zooming still drifts the page counter by a page or two during the zoom itself, settling correctly once zooming stops. An attempt to align the page-restore to the viewport midline (matching the capture rule) made the behaviour worse and was reverted. The reader's actual position in the document is never lost - only the page-number readout twitches mid-zoom. Accepted as-is for now rather than risk further regressions on a load-bearing render path. Lesson: not every cosmetic twitch is worth chasing on a file this load-bearing; know when to stop and ship the version that works.
+
+### Session result
+The custom PDF viewer gained three improvements this session, all committed: baked-in links are now clickable (bac69a3), and the viewer holds the reader's page through fullscreen, fit-to-width, and tab-return, with a new typeable page-number box (9129f73). A separate study sheet category form fix also landed (5ed6bac). The one remaining rough edge is a cosmetic page-counter twitch during zoom that settles on release; a midline-restore fix was tried and reverted for making it worse, so it is accepted as-is rather than destabilise the render path further. Still ahead on the PDF viewer: Milestone 4 - saving annotations per class with a new table and RLS, plus the after-class read-only lock - which is a money/auth/RLS-class change and will use the Opus tier with both subagents before its commit.
+
+---## Session 175 - 27 June 2026 - PDF viewer annotation layer (Milestone 3)
 
 ### What was built
 - Added a full annotation layer to the custom pdf.js viewer (src/components/pdf/PdfViewer.tsx), built on top of the render-only canvas viewer from the previous milestone. Every annotation coordinate is stored as a 0..1 fraction of the page, per page, so marks stay glued to the page content at any zoom, fit-to-width, or fullscreen.

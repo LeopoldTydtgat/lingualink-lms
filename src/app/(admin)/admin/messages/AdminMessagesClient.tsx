@@ -9,6 +9,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { getAdminThreadMessages, sendAdminMessage, markAdminThreadRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -22,8 +23,9 @@ interface AdminMessage {
   receiver_id: string
   receiver_type: string
   content: string
-  attachments: any[]
+  attachments: Array<{ url: string; filename: string; size: number }>
   read_at: string | null
+  admin_read_at: string | null
   created_at: string
 }
 
@@ -73,12 +75,6 @@ function formatTime(dateStr: string): string {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -409,6 +405,7 @@ export default function AdminMessagesClient({
                   const isStudent = msg.sender_type === 'student'
                   const isAdmin   = msg.sender_type === 'admin'
                   const isRight   = isStudent || isAdmin
+                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
 
                   const showDate =
                     index === 0 ||
@@ -434,7 +431,10 @@ export default function AdminMessagesClient({
                           {/* Colour key:
                               teacher = dark charcoal (#1F2937), left-aligned
                               student = orange (#FF8303), right-aligned
-                              admin   = slate (#374151), right-aligned */}
+                              admin   = slate (#374151), right-aligned
+                              NEW302: hide the bubble entirely for an attachment-only
+                              (empty-content) message so it doesn't render a blank box. */}
+                          {hasContent && (
                           <div
                             className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -447,6 +447,23 @@ export default function AdminMessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
+                          {msg.attachments && msg.attachments.length > 0 && (
+                            <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
+                              {msg.attachments.map((att, i) => (
+                                <a
+                                  key={i}
+                                  href={att.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
+                                  style={{ color: '#4b5563' }}
+                                >
+                                  📎 {att.filename}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className={`flex items-center gap-1 mt-1 ${isRight ? 'justify-end' : 'justify-start'}`}>
                             <span className="text-xs text-gray-400">
                               {formatTime(msg.created_at)}

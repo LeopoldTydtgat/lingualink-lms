@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { EmailBounceBadge } from '@/components/EmailBounceBadge'
 
 type Teacher = {
   id: string
@@ -18,6 +19,8 @@ type Student = {
   is_private: boolean
   company_id: string | null
   company_name: string | null
+  email_bounced_at: string | null
+  email_bounce_reason: string | null
   hours_remaining: number | null
   teachers: Teacher[]
 }
@@ -246,7 +249,12 @@ export default function StudentsListClient({ students }: Props) {
                     </div>
                   </td>
 
-                  <td className="px-4 py-3 text-gray-600">{student.email}</td>
+                  <td className="px-4 py-3 text-gray-600">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{student.email}</span>
+                      {student.email_bounced_at ? <EmailBounceBadge /> : null}
+                    </div>
+                  </td>
 
                   {/* Company tag — Private badge if no company */}
                   <td className="px-4 py-3">

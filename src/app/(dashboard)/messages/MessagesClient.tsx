@@ -10,6 +10,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { sendMessage, markMessagesAsRead } from './actions'
 import { toast } from 'sonner'
 
@@ -33,7 +34,6 @@ interface Contact {
   id: string
   type: string
   name: string
-  email: string
   photo_url: string | null
   latestMessage: Message | null
   unreadCount: number
@@ -56,6 +56,9 @@ interface MessagesClientProps {
   currentUser: Profile
   contacts: Contact[]
   allStudents: Student[]
+  // NEW275: the teacher's currently-assigned student ids (mirrors the send-action gate).
+  // A student history thread whose id is absent here is read-only for this teacher.
+  assignedStudentIds: string[]
   initialContact?: Contact | null
 }
 
@@ -79,12 +82,6 @@ interface MessagesClientProps {
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
-}
-
-function isEmojiOnly(html: string): boolean {
-  const stripped = html.replace(/<[^>]*>/g, '').trim()
-  const emojiRegex = /^[\p{Emoji}\s]+$/u
-  return emojiRegex.test(stripped) && stripped.length <= 8
 }
 
 function Avatar({ name, photoUrl, size = 10 }: {
@@ -140,6 +137,7 @@ export default function MessagesClient({
   currentUser,
   contacts: initialContacts,
   allStudents,
+  assignedStudentIds,
   initialContact = null,
 }: MessagesClientProps) {
   const supabase = useMemo(() => createClient(), [])
@@ -160,6 +158,7 @@ export default function MessagesClient({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
+  const pendingReadsRef = useRef<Map<string, string>>(new Map())
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -190,7 +189,7 @@ export default function MessagesClient({
     setLoadingMessages(true)
     const { data } = await supabase
       .from('messages')
-      .select('*')
+      .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
       .or(
         `and(sender_id.eq.${currentUser.id},receiver_id.eq.${contact.id}),` +
         `and(sender_id.eq.${contact.id},receiver_id.eq.${currentUser.id}),` +
@@ -256,6 +255,7 @@ export default function MessagesClient({
         (payload) => {
           const updated = payload.new as Message
           if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
             setMessages(prev =>
               prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
             )
@@ -270,7 +270,12 @@ export default function MessagesClient({
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
     const html = editor.getHTML()
-    if ((!html || html === '<p></p>') && pendingAttachments.length === 0) return
+    // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    if (isEmpty && pendingAttachments.length === 0) return
+    // Attachment-only send: store clean '' rather than '<p></p>' so the renderer's
+    // hasContent guard hides the empty bubble.
+    const contentToSend = isEmpty ? '' : html
 
     setSending(true)
     setSendError(null)
@@ -278,7 +283,7 @@ export default function MessagesClient({
       const result = await sendMessage(
         selectedContact.id,
         selectedContact.type as 'teacher' | 'admin' | 'student',
-        html,
+        contentToSend,
         pendingAttachments.length > 0 ? pendingAttachments : undefined
       )
 
@@ -287,21 +292,29 @@ export default function MessagesClient({
         return
       }
 
-      const optimisticMsg: Message = {
+      // NEW286: prefer the real inserted row (carries the DB id) so the Realtime
+      // read-receipt UPDATE — which matches on that id — can flip this message's
+      // read tick. Fall back to an optimistic entry only if the row is missing.
+      const sentMsg: Message = (result?.message as Message | undefined) ?? {
         id: crypto.randomUUID(),
         sender_id: currentUser.id,
         sender_type: currentUser.role,
         receiver_id: selectedContact.id,
         receiver_type: selectedContact.type,
-        content: html,
+        content: contentToSend,
         attachments: pendingAttachments,
         read_at: null,
         created_at: new Date().toISOString(),
       }
 
-      setMessages(prev => [...prev, optimisticMsg])
+      const pendingReadAt = pendingReadsRef.current.get(sentMsg.id)
+      if (pendingReadAt) {
+        sentMsg.read_at = pendingReadAt
+        pendingReadsRef.current.delete(sentMsg.id)
+      }
+      setMessages(prev => [...prev, sentMsg])
       setContacts(prev =>
-        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: optimisticMsg } : c)
+        prev.map(c => c.id === selectedContact.id ? { ...c, latestMessage: sentMsg } : c)
       )
       editor.commands.clearContent()
       setPendingAttachments([])
@@ -322,7 +335,6 @@ export default function MessagesClient({
         id: student.id,
         type: 'student',
         name: student.full_name,
-        email: student.email,
         photo_url: student.photo_url,
         latestMessage: null,
         unreadCount: 0,
@@ -368,6 +380,18 @@ export default function MessagesClient({
   const filteredStudents = allStudents.filter(s =>
     s.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
+
+  // NEW275: a stale history thread can still be selected for a student this teacher is no
+  // longer assigned to (the history contact list is intentionally ungated so past
+  // conversations stay readable). The server send gate blocks such a send; reflect that
+  // here with a read-only composer instead of letting the send fail. Admins are ungated
+  // (never blocked); teacher↔teacher/admin threads are never assignment-gated.
+  const assignedStudentIdSet = useMemo(() => new Set(assignedStudentIds), [assignedStudentIds])
+  const isBlockedStudent =
+    !!selectedContact &&
+    currentUser.role !== 'admin' &&
+    selectedContact.type === 'student' &&
+    !assignedStudentIdSet.has(selectedContact.id)
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -480,6 +504,7 @@ export default function MessagesClient({
               ) : (
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentUser.id
+                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -503,7 +528,10 @@ export default function MessagesClient({
                           {/* Bubble
                               Sent:     #FF8303 orange, white text
                               Received: #1F2937 dark charcoal, white text
-                              Two distinct colours = immediately obvious who said what */}
+                              Two distinct colours = immediately obvious who said what
+                              NEW302: hide the bubble entirely for an attachment-only
+                              (empty-content) message so it doesn't render a blank box. */}
+                          {hasContent && (
                           <div
                             className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -514,8 +542,9 @@ export default function MessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )}
                           {msg.attachments && msg.attachments.length > 0 && (
-                            <div className="mt-1 flex flex-col gap-1">
+                            <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
                               {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
                                 <a
                                   key={i}
@@ -549,7 +578,21 @@ export default function MessagesClient({
             {/* ── Message composer ──
                 The editor sits directly in the footer — no box-within-a-box.
                 The style tag below suppresses ProseMirror's own default focus border
-                which cannot be removed via Tailwind classes alone. */}
+                which cannot be removed via Tailwind classes alone.
+                NEW275: for a stale history thread whose student is no longer assigned to
+                this teacher, the composer is replaced by a read-only notice; the thread
+                above stays fully readable. */}
+            {isBlockedStudent ? (
+              <div className="border-t border-gray-200 flex-shrink-0 bg-white px-5 py-4">
+                <p className="text-sm font-medium text-gray-600">
+                  You can no longer message {selectedContact.name}.
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  This student is not currently assigned to you. Please contact an
+                  administrator if you need to reach them.
+                </p>
+              </div>
+            ) : (
             <div className="border-t border-gray-200 flex-shrink-0 bg-white">
               <style>{`
                 .messages-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
@@ -677,6 +720,7 @@ export default function MessagesClient({
                 </button>
               </div>
             </div>
+            )}
           </>
         )}
       </div>

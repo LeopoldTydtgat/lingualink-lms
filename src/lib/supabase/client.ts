@@ -1,15 +1,20 @@
 import { createBrowserClient } from '@supabase/ssr'
 import { SHARED_COOKIE_DOMAIN, isProductionHost } from '@/lib/host'
 
-// Use this in any Client Component ('use client')
-//
 // We pass a custom cookie adapter so browser-side writes (silent token
 // refresh, signInWithPassword for re-auth on the account page) get
 // `domain=.lingualinkonline.com` in production. Without this, the browser
 // would write host-only cookies that conflict with the proxy's domain-scoped
 // cookies — both get sent on subsequent requests and Supabase's "first one
 // wins" cookie read can flap between stale and fresh tokens.
-export function createClient() {
+//
+// Kept as a standalone builder so the singleton below can take its type from
+// `ReturnType<typeof buildBrowserClient>`. That resolves to the concrete client
+// type this call produces (SchemaName pinned to "public"). Typing the singleton
+// as `ReturnType<typeof createBrowserClient>` instead would read that overloaded
+// import's broad signature and widen SchemaName, degrading realtime/query
+// callback payloads to `any` for every consumer of createClient().
+function buildBrowserClient() {
   return createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -34,6 +39,32 @@ export function createClient() {
       },
     }
   )
+}
+
+// Single shared browser client. One client means one authenticated realtime
+// socket shared by all components; setAuth (wired below on first construction)
+// keeps that socket's JWT in sync with the session so RLS-filtered
+// postgres_changes events are actually delivered instead of silently dropped.
+let browserClient: ReturnType<typeof buildBrowserClient> | undefined
+
+// Use this in any Client Component ('use client')
+export function createClient() {
+  if (browserClient) return browserClient
+
+  browserClient = buildBrowserClient()
+
+  // Wire realtime auth once, on first construction: seed the socket's JWT from
+  // the current session, then keep it current across sign-in/out/refresh.
+  browserClient.auth.getSession().then(({ data }) => {
+    browserClient!.realtime.setAuth(data.session?.access_token ?? null)
+  }).catch(() => {
+    // Non-fatal: onAuthStateChange will sync the realtime JWT when a session lands.
+  })
+  browserClient.auth.onAuthStateChange((_event, session) => {
+    browserClient!.realtime.setAuth(session?.access_token ?? null)
+  })
+
+  return browserClient
 }
 
 function parseCookieHeader(raw: string): Array<{ name: string; value: string }> {

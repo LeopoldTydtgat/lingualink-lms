@@ -115,7 +115,7 @@ export async function teacherCancelLesson(
         messageToStudent
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: student.email,
         subject: 'Lingualink Online - Your class has been cancelled by your teacher',
         html: buildEmailTemplate({
@@ -143,9 +143,9 @@ export async function teacherCancelLesson(
         requireTz(teacherProfile.timezone, 'cancel-by-teacher:teacher')
       )
       await resend.emails.send({
-        from: 'no-reply@lingualinkonline.com',
+        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacherProfile.email,
-        subject: 'Lingualink Online — Class cancellation confirmed',
+        subject: 'Lingualink Online - Class cancellation confirmed',
         html: buildEmailTemplate({
           recipientName: teacherName,
           recipientFallback: 'Teacher',

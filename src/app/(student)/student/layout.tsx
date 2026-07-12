@@ -3,6 +3,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireTz } from '@/lib/time/requireTz'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -36,9 +37,21 @@ export default async function StudentDashboardLayout({
 
   if (!student) redirect('/student/login')
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')
-  const { data: nextLesson } = await supabase
+
+  // Resolve the student's account timezone once (fail-closed, same helper the My
+  // Classes page uses) so the right panel and reminder modal render class times in
+  // the student's zone rather than the viewer's browser zone.
+  const studentTimezone = requireTz(student.timezone, 'student-layout')
+
+  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+  // pay-withholding model, so a single-row fetch would let it shadow the real next
+  // class. Fetch a few candidates and pick the first that hasn't ended; an
+  // in-progress class (start <= now < end) must still be picked — the panel's
+  // "In class" state depends on it.
+  const { data: candidateLessons } = await supabase
     .from('lessons')
     .select(`
+      id,
       scheduled_at,
       teams_join_url,
       duration_minutes,
@@ -51,8 +64,12 @@ export default async function StudentDashboardLayout({
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+    .limit(5)
+
+  const nowMs = Date.now()
+  const nextLesson = (candidateLessons ?? []).find(
+    (l) => nowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+  ) ?? null
 
   const nextLessonTeacherName = nextLesson
     ? (Array.isArray((nextLesson as any).teacher)
@@ -93,7 +110,7 @@ export default async function StudentDashboardLayout({
 
   const { count: unreadMessageCount } = await supabase
     .from('messages')
-    .select('*', { count: 'exact', head: true })
+    .select('id', { count: 'exact', head: true })
     .eq('receiver_id', student.id)
     .is('read_at', null)
 
@@ -127,7 +144,7 @@ export default async function StudentDashboardLayout({
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       {/* Sidebar runs full height - logo lives here */}
-      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={user.id} />
+      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
 
       {/* Right side: header on top, then content row below */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -148,6 +165,7 @@ export default async function StudentDashboardLayout({
           </main>
           <StudentRightPanel
             studentId={student.id}
+            studentTimezone={studentTimezone}
             nextLesson={nextLesson ?? null}
             teacherName={nextLessonTeacherName}
             hoursRemaining={hoursRemaining}
@@ -160,7 +178,7 @@ export default async function StudentDashboardLayout({
       </div>
 
       {/* Class reminder modal — renders on all student pages */}
-      <ClassReminderModal studentId={student.id} />
+      <ClassReminderModal studentId={student.id} studentTimezone={studentTimezone} />
 
       <IdleTimeoutWatcher
         nextLessonStartIso={protectedLesson?.scheduled_at ?? null}

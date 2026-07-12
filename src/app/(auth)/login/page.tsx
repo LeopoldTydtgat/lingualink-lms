@@ -60,7 +60,39 @@ function LoginPageContent() {
 
   return (
     <>
-      <style>{`html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }`}</style>
+      <style>{`
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+
+        /* Slow Ken Burns zoom + horizontal drift on the brand photo */
+        @keyframes loginKenBurns {
+          from { transform: scale(1)    translateX(0); }
+          to   { transform: scale(1.18) translateX(-3%); }
+        }
+        .login-bg-image {
+          animation: loginKenBurns 14s ease-in-out infinite alternate;
+        }
+
+        /* Diagonal orange shimmer sweeping across the panel */
+        @keyframes loginShimmer {
+          from { transform: translateX(-120%); }
+          to   { transform: translateX(120%); }
+        }
+        .login-bg-shimmer {
+          background: linear-gradient(115deg, transparent 40%, rgba(255,163,60,0.22) 50%, transparent 60%);
+          animation: loginShimmer 7s linear infinite;
+        }
+        .login-bg-shimmer2 {
+          background: linear-gradient(65deg, transparent 42%, rgba(255,255,255,0.10) 50%, transparent 58%);
+          animation: loginShimmer 11s linear infinite;
+          animation-delay: -5s;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .login-bg-image,
+          .login-bg-shimmer,
+          .login-bg-shimmer2 { animation: none; }
+        }
+      `}</style>
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', fontFamily: 'Inter, sans-serif' }}>
 
         {/* Orange accent stripe — left edge */}
@@ -192,10 +224,41 @@ function LoginPageContent() {
           flex: 1,
           position: 'relative',
           overflow: 'hidden',
-          backgroundImage: "url('/login-bg.png')",
-          backgroundSize: 'cover',
-          backgroundPosition: 'center top',
         }}>
+
+          {/* Background photo — animated (Ken Burns) layer; overflow-hidden parent hides the zoom edges */}
+          <div
+            className="login-bg-image"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: "url('/login-bg.png')",
+              backgroundSize: 'cover',
+              backgroundPosition: 'center top',
+              transformOrigin: 'center center',
+              willChange: 'transform',
+            }}
+          />
+
+          {/* Shimmer overlay — diagonal orange sweep, sits above the photo, non-interactive */}
+          <div
+            className="login-bg-shimmer"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+            }}
+          />
+
+          {/* Second shimmer overlay — offset diagonal white sweep, non-interactive */}
+          <div
+            className="login-bg-shimmer2"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+            }}
+          />
 
           {/* Dark gradient overlay — keeps bottom text readable */}
           <div style={{

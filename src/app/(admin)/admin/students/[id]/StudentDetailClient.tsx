@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -182,8 +183,6 @@ function CategoryBadge({ category }: { category: string }) {
       ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
       : category.toLowerCase() === 'grammar'
       ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : category.toLowerCase() === 'material'
-      ? { backgroundColor: '#dbeafe', color: '#1e40af' }
       : { backgroundColor: '#f3f4f6', color: '#374151' }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
@@ -581,6 +580,9 @@ export default function StudentDetailClient({
             <div>
               <h1 className="text-xl font-bold text-gray-900">{fullName}</h1>
               <p className="text-sm text-gray-500 mb-2">{student.email as string}</p>
+              {student.email_bounced_at ? (
+                <EmailBounceNotice reason={student.email_bounce_reason as string | null} />
+              ) : null}
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={status} />
                 {companyName ? (

@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getBillability } from '@/lib/billing/billability'
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
@@ -27,13 +29,9 @@ function toCSV(rows: Record<string, unknown>[]): string {
   return lines.join('\r\n')
 }
 
-function formatDateTime(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-}
-
+// Date-only helper — used for `date`-typed columns (training start/end) that are
+// NOT instants and must stay exactly as stored. Instant (timestamptz) columns are
+// rendered in the resolved export timezone via formatInstantInTz / formatDateInTz.
 function formatDate(iso: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 10)
@@ -66,6 +64,12 @@ export async function GET(
 
   const allowed = await checkAdminAccess(supabase)
   if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // Resolve the settings-driven export timezone once per request. Every instant
+  // (timestamptz) column below renders in this zone and its header carries the
+  // zone's short label. Date-only columns are unaffected.
+  const exportTz = await getExportTimezone()
+  const exportTzLabel = tzLabel(exportTz)
 
   const { searchParams } = new URL(request.url)
   const fromDate = searchParams.get('from')   // YYYY-MM-DD
@@ -152,8 +156,8 @@ export async function GET(
             durationMinutes: l.duration_minutes ?? 0,
           }).billableToTeacher
           return {
-            'Date': formatDate(l.scheduled_at),
-            'Time (UTC)': formatDateTime(l.scheduled_at).slice(11),
+            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
+            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Teacher': teacherMap[l.teacher_id] ?? '',
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
@@ -217,7 +221,7 @@ export async function GET(
           classesTaken: number
           studentNoShows: number
           totalMinutes: number
-          rate: number
+          rates: Set<number>
           currency: string
           billableAmount: number
           invoiceUploaded: string
@@ -225,23 +229,38 @@ export async function GET(
 
         const missingTzTeachers = new Set<string>()
 
+        // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+        // profile.rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
+        const rateMap = await fetchLessonRateMap(adminClient, lessonIds)
+
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
-          const billable = getBillability({
+          const profile = profileMap[lesson.teacher_id]
+
+          // Snapshot rate for this lesson, else the teacher's live rate (Decision A).
+          // Resolved BEFORE the billable gate so getBillability is the single source
+          // of truth for both the gate AND the per-lesson amount — mirrors the invoice
+          // path (recomputeAmounts.ts), which resolves the rate for every prefiltered
+          // lesson then reads getBillability(...).amount.
+          const resolvedRate = resolveLessonRate(rateMap, lesson.id, profile?.rate ?? 0)
+          const bill = getBillability({
             status: lesson.status,
             scheduledAt: lesson.scheduled_at,
             cancelledAt: lesson.cancelled_at,
             cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
-            hourlyRate: 0,            // gate only — amount is summed separately below with the real rate
+            hourlyRate: resolvedRate,
             durationMinutes: lesson.duration_minutes ?? 0,
-          }).billableToTeacher
-          if (!billable) continue
+          })
+          if (!bill.billableToTeacher) continue
 
-          const profile = profileMap[lesson.teacher_id]
           if (!profile?.timezone) {
             missingTzTeachers.add(lesson.teacher_id)
             continue
           }
+          // NEW271: Month buckets in the TEACHER's own timezone (matches NEW268 D3 /
+          // recomputeAmounts.ts invoice basis). Display columns render in the export tz,
+          // but the billing-period KEY is teacher-local so this CSV's Month/Total agree
+          // with invoices.amount_eur and the invoice-status join keys correctly.
           const month = getMonthKeyInTz(new Date(lesson.scheduled_at), profile.timezone).slice(0, 7)
           const key = `${lesson.teacher_id}__${month}`
 
@@ -252,7 +271,7 @@ export async function GET(
               classesTaken: 0,
               studentNoShows: 0,
               totalMinutes: 0,
-              rate: profile?.rate ?? 0,
+              rates: new Set<number>(),
               currency: profile?.currency ?? 'EUR',
               billableAmount: 0,
               invoiceUploaded: '',
@@ -262,7 +281,11 @@ export async function GET(
           summary[key].classesTaken++
           if (report?.no_show_type === 'student') summary[key].studentNoShows++
           summary[key].totalMinutes += lesson.duration_minutes ?? 0
-          summary[key].billableAmount += ((lesson.duration_minutes ?? 0) / 60) * (profile?.rate ?? 0)
+          // Sum the per-lesson amount ALREADY rounded to cents by getBillability
+          // (Math.round(...*100)/100), so Total Owed equals the invoice amount_eur
+          // for the same teacher-month instead of drifting by fractions of a cent.
+          summary[key].billableAmount += bill.amount
+          summary[key].rates.add(resolvedRate)
         }
 
         if (missingTzTeachers.size > 0) {
@@ -287,7 +310,9 @@ export async function GET(
           'Classes Taken': s.classesTaken,
           'Student No-Shows': s.studentNoShows,
           'Total Hours': (s.totalMinutes / 60).toFixed(2),
-          'Hourly Rate': s.rate.toFixed(2),
+          // Decision B: one rate if every lesson in the teacher-month resolved to the
+          // same rate, else "varies" (amounts above are per-lesson snapshot-correct).
+          'Hourly Rate': s.rates.size === 0 ? '0.00' : s.rates.size === 1 ? [...s.rates][0].toFixed(2) : 'varies',
           'Total Owed': s.billableAmount.toFixed(2),
           'Currency': s.currency,
           'Invoice Status': invoiceMap[key] ?? 'not uploaded',
@@ -403,6 +428,10 @@ export async function GET(
         const teacherMap: Record<string, { rate: number; currency: string }> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
+        // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
+        // teacherMap rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
+        const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map((l: { id: string }) => l.id))
+
         const sMap: Record<string, any> = {}
         students?.forEach((s: any) => { sMap[s.id] = s })
 
@@ -415,7 +444,7 @@ export async function GET(
             scheduledAt: l.scheduled_at,
             cancelledAt: l.cancelled_at,
             cancellationPolicy: student?.cancellation_policy as '24hr' | '48hr' | null,
-            hourlyRate: teacherMap[l.teacher_id]?.rate ?? 0,
+            hourlyRate: resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
             durationMinutes: l.duration_minutes ?? 0,
           })
           const billable24 = bill.billableToTeacher
@@ -424,8 +453,8 @@ export async function GET(
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
-            'Date': formatDate(l.scheduled_at),
-            'Time (UTC)': formatDateTime(l.scheduled_at).slice(11),
+            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
+            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
             'Status': l.status,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
@@ -499,7 +528,7 @@ export async function GET(
 
           rows.push({
             'Student': studentMap[lesson.studentId] ?? '',
-            'Class Date': formatDate(lesson.scheduledAt),
+            [`Class Date (${exportTzLabel})`]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
             'Teacher': teacherMap[report.teacher_id] ?? '',
             'Grammar': ld.grammar ?? '',
             'Expression': ld.expression ?? '',
@@ -574,11 +603,11 @@ export async function GET(
           return {
             'Teacher': teacherMap[r.teacher_id] ?? '',
             'Student': lesson ? studentMap[lesson.studentId] ?? '' : '',
-            'Class Date': lesson ? formatDateTime(lesson.scheduledAt) : '',
+            [`Class Date (${exportTzLabel})`]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
             'Hours Since Class': hoursSinceClass,
             'Report Status': r.status,
-            'Deadline': r.deadline_at ? formatDateTime(r.deadline_at) : '',
-            'Flagged At': r.flagged_at ? formatDateTime(r.flagged_at) : '',
+            [`Deadline (${exportTzLabel})`]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
+            [`Flagged At (${exportTzLabel})`]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
           }
         })
 
