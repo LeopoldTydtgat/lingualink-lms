@@ -350,7 +350,18 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
     try {
       const res = await fetch(`/api/admin/teachers/${id}`, { method: 'DELETE' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to purge teacher.')
+      if (!res.ok) {
+        const blocking = Array.isArray(data.blocking)
+          ? (data.blocking as { table: string; count: number }[])
+          : []
+        if (blocking.length > 0) {
+          const detail = blocking.map((b) => `${b.table}: ${b.count}`).join(', ')
+          throw new Error(
+            `${data.error || 'Cannot purge: this teacher has history. Archive instead.'} Blocking records — ${detail}.`
+          )
+        }
+        throw new Error(data.error || 'Failed to purge teacher.')
+      }
       setShowPurgeDialog(false)
       router.push('/admin/teachers')
       router.refresh()
@@ -886,7 +897,9 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               Permanently purge {fullName}?
             </h3>
             <p className="text-sm text-gray-500 mb-4">
-              This will permanently delete all classes, invoices, messages, reviews, and the account itself.
+              This permanently deletes the account and its login. Purging is only possible for
+              accounts with no history — a teacher with any classes, invoices, messages, or other
+              records must be archived instead.
               <strong className="text-gray-700"> This cannot be undone.</strong>
             </p>
 

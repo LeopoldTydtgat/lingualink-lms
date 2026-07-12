@@ -227,7 +227,12 @@ export async function PATCH(
   }
 }
 
-// ─── DELETE — permanently purge teacher and all associated data ───────────────
+// ─── DELETE — purge only if pristine ──────────────────────────────────────────
+//
+// Teachers with ANY history are archived (status 'former', via PATCH), never
+// purged. Purge exists solely for zero-history accounts (test accounts,
+// mistaken creations). Preflight counts every referencing table; a single
+// referencing row anywhere blocks the purge with a 409.
 
 export async function DELETE(
   _req: NextRequest,
@@ -259,105 +264,121 @@ export async function DELETE(
       )
     }
 
-    // 2. Check all linked students are 'former'
-    const { data: linkedLessons } = await adminClient
-      .from('lessons')
-      .select('student_id')
-      .eq('teacher_id', id)
-      .not('student_id', 'is', null)
+    // 2. Preflight — exact row counts in every table that references this
+    // teacher. The select column is the filtered column itself (never '*') so
+    // no column-level REVOKE is ever touched. head:true returns no row data.
+    const countBy = (table: string, column: string) =>
+      adminClient.from(table).select(column, { count: 'exact', head: true }).eq(column, id)
 
-    const linkedStudentIds = [
-      ...new Set((linkedLessons || []).map((l: { student_id: string }) => l.student_id)),
+    // teacher_history_log: only changed_by (this user as ACTOR) blocks;
+    // teacher_id rows ABOUT this teacher CASCADE on the profile delete.
+    const preflight = [
+      { table: 'lessons',                 query: countBy('lessons', 'teacher_id') },
+      { table: 'reports',                 query: countBy('reports', 'teacher_id') },
+      { table: 'classes',                 query: countBy('classes', 'teacher_id') },
+      { table: 'trainings',               query: countBy('trainings', 'teacher_id') },
+      { table: 'invoices',                query: countBy('invoices', 'teacher_id') },
+      { table: 'reviews',                 query: countBy('reviews', 'teacher_id') },
+      { table: 'student_reviews',         query: countBy('student_reviews', 'teacher_id') },
+      { table: 'training_teachers',       query: countBy('training_teachers', 'teacher_id') },
+      {
+        table: 'messages',
+        query: adminClient
+          .from('messages')
+          .select('sender_id', { count: 'exact', head: true })
+          .or(`sender_id.eq.${id},receiver_id.eq.${id}`),
+      },
+      { table: 'support_messages',        query: countBy('support_messages', 'participant_auth_id') },
+      { table: 'assignments',             query: countBy('assignments', 'assigned_by') },
+      { table: 'hours_log',               query: countBy('hours_log', 'created_by') },
+      { table: 'announcements',           query: countBy('announcements', 'created_by') },
+      {
+        table: 'admin_tasks',
+        query: adminClient
+          .from('admin_tasks')
+          .select('created_by', { count: 'exact', head: true })
+          .or(`created_by.eq.${id},assigned_to.eq.${id}`),
+      },
+      { table: 'export_log',              query: countBy('export_log', 'exported_by') },
+      { table: 'teacher_history_log',     query: countBy('teacher_history_log', 'changed_by') },
+      { table: 'students',                query: countBy('students', 'academic_advisor_id') },
+      { table: 'lesson_join_clicks',      query: countBy('lesson_join_clicks', 'user_id') },
+      { table: 'user_action_attempts',    query: countBy('user_action_attempts', 'user_id') },
+      { table: 'announcement_dismissals', query: countBy('announcement_dismissals', 'user_id') },
     ]
 
-    if (linkedStudentIds.length > 0) {
-      const { data: nonFormerStudents } = await adminClient
-        .from('students')
-        .select('full_name')
-        .in('id', linkedStudentIds)
-        .neq('status', 'former')
+    const results = await Promise.all(preflight.map((p) => p.query))
 
-      if (nonFormerStudents && nonFormerStudents.length > 0) {
+    const blocking: { table: string; count: number }[] = []
+    for (let i = 0; i < results.length; i++) {
+      const { count, error } = results[i]
+      // Fail closed: an errored (or null) count is unknown, never zero.
+      if (error || count === null) {
+        console.error(
+          `[purge teacher] preflight count failed for ${preflight[i].table}:`,
+          error
+        )
         return NextResponse.json(
-          {
-            error: `Cannot purge: the following students must be archived first.`,
-            blockedBy: nonFormerStudents.map((s: { full_name: string }) => s.full_name),
-          },
-          { status: 409 }
+          { error: 'Failed to verify teacher history. Purge aborted; nothing was deleted.' },
+          { status: 500 }
+        )
+      }
+      if (count > 0) blocking.push({ table: preflight[i].table, count })
+    }
+
+    if (blocking.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Cannot purge: this teacher has history. Archive instead.',
+          blocking,
+        },
+        { status: 409 }
+      )
+    }
+
+    // 3. Purge — the account is pristine. DB CASCADEs on the profile delete
+    // handle availability, availability_overrides, availability_templates, and
+    // teacher_history_log.teacher_id; nothing else references this user.
+
+    // 3a. Kill every live session first. Non-fatal: on a retry after a partial
+    // failure the auth user may already be gone, which makes this throw.
+    try {
+      await adminClient.auth.admin.signOut(id, 'global')
+    } catch (signOutError) {
+      console.error('[purge teacher] signOut failed (non-fatal):', signOutError)
+    }
+
+    // 3b. Delete the auth user. Tolerate ONLY user-not-found so a retry after
+    // a partial failure (auth gone, profile row left) is idempotent; any other
+    // error aborts with the profile row untouched.
+    const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(id)
+    if (authDeleteError) {
+      const isUserNotFound =
+        authDeleteError.status === 404 || authDeleteError.code === 'user_not_found'
+      if (!isUserNotFound) {
+        console.error('[purge teacher] auth user delete failed:', authDeleteError)
+        return NextResponse.json(
+          { error: 'Failed to delete the login account. Purge aborted; nothing was deleted.' },
+          { status: 500 }
         )
       }
     }
 
-    // 3. Cascade delete in dependency order
-
-    // 3a. messages
-    await adminClient
-      .from('messages')
+    // 3c. Delete the profile row (CASCADEs fire here).
+    const { error: profileDeleteError } = await adminClient
+      .from('profiles')
       .delete()
-      .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
+      .eq('id', id)
 
-    // 3b. Get lesson IDs
-    const { data: lessonRows } = await adminClient
-      .from('lessons')
-      .select('id')
-      .eq('teacher_id', id)
-    const lessonIds = (lessonRows || []).map((l: { id: string }) => l.id)
-
-    if (lessonIds.length > 0) {
-      // 3c. Get assignment IDs linked to these lessons
-      const { data: assignmentRows } = await adminClient
-        .from('assignments')
-        .select('id')
-        .in('lesson_id', lessonIds)
-      const assignmentIds = (assignmentRows || []).map((a: { id: string }) => a.id)
-
-      // 3d. Delete exercise_completions tied to those assignments
-      if (assignmentIds.length > 0) {
-        await adminClient
-          .from('exercise_completions')
-          .delete()
-          .in('assignment_id', assignmentIds)
-      }
-
-      // 3e. Delete assignments
-      await adminClient.from('assignments').delete().in('lesson_id', lessonIds)
-
-      // 3f. Delete reports
-      await adminClient.from('reports').delete().in('lesson_id', lessonIds)
-    }
-
-    // 3g. Delete invoices
-    await adminClient.from('invoices').delete().eq('teacher_id', id)
-
-    // 3h. Delete lessons
-    await adminClient.from('lessons').delete().eq('teacher_id', id)
-
-    // 3i. Delete training_teachers
-    await adminClient.from('training_teachers').delete().eq('teacher_id', id)
-
-    // 3j. Delete student_reviews
-    await adminClient.from('student_reviews').delete().eq('teacher_id', id)
-
-    // 3k. Delete teacher_history_log
-    await adminClient.from('teacher_history_log').delete().eq('teacher_id', id)
-
-    // 3l. Delete profile row
-    await adminClient.from('profiles').delete().eq('id', id)
-
-    // 3m. Delete Supabase auth user (teacher id === auth user id for profiles)
-    // Invalidate all active sessions for this user before deletion.
-    // signOut with global scope kills every refresh token across every device.
-    // Wrapped in try/catch and non-fatal — if signOut fails for any reason,
-    // we still proceed with deleteUser to ensure the account is removed.
-    try {
-      await adminClient.auth.admin.signOut(id, 'global')
-    } catch (signOutError) {
-      console.error('[purge teacher] signOut failed but proceeding with delete:', signOutError)
-    }
-    const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(id)
-    if (authDeleteError) {
-      // Non-fatal — profile is already deleted; log and continue
-      console.error('Auth user delete error (non-fatal):', authDeleteError)
+    if (profileDeleteError) {
+      console.error('[purge teacher] profile delete failed:', profileDeleteError)
+      return NextResponse.json(
+        {
+          error:
+            'The login account was deleted but the profile row could not be removed. Retry the purge to finish cleanup.',
+        },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({ success: true })
