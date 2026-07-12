@@ -43,7 +43,12 @@ export default async function StudentDashboardLayout({
   // the student's zone rather than the viewer's browser zone.
   const studentTimezone = requireTz(student.timezone, 'student-layout')
 
-  const { data: nextLesson } = await supabase
+  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+  // pay-withholding model, so a single-row fetch would let it shadow the real next
+  // class. Fetch a few candidates and pick the first that hasn't ended; an
+  // in-progress class (start <= now < end) must still be picked — the panel's
+  // "In class" state depends on it.
+  const { data: candidateLessons } = await supabase
     .from('lessons')
     .select(`
       id,
@@ -59,8 +64,12 @@ export default async function StudentDashboardLayout({
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+    .limit(5)
+
+  const nowMs = Date.now()
+  const nextLesson = (candidateLessons ?? []).find(
+    (l) => nowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+  ) ?? null
 
   const nextLessonTeacherName = nextLesson
     ? (Array.isArray((nextLesson as any).teacher)

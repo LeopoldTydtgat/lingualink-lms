@@ -34,15 +34,24 @@ export default async function DashboardLayout({
   // user somehow has no profiles row, fail safe.
   if (!profile) redirect('/login')
 
-  const { data: lessonRow } = await supabase
+  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+  // pay-withholding model, so a single-row fetch would let it shadow the real next
+  // class. Fetch a few candidates and pick the first that hasn't ended; an
+  // in-progress class (start <= now < end) must still be picked — the panel's
+  // "In class" state depends on it.
+  const { data: candidateLessons } = await supabase
     .from('lessons')
     .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
     .eq('teacher_id', profile?.id)
     .eq('status', 'scheduled')
     .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
     .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+    .limit(5)
+
+  const nextLessonNowMs = Date.now()
+  const lessonRow = (candidateLessons ?? []).find(
+    (l) => nextLessonNowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+  ) ?? null
 
   let nextLesson = null
 
@@ -51,7 +60,7 @@ export default async function DashboardLayout({
       .from('students')
       .select('full_name')
       .eq('id', lessonRow.student_id)
-      .single()
+      .maybeSingle()
 
     nextLesson = {
       id: lessonRow.id,
