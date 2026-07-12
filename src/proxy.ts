@@ -112,9 +112,11 @@ export async function proxy(request: NextRequest) {
 
   // Cron routes use bearer-token auth (CRON_SECRET) and have no Supabase
   // session — they must remain reachable here without a logged-in user.
-  // /api/keep-alive likewise. Every other /api/* route now flows through the
-  // session check below; each one already calls supabase.auth.getUser() at
-  // the top and returns 401 itself if needed.
+  // /api/keep-alive likewise. The Resend webhook is called by Resend (no
+  // Supabase session) and self-authenticates via its HMAC signature, so it
+  // must stay public to this session gate too. Every other /api/* route now
+  // flows through the session check below; each one already calls
+  // supabase.auth.getUser() at the top and returns 401 itself if needed.
   const PUBLIC_API_PATHS = new Set([
     '/api/cron/class-reminders',
     '/api/cron/low-hours-warning',
@@ -122,6 +124,7 @@ export async function proxy(request: NextRequest) {
     '/api/cron/report-overdue',
     '/api/cron/training-ending-soon',
     '/api/keep-alive',
+    '/api/webhooks/resend',
   ])
 
   const isPublicPath =

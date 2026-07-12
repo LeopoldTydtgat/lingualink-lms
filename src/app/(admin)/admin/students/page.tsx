@@ -26,6 +26,8 @@ export default async function StudentsPage() {
       status,
       is_private,
       company_id,
+      email_bounced_at,
+      email_bounce_reason,
       companies (
         id,
         name
@@ -91,6 +93,8 @@ export default async function StudentsPage() {
       is_private: s.is_private ?? true,
       company_id: s.company_id ?? null,
       company_name: company?.name ?? null,
+      email_bounced_at: s.email_bounced_at ?? null,
+      email_bounce_reason: s.email_bounce_reason ?? null,
       hours_remaining: hoursRemaining,
       teachers,
     }

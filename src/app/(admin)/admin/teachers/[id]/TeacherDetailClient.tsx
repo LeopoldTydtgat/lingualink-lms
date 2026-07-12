@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
+import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -431,6 +432,9 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
             <div>
               <h1 className="text-xl font-bold text-gray-900">{fullName}</h1>
               <p className="text-sm text-gray-500 mb-2">{teacher.email as string}</p>
+              {teacher.email_bounced_at ? (
+                <EmailBounceNotice reason={teacher.email_bounce_reason as string | null} />
+              ) : null}
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusBadge status={status} />
                 {accountTypes.map((type) => (

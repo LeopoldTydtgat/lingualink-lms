@@ -17,6 +17,8 @@ export default async function TeachersPage() {
       hourly_rate,
       currency,
       role,
+      email_bounced_at,
+      email_bounce_reason,
       lessons (count)
     `)
     .in('role', ['teacher', 'admin'])
