@@ -138,15 +138,20 @@ SENTRY_DSN
 - **Every factual claim about code, schema, or state must cite its source: file:line read this session, or actual tool/command output. Uncited claims must be prefixed `UNVERIFIED:`. 'I have not read X — paste it' is a correct, acceptable answer. Never fabricate to fill a gap.**
 - **Before editing any file, OUTPUT the grep'd list of downstream consumers and, for each, state why it is unaffected. Do not merely assert consumers were considered — show the list.**
 - **Never trust a tool's on-screen rendering of file contents — verify against the file on disk.** Edit-tool diffs and terminal echoes can drop, scramble, or merge characters (and can render clean UTF-8 as mojibake). After any edit, and before any commit, read the real bytes from disk (PowerShell `Get-Content -Raw`, or a byte/char-code dump for line-ending-sensitive files) and confirm the actual content. A passing `tsc`/test plus a clean-looking diff is not enough — confirm the file itself.
+- **NEVER run any git command** — no add, commit, push, log, status, nothing. Git is run exclusively by Leopold in PowerShell. Never add `Co-Authored-By` trailers to anything.
+- **NEVER read or write `C:\Projects\lingualink-lms-meta\BUG_LOG.md`** — it is outside this repo and maintained via PowerShell only.
+- **`DROP FUNCTION` + `CREATE` resets Postgres EXECUTE grants** — any drafted RPC SQL must explicitly re-REVOKE from `anon`/`authenticated` where the old function had revokes.
+- **Join Class button activates 10 minutes before class start** — not 15. The briefs say 15; 10 is authoritative.
+
+## Output style
+
+Terse. Show diffs, file paths, and results only. No narration, no preamble, no plans, no summaries of what you're about to do or just did. Answer questions in as few words as correctness allows.
 
 ## Known issues (as of April 2026)
 
 - Admin portal pages may timeout on Vercel Hobby plan (10 s limit) — a Pro upgrade is planned.
 - Several pages (`billing`, `messages`, `reports`, `schedule`) still have a false `if (!profile) redirect('/login')` guard that should be removed — profile null does not mean the user is unauthenticated.
 
-## Verification subagents (auto-invoke — do not wait to be asked)
+## Verification subagents (opt-in only — NEVER auto-invoke)
 
-- code-reviewer: on ANY diff touching auth, hours/billing, Microsoft Graph, `src/proxy.ts`,
-  or any API write path. Also before committing any substantive logic change.
-- supabase-rls-auditor: on ANY schema, RLS, or data-access change.
-- timezone-date-auditor: on ANY change touching dates, times, timezones, month/day bucketing, calendar rendering, booking-slot math, cron/reminder timing, or billing-period boundaries. Run alongside code-reviewer on date-heavy changes.
+Never spawn a subagent or use the Task tool unless the driving prompt for the task explicitly requests one. This includes code-reviewer, supabase-rls-auditor, and timezone-date-auditor. Subagent gates apply to auth, RLS, money/billing paths, schema changes, and core calendar/timezone math (shared date functions, booking gate, slot engine) — and run only when the driving prompt requests them by name. Routine fixes get none. Token budget matters.
