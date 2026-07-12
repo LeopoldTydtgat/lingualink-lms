@@ -1,3 +1,22 @@
+## Session 194 - 12 July 2026 - Teacher purge rewrite and repo hygiene
+
+### What was built
+- Replaced the teacher hard-delete cascade with a purge-only-if-pristine model in the admin teacher DELETE route (commit ccefa48). A preflight counts rows across 20 blocking tables, covering every RESTRICT and NO ACTION foreign key from the live schema plus four tables with no foreign key at all. Any history returns a 409 listing exactly what blocks; archiving is now the terminal state for any teacher with history.
+- The preflight fails closed: any count query error aborts with a 500 and nothing is deleted. The purge sequence is session sign-out, auth user delete (tolerating only user-not-found so a retry after partial failure is idempotent), then profile delete with a checked error. Database cascades handle availability tables and the teacher history log.
+- The admin purge dialog now surfaces the blocking tables and counts and explains the archive-instead rule.
+- Repo hygiene: commit author email switched to the GitHub noreply address and the entire 927-commit history rewritten with git filter-repo to remove the personal address. All branches force-pushed clean. Branch protection on main recreated as a ruleset (PR required, force pushes blocked).
+
+### Break/Fix Log
+Issue 1: Deleting a teacher left their support messages behind as a permanent Unknown ghost in the admin support list.
+Cause: The route's hand-written cascade never covered support_messages, which has no foreign key, so orphans were invisible to both the database and the route. The route also ignored errors on its own cascade steps and could return success after a partial failure.
+Fix: Hand-written cascade removed entirely. History now blocks deletion outright, so orphaned references can never be created; the only deletable accounts are ones nothing references.
+Lesson: A hand-maintained delete cascade will always drift from the schema. Either let the database own deletion through foreign keys, or refuse to delete anything that is still referenced.
+
+### Session result
+Teacher deletion is now safe by construction: history blocks purging, archiving handles real departures, and both paths were verified in the browser against test accounts before commit. The repository history is clean of personal data and main is protected again, clearing two go-live blockers.
+
+---
+
 ## Session 193 - 12 July 2026 - Day to Day calendar timezone frame unification
 
 ### What was built
