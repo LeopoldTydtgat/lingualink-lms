@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import Link from 'next/link'
+import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   LogOut,
   Menu,
+  Loader2,
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
@@ -64,6 +65,59 @@ const navItems = [
   { href: '/admin/exports', label: 'Exports', icon: Download },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ]
+
+// Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
+// state. While the clicked route loads, dim the row and swap the icon for a
+// spinner. Active styling (orange + colours) is passed in and preserved.
+function AdminNavContent({
+  Icon,
+  label,
+  active,
+  showBadge,
+  badgeCount,
+}: {
+  Icon: React.ElementType
+  label: string
+  active: boolean
+  showBadge: boolean
+  badgeCount: number
+}) {
+  const { pending } = useLinkStatus()
+  return (
+    <span
+      className="flex items-center gap-3 w-full transition-opacity"
+      style={{ opacity: pending ? 0.55 : 1 }}
+    >
+      {pending ? (
+        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#ffffff' : '#9ca3af' }} />
+      ) : (
+        <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
+      )}
+      <span className="flex-1">{label}</span>
+      {showBadge && (
+        <span
+          style={{
+            backgroundColor: active ? '#ffffff' : '#FF8303',
+            color: active ? '#FF8303' : '#ffffff',
+            fontSize: '11px',
+            minWidth: '18px',
+            height: '18px',
+            borderRadius: '9999px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingLeft: '4px',
+            paddingRight: '4px',
+            fontWeight: 600,
+            lineHeight: 1,
+          }}
+        >
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
+      )}
+    </span>
+  )
+}
 
 export default function AdminLayoutClient({
   profile,
@@ -191,36 +245,20 @@ export default function AdminLayoutClient({
         href={item.href}
         prefetch={false}
         onClick={() => setSidebarOpen(false)}
-        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-white/10'}`}
         style={
           active
             ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
             : { color: '#9ca3af' }
         }
       >
-        <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
-        <span className="flex-1">{item.label}</span>
-        {showBadge && (
-          <span
-            style={{
-              backgroundColor: active ? '#ffffff' : '#FF8303',
-              color: active ? '#FF8303' : '#ffffff',
-              fontSize: '11px',
-              minWidth: '18px',
-              height: '18px',
-              borderRadius: '9999px',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              paddingLeft: '4px',
-              paddingRight: '4px',
-              fontWeight: 600,
-              lineHeight: 1,
-            }}
-          >
-            {badgeCount > 99 ? '99+' : badgeCount}
-          </span>
-        )}
+        <AdminNavContent
+          Icon={Icon}
+          label={item.label}
+          active={active}
+          showBadge={showBadge}
+          badgeCount={badgeCount}
+        />
       </Link>
     )
   }
