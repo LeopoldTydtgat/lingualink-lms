@@ -110,6 +110,7 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
           bodyHtml: studentCancellationByStudentEmailContent(
             teacher?.full_name ?? 'Your teacher',
             lesson.scheduled_at,
+            lesson.duration_minutes,
             refunded ? hoursToRefund : 0,
             studentTimezone
           ),
@@ -131,6 +132,7 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
             bodyHtml: teacherCancellationEmailContent(
               student.full_name,
               lesson.scheduled_at,
+              lesson.duration_minutes,
               teacherTimezone
             ),
             contactEmail: 'teachers@lingualinkonline.com',

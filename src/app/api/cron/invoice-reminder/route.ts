@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate } from '@/lib/email/templates'
+import { buildEmailTemplate, buildButton } from '@/lib/email/templates'
 import { verifyCronAuth } from '@/lib/cron-auth'
 
 const supabase = createClient(
@@ -80,12 +80,7 @@ export async function GET(request: Request) {
             <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
               Please log in to your portal to upload your invoice.
             </p>
-            <a
-              href="${process.env.NEXT_PUBLIC_TEACHER_URL}/billing"
-              style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;"
-            >
-              Upload My Invoice
-            </a>
+            ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/billing`, 'Upload My Invoice')}
           `,
           contactEmail: 'teachers@lingualinkonline.com',
         }),

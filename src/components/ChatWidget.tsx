@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import { toast } from 'sonner'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -24,6 +25,10 @@ interface SupportMessage {
   attachments: Array<{ url: string; filename: string; size: number }>
   created_at: string
   read_at: string | null
+  edited_at?: string | null
+  // Client-only: set on the optimistic temp row until the temp-to-real swap in
+  // handleSend replaces it. Never persisted; a real DB row never carries it.
+  pending?: boolean
 }
 
 interface FaqItem {
@@ -142,6 +147,8 @@ export default function ChatWidget({
   // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
   // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
   const pendingReadsRef = useRef<Map<string, string>>(new Map())
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -149,6 +156,18 @@ export default function ChatWidget({
       StarterKit.configure({ underline: false }),
       Underline,
       Placeholder.configure({ placeholder: 'Type a message...' }),
+    ],
+    content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
+  })
+
+  // Separate instance for inline message editing — the main composer keeps its draft.
+  const editEditor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ underline: false }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Edit message...' }),
     ],
     content: '',
     onTransaction: () => forceUpdate(n => n + 1),
@@ -195,11 +214,12 @@ export default function ChatWidget({
     if (messagesLoaded) return
     const { data } = await supabase
       .from('support_messages')
-      .select('id, sender_role, content, attachments, created_at, read_at')
+      .select('id, sender_role, content, attachments, created_at, read_at, edited_at')
       .eq('participant_auth_id', participantAuthId)
       .order('created_at', { ascending: true })
     setMessages((data as SupportMessage[]) || [])
     setMessagesLoaded(true)
+    setEditingMessageId(null)
 
     // Mark admin messages as read now that the teacher has opened the widget
     await markAdminMessagesRead()
@@ -290,12 +310,27 @@ export default function ChatWidget({
           const updated = payload.new as SupportMessage
           // Update read_at on the matching message so ticks flip live. Buffer the read_at first
           // (NEW300) so a temp→real swap in handleSend can carry it over instead of losing it.
+          // The same events also carry edits (content + edited_at) from either side, so patch
+          // those too — read_at never regresses to null here because an edit UPDATE on an
+          // unread message arrives with read_at still null.
           if (updated.read_at) {
             pendingReadsRef.current.set(updated.id, updated.read_at)
-            setMessages(prev =>
-              prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-            )
           }
+          // Return prev UNCHANGED (same array reference) when no message matches
+          // (e.g. the temp row hasn't been swapped for the real id yet - the
+          // buffered read above still covers that) so an unrelated UPDATE doesn't
+          // re-fire the scroll-to-bottom effect, which keys on array identity.
+          setMessages(prev => {
+            if (!prev.some(m => m.id === updated.id)) return prev
+            return prev.map(m => m.id === updated.id
+              ? {
+                  ...m,
+                  read_at: updated.read_at ?? m.read_at,
+                  content: updated.content ?? m.content,
+                  edited_at: updated.edited_at ?? m.edited_at,
+                }
+              : m)
+          })
         }
       )
       .subscribe()
@@ -342,7 +377,8 @@ export default function ChatWidget({
     setPendingAttachments([])
     setSending(true)
 
-    // Optimistic update
+    // Optimistic update - pending until the temp-to-real swap below, so the Edit
+    // affordance never targets a row whose id doesn't exist in the DB.
     const tempId = crypto.randomUUID()
     setMessages(prev => [...prev, {
       id: tempId,
@@ -351,6 +387,7 @@ export default function ChatWidget({
       attachments: attachmentsToSend,
       created_at: new Date().toISOString(),
       read_at: null,
+      pending: true,
     }])
 
     const res = await fetch('/api/support/send', {
@@ -392,6 +429,64 @@ export default function ChatWidget({
     }
 
     setSending(false)
+  }
+
+  const handleStartEdit = (msg: SupportMessage) => {
+    setEditingMessageId(msg.id)
+    editEditor?.commands.setContent(msg.content || '')
+    setTimeout(() => editEditor?.commands.focus('end'), 100)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null)
+    editEditor?.commands.clearContent()
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editEditor || !editingMessageId || savingEdit) return
+    const target = messages.find(m => m.id === editingMessageId)
+    if (!target) return
+
+    const html = editEditor.getHTML()
+    // Same emptiness rule as handleSend; empty is allowed only when the message
+    // keeps its attachments (attachment-only messages store '').
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    const hasAttachments = Array.isArray(target.attachments) && target.attachments.length > 0
+    if (isEmpty && !hasAttachments) {
+      toast.error('Message cannot be empty.', { duration: 6000 })
+      return
+    }
+    const contentToSave = isEmpty ? '' : html
+
+    setSavingEdit(true)
+    const res = await fetch('/api/support/edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messageId: editingMessageId, content: contentToSave }),
+    })
+
+    if (!res.ok) {
+      // Surface the window rejection verbatim (retrying can't help there);
+      // everything else stays generic.
+      const json = await res.json().catch(() => null)
+      toast.error(
+        json?.error === EDIT_WINDOW_ERROR ? EDIT_WINDOW_ERROR : 'Edit failed to save. Please try again.',
+        { duration: 6000 }
+      )
+    } else {
+      const json = await res.json()
+      if (json.message) {
+        const updated = json.message as SupportMessage
+        setMessages(prev =>
+          prev.map(m => m.id === updated.id
+            ? { ...m, content: updated.content, edited_at: updated.edited_at }
+            : m)
+        )
+      }
+      setEditingMessageId(null)
+      editEditor.commands.clearContent()
+    }
+    setSavingEdit(false)
   }
 
   const handleEmojiButtonClick = () => {
@@ -481,6 +576,35 @@ export default function ChatWidget({
                           <Avatar name={adminName} photoUrl={adminPhotoUrl} size={7} />
                         )}
                         <div className="max-w-[75%]">
+                          {editingMessageId === msg.id ? (
+                            /* Inline edit box replaces the bubble; attachments are never
+                               modified by an edit and reappear on save/cancel. */
+                            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2" style={{ minWidth: '180px' }}>
+                              <div
+                                className="widget-composer text-sm min-h-[32px] max-h-[80px] overflow-y-auto cursor-text"
+                                onClick={() => editEditor?.commands.focus()}
+                              >
+                                <EditorContent editor={editEditor} />
+                              </div>
+                              <div className="flex items-center justify-end gap-2 mt-2">
+                                <button
+                                  onClick={handleCancelEdit}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={handleSaveEdit}
+                                  disabled={savingEdit}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+                                  style={{ backgroundColor: '#FF8303' }}
+                                >
+                                  {savingEdit ? 'Saving...' : 'Save'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                          <>
                           {hasContent && (
                           <div
                             className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
@@ -509,7 +633,25 @@ export default function ChatWidget({
                               ))}
                             </div>
                           )}
+                          </>
+                          )}
                           <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
+                            {/* Edit affordance: own messages only, within the 15-minute
+                                window (server re-checks authoritatively), never on a
+                                pending optimistic row. */}
+                            {isFromMe && editingMessageId !== msg.id &&
+                              !msg.pending && isWithinEditWindow(msg.created_at) && (
+                              <button
+                                onClick={() => handleStartEdit(msg)}
+                                className="text-xs text-gray-400 hover:text-gray-600"
+                                aria-label="Edit message"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {msg.edited_at && (
+                              <span className="text-xs text-gray-400 italic">(edited)</span>
+                            )}
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
                             {isFromMe && (
                               <span

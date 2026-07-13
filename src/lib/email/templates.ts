@@ -211,9 +211,10 @@ export function teacherNewBookingEmailContent(
 export function teacherCancellationEmailContent(
   studentName: string,
   scheduledAt: string,
+  durationMinutes: number,
   teacherTimezone: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled. Your schedule has been updated.
@@ -229,9 +230,10 @@ export function teacherCancellationEmailContent(
 export function teacherReportForfeitedEmailContent(
   studentName: string,
   scheduledAt: string,
+  durationMinutes: number,
   teacherTimezone: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, teacherTimezone)
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       The 12-hour window to submit your class report for your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime} has now closed.
@@ -245,6 +247,7 @@ export function teacherReportForfeitedEmailContent(
 export function teacherRescheduledEmailContent(
   studentName: string,
   oldScheduledAt: string | null,
+  oldDurationMinutes: number | null,
   newScheduledAt: string,
   durationMinutes: number,
   teacherTimezone: string
@@ -252,7 +255,7 @@ export function teacherRescheduledEmailContent(
   const newTime = formatClassTime(newScheduledAt, teacherTimezone, durationMinutes)
   const rows: { label: string; value: string }[] = []
   if (oldScheduledAt) {
-    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, teacherTimezone) })
+    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, teacherTimezone, oldDurationMinutes ?? undefined) })
     rows.push({ label: 'New time', value: newTime })
   } else {
     rows.push({ label: 'Class time', value: newTime })
@@ -286,19 +289,21 @@ export function studentBookingConfirmationEmailContent(
       { label: 'Date &amp; Time', value: formattedTime },
       { label: 'Duration', value: `${durationMinutes} minutes` },
     ])}
-    <p style="margin:0;font-size:13px;color:#6B7280;line-height:1.6;">
+    <p style="margin:0 0 24px;font-size:13px;color:#6B7280;line-height:1.6;">
       The Join Class button in your portal activates 10 minutes before the class starts.
     </p>
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'View My Classes')}
   `
 }
 
 export function studentCancellationByStudentEmailContent(
   teacherName: string,
   scheduledAt: string,
+  durationMinutes: number,
   hoursRefunded: number | null,
   studentTimezone: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   const refundRow = hoursRefunded
     ? { label: 'Hours returned', value: `${hoursRefunded}h added back to your balance` }
     : { label: 'Note', value: '<span style="color:#DC2626;">No hours refunded — cancellation within 24 hours of class</span>' }
@@ -318,11 +323,12 @@ export function studentCancellationByStudentEmailContent(
 export function studentCancellationByTeacherEmailContent(
   teacherName: string,
   scheduledAt: string,
+  durationMinutes: number,
   hoursRefunded: number,
   studentTimezone: string,
   teacherMessage: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Unfortunately your class has been cancelled by your teacher. Your hours have been returned to your balance.
@@ -345,6 +351,7 @@ export function studentCancellationByTeacherEmailContent(
 export function studentRescheduledEmailContent(
   teacherName: string,
   oldScheduledAt: string | null,
+  oldDurationMinutes: number | null,
   newScheduledAt: string,
   durationMinutes: number,
   studentTimezone: string
@@ -352,7 +359,7 @@ export function studentRescheduledEmailContent(
   const newTime = formatClassTime(newScheduledAt, studentTimezone, durationMinutes)
   const rows: { label: string; value: string }[] = []
   if (oldScheduledAt) {
-    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, studentTimezone) })
+    rows.push({ label: 'Previous time', value: formatClassTime(oldScheduledAt, studentTimezone, oldDurationMinutes ?? undefined) })
     rows.push({ label: 'New time', value: newTime })
   } else {
     rows.push({ label: 'Class time', value: newTime })
@@ -363,6 +370,7 @@ export function studentRescheduledEmailContent(
       Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled.
     </p>
     ${buildDetailsTable('Class details', rows)}
+    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'View My Classes')}
   `
 }
 
@@ -457,11 +465,12 @@ export function studentTrainingEndingSoonEmailContent(endDate: string): string {
 export function studentCancellationByAdminEmailContent(
   teacherName: string,
   scheduledAt: string,
+  durationMinutes: number,
   hoursRefunded: number,
   studentTimezone: string,
   cancellationReason?: string
 ): string {
-  const formattedTime = formatClassTime(scheduledAt, studentTimezone)
+  const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   const refunded = hoursRefunded > 0
   const openingSentence = refunded
     ? "We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience."

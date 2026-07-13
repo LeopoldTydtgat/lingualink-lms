@@ -65,6 +65,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid timezone parameter' }, { status: 400 })
   }
 
+  // Optional: drop a single lesson from the booked set so its own slot is not
+  // reported unavailable against itself (admin edit-class re-timing the lesson).
+  // ADMIN/STAFF ONLY. The student booking WRITE paths enforce overlap
+  // independently of this advisory endpoint (api/student/book: isSlotAvailable +
+  // clash query + DB exclusion constraint; api/admin/classes: clash + constraint),
+  // so this cannot enable a double-book — but gating it to admins keeps the student
+  // availability response byte-identical and removes any occupied-slot-hiding
+  // vector. Malformed ids are ignored silently.
+  const excludeLessonIdRaw = searchParams.get('excludeLessonId')
+  const isUuid = (v: string) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
+  const excludeLessonId =
+    isAdmin && excludeLessonIdRaw && isUuid(excludeLessonIdRaw) ? excludeLessonIdRaw : null
+
   // ── Fetch teacher's timezone ────────────────────────────────────────────────
   // Use the admin client so RLS on profiles/availability does not block the student's session.
 
@@ -100,13 +114,15 @@ export async function GET(req: NextRequest) {
   // the window still blocks the slots it overlaps inside it, and a lesson
   // starting at/after windowEndMs still blocks the NEW324 extended slots
   // (up to 60 min past the window end) it overlaps.
-  const { data: bookedLessons } = await admin
+  let bookedQuery = admin
     .from('lessons')
     .select('scheduled_at, duration_minutes')
     .eq('teacher_id', teacherId)
     .eq('status', 'scheduled')
     .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
     .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())
+  if (excludeLessonId) bookedQuery = bookedQuery.neq('id', excludeLessonId)
+  const { data: bookedLessons } = await bookedQuery
 
   const records: AvailabilityRecord[] = availabilityData ?? []
   const booked: BookedLesson[] = bookedLessons ?? []

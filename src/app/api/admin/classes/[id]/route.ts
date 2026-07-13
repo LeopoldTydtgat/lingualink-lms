@@ -215,6 +215,7 @@ export async function PATCH(
         const emailBody = studentCancellationByAdminEmailContent(
           teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
+          existing.duration_minutes,
           emailHoursValue,
           requireTz(studentData.timezone, 'admin-cancel:student'),
           cancellation_reason ?? undefined
@@ -530,6 +531,7 @@ export async function PATCH(
         const emailBody = studentRescheduledEmailContent(
           teacherName,
           existing.scheduled_at,
+          existing.duration_minutes,
           newScheduledAt,
           newDuration,
           studentTz
@@ -561,6 +563,7 @@ export async function PATCH(
         const emailBody = teacherRescheduledEmailContent(
           studentName,
           existing.scheduled_at,
+          existing.duration_minutes,
           newScheduledAt,
           newDuration,
           teacherTz

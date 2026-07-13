@@ -301,7 +301,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Create the lesson record
-  const { data: lesson, error: lessonError } = await supabase
+  const { data: lesson, error: lessonError } = await adminClient
     .from('lessons')
     .insert({
       teacher_id,

@@ -1,3 +1,65 @@
+## Session 202 - 13 July 2026 - Admin edit-class availability annotation and billing audit
+
+### What was built
+Commit e5de79d. The admin edit-class time dropdown previously rendered a
+raw 06:00-22:00 grid with no availability signal, unlike the admin
+booking flow which greys unavailable times. EditClassClient now mirrors
+the booking flow: it fetches the teacher's availability for the chosen
+date, builds a week-wide set of bookable start instants (handling runs
+that cross teacher-local midnight), and annotates each dropdown option,
+greying unavailable times with an "(unavailable)" label. The annotation
+is advisory only; the save-time warning banner remains the gate, and any
+fetch failure falls back to no annotation rather than blocking.
+
+The availability API route gained an optional excludeLessonId parameter
+so the lesson being edited no longer counts as booking its own slot.
+This removes a spurious "outside availability" warning that fired on
+duration-only edits. The parameter is UUID-validated and gated
+server-side to admin and staff callers via the route's existing role
+lookup; student callers receive byte-identical responses whether or not
+the parameter is sent. A security review confirmed overlap is enforced
+independently at insert time on both booking write paths, so the
+advisory endpoint cannot enable a double booking.
+
+### Break/Fix Log
+A reported billing defect (teacher projection not dropping after an
+admin cancellation) was audited read-only across every billing surface:
+the right-panel widget, the teacher billing page, the invoice recompute,
+all admin billing views, and all CSV exports. Every amount flows through
+a single billability function that checks cancellation timing in one
+place. A live database check showed the cancelled class was 20.9 hours
+before start, under the 24 hour threshold, so the teacher is paid and
+the unchanged projection was correct behaviour. Closed as not a bug. The
+client confirmed the intended rule: an admin cancellation under 24 hours
+pays the teacher, which the code already implements. The same audit
+logged a separate open item covering cancel and reschedule attribution
+gaps across admin views, to be fixed in a later session.
+
+### Session result
+Edit-class availability annotation shipped and verified live: dropdown
+annotates correctly, own-slot edits save clean, annotation updates on
+date change, and the student booking flow is unchanged. Billing maths
+verified correct end to end. One commit pushed to dev.
+
+---
+
+## Session 201 - 13 July 2026 - Edit-own-message on Messages and Support, plus support_messages grants fix
+### What was built
+- Edit-own-message across all four chat surfaces: teacher Messages, student Messages, teacher support widget, admin Support. Own messages only, content only (attachments untouched), silent edits with an "(edited)" tag, no emails (commit 79eb9f8).
+- 15-minute edit window enforced server-side in all three edit paths (both editMessage server actions and the new /api/support/edit route), compared against the DB row's created_at, never a client timestamp. Shared helper src/lib/messages/editWindow.ts is the single source of truth; the same helper hides the Edit button client-side once the window passes.
+- Every edit re-runs the full send-path security: ownership check, the NEW275 assignment gate (an unassigned teacher or student cannot inject edited content into a blocked thread), and sanitizeHtml. All content updates go through server code with the admin client - the browser has no content write path.
+- Realtime UPDATE handlers extended on all four surfaces so an edit patches the other side's open thread and contact-list preview live, without disturbing the NEW300 read-receipt buffering. No-match guards added so updates for other threads no longer re-fire the scroll-to-bottom effect.
+- Edit affordance suppressed on optimistic temp rows (client-only pending flag dropped on the temp-to-real swap) and in read-only unassigned-student threads.
+- Two migrations captured: the support_messages grants fix (commit 78cffd6) and the edited_at columns plus the messages edited_at SELECT grant.
+- Gated review: supabase-rls-auditor and code-reviewer ran on both passes. Zero criticals; the one WARN (missing no-match guard on the receiver-side handlers) was fixed same-session and re-reviewed. tsc clean, 187/187 unit tests green, all four surfaces browser-verified including the window cutoff and cross-client live patching.
+### Break/Fix Log
+- Issue 1: Any teacher could rewrite admin support replies in their own thread. Symptom: none visible in the app; found by an information_schema grants audit during feature preflight. Cause: authenticated held table-level UPDATE, DELETE and TRUNCATE on support_messages with every column updatable, and the row-scoped mark-as-read RLS policy then allowed content rewrites via direct supabase-js. Fix: revoked all write privileges beyond INSERT from authenticated and anon, re-granted UPDATE on read_at only, verified twice via information_schema, captured as migration 20260712120000 (commit 78cffd6). Lesson: an RLS policy is only as tight as the grants beneath it; audit column_privileges, not just pg_policies, before trusting any UPDATE policy.
+- Issue 2: First typecheck failed with a handleSaveEdit redeclaration in the admin support client. Cause: the FAQ editor in the same component already owned that handler name. Fix: message-edit handlers renamed to handleStartMessageEdit, handleCancelMessageEdit, handleSaveMessageEdit. Lesson: grep a component for handler names before adding same-named ones to a file that hosts two features.
+- Issue 3: Reviewer caught that a contact editing a message in a non-open thread would yank the currently open thread to the bottom. Cause: the receiver-side edit handler called setMessages unconditionally, and the scroll effect keys on array identity. Fix: return the previous array unchanged when no message id matches, mirroring the sender-side guard. Lesson: any Realtime handler feeding a state array that drives an effect needs a no-op path for non-matching events.
+### Session result
+Edit-own-message shipped across all three portals in two commits (78cffd6, 79eb9f8), pushed to dev. The feature preflight surfaced and closed a HIGH-severity grants hole on support_messages the same day it was found, with the standing rule recorded that content UPDATE must never be re-granted on either chat table. The 15-minute window keeps messages honest as business records while allowing typo fixes, and the server is authoritative on every path.
+---
+
 ## Session 200 - 12 July 2026 - NEW327: full email overhaul
 ### What was built
 - Rebuilt the shared email wrapper: orange header band with the hosted logo (Supabase public templates bucket, hardcoded URL), flat white card with 1px border, shaded footer, no border-radius anywhere outside the VML button fallback. Outlook-safe throughout (commit 1e587fe).

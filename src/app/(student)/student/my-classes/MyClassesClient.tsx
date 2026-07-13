@@ -65,6 +65,12 @@ function formatTime(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
+function formatTimeRange(isoString: string, timezone: string, durationMinutes: number): string {
+  const start = new Date(isoString)
+  const end = new Date(start.getTime() + durationMinutes * 60000)
+  return `${formatTime(isoString, timezone)} - ${formatTime(end.toISOString(), timezone)}`
+}
+
 // Returns YYYY-MM-DD in the student's local timezone — used to group lessons by day
 function getLocalDateKey(isoString: string, timezone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -560,7 +566,7 @@ export default function MyClassesClient({
                               )}
                             </div>
                             <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                              {mounted ? formatTime(lesson.scheduled_at, studentTimezone) : ''} · {lesson.duration_minutes} min
+                              {mounted ? formatTimeRange(lesson.scheduled_at, studentTimezone, lesson.duration_minutes) : ''} · {lesson.duration_minutes} min
                             </span>
                           </div>
 
@@ -774,7 +780,7 @@ export default function MyClassesClient({
                             )}
                           </div>
                           <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                            {mounted ? `${formatDate(lesson.scheduled_at, studentTimezone)} · ${formatTime(lesson.scheduled_at, studentTimezone)}` : ''} · {lesson.duration_minutes} min
+                            {mounted ? `${formatDate(lesson.scheduled_at, studentTimezone)} · ${formatTimeRange(lesson.scheduled_at, studentTimezone, lesson.duration_minutes)}` : ''} · {lesson.duration_minutes} min
                           </span>
                         </div>
 

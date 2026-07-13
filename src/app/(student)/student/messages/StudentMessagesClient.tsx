@@ -12,7 +12,8 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
-import { sendMessage, markMessagesAsRead } from './actions'
+import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
+import { sendMessage, editMessage, markMessagesAsRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -28,6 +29,10 @@ interface Message {
   attachments: any[]
   read_at: string | null
   created_at: string
+  edited_at?: string | null
+  // Client-only: set on the optimistic fallback row (no real DB id, so it can never
+  // be edited). Never persisted; a real DB row never carries it.
+  pending?: boolean
 }
 
 interface Contact {
@@ -153,6 +158,8 @@ export default function StudentMessagesClient({
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
   const pendingReadsRef = useRef<Map<string, string>>(new Map())
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -160,6 +167,18 @@ export default function StudentMessagesClient({
       StarterKit.configure({ underline: false }),
       Underline,
       Placeholder.configure({ placeholder: 'Write a message...' }),
+    ],
+    content: '',
+    onTransaction: () => forceUpdate(n => n + 1),
+  })
+
+  // Separate instance for inline message editing — the main composer keeps its draft.
+  const editEditor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ underline: false }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Edit message...' }),
     ],
     content: '',
     onTransaction: () => forceUpdate(n => n + 1),
@@ -183,7 +202,7 @@ export default function StudentMessagesClient({
     setLoadingMessages(true)
     const { data } = await supabase
       .from('messages')
-      .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
+      .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at, edited_at')
       .or(
         `and(sender_id.eq.${currentStudent.id},receiver_id.eq.${contact.id}),` +
         `and(sender_id.eq.${contact.id},receiver_id.eq.${currentStudent.id})`
@@ -198,6 +217,7 @@ export default function StudentMessagesClient({
 
   const handleSelectContact = useCallback(async (contact: Contact) => {
     setSelectedContact(contact)
+    setEditingMessageId(null)
     await fetchMessages(contact)
   }, [fetchMessages])
 
@@ -225,7 +245,10 @@ export default function StudentMessagesClient({
       )
       .on(
         // When the teacher reads the student's messages, read_at gets set.
-        // Listen for UPDATEs on messages this student sent to flip the tick.
+        // Listen for UPDATEs on messages this student sent to flip the tick. The same
+        // events also carry this student's own edits (content + edited_at) from another
+        // session, so patch those too — read_at never regresses to null here because an
+        // edit UPDATE on an unread message arrives with read_at still null.
         'postgres_changes',
         {
           event: 'UPDATE',
@@ -237,10 +260,54 @@ export default function StudentMessagesClient({
           const updated = payload.new as Message
           if (updated.read_at) {
             pendingReadsRef.current.set(updated.id, updated.read_at)
-            setMessages(prev =>
-              prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-            )
           }
+          // Return prev UNCHANGED (same array reference) when no message matches -
+          // an UPDATE for another thread must not re-fire the scroll-to-bottom
+          // effect, which keys on the messages array identity.
+          setMessages(prev => {
+            if (!prev.some(m => m.id === updated.id)) return prev
+            return prev.map(m => m.id === updated.id
+              ? {
+                  ...m,
+                  read_at: updated.read_at ?? m.read_at,
+                  content: updated.content ?? m.content,
+                  edited_at: updated.edited_at ?? m.edited_at,
+                }
+              : m)
+          })
+        }
+      )
+      .on(
+        // When the teacher edits a message they sent to us, patch its content and
+        // edited_at live. Guarded on edited_at so our own markMessagesAsRead UPDATEs
+        // (which also match receiver_id = us) pass through untouched.
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `receiver_id=eq.${currentStudent.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as Message
+          if (!updated.edited_at) return
+          // Same no-match guard as the sender-side handler above: an edit in a
+          // thread other than the open one must not re-fire the scroll-to-bottom
+          // effect. The contacts patch below stays unconditional - a non-open
+          // thread's preview still needs the edit, and it has no scroll effect.
+          setMessages(prev => {
+            if (!prev.some(m => m.id === updated.id)) return prev
+            return prev.map(m => m.id === updated.id
+              ? { ...m, content: updated.content ?? m.content, edited_at: updated.edited_at }
+              : m)
+          })
+          // Keep the contact list's preview in step when the edited message is the
+          // one shown there (same shape as the own-save patch in handleSaveEdit).
+          setContacts(prev =>
+            prev.map(c => c.latestMessage?.id === updated.id
+              ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content ?? c.latestMessage.content } }
+              : c)
+          )
         }
       )
       .subscribe()
@@ -276,7 +343,9 @@ export default function StudentMessagesClient({
 
       // NEW286: prefer the real inserted row (carries the DB id) so the Realtime
       // read-receipt UPDATE — which matches on that id — can flip this message's
-      // read tick. Fall back to an optimistic entry only if the row is missing.
+      // read tick. Fall back to an optimistic entry only if the row is missing;
+      // the fallback is marked pending so the Edit affordance never targets a
+      // row whose id doesn't exist in the DB.
       const sentMsg: Message = (result?.message as Message | undefined) ?? {
         id: crypto.randomUUID(),
         sender_id: currentStudent.id,
@@ -287,6 +356,7 @@ export default function StudentMessagesClient({
         attachments: pendingAttachments,
         read_at: null,
         created_at: new Date().toISOString(),
+        pending: true,
       }
 
       const pendingReadAt = pendingReadsRef.current.get(sentMsg.id)
@@ -305,6 +375,66 @@ export default function StudentMessagesClient({
       setSendError('Message failed to send. Please try again.')
     } finally {
       setSending(false)
+    }
+  }
+
+  const handleStartEdit = (msg: Message) => {
+    setEditingMessageId(msg.id)
+    editEditor?.commands.setContent(msg.content || '')
+    setTimeout(() => editEditor?.commands.focus('end'), 100)
+  }
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null)
+    editEditor?.commands.clearContent()
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editEditor || !editingMessageId || savingEdit) return
+    const target = messages.find(m => m.id === editingMessageId)
+    if (!target) return
+
+    const html = editEditor.getHTML()
+    // Same emptiness rule as handleSend; empty is allowed only when the message
+    // keeps its attachments (attachment-only messages store '').
+    const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
+    const hasAttachments = Array.isArray(target.attachments) && target.attachments.length > 0
+    if (isEmpty && !hasAttachments) {
+      toast.error('Message cannot be empty.', { duration: 6000 })
+      return
+    }
+    const contentToSave = isEmpty ? '' : html
+
+    setSavingEdit(true)
+    try {
+      const result = await editMessage(editingMessageId, contentToSave)
+      if (result?.error || !result?.message) {
+        // Surface the window rejection verbatim (retrying can't help there);
+        // everything else stays generic.
+        toast.error(
+          result?.error === EDIT_WINDOW_ERROR ? EDIT_WINDOW_ERROR : 'Edit failed to save. Please try again.',
+          { duration: 6000 }
+        )
+        return
+      }
+      const updated = result.message as Message
+      setMessages(prev =>
+        prev.map(m => m.id === updated.id
+          ? { ...m, content: updated.content, edited_at: updated.edited_at }
+          : m)
+      )
+      setContacts(prev =>
+        prev.map(c => c.latestMessage?.id === updated.id
+          ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content } }
+          : c)
+      )
+      setEditingMessageId(null)
+      editEditor.commands.clearContent()
+    } catch (err) {
+      console.error('Edit failed:', err)
+      toast.error('Edit failed to save. Please try again.', { duration: 6000 })
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -362,6 +492,18 @@ export default function StudentMessagesClient({
   const filteredTeachers = assignedTeachers.filter(t =>
     t.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
+
+  // Mirrors the teacher client's isBlockedStudent gate (NEW275): the server edit
+  // action re-checks the assignment for EVERY receiver, so the Edit affordance is
+  // hidden when the selected contact is not in the currently-assigned set instead
+  // of letting the save fail server-side. The page only lists assigned contacts at
+  // load, so this only bites a session left open across an unassignment.
+  const assignedTeacherIdSet = useMemo(
+    () => new Set(assignedTeachers.map(t => t.id)),
+    [assignedTeachers]
+  )
+  const isBlockedContact =
+    !!selectedContact && !assignedTeacherIdSet.has(selectedContact.id)
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -498,6 +640,35 @@ export default function StudentMessagesClient({
                       )}
                       <div className={`flex ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
+                          {editingMessageId === msg.id ? (
+                            /* Inline edit box replaces the bubble; attachments are never
+                               modified by an edit and reappear on save/cancel. */
+                            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2" style={{ minWidth: '220px' }}>
+                              <div
+                                className="student-composer text-sm min-h-[40px] max-h-[120px] overflow-y-auto cursor-text"
+                                onClick={() => editEditor?.commands.focus()}
+                              >
+                                <EditorContent editor={editEditor} />
+                              </div>
+                              <div className="flex items-center justify-end gap-2 mt-2">
+                                <button
+                                  onClick={handleCancelEdit}
+                                  className="px-3 py-1 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 hover:bg-gray-50"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={handleSaveEdit}
+                                  disabled={savingEdit}
+                                  className="px-3 py-1 rounded-lg text-xs font-medium text-white disabled:opacity-50"
+                                  style={{ backgroundColor: '#FF8303' }}
+                                >
+                                  {savingEdit ? 'Saving...' : 'Save'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                          <>
                           {/* NEW302: hide the bubble entirely for an attachment-only
                               (empty-content) message so it doesn't render a blank box. */}
                           {hasContent && (
@@ -527,8 +698,27 @@ export default function StudentMessagesClient({
                               ))}
                             </div>
                           )}
+                          </>
+                          )}
                           {/* Timestamp + read ticks */}
                           <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
+                            {/* Edit affordance: own messages only, within the 15-minute
+                                window (server re-checks authoritatively), never on a
+                                pending optimistic row. Hidden when the contact is no
+                                longer assigned, matching the server edit gate. */}
+                            {isFromMe && !isBlockedContact && editingMessageId !== msg.id &&
+                              !msg.pending && isWithinEditWindow(msg.created_at) && (
+                              <button
+                                onClick={() => handleStartEdit(msg)}
+                                className="text-xs text-gray-400 hover:text-gray-600"
+                                aria-label="Edit message"
+                              >
+                                Edit
+                              </button>
+                            )}
+                            {msg.edited_at && (
+                              <span className="text-xs text-gray-400 italic">(edited)</span>
+                            )}
                             <span className="text-xs text-gray-400">
                               {formatTime(msg.created_at)}
                             </span>

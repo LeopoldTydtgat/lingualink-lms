@@ -28,7 +28,7 @@ export default async function AdminSupportPage() {
     participantId: string
     participantType: string
     participantAuthId: string
-    latestMessage: { content: string; created_at: string; sender_role: string }
+    latestMessage: { id: string; content: string; created_at: string; sender_role: string }
     unreadCount: number
   }>()
 

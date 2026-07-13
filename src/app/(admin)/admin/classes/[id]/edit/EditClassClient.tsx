@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -103,11 +103,71 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   const [saving, setSaving] = useState(false)
   const [checkingAvailability, setCheckingAvailability] = useState(false)
   const [availabilityWarning, setAvailabilityWarning] = useState(false)
+  // Advisory annotation for the time dropdown (additive — does not gate).
+  // null = unknown / not yet loaded → annotate nothing. A non-null Set = loaded:
+  // any HH:MM NOT in the Set is outside the teacher's set availability. An empty
+  // Set is valid (teacher has no availability that day → all times annotated).
+  const [availableTimes, setAvailableTimes] = useState<Set<string> | null>(null)
 
   const selectedTeacherTz =
     teachers.find((t) => t.id === teacherId)?.timezone
     ?? (teacherId === lesson.teacher_id ? lesson.teacher?.timezone : null)
     ?? null
+
+  // Annotate the time dropdown with the teacher's set availability for the chosen
+  // date. ADDITIVE / ADVISORY ONLY — never blocks: handleSave and the "Proceed
+  // anyway" banner remain the backstop. Any failure clears to null so nothing is
+  // greyed. excludeLessonId drops THIS lesson from the booked set so its own slot
+  // is not reported unavailable against itself. Mirrors BookingFlowClient.
+  useEffect(() => {
+    if (!teacherId || !selectedTeacherTz || !date) {
+      setAvailableTimes(null)
+      return
+    }
+
+    const tz = selectedTeacherTz
+    const controller = new AbortController()
+    setAvailableTimes(null)
+
+    async function loadAvailability() {
+      try {
+        const res = await fetch(
+          `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(tz)}&excludeLessonId=${lesson.id}`,
+          { signal: controller.signal }
+        )
+        if (!res.ok) {
+          setAvailableTimes(null)
+          return
+        }
+        const data = await res.json()
+        // Continuation slots of a run that crosses teacher-local midnight live
+        // under the NEXT day's key, so the bookable-start check needs a week-wide
+        // set of available start instants — not just the selected date's column.
+        const availableStartMs = new Set<number>()
+        for (const daySlots of Object.values(data.slots ?? {}) as { startIso: string; available: boolean }[][]) {
+          for (const s of daySlots) if (s.available) availableStartMs.add(new Date(s.startIso).getTime())
+        }
+        const slotsForDate: { startIso: string; available: boolean }[] = data.slots?.[date] ?? []
+        const slotsNeeded = duration / 30
+        const times = new Set<string>()
+        for (const slot of slotsForDate) {
+          if (isBookableStart(slot.startIso, slotsNeeded, availableStartMs)) {
+            times.add(slotLocalTime(slot.startIso, tz))
+          }
+        }
+        setAvailableTimes(times)
+      } catch (err) {
+        // Our own abort: ignore silently (a newer run is taking over).
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        // Any other failure fails safe to "no annotation" — banner stays the gate.
+        setAvailableTimes(null)
+      }
+    }
+
+    void loadAvailability()
+
+    return () => controller.abort()
+  }, [teacherId, selectedTeacherTz, date, duration, lesson.id])
 
   if (!selectedTeacherTz) {
     return (
@@ -183,7 +243,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     setAvailabilityWarning(false)
     try {
       const res = await fetch(
-        `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(selectedTeacherTz)}`
+        `/api/student/availability?teacherId=${teacherId}&weekStart=${date}&timezone=${encodeURIComponent(selectedTeacherTz)}&excludeLessonId=${lesson.id}`
       )
       if (res.ok) {
         const data = await res.json()
@@ -288,9 +348,14 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
               backgroundColor: 'white', boxSizing: 'border-box',
             }}
           >
-            {timeSlots.map((slot) => (
-              <option key={slot} value={slot}>{slot}</option>
-            ))}
+            {timeSlots.map((slot) => {
+              const isUnavailable = availableTimes !== null && !availableTimes.has(slot)
+              return (
+                <option key={slot} value={slot} style={isUnavailable ? { color: '#888888' } : undefined}>
+                  {slot}{isUnavailable ? ' (unavailable)' : ''}
+                </option>
+              )
+            })}
           </select>
         </div>
 

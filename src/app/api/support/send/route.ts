@@ -28,13 +28,21 @@ export async function POST(request: Request) {
     }
     const safeAttachments = validation.attachments
 
-    // Security: non-admin users can only send for themselves
+    // Security: non-admin users can only send for themselves. Fail safe on the
+    // role lookup: a query error returns 500 rather than silently demoting the
+    // sender to non-admin. Zero rows is NOT an error here (students have no
+    // profiles row), so .maybeSingle() — a missing profile is a normal user send.
     const admin = createAdminClient()
-    const { data: senderProfile } = await admin
+    const { data: senderProfile, error: senderProfileError } = await admin
       .from('profiles')
       .select('role, full_name, email')
       .eq('id', user.id)
-      .single()
+      .maybeSingle()
+
+    if (senderProfileError) {
+      console.error('[support/send] sender profile fetch error:', senderProfileError)
+      return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+    }
 
     const isAdmin = senderProfile?.role === 'admin'
 
@@ -51,6 +59,9 @@ export async function POST(request: Request) {
         participant_type: participantType,
         participant_auth_id: participantAuthId,
         sender_role: isAdmin ? 'admin' : 'user',
+        // NEW336: attribute admin replies to the admin who wrote them (auth uid).
+        // User rows stay NULL — participant_auth_id already identifies the sender.
+        sender_auth_id: isAdmin ? user.id : null,
         content: safeContent,
         attachments: safeAttachments,
       })
