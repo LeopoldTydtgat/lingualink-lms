@@ -19,19 +19,29 @@ export async function POST(request: Request) {
     // Security: authenticated has no UPDATE grant on support_messages.content, so the
     // edit runs through the admin client after an explicit ownership check. A non-admin
     // may edit only their own messages (participant_auth_id match, sender_role 'user');
-    // an admin may edit only admin replies. Fail closed on any lookup error.
+    // an admin may edit only admin replies they authored themselves (NEW336:
+    // sender_auth_id match) or legacy admin rows with no author recorded
+    // (sender_auth_id NULL — deliberately editable by any admin, no backfill).
+    // Fail closed on any lookup error. The role lookup fails safe too: a query
+    // error returns 500 rather than silently demoting the sender to non-admin
+    // (zero rows is normal — students have no profiles row).
     const admin = createAdminClient()
-    const { data: senderProfile } = await admin
+    const { data: senderProfile, error: senderProfileError } = await admin
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle()
 
+    if (senderProfileError) {
+      console.error('[support/edit] sender profile fetch error:', senderProfileError)
+      return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+    }
+
     const isAdmin = senderProfile?.role === 'admin'
 
     const { data: target, error: fetchError } = await admin
       .from('support_messages')
-      .select('id, participant_auth_id, sender_role, attachments, created_at')
+      .select('id, participant_auth_id, sender_role, sender_auth_id, attachments, created_at')
       .eq('id', messageId)
       .maybeSingle()
 
@@ -44,7 +54,8 @@ export async function POST(request: Request) {
     }
 
     const canEdit = isAdmin
-      ? target.sender_role === 'admin'
+      ? target.sender_role === 'admin' &&
+        (target.sender_auth_id === null || target.sender_auth_id === user.id)
       : target.participant_auth_id === user.id && target.sender_role === 'user'
     if (!canEdit) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -67,10 +78,24 @@ export async function POST(request: Request) {
 
     const safeContent = sanitizeHtml(content ?? '')
 
-    const { data: updated, error } = await admin
+    // Defence-in-depth: re-bind the ownership conditions on the UPDATE itself
+    // (mirrors the messages editMessage actions' .eq('sender_id', ...)), so the
+    // statement can never touch a row the canEdit check above didn't cover.
+    // If the filters match nothing, .single() errors and the edit fails closed.
+    let updateQuery = admin
       .from('support_messages')
       .update({ content: safeContent, edited_at: new Date().toISOString() })
       .eq('id', messageId)
+
+    updateQuery = isAdmin
+      ? updateQuery
+          .eq('sender_role', 'admin')
+          .or(`sender_auth_id.is.null,sender_auth_id.eq.${user.id}`)
+      : updateQuery
+          .eq('participant_auth_id', user.id)
+          .eq('sender_role', 'user')
+
+    const { data: updated, error } = await updateQuery
       .select('id, sender_role, content, attachments, created_at, read_at, edited_at')
       .single()
 

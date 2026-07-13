@@ -1,0 +1,13 @@
+-- NEW336 author attribution on admin support replies: applied live in the
+-- Supabase SQL Editor on 13 Jul 2026. This file captures the change in the repo.
+--
+-- sender_auth_id records WHICH admin wrote an admin reply (the sending admin's
+-- auth.users id, written server-side by api/support/send via the service role).
+-- NULL on user rows (participant_auth_id already identifies the sender) and on
+-- all pre-existing rows — no backfill; a NULL admin row is deliberately editable
+-- by any admin (api/support/edit).
+--
+-- No new grants needed: support_messages SELECT for authenticated is table-level
+-- (see 20260712120001) so the column is covered automatically, and it is only
+-- ever written via the service role.
+alter table public.support_messages add column sender_auth_id uuid;

@@ -493,6 +493,18 @@ export default function StudentMessagesClient({
     t.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
 
+  // Mirrors the teacher client's isBlockedStudent gate (NEW275): the server edit
+  // action re-checks the assignment for EVERY receiver, so the Edit affordance is
+  // hidden when the selected contact is not in the currently-assigned set instead
+  // of letting the save fail server-side. The page only lists assigned contacts at
+  // load, so this only bites a session left open across an unassignment.
+  const assignedTeacherIdSet = useMemo(
+    () => new Set(assignedTeachers.map(t => t.id)),
+    [assignedTeachers]
+  )
+  const isBlockedContact =
+    !!selectedContact && !assignedTeacherIdSet.has(selectedContact.id)
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -692,8 +704,9 @@ export default function StudentMessagesClient({
                           <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             {/* Edit affordance: own messages only, within the 15-minute
                                 window (server re-checks authoritatively), never on a
-                                pending optimistic row. */}
-                            {isFromMe && editingMessageId !== msg.id &&
+                                pending optimistic row. Hidden when the contact is no
+                                longer assigned, matching the server edit gate. */}
+                            {isFromMe && !isBlockedContact && editingMessageId !== msg.id &&
                               !msg.pending && isWithinEditWindow(msg.created_at) && (
                               <button
                                 onClick={() => handleStartEdit(msg)}

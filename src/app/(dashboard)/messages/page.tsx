@@ -5,8 +5,9 @@ import { redirect } from 'next/navigation'
 import MessagesClient from './MessagesClient'
 import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
 
-// Row from the messages select('*'); mirrors MessagesClient's Message so the
-// contacts prop stays assignable. Only created_at is read off latestMessage here.
+// Row from the messages explicit-column select below; mirrors MessagesClient's
+// Message so the contacts prop stays assignable. Only created_at is read off
+// latestMessage here.
 type MessageRow = {
   id: string
   sender_id: string
