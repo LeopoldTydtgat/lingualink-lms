@@ -110,6 +110,7 @@ export async function teacherCancelLesson(
       const emailBody = studentCancellationByTeacherEmailContent(
         teacherName,
         lesson.scheduled_at,
+        lesson.duration_minutes,
         hoursRefunded,
         requireTz(student.timezone, 'cancel-by-teacher:student'),
         messageToStudent
@@ -140,6 +141,7 @@ export async function teacherCancelLesson(
       const teacherEmailBody = teacherCancellationEmailContent(
         student.full_name,
         lesson.scheduled_at,
+        lesson.duration_minutes,
         requireTz(teacherProfile.timezone, 'cancel-by-teacher:teacher')
       )
       await resend.emails.send({

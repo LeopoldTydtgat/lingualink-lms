@@ -216,6 +216,7 @@ export async function GET(request: Request) {
             bodyHtml: teacherReportForfeitedEmailContent(
               student?.full_name ?? 'your student',
               lesson.scheduled_at,
+              lesson.duration_minutes,
               teacherTz
             ),
             contactEmail: 'teachers@lingualinkonline.com',

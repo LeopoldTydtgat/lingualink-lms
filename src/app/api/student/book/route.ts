@@ -190,6 +190,7 @@ export async function POST(req: NextRequest) {
     // Original start time of the rescheduled-from lesson — captured before the RPC
     // cancels it, so the reschedule emails can show "Previous time". Null on a fresh book.
     let oldScheduledAt: string | null = null
+    let oldDurationMinutes: number | null = null
     // NEW257: id of the hours_log ledger row inserted by book_class_atomic.
     // Set only on the fresh-book path below; stays null on the reschedule path
     // (which uses reschedule_class_atomic and is not backfilled here).
@@ -214,6 +215,7 @@ export async function POST(req: NextRequest) {
       oldDurationHours = oldLesson.duration_minutes / 60
       oldTeamsMeetingId = oldLesson.teams_meeting_id ?? null
       oldScheduledAt = oldLesson.scheduled_at ?? null
+      oldDurationMinutes = oldLesson.duration_minutes ?? null
 
       const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
         p_old_lesson_id: rescheduleId,
@@ -558,7 +560,7 @@ export async function POST(req: NextRequest) {
       : 'Lingualink Online - Your class is confirmed'
 
     const studentBodyHtml = isReschedule
-      ? studentRescheduledEmailContent(teacher.full_name, oldScheduledAt, newScheduledAtIso, durationMinutes, studentTimezone)
+      ? studentRescheduledEmailContent(teacher.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone)
       : studentBookingConfirmationEmailContent(teacher.full_name, newScheduledAtIso, durationMinutes, studentTimezone)
 
     const teacherSubject = isReschedule
@@ -566,7 +568,7 @@ export async function POST(req: NextRequest) {
       : `Lingualink Online - New class booked with ${studentRow.full_name}`
 
     const teacherBodyHtml = isReschedule
-      ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, newScheduledAtIso, durationMinutes, teacherTimezone)
+      ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, teacherTimezone)
       : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
 
     await Promise.allSettled([
