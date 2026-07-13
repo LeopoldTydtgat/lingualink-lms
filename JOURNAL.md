@@ -1,3 +1,48 @@
+## Session 202 - 13 July 2026 - Admin edit-class availability annotation and billing audit
+
+### What was built
+Commit e5de79d. The admin edit-class time dropdown previously rendered a
+raw 06:00-22:00 grid with no availability signal, unlike the admin
+booking flow which greys unavailable times. EditClassClient now mirrors
+the booking flow: it fetches the teacher's availability for the chosen
+date, builds a week-wide set of bookable start instants (handling runs
+that cross teacher-local midnight), and annotates each dropdown option,
+greying unavailable times with an "(unavailable)" label. The annotation
+is advisory only; the save-time warning banner remains the gate, and any
+fetch failure falls back to no annotation rather than blocking.
+
+The availability API route gained an optional excludeLessonId parameter
+so the lesson being edited no longer counts as booking its own slot.
+This removes a spurious "outside availability" warning that fired on
+duration-only edits. The parameter is UUID-validated and gated
+server-side to admin and staff callers via the route's existing role
+lookup; student callers receive byte-identical responses whether or not
+the parameter is sent. A security review confirmed overlap is enforced
+independently at insert time on both booking write paths, so the
+advisory endpoint cannot enable a double booking.
+
+### Break/Fix Log
+A reported billing defect (teacher projection not dropping after an
+admin cancellation) was audited read-only across every billing surface:
+the right-panel widget, the teacher billing page, the invoice recompute,
+all admin billing views, and all CSV exports. Every amount flows through
+a single billability function that checks cancellation timing in one
+place. A live database check showed the cancelled class was 20.9 hours
+before start, under the 24 hour threshold, so the teacher is paid and
+the unchanged projection was correct behaviour. Closed as not a bug. The
+client confirmed the intended rule: an admin cancellation under 24 hours
+pays the teacher, which the code already implements. The same audit
+logged a separate open item covering cancel and reschedule attribution
+gaps across admin views, to be fixed in a later session.
+
+### Session result
+Edit-class availability annotation shipped and verified live: dropdown
+annotates correctly, own-slot edits save clean, annotation updates on
+date change, and the student booking flow is unchanged. Billing maths
+verified correct end to end. One commit pushed to dev.
+
+---
+
 ## Session 201 - 13 July 2026 - Edit-own-message on Messages and Support, plus support_messages grants fix
 ### What was built
 - Edit-own-message across all four chat surfaces: teacher Messages, student Messages, teacher support widget, admin Support. Own messages only, content only (attachments untouched), silent edits with an "(edited)" tag, no emails (commit 79eb9f8).
