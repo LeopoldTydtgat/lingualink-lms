@@ -4,6 +4,7 @@ import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
@@ -96,7 +97,7 @@ export async function GET(
           .from('lessons')
           .select(`
             id, scheduled_at, duration_minutes, status,
-            cancelled_at, cancellation_reason,
+            cancelled_at, cancellation_reason, cancelled_by, rescheduled_by,
             teacher_id, student_id, training_id
           `)
           .order('scheduled_at', { ascending: false })
@@ -155,6 +156,24 @@ export async function GET(
             hourlyRate: 0,            // amount unused here — this export only shows Yes/No
             durationMinutes: l.duration_minutes ?? 0,
           }).billableToTeacher
+
+          // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
+          // helper, mirroring the reports export so both admin CSVs read identically.
+          // Non-cancel labels are export-specific and match reports/export/route.ts verbatim.
+          const st = l.status as string
+          const cancelLabel = getCancellationLabel(
+            { status: st, cancelled_by: l.cancelled_by, rescheduled_by: l.rescheduled_by },
+            'admin'
+          )
+          let statusLabel: string
+          if (cancelLabel !== null) statusLabel = cancelLabel
+          else if (st === 'completed') statusLabel = 'Taken'
+          else if (st === 'student_no_show') statusLabel = 'Student No-Show'
+          else if (st === 'teacher_no_show') statusLabel = 'Teacher No-Show'
+          else if (st === 'scheduled') statusLabel = 'Scheduled'
+          else if (st === 'missed') statusLabel = 'Missed'
+          else statusLabel = st
+
           return {
             [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
             [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
@@ -162,7 +181,7 @@ export async function GET(
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
             'Duration (min)': l.duration_minutes,
-            'Status': l.status,
+            'Status': statusLabel,
             'Report Status': report?.status ?? 'no report',
             'Billable to Teacher': billable ? 'Yes' : 'No',
             'Cancellation Reason': l.cancellation_reason ?? '',
@@ -407,7 +426,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, student_id, teacher_id')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id')
           .in('student_id', studentIds)
           .order('scheduled_at', { ascending: false })
 
@@ -450,13 +469,30 @@ export async function GET(
           const billable24 = bill.billableToTeacher
           const billable48 = bill.billable48hr
 
+          // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
+          // helper, mirroring the all-classes export so both admin CSVs read identically.
+          // Display-only: getBillability above still keys off the raw l.status.
+          const st = l.status as string
+          const cancelLabel = getCancellationLabel(
+            { status: st, cancelled_by: l.cancelled_by, rescheduled_by: l.rescheduled_by },
+            'admin'
+          )
+          let statusLabel: string
+          if (cancelLabel !== null) statusLabel = cancelLabel
+          else if (st === 'completed') statusLabel = 'Taken'
+          else if (st === 'student_no_show') statusLabel = 'Student No-Show'
+          else if (st === 'teacher_no_show') statusLabel = 'Teacher No-Show'
+          else if (st === 'scheduled') statusLabel = 'Scheduled'
+          else if (st === 'missed') statusLabel = 'Missed'
+          else statusLabel = st
+
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
             [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
             [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
-            'Status': l.status,
+            'Status': statusLabel,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
             'Billable cancellation (48hr policy)': billable48 ? 'Yes' : 'No',
             'Amount': bill.companyAmount,
