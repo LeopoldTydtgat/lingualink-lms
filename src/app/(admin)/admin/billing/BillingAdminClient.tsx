@@ -848,11 +848,12 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             <p className="text-sm text-gray-400">No classes found for this period.</p>
                           ) : (
                             <>
-                              <div className="grid grid-cols-6 gap-3 text-xs font-medium text-gray-400 uppercase mb-2">
+                              <div className="grid grid-cols-7 gap-3 text-xs font-medium text-gray-400 uppercase mb-2">
                                 <span className="col-span-2">Student</span>
                                 <span>Date &amp; Time</span>
                                 <span>Duration</span>
-                                <span>Status</span>
+                                <span>Class Status</span>
+                                <span>Billing</span>
                                 <span className="text-right">Amount</span>
                               </div>
                               {lessonData.map(l => {
@@ -865,10 +866,11 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                                   durationMinutes: l.duration_minutes,
                                 })
                                 return (
-                                  <div key={l.id} className="grid grid-cols-6 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
+                                  <div key={l.id} className="grid grid-cols-7 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
                                     <span className="col-span-2 text-gray-900 truncate">{l.studentName}</span>
                                     <span className="text-gray-500">{formatDateTime(l.scheduled_at)}</span>
                                     <span className="text-gray-500">{l.duration_minutes} min</span>
+                                    <span className="text-gray-600">{getLessonStatusLabel(l)}</span>
                                     <span className="text-xs font-medium" style={{ color: bill.labelColor }}>{bill.label}</span>
                                     <span className="text-right text-gray-700">
                                       {bill.billableToTeacher ? `${currencySymbol(l.teacherCurrency)}${bill.amount.toFixed(2)}` : '—'}
