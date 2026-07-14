@@ -171,7 +171,6 @@ export const UpdateTeacherSchema = z.object({
   admin_notes: z.string().max(10_000).optional().nullable(),
   follow_up_reason: z.string().max(1000).optional().nullable(),
   preferred_payment_type: z.string().max(50).optional().nullable(),
-  is_active: z.boolean().optional(),
 })
 
 export type UpdateTeacherInput = z.infer<typeof UpdateTeacherSchema>

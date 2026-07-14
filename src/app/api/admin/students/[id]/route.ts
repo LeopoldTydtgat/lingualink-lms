@@ -106,7 +106,7 @@ export async function PATCH(
     } = parsed.data
 
     // Explicit allowlist — never spread the body. Excludes id, auth_user_id,
-    // created_at, is_active, profile_completed and anything else the client
+    // created_at, profile_completed and anything else the client
     // is not allowed to set.
     const studentUpdate: Record<string, unknown> = {
       full_name:             parsed.data.full_name,

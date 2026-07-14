@@ -191,8 +191,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to load teacher timezone' }, { status: 500 })
   }
   // Eligibility gate: the assignment target must be an active teacher. status='current'
-  // is the canonical active-account gate; is_active is deprecated (CLAUDE.md L135 /
-  // JOURNAL Bug 8). Runs before scheduledAtUtc and before the lesson insert.
+  // is the canonical active-account gate (CLAUDE.md L135 / JOURNAL Bug 8). Runs before
+  // scheduledAtUtc and before the lesson insert.
   const isEligibleTeacher =
     !!teacherProfile &&
     teacherProfile.status === 'current' &&

@@ -159,7 +159,6 @@ export async function POST(req: NextRequest) {
         qualifications: data.qualifications ?? null,
         teaching_languages: data.teaching_languages ?? [],
         speaking_languages: data.native_languages ?? [],
-        is_active: true,
         preferred_payment_type: data.preferred_payment_type ?? null,
         paypal_email: data.paypal_email ?? null,
         banking_details: data.banking_details ?? null,
