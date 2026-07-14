@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
@@ -196,20 +196,24 @@ export async function PATCH(
       }
     }
 
+    // Resolve teacher + student once, ahead of both cancellation-email blocks below —
+    // mirrors the reschedule branch's up-front fetch. Widened to include teacher
+    // email/timezone (previously full_name-only) so the teacher block below needs
+    // no second round-trip.
+    const { data: teacherProfile } = await adminClient
+      .from('profiles')
+      .select('full_name, email, timezone')
+      .eq('id', existing.teacher_id)
+      .single()
+
+    const { data: studentData } = await adminClient
+      .from('students')
+      .select('full_name, email, timezone')
+      .eq('id', existing.student_id)
+      .single()
+
     // Send cancellation email to student
     try {
-      const { data: teacherProfile } = await adminClient
-        .from('profiles')
-        .select('full_name')
-        .eq('id', existing.teacher_id)
-        .single()
-
-      const { data: studentData } = await adminClient
-        .from('students')
-        .select('full_name, email, timezone')
-        .eq('id', existing.student_id)
-        .single()
-
       if (studentData?.email) {
         const emailHoursValue = refunded ? hoursToRefund : 0
         const emailBody = studentCancellationByAdminEmailContent(
@@ -235,6 +239,34 @@ export async function PATCH(
       }
     } catch (emailErr) {
       console.error('[Email] Admin cancellation email failed — lesson still cancelled:', emailErr)
+      Sentry.captureException(emailErr)
+    }
+
+    // Send cancellation email to teacher
+    try {
+      if (teacherProfile?.email) {
+        const teacherEmailBody = teacherCancellationEmailContent(
+          studentData?.full_name ?? 'Student',
+          existing.scheduled_at,
+          existing.duration_minutes,
+          requireTz(teacherProfile.timezone, 'admin-cancel:teacher'),
+          cancellation_reason ?? undefined
+        )
+        await resend.emails.send({
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+          to: teacherProfile.email,
+          subject: 'Lingualink Online - Your class has been cancelled',
+          html: buildEmailTemplate({
+            recipientName: teacherProfile.full_name ?? 'Teacher',
+            recipientFallback: 'Teacher',
+            subject: 'Class cancelled',
+            bodyHtml: teacherEmailBody,
+            contactEmail: 'teachers@lingualinkonline.com',
+          }),
+        })
+      }
+    } catch (emailErr) {
+      console.error('[Email] Admin cancellation teacher email failed — lesson still cancelled:', emailErr)
       Sentry.captureException(emailErr)
     }
 

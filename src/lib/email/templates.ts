@@ -212,17 +212,22 @@ export function teacherCancellationEmailContent(
   studentName: string,
   scheduledAt: string,
   durationMinutes: number,
-  teacherTimezone: string
+  teacherTimezone: string,
+  cancellationReason?: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
+  const rows: { label: string; value: string }[] = [
+    { label: 'Cancelled class', value: formattedTime },
+    { label: 'Student', value: studentName },
+  ]
+  if (cancellationReason) {
+    rows.push({ label: 'Reason', value: cancellationReason })
+  }
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled. Your schedule has been updated.
     </p>
-    ${buildDetailsTable('Cancellation details', [
-      { label: 'Cancelled class', value: formattedTime },
-      { label: 'Student', value: studentName },
-    ])}
+    ${buildDetailsTable('Cancellation details', rows)}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}
   `
 }
