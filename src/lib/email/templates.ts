@@ -256,7 +256,8 @@ export function teacherRescheduledEmailContent(
   oldDurationMinutes: number | null,
   newScheduledAt: string,
   durationMinutes: number,
-  teacherTimezone: string
+  teacherTimezone: string,
+  initiatedBy: 'student' | 'admin'
 ): string {
   const newTime = formatClassTime(newScheduledAt, teacherTimezone, durationMinutes)
   const rows: { label: string; value: string }[] = []
@@ -268,9 +269,12 @@ export function teacherRescheduledEmailContent(
   }
   rows.push({ label: 'Duration', value: `${durationMinutes} minutes` })
   rows.push({ label: 'Student', value: studentName })
+  const openingSentence = initiatedBy === 'student'
+    ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been rescheduled by the student.`
+    : `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been rescheduled by Lingualink admin.`
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class with <strong style="color:#FF8303;">${studentName}</strong> has been rescheduled.
+      ${openingSentence}
     </p>
     ${buildDetailsTable('Class details', rows)}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View Upcoming Classes')}
@@ -360,7 +364,8 @@ export function studentRescheduledEmailContent(
   oldDurationMinutes: number | null,
   newScheduledAt: string,
   durationMinutes: number,
-  studentTimezone: string
+  studentTimezone: string,
+  initiatedBy: 'student' | 'admin'
 ): string {
   const newTime = formatClassTime(newScheduledAt, studentTimezone, durationMinutes)
   const rows: { label: string; value: string }[] = []
@@ -371,9 +376,12 @@ export function studentRescheduledEmailContent(
     rows.push({ label: 'Class time', value: newTime })
   }
   rows.push({ label: 'Duration', value: `${durationMinutes} minutes` })
+  const openingSentence = initiatedBy === 'student'
+    ? `Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled as requested.`
+    : `Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled by Lingualink admin.`
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled.
+      ${openingSentence}
     </p>
     ${buildDetailsTable('Class details', rows)}
     ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/my-classes`, 'View My Classes')}

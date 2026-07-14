@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
 import { isCancelledStatus } from '@/lib/billing/billability'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
 import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
 
@@ -30,6 +31,7 @@ interface Lesson {
   cancelled_at: string | null
   cancellation_reason: string | null
   cancelled_by: string | null
+  rescheduled_by: string | null
   teacher_id: string
   training_id: string
   teacher: Teacher | null
@@ -119,16 +121,6 @@ function getSecondsUntil(isoString: string, now: number): number {
 
 function isWithin24Hours(isoString: string, now: number): boolean {
   return getSecondsUntil(isoString, now) < 86400
-}
-
-// Maps the cancelled_by value to a student-facing label (student is the viewer here).
-function cancelledByLabel(cancelledBy: string): string {
-  switch (cancelledBy) {
-    case 'teacher': return 'Cancelled by your teacher'
-    case 'student': return 'Cancelled by you'
-    case 'admin': return 'Cancelled by admin'
-    default: return 'Cancelled'
-  }
 }
 
 export default function MyClassesClient({
@@ -484,6 +476,7 @@ export default function MyClassesClient({
                 {/* Lessons within this day */}
                 {isExpanded && dayLessons.map((lesson, i) => {
                   const isCancelled = isCancelledStatus(lesson.status)
+                  const cancelLabel = getCancellationLabel(lesson, 'student')
                   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
                   const secondsUntil = mounted ? getSecondsUntil(lesson.scheduled_at, now) : 0
                   const isLast = i === dayLessons.length - 1
@@ -670,9 +663,9 @@ export default function MyClassesClient({
                           </div>
                         )}
 
-                        {isCancelled && lesson.cancelled_by && (
+                        {(lesson.cancelled_by || lesson.rescheduled_by) && cancelLabel && (
                           <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                            {cancelledByLabel(lesson.cancelled_by)}
+                            {cancelLabel}
                           </p>
                         )}
                       </div>
@@ -713,6 +706,7 @@ export default function MyClassesClient({
 
               {cancelledSectionExpanded && cancelledLessons.map((lesson, i) => {
                 const isCancelled = isCancelledStatus(lesson.status)
+                const cancelLabel = getCancellationLabel(lesson, 'student')
                 const within24 = false
                 const secondsUntil = 0
                 const isLast = i === cancelledLessons.length - 1
@@ -836,9 +830,9 @@ export default function MyClassesClient({
                         )}
                       </div>
 
-                      {isCancelled && lesson.cancelled_by && (
+                      {(lesson.cancelled_by || lesson.rescheduled_by) && cancelLabel && (
                         <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                          {cancelledByLabel(lesson.cancelled_by)}
+                          {cancelLabel}
                         </p>
                       )}
                     </div>

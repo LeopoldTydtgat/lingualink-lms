@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 interface Teacher {
   id: string
@@ -16,6 +17,8 @@ interface Lesson {
   status: string
   cancelled_at: string | null
   cancellation_reason: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   teams_join_url: string | null
   teacher_id: string
   student_id: string
@@ -354,6 +357,7 @@ export default function ClassesListClient({ teachers }: Props) {
         ) : (
           lessons.map((lesson, index) => {
             const statusMeta = getStatusMeta(lesson.status)
+            const statusLabel = getCancellationLabel(lesson, 'admin') ?? statusMeta.label
             return (
               <div
                 key={lesson.id}
@@ -445,7 +449,7 @@ export default function ClassesListClient({ teachers }: Props) {
                   color: statusMeta.color,
                   width: 'fit-content',
                 }}>
-                  {statusMeta.label}
+                  {statusLabel}
                 </span>
 
                 {filterStatus === 'cancelled' && (

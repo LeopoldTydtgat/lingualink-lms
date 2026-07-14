@@ -289,9 +289,9 @@ export async function PATCH(
   const teacherChanged = typeof fields.teacher_id === 'string' && fields.teacher_id !== existing.teacher_id
 
   // Eligibility gate: when the assignment is actually changing, the new teacher must
-  // be an active teacher. status='current' is the canonical active-account gate;
-  // is_active is deprecated (CLAUDE.md L135 / JOURNAL Bug 8). Keyed on teacherChanged
-  // and placed independently of the scheduled_at block below, so a teacher-only
+  // be an active teacher. status='current' is the canonical active-account gate
+  // (CLAUDE.md L135 / JOURNAL Bug 8). Keyed on teacherChanged and placed
+  // independently of the scheduled_at block below, so a teacher-only
   // reassignment (no time change) is still validated — and always before the update.
   if (teacherChanged && fields.teacher_id) {
     const { data: candidateTeacher, error: candidateError } = await adminClient
@@ -572,7 +572,8 @@ export async function PATCH(
           existing.duration_minutes,
           newScheduledAt,
           newDuration,
-          studentTz
+          studentTz,
+          'admin'
         )
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
@@ -604,7 +605,8 @@ export async function PATCH(
           existing.duration_minutes,
           newScheduledAt,
           newDuration,
-          teacherTz
+          teacherTz,
+          'admin'
         )
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',

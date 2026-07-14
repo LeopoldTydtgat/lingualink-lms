@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 interface Profile {
   id: string
@@ -29,6 +30,8 @@ interface Lesson {
   duration_minutes: number
   status: string
   cancelled_at: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   students: { full_name: string } | { full_name: string }[] | null
   // Per-lesson pay rate resolved server-side (snapshot ?? live profiles.hourly_rate).
   rate: number
@@ -65,15 +68,14 @@ function formatDateTime(dateStr: string): string {
   return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
-function getStatusLabel(status: string): string {
-  switch (status) {
+function getStatusLabel(lesson: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }): string {
+  const cancelLabel = getCancellationLabel(lesson, 'teacher')
+  if (cancelLabel !== null) return cancelLabel
+  switch (lesson.status) {
     case 'completed': return 'Completed'
     case 'student_no_show': return 'Student absent'
     case 'teacher_no_show': return 'Teacher absent'
-    case 'cancelled': return 'Cancelled'
-    case 'cancelled_by_student': return 'Cancelled by student'
-    case 'cancelled_by_teacher': return 'Cancelled by you'
-    default: return status
+    default: return lesson.status
   }
 }
 
@@ -426,7 +428,7 @@ export default function BillingClient({
                                   className="text-xs px-2 py-0.5 rounded-full text-white"
                                   style={{ backgroundColor: getLessonStatusColor(lesson.status) }}
                                 >
-                                  {getStatusLabel(lesson.status)}
+                                  {getStatusLabel(lesson)}
                                 </span>
                                 <span className="text-sm text-gray-900 w-20 text-right">
                                   {bill.billableToTeacher ? `${sym}${bill.amount.toFixed(2)}` : `${sym}0.00`}

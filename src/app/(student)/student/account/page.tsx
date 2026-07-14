@@ -21,7 +21,7 @@ export default async function StudentAccountPage() {
   // Get student record — exclude admin-only columns to avoid leaking sensitive data
   const { data: student, error: studentError } = await admin
     .from('students')
-    .select('id, auth_user_id, full_name, email, photo_url, phone, timezone, language_preference, learning_goals, interests, self_assessed_level, placement_test_result, placement_test_taken_at, company_id, customer_number, is_private, academic_advisor_id, status, native_language, learning_language, current_fluency_level, is_active, created_at, updated_at')
+    .select('id, auth_user_id, full_name, email, photo_url, phone, timezone, language_preference, learning_goals, interests, self_assessed_level, placement_test_result, placement_test_taken_at, company_id, customer_number, is_private, academic_advisor_id, status, native_language, learning_language, current_fluency_level, created_at, updated_at')
     .eq('auth_user_id', user.id)
     .single()
 

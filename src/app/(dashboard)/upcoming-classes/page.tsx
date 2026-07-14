@@ -29,6 +29,7 @@ export default async function UpcomingClassesPage() {
         cancelled_at,
         cancellation_reason,
         cancelled_by,
+        rescheduled_by,
         students (
           id,
           full_name,
@@ -60,6 +61,7 @@ export default async function UpcomingClassesPage() {
       cancelled_at: l.cancelled_at ?? null,
       cancellation_reason: l.cancellation_reason ?? null,
       cancelled_by: l.cancelled_by ?? null,
+      rescheduled_by: l.rescheduled_by ?? null,
       student,
     }
   })

@@ -13,6 +13,8 @@ type LessonRow = {
   duration_minutes: number
   status: string
   cancelled_at: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   students: { full_name: string } | { full_name: string }[] | null
   // Per-lesson pay rate resolved server-side (snapshot ?? live profiles.hourly_rate).
   rate: number
@@ -105,7 +107,7 @@ export default async function BillingPage() {
   // doesn't need a separate effect after the loadData removal.
   const { data: lessons } = await admin
     .from('lessons')
-    .select('id, scheduled_at, duration_minutes, status, cancelled_at, students(full_name)')
+    .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, students(full_name)')
     .eq('teacher_id', user.id)
     .in('status', MONTH_BILLING_PREFILTER_STATUSES)
     .order('scheduled_at', { ascending: true })

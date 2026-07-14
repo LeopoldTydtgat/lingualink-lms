@@ -1,3 +1,24 @@
+## Session 203 - 14 July 2026 - Cancellation and reschedule attribution across every admin view
+
+### What was built
+Closed out the attribution work started in the previous session. The system stored who cancelled a class and who rescheduled it, but almost nothing displayed it, so a class the student rescheduled and a class the admin cancelled both rendered as a bare "Cancelled". That is a truthfulness problem rather than a money problem, but it lands in the two places the client actually reconciles against: the teacher invoice detail and the CSV she sends to a B2B company.
+
+A shared labeller now owns the wording. It is deliberately scoped to the cancellation family only, because the eight views that display class status use different wording and different palettes for the other statuses, and unifying those is a design decision rather than a bug fix. The labeller distinguishes a real cancellation from the dead leg a reschedule leaves behind, resolves the actor from an explicit attribution column with a fallback to the status suffix for legacy rows, and phrases the result differently depending on whether the reader is the admin, the teacher or the student, so the student sees "Cancelled by you" where the admin sees "Cancelled by student".
+
+Both reschedule emails now name whoever initiated the move. The admin edit route stamps itself as the actor when it changes a class time, and does so only when the time actually changed, so a duration-only edit no longer misattributes anything.
+
+### Break/Fix Log
+An admin time edit leaves the class live and scheduled. It does not create a dead leg. The labeller checked the reschedule stamp before it resolved the cancellation actor, which meant a class the admin had merely moved, and the student later cancelled, would announce itself as "Rescheduled by admin" in every view including the invoice detail and the exports. A second door led to the same place: the routine that unwinds a failed reschedule restored the class to scheduled but left the reschedule stamp behind on it. Both were fixed in the database by having the cancellation and unwind routines clear the stamp as part of the same update, with the function signatures left untouched so the existing grants survived. Verified against the live catalogue, and a repository-wide search confirmed no route writes a cancelled status outside those two routines.
+
+Two further gaps surfaced on inspection. The all-classes and company-billing CSV exports were still writing the raw database enum, so nine rows collapsed to an undifferentiated "cancelled" in the file used to invoice a company. And the teacher invoice detail had no class-status column at all: its status column showed billability, so a cancellation and a reschedule leg looked identical to anyone reconciling a teacher's monthly invoice. Both fixed. Billing calculations still read the raw status; the label is display-only and cannot feed a number.
+
+A last one surfaced from a screenshot rather than from a test: two of the on-screen labels had no case for a scheduled or a missed class and fell through to printing the raw lowercase database value. Three lines.
+
+### Session result
+Six commits. Attribution is now consistent across the teacher portal, the student portal, every admin view, both reschedule emails, and all three CSV exports. Eight live scenarios tested end to end, including the one that proves the database fix: a class moved by the admin and then cancelled by the student now correctly reads "Cancelled by student".
+
+---
+
 ## Session 202 - 13 July 2026 - Admin edit-class availability annotation and billing audit
 
 ### What was built

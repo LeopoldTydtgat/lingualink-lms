@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -58,6 +59,8 @@ type Lesson = {
   scheduled_at: string
   duration_minutes: number
   status: string
+  cancelled_by: string | null
+  rescheduled_by: string | null
   teacher_name: string
 }
 
@@ -129,7 +132,7 @@ function StatusBadge({ status }: { status: string | null }) {
   )
 }
 
-function LessonStatusBadge({ status }: { status: string }) {
+function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }) {
   const meta: Record<string, { bg: string; color: string; label: string }> = {
     completed: { bg: '#dcfce7', color: '#166534', label: 'Completed' },
     scheduled: { bg: '#dbeafe', color: '#1e40af', label: 'Scheduled' },
@@ -140,12 +143,15 @@ function LessonStatusBadge({ status }: { status: string }) {
     teacher_no_show: { bg: '#fee2e2', color: '#dc2626', label: 'Teacher no show' },
   }
   const entry = meta[status] ?? { bg: '#f3f4f6', color: '#6b7280', label: status.replace(/_/g, ' ') }
+  // Colour keys off status (via meta); the label gets cancellation/reschedule
+  // attribution from the shared helper when the row is in the cancelled family.
+  const label = getCancellationLabel({ status, cancelled_by, rescheduled_by }, 'admin') ?? entry.label
   return (
     <span
       className="px-2 py-0.5 rounded-full text-xs font-medium"
       style={{ backgroundColor: entry.bg, color: entry.color }}
     >
-      {entry.label}
+      {label}
     </span>
   )
 }
@@ -851,7 +857,7 @@ export default function StudentDetailClient({
                     </td>
                     <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
                     <td className="px-4 py-3">
-                      <LessonStatusBadge status={lesson.status} />
+                      <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
                     </td>
                   </tr>
                 ))

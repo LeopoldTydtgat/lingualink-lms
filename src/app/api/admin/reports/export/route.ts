@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getExportTimezone, tzLabel } from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
+import { getCancellationLabel } from '@/lib/lessons/statusLabel';
 
 export const runtime = 'nodejs';
 
@@ -92,7 +93,7 @@ export async function GET(request: NextRequest) {
     let query = admin
       .from('lessons')
       .select(`
-        id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, teacher_id, student_id,
+        id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, teacher_id, student_id,
         profiles!lessons_teacher_id_fkey ( full_name ),
         reports ( status, completed_at, feedback_text, did_class_happen, no_show_type, flagged_at ),
         lesson_rate_snapshots ( hourly_rate ),
@@ -163,21 +164,20 @@ export async function GET(request: NextRequest) {
         isCompanyBucket = false;
       }
 
-      // Outcome from lesson status + cancellation attribution.
+      // Outcome from lesson status + cancellation attribution. Cancellation-family
+      // wording (incl. reschedule-leg attribution) comes from the shared helper;
+      // the non-cancel labels below are export-specific and stay verbatim.
       let outcome: string;
       const st = l.status as string;
-      if (st === 'completed') outcome = 'Taken';
+      const cancelOutcome = getCancellationLabel(
+        { status: st, cancelled_by: l.cancelled_by, rescheduled_by: l.rescheduled_by },
+        'admin'
+      );
+      if (cancelOutcome !== null) outcome = cancelOutcome;
+      else if (st === 'completed') outcome = 'Taken';
       else if (st === 'student_no_show') outcome = 'Student No-Show';
       else if (st === 'teacher_no_show') outcome = 'Teacher No-Show';
-      else if (st === 'cancelled_by_student') outcome = 'Cancelled by Student';
-      else if (st === 'cancelled_by_teacher') outcome = 'Cancelled by Teacher';
-      else if (st === 'cancelled') {
-        const by = l.cancelled_by;
-        if (by === 'student') outcome = 'Cancelled by Student';
-        else if (by === 'teacher') outcome = 'Cancelled by Teacher';
-        else if (by === 'admin') outcome = 'Cancelled by Admin';
-        else outcome = 'Cancelled (unattributed)';
-      } else if (st === 'scheduled') outcome = 'Scheduled';
+      else if (st === 'scheduled') outcome = 'Scheduled';
       else outcome = st;
 
       // Cancellation window: absolute-instant gap between schedule and cancellation (tz-independent).

@@ -7,6 +7,7 @@ import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { isCancelledStatus } from '@/lib/billing/billability'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
 import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
 
@@ -27,6 +28,7 @@ type Class = {
   cancelled_at: string | null
   cancellation_reason: string | null
   cancelled_by: string | null
+  rescheduled_by: string | null
   student: Student
 }
 
@@ -117,16 +119,6 @@ function Countdown({ startsAt }: { startsAt: string }) {
   return <span className="font-mono text-sm" style={{ color: '#FF8303' }}>{timeLeft}</span>
 }
 
-// Maps the cancelled_by value to a teacher-facing label (teacher is the viewer here).
-function cancelledByLabel(cancelledBy: string): string {
-  switch (cancelledBy) {
-    case 'teacher': return 'Cancelled by you'
-    case 'student': return 'Cancelled by student'
-    case 'admin': return 'Cancelled by admin'
-    default: return 'Cancelled'
-  }
-}
-
 function ChevronIcon({ rotated }: { rotated: boolean }) {
   return (
     <svg
@@ -174,6 +166,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
   const [expanded, setExpanded] = useState(false)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
+  const cancelLabel = getCancellationLabel(cls, 'teacher')
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
   const isNext = mounted && cls.id === nextId && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
@@ -228,9 +221,9 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
                 : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
               : ''}
           </p>
-          {isCancelled && cls.cancelled_by && (
+          {(cls.cancelled_by || cls.rescheduled_by) && cancelLabel && (
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
-              {cancelledByLabel(cls.cancelled_by)}
+              {cancelLabel}
             </p>
           )}
         </div>

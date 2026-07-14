@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 import { formatInstantInTz, tzLabel } from '@/lib/exportTime'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,8 @@ interface LessonRow {
   duration_minutes: number
   status: string
   cancelled_at: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   // hydrated after join
   teacherName: string
   studentName: string
@@ -99,15 +102,16 @@ function getInvoiceStatusColor(status: string): string {
   }
 }
 
-function getLessonStatusLabel(status: string): string {
-  switch (status) {
+function getLessonStatusLabel(lesson: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }): string {
+  const cancelLabel = getCancellationLabel(lesson, 'admin')
+  if (cancelLabel !== null) return cancelLabel
+  switch (lesson.status) {
     case 'completed': return 'Completed'
     case 'student_no_show': return 'Student absent'
     case 'teacher_no_show': return 'Teacher absent'
-    case 'cancelled': return 'Cancelled'
-    case 'cancelled_by_student': return 'Cancelled by student'
-    case 'cancelled_by_teacher': return 'Cancelled by teacher'
-    default: return status
+    case 'scheduled': return 'Scheduled'
+    case 'missed': return 'Missed'
+    default: return lesson.status
   }
 }
 
@@ -256,6 +260,8 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     duration_minutes: number
     status: string
     cancelled_at: string | null
+    cancelled_by?: string | null
+    rescheduled_by?: string | null
   }[]): Promise<LessonRow[]> => {
     if (!rawLessons.length) return []
 
@@ -302,6 +308,8 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
 
       return {
         ...l,
+        cancelled_by: l.cancelled_by ?? null,
+        rescheduled_by: l.rescheduled_by ?? null,
         teacherName: t.full_name,
         studentName: s.full_name,
         hourlyRate,
@@ -334,7 +342,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
 
     const { data: raw } = await supabase
       .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
+      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
       .eq('teacher_id', teacherId)
       .gte('scheduled_at', startUtc)
       .lt('scheduled_at', endUtc)
@@ -414,7 +422,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
 
     let query = supabase
       .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
+      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
       .in('status', SETTLED_LESSON_STATUSES)
       .order('scheduled_at', { ascending: false })
 
@@ -453,7 +461,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
 
     let lessonsQuery = supabase
       .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at')
+      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
       .in('student_id', studentIds)
       .in('status', SETTLED_LESSON_STATUSES)
       .order('scheduled_at', { ascending: false })
@@ -528,7 +536,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
         l.teacherName,
         formatInstantInTz(l.scheduled_at, exportTz),
         l.duration_minutes,
-        getLessonStatusLabel(l.status),
+        getLessonStatusLabel(l),
         bill.label,
         bill.billableToTeacher ? bill.amount.toFixed(2) : '',
         l.teacherCurrency ?? 'EUR',
@@ -842,11 +850,12 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             <p className="text-sm text-gray-400">No classes found for this period.</p>
                           ) : (
                             <>
-                              <div className="grid grid-cols-6 gap-3 text-xs font-medium text-gray-400 uppercase mb-2">
+                              <div className="grid grid-cols-7 gap-3 text-xs font-medium text-gray-400 uppercase mb-2">
                                 <span className="col-span-2">Student</span>
                                 <span>Date &amp; Time</span>
                                 <span>Duration</span>
-                                <span>Status</span>
+                                <span>Class Status</span>
+                                <span>Billing</span>
                                 <span className="text-right">Amount</span>
                               </div>
                               {lessonData.map(l => {
@@ -859,10 +868,11 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                                   durationMinutes: l.duration_minutes,
                                 })
                                 return (
-                                  <div key={l.id} className="grid grid-cols-6 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
+                                  <div key={l.id} className="grid grid-cols-7 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
                                     <span className="col-span-2 text-gray-900 truncate">{l.studentName}</span>
                                     <span className="text-gray-500">{formatDateTime(l.scheduled_at)}</span>
                                     <span className="text-gray-500">{l.duration_minutes} min</span>
+                                    <span className="text-gray-600">{getLessonStatusLabel(l)}</span>
                                     <span className="text-xs font-medium" style={{ color: bill.labelColor }}>{bill.label}</span>
                                     <span className="text-right text-gray-700">
                                       {bill.billableToTeacher ? `${currencySymbol(l.teacherCurrency)}${bill.amount.toFixed(2)}` : '—'}
@@ -1001,7 +1011,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                         </div>
                         <span className="text-gray-600 self-center">{formatDateTime(l.scheduled_at)}</span>
                         <span className="text-gray-600 self-center">{l.duration_minutes} min</span>
-                        <span className="text-gray-600 self-center">{getLessonStatusLabel(l.status)}</span>
+                        <span className="text-gray-600 self-center">{getLessonStatusLabel(l)}</span>
                         <span className="text-right self-center text-xs font-medium" style={{ color: bill.labelColor }}>
                           {bill.label}
                         </span>
@@ -1202,7 +1212,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             </div>
                             <span className="text-gray-600 self-center">{formatDateTime(l.scheduled_at)}</span>
                             <span className="text-gray-600 self-center">{l.duration_minutes} min</span>
-                            <span className="text-gray-600 self-center">{getLessonStatusLabel(l.status)}</span>
+                            <span className="text-gray-600 self-center">{getLessonStatusLabel(l)}</span>
                             <span className="text-right self-center text-xs font-medium" style={{ color: bill.labelColor }}>
                               {bill.label}
                             </span>

@@ -208,7 +208,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     const { data } = await supabase
       .from('students')
       .select('id, full_name, email, photo_url')
-      .eq('is_active', true)
+      .eq('status', 'current')
       .order('full_name')
     allStudents = data || []
   } else {
@@ -218,7 +218,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         .from('students')
         .select('id, full_name, email, photo_url')
         .in('id', [...assignedStudentIds])
-        .eq('is_active', true)
+        .eq('status', 'current')
         .order('full_name')
       allStudents = data || []
     }
