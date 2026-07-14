@@ -109,6 +109,8 @@ function getLessonStatusLabel(lesson: { status: string; cancelled_by?: string | 
     case 'completed': return 'Completed'
     case 'student_no_show': return 'Student absent'
     case 'teacher_no_show': return 'Teacher absent'
+    case 'scheduled': return 'Scheduled'
+    case 'missed': return 'Missed'
     default: return lesson.status
   }
 }
