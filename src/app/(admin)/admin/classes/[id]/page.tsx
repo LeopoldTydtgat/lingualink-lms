@@ -35,6 +35,8 @@ export default async function AdminClassDetailPage({
       status,
       cancelled_at,
       cancellation_reason,
+      cancelled_by,
+      rescheduled_by,
       hours_refunded,
       teams_join_url,
       teams_meeting_id,

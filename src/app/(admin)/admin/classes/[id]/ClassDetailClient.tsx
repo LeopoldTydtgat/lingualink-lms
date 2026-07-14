@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { BLOCKED_STATUSES, isCancelledStatus } from '@/lib/billing/billability'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 interface LessonDetail {
   id: string
@@ -12,6 +13,8 @@ interface LessonDetail {
   status: string
   cancelled_at: string | null
   cancellation_reason: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   hours_refunded: boolean | null
   teams_join_url: string | null
   teams_meeting_id: string | null
@@ -76,6 +79,7 @@ export default function ClassDetailClient({ lesson }: Props) {
   }, [])
 
   const statusMeta = getStatusMeta(lesson.status)
+  const statusLabel = getCancellationLabel(lesson, 'admin') ?? statusMeta.label
   const isCancellable = ['scheduled'].includes(lesson.status)
   const isCancelled = isCancelledStatus(lesson.status)
 
@@ -147,7 +151,7 @@ export default function ClassDetailClient({ lesson }: Props) {
             padding: '4px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 600,
             backgroundColor: statusMeta.bg, color: statusMeta.color,
           }}>
-            {statusMeta.label}
+            {statusLabel}
           </span>
           <Link href={`/admin/classes/${lesson.id}/edit`} prefetch={false}>
             <button style={{

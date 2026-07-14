@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
       status,
       cancelled_at,
       cancellation_reason,
+      cancelled_by,
+      rescheduled_by,
       teams_join_url,
       training_id,
       teacher_id,

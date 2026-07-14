@@ -79,6 +79,8 @@ export default async function StudentDetailPage({
       scheduled_at,
       duration_minutes,
       status,
+      cancelled_by,
+      rescheduled_by,
       profiles:teacher_id (
         full_name
       )
@@ -93,6 +95,8 @@ export default async function StudentDetailPage({
     scheduled_at: l.scheduled_at,
     duration_minutes: l.duration_minutes,
     status: l.status,
+    cancelled_by: l.cancelled_by ?? null,
+    rescheduled_by: l.rescheduled_by ?? null,
     teacher_name: Array.isArray(l.profiles)
       ? (l.profiles[0] as { full_name: string } | undefined)?.full_name ?? '—'
       : (l.profiles as { full_name: string } | null)?.full_name ?? '—',

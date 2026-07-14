@@ -46,6 +46,8 @@ export default async function TeacherDetailPage({
       scheduled_at,
       duration_minutes,
       status,
+      cancelled_by,
+      rescheduled_by,
       students (
         full_name
       )

@@ -36,6 +36,7 @@ export default async function MyClassesPage() {
       cancelled_at,
       cancellation_reason,
       cancelled_by,
+      rescheduled_by,
       teacher_id,
       training_id,
       teacher:profiles!teacher_id (
