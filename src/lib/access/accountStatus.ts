@@ -55,6 +55,52 @@ export async function isCounterpartCurrent(
 }
 
 /**
+ * NEW347 — true only when EVERY account row belonging to this auth uuid is exactly
+ * 'current'. Never throws; every failure mode returns false.
+ *
+ * Separate from `isCounterpartCurrent` because it keys on a different identifier:
+ * this helper takes the AUTH uuid (`auth.users.id`, i.e. `user.id` from
+ * `supabase.auth.getUser()`), whereas `isCounterpartCurrent` takes the TABLE PK stored
+ * on the message row. The two coincide for teachers/admins (`profiles.id` IS the auth
+ * uuid) but NOT for students: `students.auth_user_id` is the indirection, so passing an
+ * auth uuid to `isCounterpartCurrent` would match zero student rows and deny every
+ * student. Keep the two helpers distinct — do not merge them.
+ *
+ * BOTH tables are ALWAYS checked, and the lookups never short-circuit. One auth uuid can
+ * hold a `profiles` row AND a `students` row at the same time (live example, logged as
+ * NEW110: auth 03abd97e has students.status 'current' with profiles.status 'former'), so
+ * ROW PRESENCE IS NOT A ROLE SIGNAL — a profiles hit is NOT proof the sender is a
+ * teacher, and returning on it would both deny that live student support access and, in
+ * the mirror case (profiles 'current' + students 'former'), let a former student through.
+ *
+ * Requires the service-role client (createAdminClient()): RLS blocks `students` reads
+ * under the teacher role, so a regular server client would deny students spuriously.
+ * The caller injects it, same contract as `isCounterpartCurrent`.
+ *
+ * DENY BY DEFAULT: neither status column has a CHECK constraint, so this tests
+ * `=== 'current'` and never `!= 'former'`. An error on EITHER query, no row in either
+ * table, an unexpected value, and any single 'former'/'on_hold' row all return false.
+ */
+export async function isSenderCurrent(
+  db: SupabaseClient,
+  authUserId: string,
+): Promise<boolean> {
+  const [profileResult, studentResult] = await Promise.all([
+    db.from('profiles').select('status').eq('id', authUserId).maybeSingle(),
+    db.from('students').select('status').eq('auth_user_id', authUserId).maybeSingle(),
+  ])
+
+  if (profileResult.error || studentResult.error) return false
+
+  const rows = [profileResult.data, studentResult.data].filter(
+    (row): row is { status: string } => row !== null,
+  )
+
+  if (rows.length === 0) return false
+  return rows.every(row => row.status === 'current')
+}
+
+/**
  * Shown to the sender when the counterpart is no longer current. Mirrors
  * EDIT_WINDOW_ERROR in `src/lib/messages/editWindow.ts`: one exported constant so the
  * three server actions and any client that wants to surface it verbatim cannot drift.
