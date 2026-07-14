@@ -572,7 +572,8 @@ export async function PATCH(
           existing.duration_minutes,
           newScheduledAt,
           newDuration,
-          studentTz
+          studentTz,
+          'admin'
         )
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
@@ -604,7 +605,8 @@ export async function PATCH(
           existing.duration_minutes,
           newScheduledAt,
           newDuration,
-          teacherTz
+          teacherTz,
+          'admin'
         )
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
