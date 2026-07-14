@@ -138,7 +138,6 @@ export async function POST(req: NextRequest) {
         timezone: data.timezone,
         language_preference: data.language_preference ?? null,
         status: data.status,
-        is_active: true,
         is_private: data.is_private ?? true,
         profile_completed: false,
         company_id: data.company_id ?? null,
