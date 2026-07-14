@@ -109,13 +109,14 @@ function formatClassTime(isoString: string, timezone: string, durationMinutes?: 
 // Builds an email button that renders correctly in Outlook (via VML) and all
 // other clients (via a standard <a> tag). Outlook ignores CSS border-radius on
 // anchor tags entirely — VML roundrect is the only reliable fix.
-// Width of 240px accommodates the longest button label used in these templates.
+// Width of 300px accommodates the longest button label used in these templates;
+// the button is centered via align="center" for Outlook.
 export function buildButton(href: string, label: string): string {
   return `
-<table cellpadding="0" cellspacing="0" style="margin:0;">
+<table cellpadding="0" cellspacing="0" align="center" style="margin:0 auto;">
   <tr>
     <td>
-      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:46px;v-text-anchor:middle;width:240px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${label}</center></v:roundrect><![endif]-->
+      <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:46px;v-text-anchor:middle;width:300px;" arcsize="13%" stroke="f" fillcolor="#FF8303"><w:anchorlock/><center style="color:#FFFFFF;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">${label}</center></v:roundrect><![endif]-->
       <!--[if !mso]><!-->
       <a href="${href}" style="display:inline-block;background-color:#FF8303;color:#FFFFFF;font-size:15px;font-weight:600;padding:12px 28px;border-radius:6px;text-decoration:none;">${label}</a>
       <!--<![endif]-->
@@ -212,17 +213,22 @@ export function teacherCancellationEmailContent(
   studentName: string,
   scheduledAt: string,
   durationMinutes: number,
-  teacherTimezone: string
+  teacherTimezone: string,
+  cancellationReason?: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
+  const rows: { label: string; value: string }[] = [
+    { label: 'Cancelled class', value: formattedTime },
+    { label: 'Student', value: studentName },
+  ]
+  if (cancellationReason) {
+    rows.push({ label: 'Reason', value: cancellationReason })
+  }
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled. Your schedule has been updated.
     </p>
-    ${buildDetailsTable('Cancellation details', [
-      { label: 'Cancelled class', value: formattedTime },
-      { label: 'Student', value: studentName },
-    ])}
+    ${buildDetailsTable('Cancellation details', rows)}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}
   `
 }
