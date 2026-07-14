@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, newMessageEmailContent, studentNewMessageEmailContent } from '@/lib/email/templates'
+import { ACCOUNT_INACTIVE_ERROR, isCounterpartCurrent } from '@/lib/access/accountStatus'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 
 async function assertAdmin() {
@@ -79,6 +80,16 @@ export async function sendAdminMessage(
   // If last message was from student → send to teacher. Otherwise → send to student.
   const receiverId   = lastSenderType === 'student' ? teacherSideId : studentId
   const receiverType = lastSenderType === 'student' ? 'teacher' as const : 'student' as const
+
+  // NEW346: the resolved recipient must still be current — an admin must not push a
+  // message (and the email below) into a locked-out account. Gates BOTH directions off
+  // the receiverType derived immediately above: a teacher recipient -> profiles, a
+  // student recipient -> students. Fail closed via the helper's deny-by-default.
+  // The adminProfile role check above is left exactly as it is (pre-existing concern).
+  const counterpartCurrent = await isCounterpartCurrent(adminDb, receiverId, receiverType)
+  if (!counterpartCurrent) {
+    return { error: ACCOUNT_INACTIVE_ERROR }
+  }
 
   const safeContent = sanitizeHtml(content)
 

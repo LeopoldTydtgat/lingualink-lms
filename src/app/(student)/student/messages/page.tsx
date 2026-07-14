@@ -32,11 +32,14 @@ export default async function StudentMessagesPage() {
     assignedTeacherIds = new Set<string>()
   }
 
-  let assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string }[] = []
+  // NEW346 adds `status` to the select: display-only data feeding the composer gate in
+  // StudentMessagesClient. The list is NOT filtered by it — a former teacher's thread
+  // must stay selectable and readable, it just loses its composer.
+  let assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string; status: string | null }[] = []
   if (assignedTeacherIds.size > 0) {
     const { data: teacherProfiles } = await supabase
       .from('profiles')
-      .select('id, full_name, photo_url, role')
+      .select('id, full_name, photo_url, role, status')
       .in('id', [...assignedTeacherIds])
     assignedTeachers = teacherProfiles ?? []
   }
@@ -54,6 +57,7 @@ export default async function StudentMessagesPage() {
     name: string
     photo_url: string | null
     type: string
+    status: string | null
     latestMessage: typeof allMessages extends (infer T)[] | null ? T : never
     unreadCount: number
   }>()
@@ -71,6 +75,8 @@ export default async function StudentMessagesPage() {
         name: teacher.full_name,
         photo_url: teacher.photo_url,
         type: teacher.role === 'admin' ? 'admin' : 'teacher',
+        // NEW346: carries the composer gate. Null is not 'current' -> fails closed.
+        status: teacher.status ?? null,
         latestMessage: msg,
         unreadCount: 0,
       })

@@ -40,6 +40,10 @@ interface Contact {
   type: string
   name: string
   photo_url: string | null
+  // NEW346: the counterpart's account status ('current' | 'former' | 'on_hold', or null
+  // when it could not be resolved). Anything other than 'current' makes the thread
+  // read-only; the thread itself stays fully readable.
+  status: string | null
   latestMessage: Message | null
   unreadCount: number
 }
@@ -466,6 +470,10 @@ export default function MessagesClient({
         type: 'student',
         name: student.full_name,
         photo_url: student.photo_url,
+        // NEW346: the new-message picker's server query already filters
+        // status='current' (page.tsx), so anyone reachable here is current by
+        // construction. The server send gate re-checks authoritatively regardless.
+        status: 'current',
         latestMessage: null,
         unreadCount: 0,
       }
@@ -511,17 +519,24 @@ export default function MessagesClient({
     s.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
 
-  // NEW275: a stale history thread can still be selected for a student this teacher is no
-  // longer assigned to (the history contact list is intentionally ungated so past
-  // conversations stay readable). The server send gate blocks such a send; reflect that
-  // here with a read-only composer instead of letting the send fail. Admins are ungated
-  // (never blocked); teacher↔teacher/admin threads are never assignment-gated.
+  // NEW275 + NEW346: a stale history thread can still be selected (the history contact
+  // list is intentionally ungated so past conversations stay readable). The server send
+  // gate blocks such a send; reflect that here with a read-only composer instead of
+  // letting the send fail. Two independent reasons a thread is read-only:
+  //
+  //  1. NEW275 assignment — this teacher is no longer assigned to that student. Admins
+  //     are ungated here and teacher↔teacher/admin threads are never assignment-gated.
+  //  2. NEW346 status — the counterpart account is no longer 'current'. This half
+  //     applies to EVERY contact type and to admins too: nobody may message a
+  //     locked-out account. Mirrors the server's isCounterpartCurrent gate, including
+  //     its deny-by-default (a null/unknown status is not 'current').
   const assignedStudentIdSet = useMemo(() => new Set(assignedStudentIds), [assignedStudentIds])
-  const isBlockedStudent =
+  const isBlockedContact =
     !!selectedContact &&
-    currentUser.role !== 'admin' &&
-    selectedContact.type === 'student' &&
-    !assignedStudentIdSet.has(selectedContact.id)
+    ((currentUser.role !== 'admin' &&
+      selectedContact.type === 'student' &&
+      !assignedStudentIdSet.has(selectedContact.id)) ||
+      selectedContact.status !== 'current')
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -723,9 +738,10 @@ export default function MessagesClient({
                           <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             {/* Edit affordance: own messages only, within the 15-minute
                                 window (server re-checks authoritatively), never on a
-                                pending optimistic row. Hidden in read-only
-                                (unassigned-student) threads to match the disabled composer. */}
-                            {isFromMe && !isBlockedStudent && editingMessageId !== msg.id &&
+                                pending optimistic row. Hidden in read-only threads
+                                (unassigned student, or non-current counterpart account)
+                                to match the disabled composer. */}
+                            {isFromMe && !isBlockedContact && editingMessageId !== msg.id &&
                               !msg.pending && isWithinEditWindow(msg.created_at) && (
                               <button
                                 onClick={() => handleStartEdit(msg)}
@@ -757,17 +773,20 @@ export default function MessagesClient({
                 The editor sits directly in the footer — no box-within-a-box.
                 The style tag below suppresses ProseMirror's own default focus border
                 which cannot be removed via Tailwind classes alone.
-                NEW275: for a stale history thread whose student is no longer assigned to
-                this teacher, the composer is replaced by a read-only notice; the thread
-                above stays fully readable. */}
-            {isBlockedStudent ? (
+                NEW275/NEW346: for a stale history thread — one whose student is no longer
+                assigned to this teacher, or whose counterpart account is no longer
+                current — the composer is replaced by a read-only notice; the thread
+                above stays fully readable. The sub-line names the actual reason, since a
+                deactivated account and an unassignment need different follow-up. */}
+            {isBlockedContact ? (
               <div className="border-t border-gray-200 flex-shrink-0 bg-white px-5 py-4">
                 <p className="text-sm font-medium text-gray-600">
                   You can no longer message {selectedContact.name}.
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
-                  This student is not currently assigned to you. Please contact an
-                  administrator if you need to reach them.
+                  {selectedContact.status !== 'current'
+                    ? 'This account is no longer active. You can still read the conversation above.'
+                    : 'This student is not currently assigned to you. Please contact an administrator if you need to reach them.'}
                 </p>
               </div>
             ) : (

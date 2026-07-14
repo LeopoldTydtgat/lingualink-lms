@@ -7,6 +7,7 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentNewMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 import { getAssignedStudentIds } from '@/lib/access/trainingAssignment'
+import { ACCOUNT_INACTIVE_ERROR, isCounterpartCurrent } from '@/lib/access/accountStatus'
 import { validateAttachments } from '@/lib/messages/validateAttachments'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 
@@ -39,8 +40,8 @@ export async function sendMessage(
   // student iff assigned to one of their trainings (bookings are irrelevant). Admin sender
   // is ungated (may message anyone). Fail closed — any verification lookup error returns
   // rather than falling through to the insert.
+  const accessDb = createAdminClient()
   if (senderType === 'teacher') {
-    const accessDb = createAdminClient()
     if (receiverType === 'student') {
       let assignedStudentIds: Set<string>
       try {
@@ -72,6 +73,23 @@ export async function sendMessage(
         return { error: 'Invalid recipient.' }
       }
     }
+  }
+
+  // NEW346: the counterpart account must still be current. The assignment gate above
+  // only proves a training_teachers row exists — a FORMER student keeps that row, so
+  // without this the send succeeds and the new-message email below fires to an account
+  // proxy.ts will not let log in. Unlike the assignment gate this applies to EVERY
+  // sender, admin included (an admin must not message a locked-out account either),
+  // which is why accessDb is hoisted out of the teacher branch above. receiverType
+  // 'admin' maps to the profiles lookup. Fail closed: the helper denies by default on a
+  // missing row or a query error.
+  const counterpartCurrent = await isCounterpartCurrent(
+    accessDb,
+    receiverId,
+    receiverType === 'student' ? 'student' : 'teacher',
+  )
+  if (!counterpartCurrent) {
+    return { error: ACCOUNT_INACTIVE_ERROR }
   }
 
   // NEW299: pin/strip attachment URLs (phishing vector) — the RLS insert policy checks
@@ -178,6 +196,19 @@ export async function editMessage(messageId: string, content: string) {
     if (!assignedStudentIds.has(message.receiver_id)) {
       return { error: 'You can only message students assigned to you.' }
     }
+  }
+
+  // NEW346: an edit pushes new content into the thread, so it must clear the same
+  // counterpart-status gate as sendMessage. Keyed on the STORED row's receiver, never a
+  // client-supplied id. Applies to every sender (admin included) and to teacher↔teacher
+  // /admin threads, which the assignment gate above deliberately skips.
+  const editCounterpartCurrent = await isCounterpartCurrent(
+    adminDb,
+    message.receiver_id,
+    message.receiver_type === 'student' ? 'student' : 'teacher',
+  )
+  if (!editCounterpartCurrent) {
+    return { error: ACCOUNT_INACTIVE_ERROR }
   }
 
   // Content may be empty only when the message carries attachments (attachment-only
