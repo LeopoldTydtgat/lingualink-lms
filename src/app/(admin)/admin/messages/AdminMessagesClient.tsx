@@ -1,16 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
-import Underline from '@tiptap/extension-underline'
-import Placeholder from '@tiptap/extension-placeholder'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
-import { getAdminThreadMessages, sendAdminMessage, markAdminThreadRead } from './actions'
+import { getAdminThreadMessages, markAdminThreadRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
@@ -131,23 +127,10 @@ export default function AdminMessagesClient({
   const [selectedConv, setSelectedConv] = useState<AdminConversation | null>(null)
   const [messages, setMessages] = useState<AdminMessage[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
-  const [sending, setSending] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [, forceUpdate] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const emojiPickerRef = useRef<HTMLDivElement>(null)
-
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ underline: false }),
-      Underline,
-      Placeholder.configure({ placeholder: 'Write a message…' }),
-    ],
-    content: '',
-    onTransaction: () => forceUpdate(n => n + 1),
-  })
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -187,8 +170,9 @@ export default function AdminMessagesClient({
   }, [fetchMessages])
 
   // Realtime: listen for new INSERTs on messages, scoped to the current thread.
-  // Three server-side filters cover both directions of the direct exchange plus
-  // any admin interjection; the client-side check below is kept as defense-in-depth.
+  // Two server-side filters cover both directions of the direct exchange; the third
+  // (sender_type=eq.admin) now has no in-app producer and is retained defensively.
+  // The client-side check below is kept as defense-in-depth.
   useEffect(() => {
     if (!selectedConv) return
 
@@ -198,9 +182,10 @@ export default function AdminMessagesClient({
       const newMsg = payload.new as AdminMessage
       const isDirectExchange =
         parties.has(newMsg.sender_id) && parties.has(newMsg.receiver_id)
-      // Only the teacher-addressed copy is used in the admin thread view.
-      // The student-addressed copy is ignored here to avoid showing the
-      // message twice (sendAdminMessage now inserts one row per party).
+      // Defensive only: no in-app producer inserts sender_type='admin' any more
+      // (/admin/messages is view-only). Historical admin rows reach the thread via
+      // getAdminThreadMessages, not this branch — an INSERT event never fires for
+      // rows that already exist. Kept to catch an out-of-band insert.
       const isAdminInterjection =
         newMsg.sender_type === 'admin' &&
         (newMsg.receiver_id === selectedConv.studentId ||
@@ -245,42 +230,6 @@ export default function AdminMessagesClient({
 
     return () => { supabase.removeChannel(channel) }
   }, [selectedConv, supabase])
-
-  const handleSend = async () => {
-    if (!editor || !selectedConv || sending) return
-    const html = editor.getHTML()
-    if (!html || html === '<p></p>') return
-    setSending(true)
-
-    const result = await sendAdminMessage(
-      selectedConv.teacherSideId,
-      selectedConv.studentId,
-      html
-    )
-
-    if (result?.error) {
-      console.error('Send failed:', result.error)
-      setSending(false)
-      return
-    }
-
-    if (result?.message) {
-      setMessages(prev => {
-        if (prev.some(m => m.id === result.message.id)) return prev
-        return [...prev, result.message as AdminMessage]
-      })
-      setConversations(prev =>
-        prev.map(c => c.key === selectedConv.key
-          ? { ...c, latestMessage: result.message as AdminMessage }
-          : c
-        )
-      )
-    }
-
-    editor.commands.clearContent()
-    setSending(false)
-    editor?.commands.focus()
-  }
 
   const filteredConversations = conversations.filter(conv =>
     conv.teacherSideName.toLowerCase().includes(searchQuery.toLowerCase()) ||
