@@ -467,6 +467,12 @@ export async function PATCH(
   if (timeChanged) {
     updatePayload.reminder_24_sent = false
     updatePayload.reminder_1h_sent = false
+    // NEW341: stamp the actor who moved this lesson. Gated on timeChanged (NOT on
+    // teacherChanged or durationChanged) so it means exactly what the reschedule
+    // emails below mean: the class time actually moved. A teacher swap or a
+    // duration edit is not a reschedule and must not be attributed as one.
+    updatePayload.rescheduled_by = 'admin'
+    updatePayload.rescheduled_at = new Date().toISOString()
   }
 
   if (Object.keys(updatePayload).length > 1) {
