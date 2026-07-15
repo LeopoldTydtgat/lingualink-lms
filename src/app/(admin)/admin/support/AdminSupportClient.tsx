@@ -560,10 +560,19 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     setShowEmojiPicker(v => !v)
   }
 
-  const tabStyle = (tab: 'conversations' | 'faqs') =>
-    activeTab === tab
+  // NEW346: the 2px underline is drawn by the button's own border-bottom, so without a
+  // fixed width it shrank to each label's text width ("FAQs" got a much shorter underline
+  // than "Conversations"). Centre the label in a 150px-minimum button so every underline
+  // is the same length, matching the teacher account tab bar.
+  const tabStyle = (tab: 'conversations' | 'faqs'): React.CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '150px',
+    ...(activeTab === tab
       ? { borderBottom: '2px solid #FF8303', color: '#FF8303' }
-      : { borderBottom: '2px solid transparent', color: '#6b7280' }
+      : { borderBottom: '2px solid transparent', color: '#6b7280' }),
+  })
 
   return (
     <div style={{ padding: '24px' }}>
