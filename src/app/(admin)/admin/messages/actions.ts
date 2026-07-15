@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isSenderCurrent } from '@/lib/access/accountStatus'
 
 async function assertAdmin() {
   // RLS-bound client — role lookup must run as the user, not via service role.
@@ -19,6 +20,13 @@ async function assertAdmin() {
     profile?.role === 'admin' ||
     (profile?.account_types ?? []).includes('school_admin')
   if (!isAdmin) throw new Error('Unauthorized')
+
+  // NEW348: role/account_types alone let a deactivated admin account through this
+  // gate. isSenderCurrent checks profiles.status for this auth uuid and requires
+  // the service-role client (it also queries students, which RLS blocks) — same
+  // helper NEW347 uses on the support send/edit routes.
+  const admin = createAdminClient()
+  if (!(await isSenderCurrent(admin, user.id))) throw new Error('Unauthorized')
 }
 
 export async function getAdminThreadMessages(teacherSideId: string, studentId: string) {
