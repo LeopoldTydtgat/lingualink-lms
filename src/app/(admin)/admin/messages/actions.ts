@@ -22,9 +22,11 @@ async function assertAdmin() {
   if (!isAdmin) throw new Error('Unauthorized')
 
   // NEW348: role/account_types alone let a deactivated admin account through this
-  // gate. isSenderCurrent checks profiles.status for this auth uuid and requires
-  // the service-role client (it also queries students, which RLS blocks) — same
-  // helper NEW347 uses on the support send/edit routes.
+  // gate. isSenderCurrent checks BOTH profiles.status and students.status for this
+  // auth uuid — one auth id can hold both row types (NEW110), and it denies if
+  // either is not 'current'. Requires the service-role client (students reads are
+  // RLS-blocked otherwise) — same helper NEW347 uses on the support send/edit
+  // routes.
   const admin = createAdminClient()
   if (!(await isSenderCurrent(admin, user.id))) throw new Error('Unauthorized')
 }
