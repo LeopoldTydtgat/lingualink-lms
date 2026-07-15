@@ -119,6 +119,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   // NEW300: buffers read_at values that arrive via Realtime UPDATE before handleSend has
   // swapped the temp message for the real DB row, so the read tick isn't stomped back to null.
   const pendingReadsRef = useRef<Map<string, string>>(new Map())
+  // NEW304: holds the tempId of the admin's own in-flight optimistic send. The Realtime
+  // INSERT below can echo that same row back before handleSend's fetch response resolves;
+  // without this the echo is appended as a second row (duplicate React key) instead of
+  // replacing the temp one. Single-flight only (handleSend is guarded by `sending`), so one
+  // ref is enough - no need to track multiple in-flight sends.
+  const pendingSendIdRef = useRef<string | null>(null)
   // NEW303: mirrors selectedConv so the component-lifetime list subscription (which must NOT
   // resubscribe on every selection change) can read the currently-open conversation without
   // being keyed to it. Kept in sync by the tiny effect below.
@@ -215,7 +221,21 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
       }, (payload) => {
         const msg = payload.new as SupportMessage
-        setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
+        setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) return prev
+          // NEW304: this Realtime echo can arrive before handleSend's own fetch response
+          // swaps the temp row for the real one. If it's the admin's own in-flight send,
+          // replace the pending temp row in place instead of appending a duplicate - the
+          // later fetch-response swap then finds no matching tempId and is a harmless no-op.
+          if (msg.sender_role === 'admin' && pendingSendIdRef.current) {
+            const tempIdx = prev.findIndex(m => m.id === pendingSendIdRef.current)
+            if (tempIdx !== -1) {
+              pendingSendIdRef.current = null
+              return [...prev.slice(0, tempIdx), msg, ...prev.slice(tempIdx + 1)]
+            }
+          }
+          return [...prev, msg]
+        })
         // NEW300: a user message arriving live in the open conversation must be marked read so
         // its tick flips for the user. The subscription filter already scopes this to selectedConv.
         if (msg.sender_role === 'user') {
@@ -390,6 +410,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     // Optimistic temp row is pending until the temp-to-real swap below, so the Edit
     // affordance never targets a row whose id doesn't exist in the DB.
     const tempId = crypto.randomUUID()
+    // NEW304: tracks this send until either the fetch response or the Realtime echo resolves
+    // it, so the other one becomes a no-op instead of creating a duplicate row.
+    pendingSendIdRef.current = tempId
     setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: contentToSend, attachments: attachmentsToSend, created_at: new Date().toISOString(), read_at: null, pending: true }])
 
     const res = await fetch('/api/support/send', {
@@ -428,6 +451,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         )
       }
     }
+    // NEW304: this send is now resolved one way or another; stop tracking it so a later,
+    // unrelated Realtime INSERT never mistakes itself for this send.
+    if (pendingSendIdRef.current === tempId) pendingSendIdRef.current = null
     setSending(false)
   }
 
