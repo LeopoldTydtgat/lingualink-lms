@@ -290,7 +290,7 @@ export async function POST(req: NextRequest) {
 
     try {
       const meeting = await createTeamsMeeting({
-        subject: `Lingualink class – ${studentRow.full_name} with ${teacher.full_name}`,
+        subject: `LinguaLink class – ${studentRow.full_name} with ${teacher.full_name}`,
         startTime: scheduledAt,
         durationMinutes,
       })

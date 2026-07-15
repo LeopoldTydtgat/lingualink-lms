@@ -285,13 +285,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to reserve hours. Please try again.' }, { status: 500 })
   }
 
+  // Fetch teacher + student full names for the Teams meeting subject and,
+  // later, the confirmation emails — hoisted here so both call sites share
+  // this single pair of queries instead of fetching twice.
+  const { data: teacherEmailProfile } = await adminClient
+    .from('profiles')
+    .select('full_name, email, timezone')
+    .eq('id', teacher_id)
+    .single()
+
+  const { data: studentEmailData } = await adminClient
+    .from('students')
+    .select('full_name, email, timezone')
+    .eq('id', student_id)
+    .single()
+
   // Create Teams meeting before inserting the lesson so the URL is available immediately
   let teamsJoinUrl: string | null = null
   let teamsMeetingId: string | null = null
   try {
     console.log('[Teams] Creating meeting — AZURE_TENANT_ID set:', !!process.env.AZURE_TENANT_ID, '| AZURE_CLIENT_ID set:', !!process.env.AZURE_CLIENT_ID, '| AZURE_CLIENT_SECRET set:', !!process.env.AZURE_CLIENT_SECRET)
     const meeting = await createTeamsMeeting({
-      subject: `LinguaLink lesson — ${scheduledAtUtc}`,
+      subject: `LinguaLink class – ${studentEmailData?.full_name ?? 'Student'} with ${teacherEmailProfile?.full_name ?? 'Teacher'}`,
       startTime: scheduledAtUtc,
       durationMinutes: duration_minutes,
     })
@@ -389,33 +404,19 @@ export async function POST(request: NextRequest) {
 
   // Send confirmation emails to teacher and student
   try {
-    // Fetch teacher profile for email and timezone
-    const { data: teacherProfile } = await adminClient
-      .from('profiles')
-      .select('full_name, email, timezone')
-      .eq('id', teacher_id)
-      .single()
-
-    // Fetch student for email and timezone
-    const { data: studentData } = await adminClient
-      .from('students')
-      .select('full_name, email, timezone')
-      .eq('id', student_id)
-      .single()
-
-    if (teacherProfile?.email) {
+    if (teacherEmailProfile?.email) {
       const teacherBody = teacherNewBookingEmailContent(
-        studentData?.full_name ?? 'Your student',
+        studentEmailData?.full_name ?? 'Your student',
         scheduledAtUtc,
         duration_minutes,
-        requireTz(teacherProfile.timezone, 'admin-book:teacher')
+        requireTz(teacherEmailProfile.timezone, 'admin-book:teacher')
       )
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-        to: teacherProfile.email,
-        subject: `Lingualink Online - New class booked with ${studentData?.full_name ?? 'a student'}`,
+        to: teacherEmailProfile.email,
+        subject: `Lingualink Online - New class booked with ${studentEmailData?.full_name ?? 'a student'}`,
         html: buildEmailTemplate({
-          recipientName: teacherProfile.full_name ?? 'Teacher',
+          recipientName: teacherEmailProfile.full_name ?? 'Teacher',
           recipientFallback: 'Teacher',
           subject: 'New class booked',
           bodyHtml: teacherBody,
@@ -424,19 +425,19 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    if (studentData?.email) {
+    if (studentEmailData?.email) {
       const studentBody = studentBookingConfirmationEmailContent(
-        teacherProfile?.full_name ?? 'Your teacher',
+        teacherEmailProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
-        requireTz(studentData.timezone, 'admin-book:student')
+        requireTz(studentEmailData.timezone, 'admin-book:student')
       )
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-        to: studentData.email,
+        to: studentEmailData.email,
         subject: 'Lingualink Online - Your class is confirmed',
         html: buildEmailTemplate({
-          recipientName: studentData.full_name ?? 'Student',
+          recipientName: studentEmailData.full_name ?? 'Student',
           recipientFallback: 'Student',
           subject: 'Your class is confirmed',
           bodyHtml: studentBody,
