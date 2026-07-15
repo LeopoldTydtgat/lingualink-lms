@@ -35,6 +35,11 @@ export default async function StudentMessagesPage() {
   // NEW346 adds `status` to the select: display-only data feeding the composer gate in
   // StudentMessagesClient. The list is NOT filtered by it — a former teacher's thread
   // must stay selectable and readable, it just loses its composer.
+  //
+  // This array must keep holding ASSIGNED teachers only: the client derives both the
+  // new-message picker (filteredTeachers) and the assignment half of isBlockedContact
+  // from it. Historical counterparts are resolved separately below and deliberately
+  // stay OUT of it, which is exactly what makes their threads read-only.
   let assignedTeachers: { id: string; full_name: string; photo_url: string | null; role: string; status: string | null }[] = []
   if (assignedTeacherIds.size > 0) {
     const { data: teacherProfiles } = await supabase
@@ -51,6 +56,33 @@ export default async function StudentMessagesPage() {
     .or(`sender_id.eq.${student.id},receiver_id.eq.${student.id}`)
     .order('created_at', { ascending: false })
 
+  // NEW283: resolve the counterparts this student has HISTORY with but is no longer
+  // assigned to. Without these the contacts loop below dropped the whole thread (the old
+  // `if (!teacher) continue`), silently deleting past conversations from the UI the moment
+  // an assignment ended — contradicting the NEW346 design, which keeps history listed and
+  // readable and gates only the composer.
+  //
+  // Fetched with the ADMIN client on purpose: the student role's RLS visibility on an
+  // UNASSIGNED teacher's profile is unverified, and a regular-client miss would silently
+  // reintroduce the very bug this fixes. This page already uses the admin client for the
+  // assignment lookup above. Only display fields are selected — no privileged columns.
+  // Fail soft: on a query error fall back to empty, which degrades to today's behaviour
+  // (thread skipped) rather than crashing the page.
+  const historicalContactIds = new Set<string>()
+  for (const msg of allMessages ?? []) {
+    const contactId = msg.sender_id === student.id ? msg.receiver_id : msg.sender_id
+    if (!assignedTeacherIds.has(contactId)) historicalContactIds.add(contactId)
+  }
+
+  let historicalContacts: { id: string; full_name: string; photo_url: string | null; role: string; status: string | null }[] = []
+  if (historicalContactIds.size > 0) {
+    const { data: historicalProfiles, error: historicalError } = await admin
+      .from('profiles')
+      .select('id, full_name, photo_url, role, status')
+      .in('id', [...historicalContactIds])
+    historicalContacts = historicalError ? [] : (historicalProfiles ?? [])
+  }
+
   // Build contacts list — one entry per teacher/admin the student has messaged
   const contactMap = new Map<string, {
     id: string
@@ -66,8 +98,17 @@ export default async function StudentMessagesPage() {
     const contactId = msg.sender_id === student.id ? msg.receiver_id : msg.sender_id
 
     if (!contactMap.has(contactId)) {
-      // Find teacher info from assignedTeachers
-      const teacher = assignedTeachers.find(t => t.id === contactId)
+      // NEW283: contacts now include HISTORICAL (unassigned) counterparts, not just
+      // currently-assigned ones — resolve from assignedTeachers first, then fall back to
+      // the historical profiles fetched above. Listing an unassigned counterpart does NOT
+      // grant send permission: the client's isBlockedContact gate keys off the
+      // assignedTeachers prop (which excludes these), so the thread renders read-only,
+      // and the NEW275 gate in the send action rejects any send to them authoritatively.
+      // The `continue` remains only as the final fallback for a counterpart id matching
+      // neither list (e.g. a hard-deleted profile), which has nothing to render.
+      const teacher =
+        assignedTeachers.find(t => t.id === contactId) ??
+        historicalContacts.find(t => t.id === contactId)
       if (!teacher) continue // skip messages from unknown contacts
 
       contactMap.set(contactId, {
