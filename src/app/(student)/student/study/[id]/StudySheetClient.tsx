@@ -346,11 +346,11 @@ export default function StudySheetClient({
       <div className="flex gap-2 border-b border-gray-200 mb-6">
         <button
           onClick={() => setActiveTab('vocab')}
-          className="pb-3 px-1 text-sm font-medium transition-colors"
+          className="flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeTab === 'vocab'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '160px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '160px' }
           }
         >
           Vocabulary List
@@ -361,11 +361,11 @@ export default function StudySheetClient({
 
         <button
           onClick={() => setActiveTab('exercises')}
-          className="pb-3 px-1 text-sm font-medium transition-colors"
+          className="flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeTab === 'exercises'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '160px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '160px' }
           }
         >
           Exercises

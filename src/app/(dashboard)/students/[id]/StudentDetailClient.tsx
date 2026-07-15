@@ -409,11 +409,11 @@ export default function StudentDetailClient({
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className="px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
+            className="flex items-center justify-center px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors"
             style={
               activeTab === tab
-                ? { borderBottomColor: '#FF8303', color: '#FF8303' }
-                : { borderBottomColor: 'transparent', color: '#6b7280' }
+                ? { borderBottomColor: '#FF8303', color: '#FF8303', minWidth: '130px' }
+                : { borderBottomColor: 'transparent', color: '#6b7280', minWidth: '130px' }
             }
           >
             {tab}
