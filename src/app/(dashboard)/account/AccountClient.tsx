@@ -729,8 +729,10 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
             style={{
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
               gap: '6px',
               padding: '10px 20px',
+              minWidth: '150px',
               fontSize: '14px',
               fontWeight: activeTab === id ? 600 : 400,
               color: activeTab === id ? '#FF8303' : '#6b7280',

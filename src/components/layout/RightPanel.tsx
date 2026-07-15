@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
+import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ interface NextLesson {
 
 type RightPanelProps = {
   teacherId: string | null
+  teacherTimezone: string | null
   announcements?: AnnouncementItem[]
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
@@ -47,23 +49,21 @@ function formatCountdown(totalSeconds: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-// Format: "Thu 09 Apr, 10:00 – 11:00"
-// Uses manual construction — never toLocaleTimeString() to avoid hydration mismatch
-function formatClassTime(isoString: string, durationMinutes: number): string {
-  const date = new Date(isoString)
-
-  const weekday = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()]
-  const day = String(date.getDate()).padStart(2, '0')
-  const month = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.getMonth()]
-
-  const startH = String(date.getHours()).padStart(2, '0')
-  const startM = String(date.getMinutes()).padStart(2, '0')
-
-  const endDate = new Date(date.getTime() + durationMinutes * 60 * 1000)
-  const endH = String(endDate.getHours()).padStart(2, '0')
-  const endM = String(endDate.getMinutes()).padStart(2, '0')
-
-  return `${weekday} ${day} ${month}, ${startH}:${startM} – ${endH}:${endM}`
+// Format: "Thu 09 Apr, 10:00 – 11:00" in the teacher's account timezone.
+// Built from utcInstantToTzParts (same helper as StudentRightPanel and the
+// teacher schedule) so server and client render identical text — never
+// getHours()/getDay() (browser-local, causes hydration mismatch) and never
+// toLocaleTimeString(). Falls back to UTC if the account timezone is missing
+// or invalid rather than throwing — this panel has no error boundary above it.
+function formatClassTime(isoString: string, durationMinutes: number, timezone: string | null): string {
+  const tz = timezone && isValidTimeZone(timezone) ? timezone : 'UTC'
+  const startMs = new Date(isoString).getTime()
+  const s = utcInstantToTzParts(isoString, tz)
+  const e = utcInstantToTzParts(new Date(startMs + durationMinutes * 60 * 1000), tz)
+  const weekday = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][s.weekday]
+  const month = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][s.month - 1]
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${weekday} ${pad(s.day)} ${month}, ${pad(s.hour)}:${pad(s.minute)} – ${pad(e.hour)}:${pad(e.minute)}`
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£
 
 export default function RightPanel({
   teacherId,
+  teacherTimezone,
   announcements = [],
   nextLesson = null,
   billingData,
@@ -154,9 +155,10 @@ export default function RightPanel({
                 </p>
               )}
 
-              {/* Date and time range */}
+              {/* Date and time range — gated on mounted (hydration-safe) and
+                  rendered in the teacher's account timezone, not browser-local */}
               <p className="text-xs text-gray-500 mb-0.5">
-                {formatClassTime(nextLesson.scheduled_at, nextLesson.duration_minutes)}
+                {mounted ? formatClassTime(nextLesson.scheduled_at, nextLesson.duration_minutes, teacherTimezone) : ''}
               </p>
 
               {/* Student name */}

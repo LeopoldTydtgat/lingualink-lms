@@ -7,6 +7,7 @@ import resend from '@/lib/email/client'
 import { buildEmailTemplate, newMessageEmailContent } from '@/lib/email/templates'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
+import { ACCOUNT_INACTIVE_ERROR, isCounterpartCurrent } from '@/lib/access/accountStatus'
 import { validateAttachments } from '@/lib/messages/validateAttachments'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 
@@ -47,6 +48,17 @@ export async function sendMessage(
   }
   if (!assignedTeacherIds.has(receiverId)) {
     return { error: 'You can only message teachers assigned to your training.' }
+  }
+
+  // NEW346: the counterpart account must still be current. The assignment gate above
+  // only proves a training_teachers row exists — a FORMER teacher keeps that row, so
+  // without this the send succeeds and the new-message email below fires to an account
+  // proxy.ts will not let log in. The counterpart here is always a teacher or an admin,
+  // both of which live in profiles. Fail closed: the helper denies by default on a
+  // missing row or a query error.
+  const counterpartCurrent = await isCounterpartCurrent(accessDb, receiverId, 'teacher')
+  if (!counterpartCurrent) {
+    return { error: ACCOUNT_INACTIVE_ERROR }
   }
 
   // NEW299: pin/strip attachment URLs (phishing vector) — the RLS insert policy checks
@@ -161,6 +173,14 @@ export async function editMessage(messageId: string, content: string) {
   }
   if (!assignedTeacherIds.has(message.receiver_id)) {
     return { error: 'You can only message teachers assigned to your training.' }
+  }
+
+  // NEW346: an edit pushes new content into the thread, so it must clear the same
+  // counterpart-status gate as sendMessage. Keyed on the STORED row's receiver, never a
+  // client-supplied id; always a profiles lookup (teacher or admin).
+  const editCounterpartCurrent = await isCounterpartCurrent(adminDb, message.receiver_id, 'teacher')
+  if (!editCounterpartCurrent) {
+    return { error: ACCOUNT_INACTIVE_ERROR }
   }
 
   // Content may be empty only when the message carries attachments (attachment-only

@@ -68,6 +68,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     type: string
     name: string
     photo_url: string | null
+    status: string | null
     latestMessage: null
     unreadCount: number
   } | null = null
@@ -75,7 +76,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   if (openAdmin === 'true' && adminId) {
     const { data: adminProfile } = await supabase
       .from('profiles')
-      .select('id, full_name, role, photo_url')
+      .select('id, full_name, role, photo_url, status')
       .eq('id', adminId)
       .single()
 
@@ -85,6 +86,9 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         type: adminProfile.role, // 'admin'
         name: adminProfile.full_name,
         photo_url: adminProfile.photo_url ?? null,
+        // NEW346: carries the composer gate. Null (column unreadable/absent) is NOT
+        // 'current', so the client fails closed to a read-only composer.
+        status: adminProfile.status ?? null,
         latestMessage: null,
         unreadCount: 0,
       }
@@ -97,6 +101,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     type: string
     name: string
     photo_url: string | null
+    status: string | null
     latestMessage: null
     unreadCount: number
   } | null = null
@@ -104,7 +109,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   if (studentId && (isAdmin || assignedStudentIds?.has(studentId))) {
     const { data: studentData } = await admin
       .from('students')
-      .select('id, full_name, email, photo_url')
+      .select('id, full_name, email, photo_url, status')
       .eq('id', studentId)
       .maybeSingle()
     if (studentData) {
@@ -113,6 +118,8 @@ export default async function MessagesPage({ searchParams }: PageProps) {
         type: 'student',
         name: studentData.full_name,
         photo_url: studentData.photo_url ?? null,
+        // NEW346: carries the composer gate (see adminContact above).
+        status: studentData.status ?? null,
         latestMessage: null,
         unreadCount: 0,
       }
@@ -164,11 +171,13 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     else profileContactIds.push(id)
   }
 
-  // Use admin client — RLS blocks teacher role from reading students table directly
+  // Use admin client — RLS blocks teacher role from reading students table directly.
+  // NEW346 adds `status` here: display-only data for the composer gate. The contact LIST
+  // itself stays unfiltered — every past conversation remains selectable and readable.
   const { data: studentDetails } = studentContactIds.length > 0
     ? await admin
         .from('students')
-        .select('id, auth_user_id, full_name, email, photo_url')
+        .select('id, auth_user_id, full_name, email, photo_url, status')
         .in('id', studentContactIds)
     : { data: [] }
 
@@ -176,20 +185,23 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   const { data: profileDetails } = profileContactIds.length > 0
     ? await supabase
         .from('profiles')
-        .select('id, full_name, role, photo_url')
+        .select('id, full_name, role, photo_url, status')
         .in('id', profileContactIds)
     : { data: [] }
 
   // Combine contact map with display details
   const contacts = Array.from(contactMap.values()).map(contact => {
     const details = contact.type === 'student'
-      ? (studentDetails || []).find((s: { id: string; auth_user_id: string; full_name: string; email: string | null; photo_url: string | null }) => s.id === contact.id)
-      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null }) => p.id === contact.id)
+      ? (studentDetails || []).find((s: { id: string; auth_user_id: string; full_name: string; email: string | null; photo_url: string | null; status: string | null }) => s.id === contact.id)
+      : (profileDetails || []).find((p: { id: string; full_name: string; role: string; photo_url: string | null; status: string | null }) => p.id === contact.id)
 
     return {
       ...contact,
       name: details?.full_name || 'Unknown',
       photo_url: details?.photo_url || null,
+      // NEW346: fails closed — an unresolved contact (details undefined) yields null,
+      // which is not 'current', so its composer is read-only.
+      status: details?.status ?? null,
     }
   })
 

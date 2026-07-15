@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
+import { ACCOUNT_INACTIVE_ERROR, isSenderCurrent } from '@/lib/access/accountStatus'
 
 export async function POST(request: Request) {
   try {
@@ -59,6 +60,15 @@ export async function POST(request: Request) {
       : target.participant_auth_id === user.id && target.sender_role === 'user'
     if (!canEdit) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // NEW347: the SENDER's own account must still be current, mirroring the send route.
+    // Ownership above only proves the row is theirs — a former student or former teacher
+    // holding a live session (past proxy.ts's 60s cookie cache) must not be able to edit
+    // content into a thread either. Keyed on user.id (the AUTH uuid) via isSenderCurrent,
+    // NOT isCounterpartCurrent (table PK). Fail closed on a missing row or query error.
+    if (!(await isSenderCurrent(admin, user.id))) {
+      return NextResponse.json({ error: ACCOUNT_INACTIVE_ERROR }, { status: 403 })
     }
 
     // 15-minute edit window (applies to everyone, admin included), checked against

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sanitizeHtml } from '@/lib/sanitize-server'
 import { validateAttachments } from '@/lib/messages/validateAttachments'
+import { ACCOUNT_INACTIVE_ERROR, isSenderCurrent } from '@/lib/access/accountStatus'
 
 export async function POST(request: Request) {
   try {
@@ -48,6 +49,18 @@ export async function POST(request: Request) {
 
     if (!isAdmin && user.id !== participantAuthId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // NEW347: the SENDER's own account must still be current. proxy.ts blocks a
+    // deactivated account at the portal, but only within its 60s cookie cache — this
+    // route was otherwise unguarded, so a former student or former teacher holding a
+    // live session could still open or continue a support thread. Applies to every
+    // sender, admin included. Keyed on user.id (the AUTH uuid) via isSenderCurrent,
+    // NOT isCounterpartCurrent (which takes the table PK and would deny every
+    // student). Never gate on the client-supplied participantId/participantType.
+    // Fail closed: the helper denies on a missing row or a query error.
+    if (!(await isSenderCurrent(admin, user.id))) {
+      return NextResponse.json({ error: ACCOUNT_INACTIVE_ERROR }, { status: 403 })
     }
 
     const safeContent = sanitizeHtml(content ?? '')

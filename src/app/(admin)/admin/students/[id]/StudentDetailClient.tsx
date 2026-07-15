@@ -6,6 +6,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -333,7 +334,7 @@ function MessageThread({
                       {msg.attachments.map((att, i) => (
                         <a
                           key={i}
-                          href={att.url}
+                          href={messageAttachmentHref('message', msg.id, i, att.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"

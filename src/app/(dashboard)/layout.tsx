@@ -227,6 +227,7 @@ export default async function DashboardLayout({
           </main>
           <RightPanel
             teacherId={profile?.id ?? null}
+            teacherTimezone={profile.timezone}
             announcements={announcements}
             nextLesson={nextLesson}
             billingData={billingData}

@@ -504,8 +504,8 @@ export default function ReportsClient({ initialReports, teachers, students }: Pr
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className="px-5 py-3 text-sm font-medium border-b-2 transition-colors"
-              style={activeTab === tab.id ? { borderBottomColor: '#FF8303', color: '#FF8303' } : { borderBottomColor: 'transparent', color: '#6B7280' }}
+              className="flex items-center justify-center px-5 py-3 text-sm font-medium border-b-2 transition-colors"
+              style={activeTab === tab.id ? { borderBottomColor: '#FF8303', color: '#FF8303', minWidth: '180px' } : { borderBottomColor: 'transparent', color: '#6B7280', minWidth: '180px' }}
             >
               {tab.label}
             </button>

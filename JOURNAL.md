@@ -1,3 +1,53 @@
+## Session 206 - 14 July 2026 - Deleting a forbidden capability, and gating support on the sender
+
+### What was built
+Two auth-surface fixes, both in the same family: a mutation path that should not have been reachable, and one that was reachable by someone who should no longer exist.
+
+The admin Messages page is view-only by design. An admin can read a teacher-student thread but must never write into it, and the interface honoured that - the composer slot rendered a static read-only notice, and the send handler behind it was never called from anything. But the actions file carried a server-directive at file level, which meant the send function was still registered as a live endpoint. Unreachable through the interface is not the same as unreachable. A crafted request carrying the action's identifier would have run it, and it would have inserted a message and fired an email. The previous session had added a guard to it as a precaution. A guard is the wrong answer to a capability the project forbids outright, so the whole thing came out: the action, the seven imports that existed only to serve it, the dead handler, the editor instance that fed the handler, and the two pieces of state that existed only to feed the editor. A repository sweep confirmed a single caller, itself dead, before anything was deleted.
+
+The second fix was the support routes. Sending or editing a support message checked that the sender owned the thread, but never checked that the sender's account was still active. Someone deactivated while holding a live session could therefore keep writing into support. The proxy blocks a deactivated account at the portal, but only inside a sixty-second cache window, so the routes themselves were a real gap rather than a redundancy. Both now check the sender's own account status and refuse when it is not current.
+
+### Break/Fix Log
+The status helper the project already had takes a table primary key, because that is what a message row stores. The support routes only know the authenticated user's identifier. For a teacher those two happen to be the same value; for a student they are not, because the student table reaches its account through a separate column. Reusing the existing helper would have matched no student rows at all and locked every student out of support while looking, from the code, entirely correct. A second helper now exists for the account-identifier case, and the two are documented as non-interchangeable.
+
+The first version of that helper then made a worse mistake, and the database caught it. It looked up the teacher table, and if it found a row it stopped there and answered, treating the presence of a row as proof of which kind of user it was dealing with. A query run before committing showed one account holding a row in both tables at once - active on the student side, stale and marked former on the teacher side. Row presence is not a role signal. The short-circuit denied a currently-active student, and the mirror case would have admitted a former one. The helper now queries both tables every time and answers yes only when every row it finds is current: one stale row anywhere refuses, a failed query refuses, no row at all refuses. The blast radius widened deliberately - an outage on the student table now refuses teachers too - and that is the deny-by-default contract behaving as intended.
+
+That dual-identity account had been logged months ago with an explicit prediction: it would confuse any code that determined a role by looking a user up in the teacher table. That is precisely what happened. The entry has been raised to a go-live blocker. The account is a test fixture rather than a real user, and it is now correctly refused from support until the stale row is reconciled - which is a data decision, not something code should paper over by picking a winner on query order.
+
+### Session result
+Both fixes shipped and reviewed. The forbidden capability no longer exists as an endpoint. The support routes now refuse a deactivated sender. A latent data defect that had been sitting in the backlog as a curiosity turned out to be load-bearing, and is now a blocker.
+
+---
+
+## Session 205 - 14 July 2026 - Messaging refuses to write into a locked-out account
+
+### What was built
+A gap that ran through every messaging surface. The new-message picker filtered out deactivated people, and the send path checked that a teacher was actually assigned to the student, but nothing checked whether the person on the other end of an existing conversation was still active. So an account could be deactivated and locked out of the portal, and a message could still be sent into their thread - and an email notification would still land in their inbox, inviting them into a portal that would refuse them at the door.
+
+A single shared helper now answers one question: may this account still be messaged. It resolves the counterpart against the right table, and it denies by default - a missing row, an unexpected value, or a failed query all refuse, because neither status column carries a constraint that would guarantee the values are what anyone expects.
+
+The gate went onto all four mutation paths: sending and editing, on both portals. Reading was deliberately left alone. History has to stay readable and the contact lists stay unfiltered - the point is not to hide the conversation, it is to stop writing into it. The student portal gained a read-only composer it never had, and its picker now filters on status the way the teacher side already did.
+
+### Break/Fix Log
+The live test found the real failure, and it was not where the audit had pointed. The original gate sat inside the branch that handled teacher senders, which meant an admin viewing the same page sailed straight past it. Moving the check to after the whole assignment block, rather than inside one arm of it, covered the admin path too. Four scenarios were then run against real accounts: a former student seen from the teacher portal, a former teacher seen from the student portal, a former student seen by an admin, and a check that no email fired in any of them. All four passed.
+
+### Session result
+Shipped. Four mutation paths gated, read access untouched, and no notification can now be sent to an account that cannot log in to receive it.
+
+---
+
+## Session 204 - 14 July 2026 - Removing a dead account flag
+
+### What was built
+The teacher table carried a boolean that no longer meant anything. Account state had moved to a status column some time ago, but the old flag lingered - read in a few places, written in one, and referenced in comments that described behaviour the code no longer had. A dead flag that still reads as if it governs access is worse than no flag at all, because the next person to touch that code will believe it.
+
+The student-facing pickers were switched to filter on status, which is what actually governs whether an account can log in. The remaining reads and the one write were removed, along with the field's entry in the validation schema and the comments that described it as live. Nine files across the admin routes and both portals.
+
+### Session result
+Shipped in two commits. The flag is gone from the schema, the routes and the comments, and account state now has exactly one source of truth.
+
+---
+
 ## Session 203 - 14 July 2026 - Cancellation and reschedule attribution across every admin view
 
 ### What was built

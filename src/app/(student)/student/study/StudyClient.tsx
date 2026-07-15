@@ -139,11 +139,11 @@ export default function StudyClient({ studentId, assignments, completions, libra
       <div className="flex gap-2 mb-6 border-b border-gray-200">
         <button
           onClick={() => setActiveSection('assigned')}
-          className="relative pb-3 px-1 text-sm font-medium transition-colors"
+          className="relative flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeSection === 'assigned'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '190px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '190px' }
           }
         >
           Assigned by Your Teacher
@@ -159,11 +159,11 @@ export default function StudyClient({ studentId, assignments, completions, libra
 
         <button
           onClick={() => setActiveSection('practice')}
-          className="relative pb-3 px-1 text-sm font-medium transition-colors"
+          className="relative flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeSection === 'practice'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '190px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '190px' }
           }
         >
           Practice on Your Own

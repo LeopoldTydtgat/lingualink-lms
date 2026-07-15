@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import { sendMessage, editMessage, markMessagesAsRead } from './actions'
 
@@ -40,6 +41,10 @@ interface Contact {
   type: string
   name: string
   photo_url: string | null
+  // NEW346: the counterpart's account status ('current' | 'former' | 'on_hold', or null
+  // when it could not be resolved). Anything other than 'current' makes the thread
+  // read-only; the thread itself stays fully readable.
+  status: string | null
   latestMessage: Message | null
   unreadCount: number
 }
@@ -49,6 +54,7 @@ interface Teacher {
   full_name: string
   photo_url: string | null
   role: string
+  status: string | null
 }
 
 interface Student {
@@ -448,6 +454,12 @@ export default function StudentMessagesClient({
         type: teacher.role === 'admin' ? 'admin' : 'teacher',
         name: teacher.full_name,
         photo_url: teacher.photo_url,
+        // NEW346: carried from the assigned-teacher row so a thread started from the
+        // picker is gated identically to one restored from history. The picker only
+        // offers current teachers (see filteredTeachers), so this is 'current' in
+        // practice; carried through rather than hard-coded so the composer still fails
+        // closed if this ever gets another caller.
+        status: teacher.status ?? null,
         latestMessage: null,
         unreadCount: 0,
       }
@@ -489,21 +501,41 @@ export default function StudentMessagesClient({
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  // NEW346: the new-message picker offers CURRENT teachers only — starting a fresh
+  // conversation with a deactivated account is never valid, and the server send gate
+  // would deny it anyway. Status is filtered BEFORE the name search so a former teacher
+  // can never be surfaced by any query. Deny by default: a null/unknown status is not
+  // 'current' and is not offered. This mirrors the teacher portal, whose picker is
+  // already filtered server-side (page.tsx:211/:221).
+  //
+  // Derived here rather than by narrowing `assignedTeachers` (or its server select),
+  // because that same array also builds the CONTACTS list and the assignment half of
+  // isBlockedContact below — both of which must stay UNFILTERED so every past
+  // conversation, including a former teacher's, remains selectable and readable.
+  // Filtering at the source would silently delete history from the UI.
   const filteredTeachers = assignedTeachers.filter(t =>
+    t.status === 'current' &&
     t.full_name.toLowerCase().includes(newMsgSearch.toLowerCase())
   )
 
-  // Mirrors the teacher client's isBlockedStudent gate (NEW275): the server edit
-  // action re-checks the assignment for EVERY receiver, so the Edit affordance is
-  // hidden when the selected contact is not in the currently-assigned set instead
-  // of letting the save fail server-side. The page only lists assigned contacts at
-  // load, so this only bites a session left open across an unassignment.
+  // Mirrors the teacher client's isBlockedContact gate. Two independent reasons a
+  // thread is read-only, both re-checked authoritatively by the server actions:
+  //
+  //  1. NEW275 assignment — the contact is not in the currently-assigned set. The page
+  //     only lists assigned contacts at load, so this only bites a session left open
+  //     across an unassignment.
+  //  2. NEW346 status — the teacher/admin account is no longer 'current'. This one is
+  //     reachable on a first load: the CONTACTS list is deliberately NOT status-filtered
+  //     (the picker is — see filteredTeachers above), so a former teacher's existing
+  //     thread stays readable but loses its composer. Deny-by-default: a null/unknown
+  //     status is not 'current'.
   const assignedTeacherIdSet = useMemo(
     () => new Set(assignedTeachers.map(t => t.id)),
     [assignedTeachers]
   )
   const isBlockedContact =
-    !!selectedContact && !assignedTeacherIdSet.has(selectedContact.id)
+    !!selectedContact &&
+    (!assignedTeacherIdSet.has(selectedContact.id) || selectedContact.status !== 'current')
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -688,7 +720,7 @@ export default function StudentMessagesClient({
                               {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
                                 <a
                                   key={i}
-                                  href={att.url}
+                                  href={messageAttachmentHref('message', msg.id, i, att.url, msg.pending)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
@@ -733,7 +765,24 @@ export default function StudentMessagesClient({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* ── Composer ── */}
+            {/* ── Composer ──
+                NEW346: for a thread whose teacher/admin is no longer assigned or whose
+                account is no longer current, the composer is replaced by a read-only
+                notice (mirrors the teacher portal's MessagesClient); the thread above
+                stays fully readable. The sub-line names the actual reason, since a
+                deactivated account and an unassignment need different follow-up. */}
+            {isBlockedContact ? (
+              <div className="border-t border-gray-200 flex-shrink-0 bg-white px-5 py-4">
+                <p className="text-sm font-medium text-gray-600">
+                  You can no longer message {selectedContact.name}.
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {selectedContact.status !== 'current'
+                    ? 'This account is no longer active. You can still read the conversation above.'
+                    : 'This teacher is not currently assigned to your training. Please contact an administrator if you need to reach them.'}
+                </p>
+              </div>
+            ) : (
             <div className="border-t border-gray-200 flex-shrink-0 bg-white">
               <style>{`
                 .student-composer .ProseMirror { outline: none !important; border: none !important; box-shadow: none !important; }
@@ -850,6 +899,7 @@ export default function StudentMessagesClient({
                 </button>
               </div>
             </div>
+            )}
           </>
         )}
       </div>

@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import { toast } from 'sonner'
 
@@ -622,7 +623,7 @@ export default function ChatWidget({
                               {msg.attachments.map((att, i) => (
                                 <a
                                   key={i}
-                                  href={att.url}
+                                  href={messageAttachmentHref('support', msg.id, i, att.url, msg.pending)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1 text-xs underline max-w-full"

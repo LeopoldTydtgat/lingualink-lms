@@ -524,7 +524,7 @@ export async function PATCH(
     } else {
       try {
         const meeting = await createTeamsMeeting({
-          subject: `Lingualink class – ${studentName} with ${teacherName}`,
+          subject: `LinguaLink class – ${studentName} with ${teacherName}`,
           startTime: newScheduledAt,
           durationMinutes: newDuration,
         })
