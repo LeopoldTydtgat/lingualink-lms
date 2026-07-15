@@ -67,7 +67,7 @@ export async function GET(
     const adminClient = createAdminClient()
     const { data: sheet } = await adminClient
       .from('study_sheets')
-      .select('id, is_active, attachments, audience, allowed_roles')
+      .select('id, is_active, attachments, audience, allowed_roles, owner_id')
       .eq('id', sheetId)
       .maybeSingle()
 
@@ -80,20 +80,23 @@ export async function GET(
     // gates. account_types / allowed_roles are Postgres text[]; a missing array
     // is treated as empty. Default deny: access only becomes true when a tier
     // grants it. Order matters — broadest matching role wins
-    // (admin > exam teacher > teacher > student).
+    // (admin > exam teacher > teacher > student). Owner clause per tier: admin
+    // is unrestricted; exam-teacher and teacher require owner_id IS NULL OR
+    // owner_id = auth.uid(); student requires owner_id IS NULL.
     const accountTypes: string[] = Array.isArray(profile?.account_types) ? profile.account_types : []
     const allowedRoles: string[] = Array.isArray(sheet.allowed_roles) ? sheet.allowed_roles : []
     const isStudentAudience = sheet.audience === 'student'
+    const ownerOk = sheet.owner_id === null || sheet.owner_id === user.id
 
     let access = false
     if (profile?.role === 'admin' || accountTypes.includes('school_admin')) {
       access = true
     } else if (accountTypes.includes('teacher_exam')) {
-      access = isStudentAudience || allowedRoles.includes('teacher') || allowedRoles.includes('teacher_exam')
+      access = (isStudentAudience || allowedRoles.includes('teacher') || allowedRoles.includes('teacher_exam')) && ownerOk
     } else if (accountTypes.includes('teacher')) {
-      access = isStudentAudience || allowedRoles.includes('teacher')
+      access = (isStudentAudience || allowedRoles.includes('teacher')) && ownerOk
     } else if (student) {
-      access = isStudentAudience
+      access = isStudentAudience && sheet.owner_id === null
     }
 
     if (!access) {
