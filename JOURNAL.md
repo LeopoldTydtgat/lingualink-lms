@@ -1,3 +1,24 @@
+## Session 208 - 15 July 2026 - Messaging hardening and export timezone alignment
+
+### What was built
+- src/app/(student)/student/messages/actions.ts - student sendMessage now validates the client-supplied receiverType against the recipient's actual profile role, mirroring the dashboard-side NEW275 block; 'student' recipients are rejected outright (commit 058086c, NEW349)
+- src/app/(student)/student/messages/page.tsx - student contact list now includes historical threads with teachers no longer assigned; counterparts resolve from the union of assigned and historical profiles, and the existing isBlockedContact logic renders historical threads read-only (commit 262bff7, NEW283)
+- src/lib/exportTime.ts - new pure helper zonedDayRangeToUtcBounds resolving inclusive local calendar-day ranges into half-open UTC instant pairs, with two-pass DST-safe offset math and a fail-safe fallback to the old +02:00 bounds (commit 6957a0b, NEW273)
+- src/app/api/admin/reports/export/route.ts - XLSX export row bounds now resolve in the settings-driven export timezone instead of hardcoded SAST days (commit 6957a0b, NEW273)
+- src/app/api/admin/billing/export/route.ts - company_billing, student_progress, and pending_reports branches now scope their date windows via zonedDayRangeToUtcBounds in the export timezone; previously bare YYYY-MM-DD strings were read as UTC midnight, silently dropping the entire dateTo day from the billing window (commit 287a6be, NEW350)
+- src/app/(admin)/admin/billing/BillingAdminClient.tsx - Student Billing and Company Billing table loaders now resolve their date filters with the same helper and timezone, so the on-screen tables and the exported CSVs always cover the identical window (commit 5dd1709, NEW350 follow-up)
+- src/app/api/admin/settings/route.ts and src/lib/exportTime.ts - server-side allowlist for the export_timezone setting; only the six zones the export day-boundary math guarantees are accepted, exported as EXPORT_TZ_ALLOWED from a single source of truth (commit 20cafdf, NEW351)
+
+### Break/Fix Log
+Issue 1: Reports XLSX export included or excluded boundary-day lessons incorrectly for non-SAST export timezones / Cause: query bounds hardcoded to +02:00 while display columns rendered in the configured zone / Fix: new zonedDayRangeToUtcBounds helper resolving bounds in the same zone the export renders in, verified by the code reviewer with an empirical sweep across all configured zones and DST transitions / Lesson: a date filter on a timestamptz column must be resolved in an explicit timezone; a bare date string is a silent UTC assumption
+
+Issue 2: Billing CSV export dropped the entire final day of the selected range / Cause: bare YYYY-MM-DD passed to .lte on a timestamptz column reads as UTC midnight at the start of that day / Fix: half-open gte/lt bounds from the shared helper, applied across all three affected export branches / Lesson: audit the same pattern across every branch of a file before fixing one occurrence
+
+Issue 3: Fixing the export alone would have made the on-screen billing tables disagree with the CSV at boundary days / Cause: the tables used the same bare-date pattern, so they were previously wrong together with the export / Fix: same bounds resolution applied to both table loaders in the same session / Lesson: when a fix changes a shared convention, sweep the surfaces that consumed the old behaviour or the fix creates a visible inconsistency
+
+### Session result
+Two messaging fixes and a full export timezone alignment shipped: student message sends are validated server-side, historical teacher threads are visible read-only, and every billing and reports export now scopes and renders its date window in one settings-driven timezone, with the setting itself locked to a server-validated allowlist. Six commits pushed to dev.
+
 ## Session 207 - 15 July 2026 - Attachment proxy, Realtime send race, and a cross-session bug sweep
 
 ### What was built
