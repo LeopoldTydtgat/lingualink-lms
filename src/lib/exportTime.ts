@@ -27,6 +27,11 @@ const TZ_LABELS: Record<string, string> = {
   'Europe/Berlin': 'CET/CEST',
 }
 
+// The only zones the exports guarantee correct day-boundary math for — none of
+// them transitions at local midnight (see the ASSUMPTION note lower in this
+// file). Single source of truth for validating the export_timezone setting.
+export const EXPORT_TZ_ALLOWED = Object.keys(TZ_LABELS)
+
 export function tzLabel(tz: string): string {
   if (TZ_LABELS[tz]) return TZ_LABELS[tz]
   try {
