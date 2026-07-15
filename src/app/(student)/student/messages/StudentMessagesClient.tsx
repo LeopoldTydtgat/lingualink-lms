@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import { sendMessage, editMessage, markMessagesAsRead } from './actions'
 
@@ -719,7 +720,7 @@ export default function StudentMessagesClient({
                               {msg.attachments.map((att: { url: string; filename: string; size: number }, i: number) => (
                                 <a
                                   key={i}
-                                  href={att.url}
+                                  href={messageAttachmentHref('message', msg.id, i, att.url, msg.pending)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"

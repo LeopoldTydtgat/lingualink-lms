@@ -6,6 +6,7 @@ import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { getAdminThreadMessages, markAdminThreadRead } from './actions'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -402,7 +403,7 @@ export default function AdminMessagesClient({
                               {msg.attachments.map((att, i) => (
                                 <a
                                   key={i}
-                                  href={att.url}
+                                  href={messageAttachmentHref('message', msg.id, i, att.url)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="flex items-center gap-1.5 text-xs underline opacity-80 hover:opacity-100"
