@@ -33,7 +33,7 @@ export default async function StudentDashboardLayout({
     .from('students')
     .select('id, full_name, email, photo_url, status, timezone')
     .eq('auth_user_id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!student) redirect('/student/login')
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')
