@@ -8,7 +8,7 @@ import {
   recomputeInvoiceAmountsForTeacher,
   recomputeInvoiceAmountsForAllTeachers,
 } from '@/lib/billing/recomputeAmounts'
-import { getExportTimezone, formatInstantInTz, tzLabel } from '@/lib/exportTime'
+import { getExportTimezone, formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
@@ -70,6 +70,25 @@ export async function GET(req: NextRequest) {
   const studentId = searchParams.get('studentId')
   const companyId = searchParams.get('companyId')
   const month = searchParams.get('month') // YYYY-MM-01 for teacher_invoices
+
+  // dateFrom/dateTo are bare YYYY-MM-DD calendar days the admin picked in the
+  // export timezone, but every column they scope (scheduled_at, created_at) is a
+  // timestamptz instant. Passing the bare string makes Postgres read it as UTC
+  // midnight, which drops the whole dateTo day and anchors both bounds to the
+  // wrong zone. Resolve the window once here, in the same zone the export renders
+  // in, into a HALF-OPEN [gte, lt) instant pair — hence .lt, not .lte, below.
+  // Each bound is independently optional; only the supplied side is applied.
+  let dateGteIso: string | null = null
+  let dateLtIso: string | null = null
+  if (dateFrom && dateTo) {
+    const bounds = zonedDayRangeToUtcBounds(dateFrom, dateTo, exportTz)
+    dateGteIso = bounds.gteIso
+    dateLtIso = bounds.ltIso
+  } else if (dateFrom) {
+    dateGteIso = zonedDayRangeToUtcBounds(dateFrom, dateFrom, exportTz).gteIso
+  } else if (dateTo) {
+    dateLtIso = zonedDayRangeToUtcBounds(dateTo, dateTo, exportTz).ltIso
+  }
 
   let csv = ''
   let filename = 'export.csv'
@@ -160,8 +179,8 @@ export async function GET(req: NextRequest) {
       .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
 
-    if (dateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', dateFrom)
-    if (dateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', dateTo)
+    if (dateGteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', dateGteIso)
+    if (dateLtIso) lessonsQuery = lessonsQuery.lt('scheduled_at', dateLtIso)
 
     const { data: lessons, error: lessonsErr } = await lessonsQuery
     if (lessonsErr) throw lessonsErr
@@ -222,8 +241,8 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (studentId) reportsQuery = reportsQuery.eq('student_id', studentId)
-    if (dateFrom) reportsQuery = reportsQuery.gte('created_at', dateFrom)
-    if (dateTo) reportsQuery = reportsQuery.lte('created_at', dateTo)
+    if (dateGteIso) reportsQuery = reportsQuery.gte('created_at', dateGteIso)
+    if (dateLtIso) reportsQuery = reportsQuery.lt('created_at', dateLtIso)
 
     const { data: reports, error: reportsErr } = await reportsQuery
     if (reportsErr) throw reportsErr
@@ -268,8 +287,8 @@ export async function GET(req: NextRequest) {
       .order('created_at', { ascending: false })
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
-    if (dateFrom) query = query.gte('created_at', dateFrom)
-    if (dateTo) query = query.lte('created_at', dateTo)
+    if (dateGteIso) query = query.gte('created_at', dateGteIso)
+    if (dateLtIso) query = query.lt('created_at', dateLtIso)
 
     const { data: reports, error: reportsErr } = await query
     if (reportsErr) throw reportsErr
