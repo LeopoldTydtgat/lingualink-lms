@@ -17,6 +17,8 @@ import {
   Plus,
   MoreVertical,
   Copy,
+  CalendarDays,
+  ClipboardCheck,
 } from 'lucide-react'
 import CreateResourceModal from './CreateResourceModal'
 
@@ -32,10 +34,21 @@ type StudySheet = {
   owner_id: string | null
 }
 
+type SheetProgress = {
+  assignedCount: number
+  completedCount: number
+  pendingCount: number
+  latestAssignedAt: string | null
+  activityCount: number
+}
+
 type Props = {
   studySheets: StudySheet[]
   isAdmin: boolean
   currentUserId: string
+  progressBySheet: Record<string, SheetProgress>
+  assignedThisWeek: number
+  newSubmissions: number
 }
 
 type TabKey = 'teaching' | 'student'
@@ -44,6 +57,7 @@ type SortKey = 'recent' | 'title'
 
 const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const MIDDOT = String.fromCharCode(183)
 
 // UTC parts only: deterministic across the SSR/CSR boundary (no hydration drift)
 // and avoids the banned toISOString / toLocale* date APIs.
@@ -293,6 +307,117 @@ function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
   )
 }
 
+// Progress bar: grey track, #FF8303 fill (locked palette, inline style per house rule).
+function ProgressBar({ completed, total }: { completed: number; total: number }) {
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0
+  return (
+    <div style={{ height: '6px', borderRadius: '999px', backgroundColor: '#e5e7eb', overflow: 'hidden' }}>
+      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: '#FF8303', borderRadius: '999px' }} />
+    </div>
+  )
+}
+
+// Student Worksheets tab card: assignment/progress aggregates plus Preview + kebab.
+// No Assign / View Responses actions in this commit.
+function WorksheetCard({ sheet, progress }: { sheet: StudySheet; progress?: SheetProgress }) {
+  const router = useRouter()
+  const Icon = categoryIcon(sheet.category)
+
+  const assignedCount = progress?.assignedCount ?? 0
+  const completedCount = progress?.completedCount ?? 0
+  const pendingCount = progress?.pendingCount ?? 0
+  const activityCount = progress?.activityCount ?? 0
+  const isAssigned = assignedCount > 0
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col"
+      style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <span
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: '40px', height: '40px', backgroundColor: '#FFF3E0' }}
+        >
+          <Icon className="w-5 h-5" style={{ color: '#FF8303' }} />
+        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className="px-2 py-0.5 rounded-full text-xs font-medium"
+            style={isAssigned
+              ? { backgroundColor: '#FFF3E0', color: '#FF8303' }
+              : { backgroundColor: '#f3f4f6', color: '#9ca3af' }}
+          >
+            {isAssigned ? 'Assigned' : 'Not Assigned'}
+          </span>
+          <DuplicateMenu sheetId={sheet.id} />
+        </div>
+      </div>
+
+      <h3 className="font-medium text-sm mb-2" style={{ color: '#111827' }}>{sheet.title}</h3>
+
+      {/* Meta: category, level (hidden when '' or null), activity count when known */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        {sheet.category && (
+          <span
+            className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+            style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+          >
+            {sheet.category}
+          </span>
+        )}
+        {sheet.level && (
+          <span
+            className="px-2 py-0.5 rounded-full text-xs font-medium"
+            style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+          >
+            {sheet.level}
+          </span>
+        )}
+        {activityCount > 0 && (
+          <span className="text-xs" style={{ color: '#9ca3af' }}>
+            {activityCount} {activityCount === 1 ? 'activity' : 'activities'}
+          </span>
+        )}
+      </div>
+
+      {/* Progress block: only when the worksheet is assigned to at least one student */}
+      {isAssigned && (
+        <div className="mb-3">
+          <div className="text-xs mb-1.5">
+            <span style={{ color: '#4b5563' }}>
+              Completed {completedCount} {completedCount === 1 ? 'student' : 'students'}
+            </span>
+            <span className="mx-1.5" style={{ color: '#d1d5db' }}>{MIDDOT}</span>
+            <span style={{ color: '#9ca3af' }}>
+              Pending {pendingCount} {pendingCount === 1 ? 'student' : 'students'}
+            </span>
+          </div>
+          <ProgressBar completed={completedCount} total={assignedCount} />
+          {progress?.latestAssignedAt && (
+            <p className="text-xs mt-2" style={{ color: '#9ca3af' }}>
+              Assigned on: {formatDate(progress.latestAssignedAt)}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex items-center gap-2 mt-auto pt-1">
+        <button
+          type="button"
+          onClick={() => router.push(`/study-sheets/${sheet.id}`)}
+          className="text-sm px-3 py-1.5 rounded-md border"
+          style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+        >
+          Preview
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function SheetTable({
   rows,
   ownedIds,
@@ -357,7 +482,14 @@ function SheetTable({
   )
 }
 
-export default function StudySheetsClient({ studySheets, isAdmin, currentUserId }: Props) {
+export default function StudySheetsClient({
+  studySheets,
+  isAdmin,
+  currentUserId,
+  progressBySheet,
+  assignedThisWeek,
+  newSubmissions,
+}: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabKey>('teaching')
   const [search, setSearch] = useState('')
@@ -441,6 +573,8 @@ export default function StudySheetsClient({ studySheets, isAdmin, currentUserId 
         <div className="flex flex-wrap gap-4 mb-6">
           <StatCard icon={GraduationCap} label="Teaching Resources" value={teachingCount} caption="Private to you" />
           <StatCard icon={Users} label="Student Worksheets" value={worksheetCount} caption="Available to assign" />
+          <StatCard icon={CalendarDays} label="Assigned This Week" value={assignedThisWeek} caption="Across your students" />
+          <StatCard icon={ClipboardCheck} label="New Submissions" value={newSubmissions} caption="In the last 7 days" />
         </div>
 
         {/* Tab bar */}
@@ -530,7 +664,25 @@ export default function StudySheetsClient({ studySheets, isAdmin, currentUserId 
         </div>
 
         {/* Content */}
-        {view === 'grid' ? (
+        {activeTab === 'student' ? (
+          visible.length === 0 ? (
+            <div
+              className="rounded-xl px-6 py-12 text-center text-sm"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#9ca3af' }}
+            >
+              {emptyMessage}
+            </div>
+          ) : (
+            <div
+              className="grid gap-4"
+              style={{ gridTemplateColumns: view === 'grid' ? 'repeat(auto-fill, minmax(280px, 1fr))' : '1fr' }}
+            >
+              {visible.map(sheet => (
+                <WorksheetCard key={sheet.id} sheet={sheet} progress={progressBySheet[sheet.id]} />
+              ))}
+            </div>
+          )
+        ) : view === 'grid' ? (
           visible.length === 0 ? (
             <div
               className="rounded-xl px-6 py-12 text-center text-sm"
