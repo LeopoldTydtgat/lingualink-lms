@@ -211,7 +211,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <p className="font-semibold" style={isCancelled ? { textDecoration: 'line-through' } : undefined}>{cls.student.full_name}</p>
+              <p className="font-semibold">{cls.student.full_name}</p>
               {isNext && (
                 <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
                   NEXT
@@ -235,7 +235,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
-            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#FFEEE6', color: '#FD5602', borderRadius: '4px' }}>Cancelled</span>
+            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>Cancelled</span>
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
@@ -387,6 +387,14 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     try { localStorage.setItem('lingualink_teacher_cancelled_section_expanded', String(next)) } catch {}
   }
 
+  function handleJumpToCancelled() {
+    if (hideCancelled) handleHideCancelledChange(false)
+    if (!cancelledSectionExpanded) handleCancelledSectionToggle()
+    requestAnimationFrame(() => {
+      document.getElementById('cancelled-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
   async function handleDismissBanner() {
     try {
       const res = await fetch('/api/profile/dismiss-banner', { method: 'POST' })
@@ -438,20 +446,20 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
           <p className="text-sm text-gray-500 mt-1">
             {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
+            {cancelledClasses.length > 0 && (
+              <>
+                {' '}&middot;{' '}
+                <button
+                  type="button"
+                  onClick={handleJumpToCancelled}
+                  className="font-medium hover:underline"
+                  style={{ color: '#FF8303', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+                >
+                  {cancelledClasses.length} cancelled
+                </button>
+              </>
+            )}
           </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {classes.length > 0 && (
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={hideCancelled}
-                onChange={(e) => handleHideCancelledChange(e.target.checked)}
-                style={{ accentColor: '#FF8303' }}
-              />
-              Hide cancelled
-            </label>
-          )}
         </div>
       </div>
 
@@ -487,22 +495,35 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       )}
 
-      {!hideCancelled && cancelledClasses.length > 0 && (
-        <div className="space-y-3">
-          <button
-            onClick={handleCancelledSectionToggle}
-            className="flex items-center gap-2 text-left w-full"
-          >
-            <span className="font-semibold text-gray-800">Cancelled</span>
-            <span style={{ fontSize: '12px', fontWeight: 600, color: '#FD5602', backgroundColor: '#FFEEE6', borderRadius: '9999px', padding: '2px 10px' }}>
-              {cancelledClasses.length}
+      {cancelledClasses.length > 0 && (
+        <div id="cancelled-section" className="space-y-3 scroll-mt-6">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCancelledSectionToggle}
+              className="flex items-center gap-2 text-left flex-1"
+            >
+              <span className="font-semibold text-gray-800">Cancelled</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
+                {cancelledClasses.length}
+              </span>
+              <div className="ml-auto">
+                <ChevronIcon rotated={cancelledSectionExpanded} />
+              </div>
+            </button>
+            <span onClick={e => e.stopPropagation()}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={hideCancelled}
+                  onChange={(e) => handleHideCancelledChange(e.target.checked)}
+                  style={{ accentColor: '#FF8303' }}
+                />
+                Hide cancelled
+              </label>
             </span>
-            <div className="ml-auto">
-              <ChevronIcon rotated={cancelledSectionExpanded} />
-            </div>
-          </button>
+          </div>
 
-          {cancelledSectionExpanded && (
+          {cancelledSectionExpanded && !hideCancelled && (
             <div className="space-y-2">
               {cancelledClasses.map(cls => (
                 <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />
