@@ -34,19 +34,21 @@ export async function POST(request: Request) {
     intro_text?: unknown
   }
 
-  // Same validation strictness as the admin create route: title and category
-  // are required. category must pass the study_sheets_category_check constraint.
-  if (!title || typeof title !== 'string' || !category || typeof category !== 'string') {
-    return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
+  // Title is the only required field. Teacher private resources may omit
+  // category and level (both are now nullable on study_sheets); when omitted the
+  // insert leaves the keys out so the DB stores NULL. category, when provided,
+  // must still pass the study_sheets_category_check constraint (vocabulary or
+  // grammar) - a non-null category that is neither is rejected up front.
+  if (!title || typeof title !== 'string') {
+    return NextResponse.json({ error: 'title is required' }, { status: 400 })
   }
-  if (category !== 'vocabulary' && category !== 'grammar') {
+  const hasCategory = category === 'vocabulary' || category === 'grammar'
+  if (category !== undefined && category !== null && category !== '' && !hasCategory) {
     return NextResponse.json({ error: 'category must be vocabulary or grammar' }, { status: 400 })
   }
 
   const insert: Record<string, unknown> = {
     title,
-    category,
-    level: typeof level === 'string' ? level : '',
     intro_text: typeof intro_text === 'string' ? intro_text : null,
     // Server-fixed, never client-supplied:
     owner_id: user.id,
@@ -65,6 +67,12 @@ export async function POST(request: Request) {
     // set explicitly so correctness never depends on the live default drifting.
     allowed_roles: ['teacher', 'teacher_exam'],
   }
+
+  // category and level are nullable for teacher resources: include each key only
+  // when actually provided so an omitted field inserts NULL (the sentinel for
+  // "no category/level"). Never coerce level to an empty string.
+  if (hasCategory) insert.category = category
+  if (typeof level === 'string' && level.length > 0) insert.level = level
 
   // difficulty is NOT NULL DEFAULT 1 - omit when not supplied so the DB
   // default applies; an explicit null violates the constraint.

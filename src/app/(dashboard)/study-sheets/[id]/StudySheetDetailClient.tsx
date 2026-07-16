@@ -32,8 +32,8 @@ type Attachment = {
 type StudySheet = {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
   content: { words: Word[] }
   attachments: Attachment[] | null
@@ -63,7 +63,7 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function categoryBadgeStyle(category: string): React.CSSProperties {
+function categoryBadgeStyle(category: string | null): React.CSSProperties {
   if (category === 'Vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
   if (category === 'Grammar') return { backgroundColor: '#eff6ff', color: '#1d4ed8' }
   return { backgroundColor: '#e0f2fe', color: '#0369a1' }
@@ -265,18 +265,22 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 mb-2">{sheet.title}</h1>
             <div className="flex items-center gap-3">
-              <span
-                className="px-2 py-0.5 rounded-full text-xs font-medium"
-                style={categoryBadgeStyle(sheet.category)}
-              >
-                {sheet.category}
-              </span>
-              <span
-                className="px-2 py-0.5 rounded-full text-xs font-medium"
-                style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-              >
-                {sheet.level}
-              </span>
+              {sheet.category && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={categoryBadgeStyle(sheet.category)}
+                >
+                  {sheet.category}
+                </span>
+              )}
+              {sheet.level && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                >
+                  {sheet.level}
+                </span>
+              )}
               {sheet.difficulty != null && <DifficultyBars count={sheet.difficulty} />}
             </div>
           </div>

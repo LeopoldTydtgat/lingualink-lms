@@ -55,8 +55,8 @@ type Assignment = {
   assigned_at: string
   study_sheet: {
     title: string
-    category: string
-    level: string
+    category: string | null
+    level: string | null
   }
 }
 
@@ -73,7 +73,8 @@ type Props = {
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
 
-function CategoryBadge({ category }: { category: string }) {
+function CategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null
   const style =
     category.toLowerCase() === 'vocabulary'
       ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
@@ -450,12 +451,14 @@ export default function StudentDetailClient({
                       <CategoryBadge category={a.study_sheet.category} />
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                        style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                      >
-                        {a.study_sheet.level}
-                      </span>
+                      {a.study_sheet.level && (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                          style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                        >
+                          {a.study_sheet.level}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(a.assigned_at).toLocaleDateString('en-GB', {

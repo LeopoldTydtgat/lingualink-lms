@@ -10,8 +10,8 @@ import { EmptyStudy } from '@/components/EmptyStudy'
 interface StudySheet {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
 }
 
@@ -66,7 +66,8 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function CategoryBadge({ category }: { category: string }) {
+function CategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null
   const style =
     category === 'Vocabulary'
       ? { backgroundColor: '#fff7ed', color: '#c2410c' }

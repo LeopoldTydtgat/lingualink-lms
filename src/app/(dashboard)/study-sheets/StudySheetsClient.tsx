@@ -23,8 +23,8 @@ import CreateResourceModal from './CreateResourceModal'
 type StudySheet = {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
   is_active: boolean
   created_at: string
@@ -53,8 +53,8 @@ function formatDate(iso: string): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
-function categoryIcon(category: string) {
-  return category.toLowerCase() === 'grammar' ? Languages : BookOpen
+function categoryIcon(category: string | null) {
+  return category?.toLowerCase() === 'grammar' ? Languages : BookOpen
 }
 
 // Reused difficulty-bar logic (unchanged from the previous surface).
@@ -240,18 +240,22 @@ function TabButton({
 function Badges({ sheet }: { sheet: StudySheet }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
-      <span
-        className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
-        style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
-      >
-        {sheet.category}
-      </span>
-      <span
-        className="px-2 py-0.5 rounded-full text-xs font-medium"
-        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-      >
-        {sheet.level}
-      </span>
+      {sheet.category && (
+        <span
+          className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+          style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+        >
+          {sheet.category}
+        </span>
+      )}
+      {sheet.level && (
+        <span
+          className="px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+        >
+          {sheet.level}
+        </span>
+      )}
       <DifficultyBars count={sheet.difficulty} />
     </div>
   )
@@ -332,12 +336,14 @@ function SheetTable({
             </span>
             <span className="text-sm capitalize" style={{ color: '#4b5563' }}>{sheet.category}</span>
             <span className="text-sm">
-              <span
-                className="px-2 py-0.5 rounded-full text-xs font-medium"
-                style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-              >
-                {sheet.level}
-              </span>
+              {sheet.level && (
+                <span
+                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                >
+                  {sheet.level}
+                </span>
+              )}
             </span>
             <span><DifficultyBars count={sheet.difficulty} /></span>
             <span className="flex items-center justify-end gap-1 self-center">

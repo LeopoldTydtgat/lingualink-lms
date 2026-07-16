@@ -44,8 +44,8 @@ interface Assignment {
   study_sheet: {
     id: string;
     title: string;
-    category: string;
-    level: string;
+    category: string | null;
+    level: string | null;
   } | null;
 }
 
@@ -323,9 +323,9 @@ export default function PastClassDetailClient({
                 >
                   <span className="text-gray-800">{a.study_sheet.title}</span>
                   <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <span>{a.study_sheet.category}</span>
-                    <span>·</span>
-                    <span>{a.study_sheet.level}</span>
+                    {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
+                    {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
+                    {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
                   </div>
                 </div>
               ) : null

@@ -40,8 +40,8 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string        // 'Vocabulary' | 'Grammar'
-  level: string           // A1, A1+, A2 … C2
+  category: string | null // 'Vocabulary' | 'Grammar'; null for teacher private resources
+  level: string | null    // A1, A1+, A2 ... C2; null for teacher private resources
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
   is_active: boolean
@@ -100,7 +100,7 @@ function exerciseCount(sheet: StudySheet, counts: Record<string, number>): numbe
 }
 
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  const cat = sheet.category.toLowerCase()
+  const cat = sheet.category?.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
   if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
   return false

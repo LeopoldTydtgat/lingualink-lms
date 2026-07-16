@@ -4,21 +4,21 @@ import { useState, useRef, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { X, Upload, Trash2, FileText } from 'lucide-react'
+import { X, Trash2, FileText } from 'lucide-react'
 
-// Teacher "Add Resource" flow. Two phases in one modal:
-//   1. create - POST /api/teacher/library returns the new sheet id (201).
-//   2. files  - upload/remove files against that id, then Done -> refresh.
-// Teacher-owned sheets are always private staff material server-side; nothing
-// here can change that. All state-dependent colours are inline style props.
-
-type Attachment = { name: string; type: string }
+// Teacher "Add Resource" flow - a single form, one action. Metadata plus any
+// number of locally-staged files; one Create button creates the sheet and then
+// uploads each staged file against the returned id. Teacher-owned sheets are
+// always private staff material server-side; nothing here can change that.
+// category and level are optional: a teacher private resource may omit both,
+// which stores NULL for each. All state-dependent colours are inline style props.
 
 type Props = { onClose: () => void }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
-const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
 const ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx'
+const ACCEPT_EXT = ['.pdf', '.doc', '.docx', '.ppt', '.pptx']
 
 const overlay: CSSProperties = {
   position: 'fixed',
@@ -60,42 +60,82 @@ const fieldStyle: CSSProperties = {
   backgroundColor: 'white',
 }
 
+function hasAcceptedExt(name: string): boolean {
+  const lower = name.toLowerCase()
+  return ACCEPT_EXT.some(ext => lower.endsWith(ext))
+}
+
 export default function CreateResourceModal({ onClose }: Props) {
   const router = useRouter()
-  const [phase, setPhase] = useState<1 | 2>(1)
 
-  // Phase 1 (create) fields
+  // Metadata - category/level use '' to mean "None" (omitted on submit).
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
   const [level, setLevel] = useState('')
   const [difficulty, setDifficulty] = useState('')
   const [introText, setIntroText] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
 
-  // Phase 2 (files) state
-  const [sheetId, setSheetId] = useState<string | null>(null)
-  const [files, setFiles] = useState<Attachment[]>([])
-  const [selected, setSelected] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  // Files staged locally; uploaded only after the sheet row is created.
+  const [staged, setStaged] = useState<File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Submission state.
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  // Once the row exists we must never POST again (a second create would make a
+  // duplicate). When some file uploads fail we hold the modal open on this flag
+  // to report which files, offering only a Close that refreshes the list.
+  const [created, setCreated] = useState(false)
+  const [failedUploads, setFailedUploads] = useState<string[]>([])
+
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    setFileError(null)
+    const picked = Array.from(e.target.files ?? [])
+    if (picked.length === 0) return
+    setStaged(prev => {
+      const next = [...prev]
+      for (const f of picked) {
+        if (!hasAcceptedExt(f.name)) {
+          setFileError(`"${f.name}" is not a supported file type.`)
+          continue
+        }
+        if (f.size > MAX_FILE_SIZE) {
+          setFileError(`"${f.name}" exceeds the 10 MB limit.`)
+          continue
+        }
+        if (next.some(s => s.name === f.name)) continue
+        next.push(f)
+      }
+      return next
+    })
+    // Reset so the same file can be re-selected after removal.
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  function removeStaged(name: string) {
+    setStaged(prev => prev.filter(f => f.name !== name))
+  }
+
+  function finishAndClose() {
+    router.refresh()
+    onClose()
+  }
+
   async function handleCreate() {
+    if (created) return
     setCreateError(null)
-    if (!title.trim() || !category || !level) {
-      setCreateError('Title, category and level are required.')
+    if (!title.trim()) {
+      setCreateError('Title is required.')
       return
     }
     setCreating(true)
     try {
-      // Omit difficulty when unset so the DB NOT NULL DEFAULT 1 applies; an
-      // explicit null would violate the constraint.
-      const payload: Record<string, unknown> = {
-        title: title.trim(),
-        category,
-        level,
-      }
+      // Send only the fields that are set. Omitting category/level lets the route
+      // insert NULL (the sentinel for a resource with no category/level).
+      const payload: Record<string, unknown> = { title: title.trim() }
+      if (category) payload.category = category
+      if (level) payload.level = level
       if (difficulty !== '') payload.difficulty = Number(difficulty)
       if (introText.trim()) payload.intro_text = introText.trim()
 
@@ -114,91 +154,40 @@ export default function CreateResourceModal({ onClose }: Props) {
         setCreating(false)
         return
       }
+
       const data = await res.json()
-      setSheetId(data.id as string)
-      setPhase(2)
+      const sheetId = data.id as string
+      // The row now exists - never create it again.
+      setCreated(true)
+
+      // Upload staged files one at a time against the new id.
+      const failed: string[] = []
+      for (const file of staged) {
+        try {
+          const form = new FormData()
+          form.append('file', file)
+          form.append('sheet_id', sheetId)
+          const up = await fetch('/api/teacher/library/upload', { method: 'POST', body: form })
+          if (!up.ok) failed.push(file.name)
+        } catch {
+          failed.push(file.name)
+        }
+      }
+
       setCreating(false)
+
+      if (failed.length > 0) {
+        // The sheet was created; only some files failed. Keep the modal open to
+        // say which - Close then refreshes the list.
+        setFailedUploads(failed)
+        return
+      }
+
+      finishAndClose()
     } catch {
       setCreateError('Could not create the resource.')
       setCreating(false)
     }
-  }
-
-  async function handleUpload() {
-    setUploadError(null)
-    if (!selected || !sheetId) {
-      setUploadError('Choose a file first.')
-      return
-    }
-    // Client-side size guard before sending; the route enforces it again.
-    if (selected.size > MAX_FILE_SIZE) {
-      setUploadError('File exceeds the 10 MB limit.')
-      return
-    }
-    setUploading(true)
-    try {
-      const form = new FormData()
-      form.append('file', selected)
-      form.append('sheet_id', sheetId)
-      const res = await fetch('/api/teacher/library/upload', {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        let msg = 'Could not upload the file.'
-        try {
-          const j = await res.json()
-          if (j?.error) msg = j.error
-        } catch {}
-        setUploadError(msg)
-        setUploading(false)
-        return
-      }
-      // Route returns the attachment {name, type} directly (no url field).
-      const att = (await res.json()) as Attachment
-      setFiles(prev => [...prev.filter(f => f.name !== att.name), att])
-      setSelected(null)
-      if (fileRef.current) fileRef.current.value = ''
-      setUploading(false)
-    } catch {
-      setUploadError('Could not upload the file.')
-      setUploading(false)
-    }
-  }
-
-  async function handleRemove(name: string) {
-    if (!sheetId) return
-    setUploadError(null)
-    try {
-      const res = await fetch('/api/teacher/library/upload', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sheet_id: sheetId, filename: name }),
-      })
-      if (!res.ok) {
-        let msg = 'Could not remove the file.'
-        try {
-          const j = await res.json()
-          if (j?.error) msg = j.error
-        } catch {}
-        setUploadError(msg)
-        return
-      }
-      setFiles(prev => prev.filter(f => f.name !== name))
-    } catch {
-      setUploadError('Could not remove the file.')
-    }
-  }
-
-  function finishAndClose() {
-    router.refresh()
-    onClose()
-  }
-
-  function handleHeaderClose() {
-    // Once phase 2 is reached the sheet exists, so refresh to surface it.
-    if (phase === 2) finishAndClose()
-    else onClose()
   }
 
   return (
@@ -215,16 +204,14 @@ export default function CreateResourceModal({ onClose }: Props) {
           }}
         >
           <div>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>
-              {phase === 1 ? 'Add Resource' : 'Add Files'}
-            </h2>
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>Add Resource</h2>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
-              {phase === 1 ? 'Private to you (staff material)' : 'Attach files to your resource'}
+              Private to you (staff material)
             </p>
           </div>
           <button
             type="button"
-            onClick={handleHeaderClose}
+            onClick={created ? finishAndClose : onClose}
             aria-label="Close"
             style={{ color: '#9ca3af', padding: '4px' }}
           >
@@ -234,80 +221,75 @@ export default function CreateResourceModal({ onClose }: Props) {
 
         {/* Body */}
         <div style={{ padding: '20px', overflowY: 'auto', flex: '1 1 auto', minHeight: 0 }}>
-          {phase === 1 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={labelStyle}>Title</label>
-                <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Resource title" />
-              </div>
-              <div>
-                <label style={labelStyle}>Category</label>
-                <select value={category} onChange={e => setCategory(e.target.value)} style={fieldStyle}>
-                  <option value="">Select a category</option>
-                  <option value="vocabulary">Vocabulary</option>
-                  <option value="grammar">Grammar</option>
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Level</label>
-                <select value={level} onChange={e => setLevel(e.target.value)} style={fieldStyle}>
-                  <option value="">Select a level</option>
-                  {LEVELS.map(l => (
-                    <option key={l} value={l}>{l}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Difficulty (optional)</label>
-                <select value={difficulty} onChange={e => setDifficulty(e.target.value)} style={fieldStyle}>
-                  <option value="">Not set</option>
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Intro text (optional)</label>
-                <textarea
-                  value={introText}
-                  onChange={e => setIntroText(e.target.value)}
-                  rows={3}
-                  placeholder="Optional description"
-                  style={{ ...fieldStyle, resize: 'vertical' }}
-                />
-              </div>
-              {createError && <p style={{ color: '#FD5602', fontSize: '13px' }}>{createError}</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div>
+              <label style={labelStyle}>Title</label>
+              <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Resource title" />
             </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={labelStyle}>Add a file</label>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept={ACCEPT}
-                  onChange={e => setSelected(e.target.files?.[0] ?? null)}
-                  style={{ fontSize: '13px', color: '#4b5563' }}
-                />
-                <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-                  PDF, DOC, DOCX, PPT, PPTX. Max 10 MB.
-                </p>
-              </div>
-              <div>
-                <Button
-                  onClick={handleUpload}
-                  disabled={uploading || !selected}
-                  style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-                >
-                  <Upload className="w-4 h-4 mr-2" />
-                  {uploading ? 'Uploading...' : 'Upload'}
-                </Button>
-              </div>
-              {uploadError && <p style={{ color: '#FD5602', fontSize: '13px' }}>{uploadError}</p>}
 
-              {files.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {files.map(f => (
+            <div>
+              <label style={labelStyle}>Category (optional)</label>
+              <select value={category} onChange={e => setCategory(e.target.value)} style={fieldStyle}>
+                <option value="">None</option>
+                <option value="vocabulary">Vocabulary</option>
+                <option value="grammar">Grammar</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Level (optional)</label>
+              <select value={level} onChange={e => setLevel(e.target.value)} style={fieldStyle}>
+                <option value="">None</option>
+                {LEVELS.map(l => (
+                  <option key={l} value={l}>{l}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Difficulty (optional)</label>
+              <select value={difficulty} onChange={e => setDifficulty(e.target.value)} style={fieldStyle}>
+                <option value="">Not set</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Intro text (optional)</label>
+              <textarea
+                value={introText}
+                onChange={e => setIntroText(e.target.value)}
+                rows={3}
+                placeholder="Optional description"
+                style={{ ...fieldStyle, resize: 'vertical' }}
+              />
+            </div>
+
+            {/* Files - staged locally, uploaded on Create */}
+            <div>
+              <label style={labelStyle}>Files (optional)</label>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={ACCEPT}
+                multiple
+                onChange={handleFilePick}
+                disabled={created}
+                style={{ fontSize: '13px', color: '#4b5563' }}
+              />
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                PDF, DOC, DOCX, PPT, PPTX. Max 10 MB each.
+              </p>
+              {fileError && <p style={{ color: '#FD5602', fontSize: '13px', marginTop: '4px' }}>{fileError}</p>}
+            </div>
+
+            {staged.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {staged.map(f => {
+                  const failed = failedUploads.includes(f.name)
+                  return (
                     <div
                       key={f.name}
                       style={{
@@ -317,7 +299,7 @@ export default function CreateResourceModal({ onClose }: Props) {
                         gap: '8px',
                         padding: '8px 10px',
                         borderRadius: '8px',
-                        border: '1px solid #E0DFDC',
+                        border: `1px solid ${failed ? '#FD5602' : '#E0DFDC'}`,
                       }}
                     >
                       <span
@@ -335,20 +317,34 @@ export default function CreateResourceModal({ onClose }: Props) {
                           {f.name}
                         </span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(f.name)}
-                        aria-label="Remove file"
-                        style={{ color: '#FD5602', padding: '4px', flexShrink: 0 }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {failed ? (
+                        <span style={{ fontSize: '12px', color: '#FD5602', flexShrink: 0 }}>Failed</span>
+                      ) : (
+                        !created && (
+                          <button
+                            type="button"
+                            onClick={() => removeStaged(f.name)}
+                            aria-label="Remove file"
+                            style={{ color: '#FD5602', padding: '4px', flexShrink: 0 }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )}
+
+            {createError && <p style={{ color: '#FD5602', fontSize: '13px' }}>{createError}</p>}
+            {failedUploads.length > 0 && (
+              <p style={{ color: '#FD5602', fontSize: '13px' }}>
+                The resource was created, but these files did not upload: {failedUploads.join(', ')}. Open the resource
+                later to add them again.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -361,9 +357,16 @@ export default function CreateResourceModal({ onClose }: Props) {
             borderTop: '1px solid #E0DFDC',
           }}
         >
-          {phase === 1 ? (
+          {created ? (
+            <Button
+              onClick={finishAndClose}
+              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
+            >
+              Close
+            </Button>
+          ) : (
             <>
-              <Button variant="outline" onClick={onClose}>
+              <Button variant="outline" onClick={onClose} disabled={creating}>
                 Cancel
               </Button>
               <Button
@@ -374,13 +377,6 @@ export default function CreateResourceModal({ onClose }: Props) {
                 {creating ? 'Creating...' : 'Create'}
               </Button>
             </>
-          ) : (
-            <Button
-              onClick={finishAndClose}
-              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-            >
-              Done
-            </Button>
           )}
         </div>
       </div>

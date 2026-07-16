@@ -50,6 +50,42 @@ export async function PATCH(
     update.audience = update.audience === 'student' ? 'student' : 'staff'
   }
 
+  // Student worksheets must always carry a category and a level. study_sheets now
+  // allows NULL category/level (for teacher private resources), and the DB CHECK
+  // only constrains a non-null category - so nothing at the DB layer stops a PATCH
+  // from stripping these off a student row. Enforce it here against the MERGED
+  // result: any of the three fields absent from this patch keeps its current
+  // value, so fetch the current row when we cannot decide from the patch alone.
+  {
+    const needCurrent = !('audience' in update) || !('category' in update) || !('level' in update)
+    let current: { audience: string | null; category: string | null; level: string | null } | null = null
+    if (needCurrent) {
+      const { data: cur } = await supabase
+        .from('study_sheets')
+        .select('audience, category, level')
+        .eq('id', id)
+        .maybeSingle()
+      current = cur
+    }
+    const resultAudience = 'audience' in update ? (update.audience as string) : current?.audience ?? null
+    if (resultAudience === 'student') {
+      const resultCategory = 'category' in update ? (update.category as string | null) : current?.category ?? null
+      const resultLevel = 'level' in update ? (update.level as string | null) : current?.level ?? null
+      // category '' would fail the study_sheets_category_check anyway, so reject
+      // null AND empty. level has no CHECK and '' is the established "not
+      // specified" value the create route and admin form still produce, so reject
+      // only a null/missing level (the DDL-introduced hazard), not ''.
+      const categoryOk = typeof resultCategory === 'string' && resultCategory.length > 0
+      const levelOk = resultLevel != null
+      if (!categoryOk || !levelOk) {
+        return NextResponse.json(
+          { error: 'Student worksheets require a category and a level.' },
+          { status: 400 }
+        )
+      }
+    }
+  }
+
   // Exercises live in the exercises table, never in study_sheets.content. When the
   // caller submits content (a full editor save), capture its exercises for the
   // table and blank content.exercises (words preserved). When content is absent

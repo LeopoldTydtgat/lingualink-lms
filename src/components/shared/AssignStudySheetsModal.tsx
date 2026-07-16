@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
 type StudySheet = {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
   content: { words?: unknown[]; exercises?: unknown[] } | null
   attachments: unknown[] | null
@@ -42,7 +42,7 @@ function DifficultyBars({ count }: { count: number }) {
 }
 
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  const cat = sheet.category.toLowerCase()
+  const cat = sheet.category?.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
   if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
   return false
@@ -287,14 +287,20 @@ export default function AssignStudySheetsModal({
                         {sheet.title}
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-400 capitalize">{sheet.category}</span>
-                        <span className="text-xs text-gray-300">·</span>
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                          style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                        >
-                          {sheet.level}
-                        </span>
+                        {sheet.category && (
+                          <span className="text-xs text-gray-400 capitalize">{sheet.category}</span>
+                        )}
+                        {sheet.category && sheet.level && (
+                          <span className="text-xs text-gray-300">{String.fromCharCode(183)}</span>
+                        )}
+                        {sheet.level && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                          >
+                            {sheet.level}
+                          </span>
+                        )}
                         {!empty && <DifficultyBars count={sheet.difficulty} />}
                         {empty && (
                           <span className="text-xs text-gray-400 italic">No content yet</span>
