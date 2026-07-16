@@ -76,7 +76,7 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
   const answered = selected !== null
 
   return (
-    <div className="border border-gray-200 rounded-xl p-5 bg-white">
+    <div className="rounded-xl p-5 bg-white shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
       <p className="font-medium text-gray-900 mb-4">{exercise.question_text}</p>
 
       <div className="space-y-2 mb-4">
@@ -181,7 +181,7 @@ function MaterialFileViewer({
   }
 
   return (
-    <div className="mb-6 space-y-4">
+    <div className="space-y-4">
       {attachments.map((att, idx) => {
         const isPdf = att.type === 'application/pdf'
         const isImage = att.type.startsWith('image/')
@@ -193,7 +193,8 @@ function MaterialFileViewer({
           <div
             key={idx}
             ref={el => { containerRefs.current[idx] = el }}
-            className="border border-gray-200 rounded-xl overflow-hidden bg-white"
+            className="rounded-xl overflow-hidden bg-white shadow-sm"
+            style={{ border: '1px solid #f3f4f6' }}
           >
             <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
               <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
@@ -245,14 +246,14 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
   const attachments = sheet.attachments ?? []
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className={live ? 'space-y-6 p-6 max-w-5xl mx-auto' : 'space-y-6'}>
 
       {/* Back button - hidden in the live window (NEW255 c-ii): in the chrome-free
           (live) route it would navigate into the chromed dashboard mid-class. */}
       {!live && (
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 mb-6"
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Study Sheets
@@ -260,7 +261,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
       )}
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl p-6 shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-gray-900 mb-2">{sheet.title}</h1>
@@ -313,7 +314,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
 
       {/* Vocabulary table */}
       {words.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+        <div className="bg-white rounded-xl overflow-hidden shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900">Vocabulary List</h2>
             <p className="text-sm text-gray-500 mt-0.5">{words.length} words</p>
@@ -345,11 +346,11 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
       <div>
         <h2 className="font-semibold text-gray-900 mb-4">
           Exercises
-          <span className="ml-2 text-sm font-normal text-gray-400">({exercises.length})</span>
+          <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold align-middle" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{exercises.length}</span>
         </h2>
 
         {exercises.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 px-6 py-12 text-center text-gray-400 text-sm">
+          <div className="bg-white rounded-xl shadow-sm px-6 py-12 text-center text-gray-400 text-sm" style={{ border: '1px solid #f3f4f6' }}>
             No exercises added yet for this study sheet.
           </div>
         ) : (
