@@ -4,7 +4,7 @@ import { useState, useRef, type CSSProperties } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { X, Trash2, FileText } from 'lucide-react'
+import { X, Trash2, FileText, Upload } from 'lucide-react'
 
 // Teacher "Add Resource" flow - a single form, one action. Metadata plus any
 // number of locally-staged files; one Create button creates the sheet and then
@@ -89,13 +89,13 @@ export default function CreateResourceModal({ onClose }: Props) {
   const [created, setCreated] = useState(false)
   const [failedUploads, setFailedUploads] = useState<string[]>([])
 
-  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+  // Shared staging path used by the native picker and drag-and-drop.
+  function stageFiles(files: File[]) {
     setFileError(null)
-    const picked = Array.from(e.target.files ?? [])
-    if (picked.length === 0) return
+    if (files.length === 0) return
     setStaged(prev => {
       const next = [...prev]
-      for (const f of picked) {
+      for (const f of files) {
         if (!hasAcceptedExt(f.name)) {
           setFileError(`"${f.name}" is not a supported file type.`)
           continue
@@ -109,6 +109,10 @@ export default function CreateResourceModal({ onClose }: Props) {
       }
       return next
     })
+  }
+
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>) {
+    stageFiles(Array.from(e.target.files ?? []))
     // Reset so the same file can be re-selected after removal.
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -276,13 +280,72 @@ export default function CreateResourceModal({ onClose }: Props) {
                 accept={ACCEPT}
                 multiple
                 onChange={handleFilePick}
-                disabled={created}
-                style={{ fontSize: '13px', color: '#4b5563' }}
+                style={{ display: 'none' }}
               />
-              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-                PDF, DOC, DOCX, PPT, PPTX. Max 10 MB each.
-              </p>
-              {fileError && <p style={{ color: '#FD5602', fontSize: '13px', marginTop: '4px' }}>{fileError}</p>}
+              <div
+                onClick={() => { if (!created) fileRef.current?.click() }}
+                onMouseEnter={e => {
+                  if (created) return
+                  e.currentTarget.style.borderColor = '#FF8303'
+                  e.currentTarget.style.backgroundColor = '#FFF8F1'
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = '#E0DFDC'
+                  e.currentTarget.style.backgroundColor = 'white'
+                }}
+                onDragOver={e => {
+                  if (created) return
+                  e.preventDefault()
+                  e.currentTarget.style.borderColor = '#FF8303'
+                  e.currentTarget.style.backgroundColor = '#FFF8F1'
+                }}
+                onDragLeave={e => {
+                  e.currentTarget.style.borderColor = '#E0DFDC'
+                  e.currentTarget.style.backgroundColor = 'white'
+                }}
+                onDrop={e => {
+                  e.preventDefault()
+                  e.currentTarget.style.borderColor = '#E0DFDC'
+                  e.currentTarget.style.backgroundColor = 'white'
+                  if (created) return
+                  stageFiles(Array.from(e.dataTransfer.files ?? []))
+                }}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                  width: '100%',
+                  padding: '24px',
+                  borderRadius: '8px',
+                  border: '2px dashed #E0DFDC',
+                  backgroundColor: 'white',
+                  textAlign: 'center',
+                  cursor: created ? 'not-allowed' : 'pointer',
+                  opacity: created ? 0.5 : 1,
+                }}
+              >
+                <span
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '9999px',
+                    backgroundColor: '#FFF3E0',
+                  }}
+                >
+                  <Upload className="w-5 h-5" style={{ color: '#FF8303' }} />
+                </span>
+                <span style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>
+                  Click to upload files
+                </span>
+                <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                  PDF, DOC, DOCX, PPT, PPTX - max 10 MB each
+                </span>
+              </div>
+              {fileError && <p style={{ color: '#FD5602', fontSize: '13px', marginTop: '8px' }}>{fileError}</p>}
             </div>
 
             {staged.length > 0 && (
