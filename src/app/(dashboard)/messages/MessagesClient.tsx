@@ -543,8 +543,8 @@ export default function MessagesClient({
 
   return (
     <div
-      className="flex bg-white rounded-lg border border-gray-200 overflow-hidden"
-      style={{ height: 'calc(100vh - 120px)' }}
+      className="flex bg-white rounded-xl overflow-hidden shadow-sm"
+      style={{ height: 'calc(100vh - 120px)', border: '1px solid #f3f4f6' }}
     >
       {/* ── Left panel: contacts list ── */}
       <div className="w-72 border-r border-gray-200 flex flex-col flex-shrink-0">
@@ -583,8 +583,10 @@ export default function MessagesClient({
               <button
                 key={contact.id}
                 onClick={() => handleSelectContact(contact)}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
-                style={selectedContact?.id === contact.id ? { backgroundColor: '#FFF3E0' } : {}}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-100"
+                style={selectedContact?.id === contact.id
+                  ? { backgroundColor: '#FFF0E0', borderLeft: '3px solid #FF8303' }
+                  : { borderLeft: '3px solid transparent' }}
               >
                 <div className="relative flex-shrink-0">
                   <Avatar name={contact.name} photoUrl={contact.photo_url} size={10} />
@@ -642,7 +644,7 @@ export default function MessagesClient({
             </div>
 
             {/* Message thread */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll" style={{ backgroundColor: '#FFF9F3' }}>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 thin-scroll" style={{ backgroundColor: '#F9FAFB' }}>
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">Loading...</div>
               ) : messages.length === 0 ? (
