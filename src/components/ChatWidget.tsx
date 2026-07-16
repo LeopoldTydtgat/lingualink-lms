@@ -511,8 +511,8 @@ export default function ChatWidget({
 
       {isOpen && (
         <div
-          className="bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
-          style={{ width: '360px', height: '520px' }}
+          className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ width: '360px', height: '520px', border: '1px solid #f3f4f6' }}
         >
           {/* Header */}
           <div className="px-4 pt-4 pb-0 flex-shrink-0" style={{ backgroundColor: '#FF8303' }}>
@@ -613,7 +613,7 @@ export default function ChatWidget({
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
                               : isFromMe
                               ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
+                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #f3f4f6', borderBottomLeftRadius: '4px' }
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
@@ -827,14 +827,14 @@ export default function ChatWidget({
             if (isOpen) setMessagesLoaded(false)
             setIsOpen(!isOpen)
           }}
-          className="w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95"
-          style={{ backgroundColor: isOpen ? '#e06e00' : '#FF8303' }}
+          className="rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
+          style={{ width: '52px', height: '52px', backgroundColor: isOpen ? '#e06e00' : '#FF8303', boxShadow: '0 4px 12px rgba(255,131,3,0.4)' }}
           aria-label={isOpen ? 'Close chat' : 'Open chat'}
         >
           {isOpen ? (
             <X size={22} className="text-white" />
           ) : (
-            <img src="/lingualink-chat-icon.svg" alt="LinguaLink chat" width={36} height={36} />
+            <img src="/lingualink-chat-icon.svg" alt="LinguaLink chat" width={32} height={32} />
           )}
         </button>
       </div>
