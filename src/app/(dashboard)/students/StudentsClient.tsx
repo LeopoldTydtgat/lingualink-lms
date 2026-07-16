@@ -62,7 +62,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
     })
   }
 
-  function TrainingCard({ training }: { training: Training }) {
+  function TrainingCard({ training, isPast = false }: { training: Training; isPast?: boolean }) {
     const student = training.students
     if (!student) return null
 
@@ -71,9 +71,22 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
       ? Math.round((training.hours_consumed / training.total_hours) * 100)
       : 0
 
+    const lowHours = !isPast && hoursRemaining < 2
+    const lowPct = !isPast && training.total_hours > 0 &&
+      (hoursRemaining / training.total_hours) < 0.25
+
+    const barColor = isPast
+      ? '#d1d5db'
+      : lowHours
+        ? '#FD5602'
+        : lowPct
+          ? '#FFB942'
+          : '#FF8303'
+
     return (
       <div
-        className="bg-white border border-gray-200 rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow"
+        className="bg-white rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow shadow-sm"
+        style={{ border: '1px solid #f3f4f6', opacity: isPast ? 0.75 : undefined }}
         onClick={() => router.push(`/students/${training.id}`)}
       >
         <div className="flex items-center gap-3 mb-3">
@@ -105,12 +118,14 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
         <div className="mb-2">
           <div className="flex justify-between text-xs text-gray-500 mb-1">
             <span>{training.hours_consumed}h used</span>
-            <span>{hoursRemaining}h remaining</span>
+            <span style={lowHours ? { color: '#FD5602', fontWeight: 600 } : undefined}>
+              {lowHours ? `${hoursRemaining}h remaining — low` : `${hoursRemaining}h remaining`}
+            </span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-1.5">
             <div
               className="h-1.5 rounded-full"
-              style={{ width: `${progressPercent}%`, backgroundColor: '#FF8303' }}
+              style={{ width: `${progressPercent}%`, backgroundColor: barColor }}
             />
           </div>
         </div>
@@ -124,9 +139,9 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
   }
 
   return (
-    <div className="p-6">
+    <div className="max-w-5xl mx-auto space-y-6">
       {/* Page header */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Students & Trainings</h1>
           <p className="text-sm text-gray-500 mt-1">{totalCount} total training{totalCount !== 1 ? 's' : ''}</p>
@@ -138,9 +153,11 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
 
         {/* LEFT — Current Trainings */}
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Current Trainings ({currentTrainings.length})</h2>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="font-semibold text-gray-800">Current Trainings</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFF0E0', color: '#C2410C' }}>
+              {currentTrainings.length}
+            </span>
           </div>
           <input
             type="text"
@@ -161,9 +178,11 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
 
         {/* RIGHT — Past Trainings */}
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Past Trainings ({pastTrainings.length})</h2>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="font-semibold text-gray-800">Past Trainings</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#f3f4f6', color: '#6b7280' }}>
+              {pastTrainings.length}
+            </span>
           </div>
           <input
             type="text"
@@ -177,7 +196,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
             <p className="text-sm text-gray-400 text-center py-8">No past trainings found.</p>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredPast.map(t => <TrainingCard key={t.id} training={t} />)}
+              {filteredPast.map(t => <TrainingCard key={t.id} training={t} isPast />)}
             </div>
           )}
         </div>
