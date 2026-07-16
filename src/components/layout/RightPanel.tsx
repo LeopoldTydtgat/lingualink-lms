@@ -4,18 +4,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface AnnouncementItem {
-  id: string
-  title: string
-  message: string
-  is_dismissable: boolean
-}
 
 interface NextLesson {
   id: string
@@ -29,7 +22,6 @@ interface NextLesson {
 type RightPanelProps = {
   teacherId: string | null
   teacherTimezone: string | null
-  announcements?: AnnouncementItem[]
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
   currency?: string | null
@@ -73,7 +65,6 @@ const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£
 export default function RightPanel({
   teacherId,
   teacherTimezone,
-  announcements = [],
   nextLesson = null,
   billingData,
   currency,
@@ -128,13 +119,13 @@ export default function RightPanel({
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
   return (
-    <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#FFFCF8' }}>
+    <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Next Class</p>
           </div>
 
@@ -230,9 +221,9 @@ export default function RightPanel({
         </section>
 
         {/* ── BILLING SUMMARY ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <Receipt size={14} color="#FF8303" style={{ flexShrink: 0 }} />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Billing</p>
           </div>
           <div className="space-y-1">
@@ -258,39 +249,6 @@ export default function RightPanel({
             Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
           </Button>
-        </section>
-
-        {/* ── WHAT'S NEW ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
-          <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <Bell size={14} className="text-gray-400" />
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              What&apos;s New
-            </p>
-            {announcements.length > 0 && (
-              <span
-                className="ml-auto text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: '#FF8303', fontSize: '10px' }}
-              >
-                {announcements.length > 9 ? '9+' : announcements.length}
-              </span>
-            )}
-          </div>
-
-          {announcements.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">No new notifications</p>
-          ) : (
-            <div className="space-y-3">
-              {announcements.map((a, index) => (
-                <div key={a.id}>
-                  {index > 0 && <div className="h-px bg-gray-200 mb-3" />}
-                  <p className="text-xs font-semibold text-gray-800">{a.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{a.message}</p>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
 
       </div>

@@ -200,39 +200,44 @@ export default async function DashboardLayout({
   })
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans overflow-hidden">
-      {/* Sidebar runs full height - logo lives here */}
-      <LeftNav
-        userRole={profile?.role ?? 'teacher'}
-        unreadMessageCount={unreadCount ?? 0}
-        userId={user.id}
-      />
+    <div className="flex flex-col h-screen bg-gray-50 font-sans overflow-hidden">
+      {/* Full-width gradient accent line — sits above nav + header */}
+      <div style={{ height: '6px', background: 'linear-gradient(90deg, #FFB942, #FF8303, #FD5602)', flexShrink: 0 }} />
 
-      {/* Right side: header on top, then content row below */}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <TopHeader
-          teacherName={profile?.full_name ?? 'Teacher'}
-          teacherPhotoUrl={profile?.photo_url ?? null}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar runs full height - logo lives here */}
+        <LeftNav
+          userRole={profile?.role ?? 'teacher'}
+          unreadMessageCount={unreadCount ?? 0}
+          userId={user.id}
         />
-        <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
-            <AnnouncementBanner
-              announcements={announcements}
-              userType="teacher"
-              userId={user.id}
-            />
-            <div className="p-6">
-              {children}
-            </div>
-          </main>
-          <RightPanel
-            teacherId={profile?.id ?? null}
-            teacherTimezone={profile.timezone}
+
+        {/* Right side: header on top, then content row below */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <TopHeader
+            teacherName={profile?.full_name ?? 'Teacher'}
+            teacherPhotoUrl={profile?.photo_url ?? null}
             announcements={announcements}
-            nextLesson={nextLesson}
-            billingData={billingData}
-            currency={currency}
           />
+          <div className="flex flex-1 overflow-hidden">
+            <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
+              <AnnouncementBanner
+                announcements={announcements}
+                userType="teacher"
+                userId={user.id}
+              />
+              <div className="p-6">
+                {children}
+              </div>
+            </main>
+            <RightPanel
+              teacherId={profile?.id ?? null}
+              teacherTimezone={profile.timezone}
+              nextLesson={nextLesson}
+              billingData={billingData}
+              currency={currency}
+            />
+          </div>
         </div>
       </div>
 
