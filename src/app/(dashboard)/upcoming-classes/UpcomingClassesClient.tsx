@@ -173,8 +173,14 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
   return (
     <div
-      className="rounded-xl bg-white shadow-md overflow-hidden"
-      style={{ border: '2px solid #d1d5db', borderLeft: isNext ? '3px solid #FF8303' : '2px solid #d1d5db', opacity: isCancelled ? 0.6 : undefined }}
+      className="rounded-xl bg-white shadow-sm overflow-hidden"
+      style={{
+        border: '1px solid #f3f4f6',
+        borderLeft: isNext ? '3px solid #FF8303'
+          : isCancelled ? '3px solid #FD5602'
+          : '1px solid #f3f4f6',
+        opacity: isCancelled ? 0.75 : undefined,
+      }}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -230,14 +236,14 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
-            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '4px' }}>Cancelled</span>
+            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#FFEEE6', color: '#FD5602', borderRadius: '4px' }}>Cancelled</span>
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </button>
 
       {expanded && (
-        <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '2px solid #d1d5db' }}>
+        <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '1px solid #f3f4f6' }}>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Lesson Notes / To-do
@@ -273,7 +279,7 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, ne
         className="flex items-center gap-2 text-left w-full"
       >
         <span className="font-semibold text-gray-800">{heading}</span>
-        <span className="text-sm text-gray-400">
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
           {classes.length} {classes.length === 1 ? 'lesson' : 'lessons'}
         </span>
         <div className="ml-auto">
@@ -396,7 +402,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-6">
 
       {showProfileBanner && (
         <div style={{
@@ -428,29 +434,36 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       )}
 
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
-        <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {classes.length > 0 && (
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={hideCancelled}
+                onChange={(e) => handleHideCancelledChange(e.target.checked)}
+                style={{ accentColor: '#FF8303' }}
+              />
+              Hide cancelled
+            </label>
+          )}
+          <Button asChild variant="outline" size="sm">
+            <Link href="/schedule" prefetch={false}>
+              <CalendarDays />
+              View Calendar
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      {classes.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={hideCancelled}
-              onChange={(e) => handleHideCancelledChange(e.target.checked)}
-              style={{ accentColor: '#FF8303' }}
-            />
-            Hide cancelled
-          </label>
-        </div>
-      )}
-
       {days.length === 0 ? (
-        <div className="flex flex-col items-center text-center py-16">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
@@ -487,7 +500,10 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             onClick={handleCancelledSectionToggle}
             className="flex items-center gap-2 text-left w-full"
           >
-            <span className="font-semibold text-gray-800">Cancelled ({cancelledClasses.length})</span>
+            <span className="font-semibold text-gray-800">Cancelled</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#FD5602', backgroundColor: '#FFEEE6', borderRadius: '9999px', padding: '2px 10px' }}>
+              {cancelledClasses.length}
+            </span>
             <div className="ml-auto">
               <ChevronIcon rotated={cancelledSectionExpanded} />
             </div>
