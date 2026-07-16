@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import SheetFormModal from './SheetFormModal'
 import AssignSheetModal from './AssignSheetModal'
+import ActivitiesModal from './ActivitiesModal'
+import TagManagerModal from './TagManagerModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,9 @@ type StudentOption = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
+
+// Shared by the table header and its rows — they must never drift apart.
+const GRID_COLUMNS = '3% 22% 10% 6% 8% 13% 7% 31%'
 
 function rolesToLabel(roles: string[]): string {
   if (!roles || roles.length === 0) return 'All Teachers'
@@ -132,10 +137,16 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const [editingSheet, setEditingSheet] = useState<StudySheet | null>(null)
   const [showAssign, setShowAssign] = useState(false)
   const [assigningSheet, setAssigningSheet] = useState<StudySheet | null>(null)
+  const [activitiesSheet, setActivitiesSheet] = useState<StudySheet | null>(null)
+  const [showTagManager, setShowTagManager] = useState(false)
 
   // ── Delete single ─────────────────────────────────────────────────────────
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  // The delete route can now fail loudly (NEW364: a sheet whose files cannot be
+  // cleaned out of storage is NOT deleted). Silently reloading the list would
+  // show the sheet still sitting there with no explanation.
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // ── Load sheets ───────────────────────────────────────────────────────────
   const loadSheets = useCallback(async () => {
@@ -230,21 +241,46 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   // ── Bulk delete ───────────────────────────────────────────────────────────
   const handleBulkDelete = async () => {
     setBulkDeleting(true)
-    await Promise.all(
-      Array.from(selectedIds).map(id =>
+    setDeleteError(null)
+
+    const ids = Array.from(selectedIds)
+    const results = await Promise.all(
+      ids.map(id =>
         fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
+          .then(res => res.ok)
+          .catch(() => false)
       )
     )
+
+    const failed = results.filter(ok => !ok).length
+
     setBulkDeleting(false)
     setConfirmBulkDelete(false)
     setSelectedIds(new Set())
+
+    // Partial failure is real: each sheet is deleted independently, so some can
+    // survive. The reloaded list shows which — this says how many, and why to look.
+    if (failed > 0) {
+      setDeleteError(
+        `${failed} of ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} could not be deleted and ${failed === 1 ? 'is' : 'are'} still listed. Try again, or delete them one at a time to see why.`
+      )
+    }
+
     await loadSheets()
   }
 
   // ── Single delete ─────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     setDeletingId(id)
-    await fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
+    setDeleteError(null)
+
+    const res = await fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setDeleteError(body.error || 'Could not delete the sheet. Please try again.')
+    }
+
     setDeletingId(null)
     setConfirmDeleteId(null)
     await loadSheets()
@@ -259,16 +295,27 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Study Library</h1>
         </div>
-        <button
-          onClick={() => { setEditingSheet(null); setShowForm(true) }}
-          className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg text-white font-medium"
-          style={{ backgroundColor: '#FF8303' }}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Study Sheet
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowTagManager(true)}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+            Manage Tags
+          </button>
+          <button
+            onClick={() => { setEditingSheet(null); setShowForm(true) }}
+            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg text-white font-medium"
+            style={{ backgroundColor: '#FF8303' }}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Study Sheet
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -329,6 +376,20 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {filtered.length} {filtered.length === 1 ? 'sheet' : 'sheets'}
         </span>
       </div>
+
+      {/* Delete failure — the sheet(s) below are still real */}
+      {deleteError && (
+        <div className="mb-4 border border-red-200 bg-red-50 rounded-lg px-4 py-3 flex items-start gap-3">
+          <p className="text-sm text-red-700 flex-1">{deleteError}</p>
+          <button
+            onClick={() => setDeleteError(null)}
+            className="text-red-400 hover:text-red-600 text-sm leading-none flex-shrink-0"
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Bulk action bar — shown when items selected */}
       {selectedIds.size > 0 && (
@@ -408,7 +469,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
           {/* Column headers */}
           <div className="grid gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100 bg-gray-50"
-            style={{ gridTemplateColumns: '3% 25% 11% 7% 9% 15% 8% 22%' }}>
+            style={{ gridTemplateColumns: GRID_COLUMNS }}>
             <input
               type="checkbox"
               checked={filtered.length > 0 && selectedIds.size === filtered.length}
@@ -433,7 +494,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   key={sheet.id}
                   className="grid gap-3 px-5 py-3.5 items-center text-sm"
                   style={{
-                    gridTemplateColumns: '3% 25% 11% 7% 9% 15% 8% 22%',
+                    gridTemplateColumns: GRID_COLUMNS,
                     backgroundColor: selectedIds.has(sheet.id) ? '#fff9f5' : undefined,
                   }}
                 >
@@ -489,6 +550,12 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       Assign
                     </button>
                     <button
+                      onClick={() => setActivitiesSheet(sheet)}
+                      className="text-xs underline text-gray-400 hover:text-gray-600"
+                    >
+                      Activities
+                    </button>
+                    <button
                       onClick={() => { setEditingSheet(sheet); setShowForm(true) }}
                       className="text-xs underline"
                       style={{ color: '#FF8303' }}
@@ -496,7 +563,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       Edit
                     </button>
                     <button
-                      onClick={() => setConfirmDeleteId(sheet.id)}
+                      onClick={() => { setDeleteError(null); setConfirmDeleteId(sheet.id) }}
                       className="text-xs underline text-red-400 hover:text-red-600"
                     >
                       Delete
@@ -523,7 +590,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               Delete Study Sheet?
             </h3>
             <p style={{ fontSize: '14px', color: '#6B7280' }}>
-              Are you sure you want to delete this study sheet? This cannot be undone.
+              Are you sure you want to delete this study sheet? Its files, activities, assignments, and any student attempt history go with it. This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
               <button
@@ -572,6 +639,20 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           adminId={adminId}
           onClose={() => { setShowAssign(false); setAssigningSheet(null) }}
         />
+      )}
+
+      {/* Activities modal */}
+      {activitiesSheet && (
+        <ActivitiesModal
+          sheetId={activitiesSheet.id}
+          sheetTitle={activitiesSheet.title}
+          onClose={() => setActivitiesSheet(null)}
+        />
+      )}
+
+      {/* Tag manager */}
+      {showTagManager && (
+        <TagManagerModal onClose={() => setShowTagManager(false)} />
       )}
     </div>
   )

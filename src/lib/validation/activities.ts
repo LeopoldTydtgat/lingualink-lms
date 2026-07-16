@@ -70,6 +70,66 @@ export const McqAnswerKeySchema = z.object({
   questions: z.record(z.string(), McqAnswerKeyEntrySchema),
 })
 
+// ─── MCQ authoring (admin builder) ────────────────────────────────────────────
+// Request body for the admin create/edit routes. Content and answer key are
+// authored together and must be validated together: each is individually valid
+// yet the pair can still be incoherent, and the grade route treats every
+// mismatch it meets at runtime as a 500 (malformed authoring). These cross-checks
+// are what stop an admin from saving an activity that can never be graded.
+
+export const McqActivityAuthorSchema = z
+  .object({
+    title: nonBlankString('Title is required'),
+    content: McqContentSchema,
+    answer_key: McqAnswerKeySchema,
+  })
+  .superRefine((val, ctx) => {
+    const questions = val.content.questions
+    const keyed = val.answer_key.questions
+    const questionIds = new Set(questions.map(q => q.id))
+
+    // Extra key entries: a key for a question that does not exist. Harmless to
+    // grading, but it is dead answer data sitting in the row and a reliable sign
+    // the two halves drifted apart.
+    for (const keyId of Object.keys(keyed)) {
+      if (!questionIds.has(keyId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['answer_key', 'questions', keyId],
+          message: `The answer key has an entry for '${keyId}', which is not a question in this activity`,
+        })
+      }
+    }
+
+    questions.forEach((question, idx) => {
+      // Own-property lookups only: a question id such as 'toString' would
+      // otherwise resolve off Object.prototype and pass these checks with a
+      // function as its "entry". Mirrors the grade route.
+      const entry = Object.hasOwn(keyed, question.id) ? keyed[question.id] : undefined
+
+      // Missing key entry: the grade route 500s on this at submit time.
+      if (!entry) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['answer_key', 'questions', question.id],
+          message: `Question ${idx + 1} has no answer key entry`,
+        })
+        return
+      }
+
+      // The correct answer must be one of the options the student is shown,
+      // compared trimmed — exactly how the grade route matches a submission.
+      // Otherwise no answer can ever grade correct.
+      if (!question.options.some(opt => opt.trim() === entry.correct_answer.trim())) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['answer_key', 'questions', question.id, 'correct_answer'],
+          message: `Question ${idx + 1}: the correct answer must be one of its options`,
+        })
+      }
+    })
+  })
+
 // ─── Grade submission ─────────────────────────────────────────────────────────
 // Request body for POST /api/student/activities/[id]/grade.
 
@@ -82,4 +142,5 @@ export type McqQuestion = z.infer<typeof McqQuestionSchema>
 export type McqContent = z.infer<typeof McqContentSchema>
 export type McqAnswerKeyEntry = z.infer<typeof McqAnswerKeyEntrySchema>
 export type McqAnswerKey = z.infer<typeof McqAnswerKeySchema>
+export type McqActivityAuthorInput = z.infer<typeof McqActivityAuthorSchema>
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionSchema>
