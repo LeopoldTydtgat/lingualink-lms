@@ -211,7 +211,7 @@ function StatCard({
   caption: string
 }) {
   return (
-    <div className="flex-1 min-w-[200px] rounded-xl p-5" style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}>
+    <div className="flex-1 min-w-[200px] rounded-xl p-5 shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6' }}>
       <div className="flex items-center gap-2 mb-2">
         <span
           className="flex items-center justify-center rounded-lg"
@@ -233,12 +233,14 @@ function TabButton({
   icon,
   label,
   caption,
+  count,
 }: {
   active: boolean
   onClick: () => void
   icon?: ReactNode
   label: string
   caption: string
+  count?: number
 }) {
   return (
     <button
@@ -249,6 +251,9 @@ function TabButton({
       <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: active ? '#FF8303' : '#4b5563' }}>
         {icon}
         {label}
+        {count !== undefined && (
+          <span className="px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{count}</span>
+        )}
       </span>
       <span className="block text-xs mt-0.5" style={{ color: '#9ca3af' }}>{caption}</span>
     </button>
@@ -285,8 +290,8 @@ function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
   return (
     <div
       onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-      className="rounded-xl p-4 transition-shadow"
-      style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', cursor: 'pointer' }}
+      className="rounded-xl p-4 transition-shadow shadow-sm"
+      style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', cursor: 'pointer' }}
       onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.06)')}
       onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
     >
@@ -344,8 +349,8 @@ function WorksheetCard({
 
   return (
     <div
-      className="rounded-xl p-4 flex flex-col"
-      style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}
+      className="rounded-xl p-4 flex flex-col shadow-sm"
+      style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6' }}
     >
       <div className="flex items-start justify-between mb-3">
         <span
@@ -462,10 +467,10 @@ function SheetTable({
 }) {
   const router = useRouter()
   return (
-    <div className="rounded-xl overflow-hidden" style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}>
+    <div className="rounded-xl overflow-hidden shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6' }}>
       <div
         className="grid grid-cols-[1fr_120px_80px_100px_72px] gap-4 px-6 py-3"
-        style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #E0DFDC' }}
+        style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #f3f4f6' }}
       >
         <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Title</span>
         <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Category</span>
@@ -564,14 +569,14 @@ export default function StudySheetsClient({
 
   const emptyMessage = activeTab === 'teaching' ? 'No private materials yet.' : 'No student worksheets yet.'
 
-  const selectStyle = { backgroundColor: 'white', borderColor: '#E0DFDC', color: '#4b5563' }
+  const selectStyle = { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#4b5563' }
 
   return (
-    <div style={{ backgroundColor: '#f9fafb', minHeight: '100%' }}>
-      <div className="p-6 max-w-6xl mx-auto">
+    <>
+      <div className="space-y-6">
 
         {/* Header */}
-        <div className="flex items-start justify-between mb-6">
+        <div className="flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Study Library</h1>
             <p className="text-sm mt-1" style={{ color: '#4b5563' }}>
@@ -604,7 +609,7 @@ export default function StudySheetsClient({
         </div>
 
         {/* Stat cards */}
-        <div className="flex flex-wrap gap-4 mb-6">
+        <div className="flex flex-wrap gap-4">
           <StatCard icon={GraduationCap} label="Teaching Resources" value={teachingCount} caption="Private to you" />
           <StatCard icon={Users} label="Student Worksheets" value={worksheetCount} caption="Available to assign" />
           <StatCard icon={CalendarDays} label="Assigned This Week" value={assignedThisWeek} caption="Across your students" />
@@ -612,24 +617,26 @@ export default function StudySheetsClient({
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-6 mb-6" style={{ borderBottom: '1px solid #E0DFDC' }}>
+        <div className="flex gap-6" style={{ borderBottom: '1px solid #E0DFDC' }}>
           <TabButton
             active={activeTab === 'teaching'}
             onClick={() => setActiveTab('teaching')}
             icon={<Lock className="w-4 h-4" />}
             label="Teaching Materials"
             caption="Private to you"
+            count={teachingCount}
           />
           <TabButton
             active={activeTab === 'student'}
             onClick={() => setActiveTab('student')}
             label="Student Worksheets"
             caption="Assign and track student progress"
+            count={worksheetCount}
           />
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#9ca3af' }} />
             <Input
@@ -701,8 +708,8 @@ export default function StudySheetsClient({
         {activeTab === 'student' ? (
           visible.length === 0 ? (
             <div
-              className="rounded-xl px-6 py-12 text-center text-sm"
-              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#9ca3af' }}
+              className="rounded-xl px-6 py-12 text-center text-sm shadow-sm"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}
             >
               {emptyMessage}
             </div>
@@ -724,8 +731,8 @@ export default function StudySheetsClient({
         ) : view === 'grid' ? (
           visible.length === 0 ? (
             <div
-              className="rounded-xl px-6 py-12 text-center text-sm"
-              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#9ca3af' }}
+              className="rounded-xl px-6 py-12 text-center text-sm shadow-sm"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}
             >
               {emptyMessage}
             </div>
@@ -742,6 +749,6 @@ export default function StudySheetsClient({
       </div>
 
       {showCreate && <CreateResourceModal onClose={() => setShowCreate(false)} />}
-    </div>
+    </>
   )
 }
