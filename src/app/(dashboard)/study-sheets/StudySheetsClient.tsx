@@ -1,10 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Search, Plus, ChevronRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Search,
+  Lock,
+  LayoutGrid,
+  List,
+  GraduationCap,
+  Users,
+  BookOpen,
+  Languages,
+  ChevronRight,
+  Plus,
+} from 'lucide-react'
 
 type StudySheet = {
   id: string
@@ -15,16 +26,35 @@ type StudySheet = {
   is_active: boolean
   created_at: string
   audience: string
+  owner_id: string | null
 }
 
 type Props = {
   studySheets: StudySheet[]
   isAdmin: boolean
+  currentUserId: string
 }
 
-const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
-const CATEGORIES = ['All', 'vocabulary', 'grammar']
+type TabKey = 'teaching' | 'student'
+type ViewMode = 'grid' | 'list'
+type SortKey = 'recent' | 'title'
 
+const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// UTC parts only: deterministic across the SSR/CSR boundary (no hydration drift)
+// and avoids the banned toISOString / toLocale* date APIs.
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+function categoryIcon(category: string) {
+  return category.toLowerCase() === 'grammar' ? Languages : BookOpen
+}
+
+// Reused difficulty-bar logic (unchanged from the previous surface).
 function DifficultyBars({ count }: { count: number }) {
   return (
     <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
@@ -41,167 +71,349 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function SheetTable({
-  heading,
-  rows,
-  emptyMessage,
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  caption,
 }: {
-  heading: string
-  rows: StudySheet[]
-  emptyMessage: string
+  icon: typeof GraduationCap
+  label: string
+  value: number
+  caption: string
 }) {
-  const router = useRouter()
-
   return (
-    <div className="mb-8">
-      <h2 className="text-lg font-semibold text-gray-900 mb-3">{heading}</h2>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        {/* Table header */}
-        <div className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-3 bg-gray-50 border-b border-gray-200">
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Title</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Level</span>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Difficulty</span>
-          <span></span>
-        </div>
-
-        {/* Rows */}
-        {rows.length === 0 ? (
-          <div className="px-6 py-12 text-center text-gray-400 text-sm">
-            {emptyMessage}
-          </div>
-        ) : (
-          rows.map((sheet) => (
-            <div
-              key={sheet.id}
-              onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-              className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 border-b border-gray-100 hover:bg-gray-50 transition-colors last:border-0"
-              style={{ cursor: 'pointer' }}
-            >
-              <span className="font-medium text-gray-900 text-sm" style={{ cursor: 'pointer' }}>{sheet.title}</span>
-              <span className="text-sm text-gray-500 capitalize" style={{ cursor: 'pointer' }}>{sheet.category}</span>
-              <span className="text-sm" style={{ cursor: 'pointer' }}>
-                <span
-                  className="px-2 py-0.5 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303', cursor: 'pointer' }}
-                >
-                  {sheet.level}
-                </span>
-              </span>
-              <span style={{ cursor: 'pointer' }}><DifficultyBars count={sheet.difficulty} /></span>
-              <ChevronRight className="w-4 h-4 text-gray-400 self-center" />
-            </div>
-          ))
-        )}
+    <div className="flex-1 min-w-[200px] rounded-xl p-5" style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: '32px', height: '32px', backgroundColor: '#FFF3E0' }}
+        >
+          <Icon className="w-4 h-4" style={{ color: '#FF8303' }} />
+        </span>
+        <span className="text-sm font-medium" style={{ color: '#4b5563' }}>{label}</span>
       </div>
+      <p className="text-3xl font-semibold" style={{ color: '#111827' }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
     </div>
   )
 }
 
-export default function StudySheetsClient({ studySheets, isAdmin }: Props) {
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+  caption,
+}: {
+  active: boolean
+  onClick: () => void
+  icon?: ReactNode
+  label: string
+  caption: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="pb-3 -mb-px text-left"
+      style={{ borderBottom: active ? '2px solid #FF8303' : '2px solid transparent' }}
+    >
+      <span className="flex items-center gap-1.5 text-sm font-medium" style={{ color: active ? '#FF8303' : '#4b5563' }}>
+        {icon}
+        {label}
+      </span>
+      <span className="block text-xs mt-0.5" style={{ color: '#9ca3af' }}>{caption}</span>
+    </button>
+  )
+}
+
+function Badges({ sheet }: { sheet: StudySheet }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span
+        className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+        style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+      >
+        {sheet.category}
+      </span>
+      <span
+        className="px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+      >
+        {sheet.level}
+      </span>
+      <DifficultyBars count={sheet.difficulty} />
+    </div>
+  )
+}
+
+function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
   const router = useRouter()
+  const Icon = categoryIcon(sheet.category)
+  return (
+    <div
+      onClick={() => router.push(`/study-sheets/${sheet.id}`)}
+      className="rounded-xl p-4 transition-shadow"
+      style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', cursor: 'pointer' }}
+      onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.06)')}
+      onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
+    >
+      <div className="flex items-start justify-between mb-3">
+        <span
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: '40px', height: '40px', backgroundColor: '#FFF3E0' }}
+        >
+          <Icon className="w-5 h-5" style={{ color: '#FF8303' }} />
+        </span>
+        {owned && <Lock className="w-4 h-4 mt-1" style={{ color: '#9ca3af' }} aria-label="Private to you" />}
+      </div>
+      <h3 className="font-medium text-sm mb-2" style={{ color: '#111827' }}>{sheet.title}</h3>
+      <div className="mb-3">
+        <Badges sheet={sheet} />
+      </div>
+      <p className="text-xs" style={{ color: '#9ca3af' }}>{formatDate(sheet.created_at)}</p>
+    </div>
+  )
+}
+
+function SheetTable({
+  rows,
+  ownedIds,
+  emptyMessage,
+}: {
+  rows: StudySheet[]
+  ownedIds: Set<string>
+  emptyMessage: string
+}) {
+  const router = useRouter()
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}>
+      <div
+        className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-3"
+        style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #E0DFDC' }}
+      >
+        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Title</span>
+        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Category</span>
+        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Level</span>
+        <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Difficulty</span>
+        <span></span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="px-6 py-12 text-center text-sm" style={{ color: '#9ca3af' }}>{emptyMessage}</div>
+      ) : (
+        rows.map(sheet => (
+          <div
+            key={sheet.id}
+            onClick={() => router.push(`/study-sheets/${sheet.id}`)}
+            className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 transition-colors"
+            style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
+            <span className="font-medium text-sm flex items-center gap-1.5" style={{ color: '#111827' }}>
+              {ownedIds.has(sheet.id) && (
+                <Lock className="w-3.5 h-3.5 shrink-0" style={{ color: '#9ca3af' }} aria-label="Private to you" />
+              )}
+              {sheet.title}
+            </span>
+            <span className="text-sm capitalize" style={{ color: '#4b5563' }}>{sheet.category}</span>
+            <span className="text-sm">
+              <span
+                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+              >
+                {sheet.level}
+              </span>
+            </span>
+            <span><DifficultyBars count={sheet.difficulty} /></span>
+            <ChevronRight className="w-4 h-4 self-center" style={{ color: '#9ca3af' }} />
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
+export default function StudySheetsClient({ studySheets, isAdmin, currentUserId }: Props) {
+  const router = useRouter()
+  const [activeTab, setActiveTab] = useState<TabKey>('teaching')
   const [search, setSearch] = useState('')
   const [selectedLevel, setSelectedLevel] = useState('All')
   const [selectedCategory, setSelectedCategory] = useState('All')
+  const [sort, setSort] = useState<SortKey>('recent')
+  const [view, setView] = useState<ViewMode>('grid')
 
-  const filtered = studySheets.filter((sheet) => {
-    const matchesSearch = sheet.title.toLowerCase().includes(search.toLowerCase())
-    const matchesLevel = selectedLevel === 'All' || sheet.level === selectedLevel
-    const matchesCategory = selectedCategory === 'All' || sheet.category === selectedCategory
-    return matchesSearch && matchesLevel && matchesCategory
-  })
+  // Tab membership, independent of search/filters:
+  //  - owned (owner_id === me)                        -> Teaching Materials (padlock)
+  //  - admin-published staff (owner null, staff)      -> Teaching Materials (no padlock; shared staff material)
+  //  - admin-published student (owner null, student)  -> Student Worksheets
+  function sheetTab(s: StudySheet): TabKey | null {
+    if (s.owner_id === currentUserId) return 'teaching'
+    if (s.owner_id === null && s.audience === 'staff') return 'teaching'
+    if (s.owner_id === null && s.audience === 'student') return 'student'
+    return null
+  }
 
-  const teachingMaterial = filtered.filter((sheet) => sheet.audience === 'staff')
-  const studentSheets = filtered.filter((sheet) => sheet.audience === 'student')
+  const teachingCount = studySheets.filter(s => s.owner_id === currentUserId).length
+  const worksheetCount = studySheets.filter(s => s.owner_id === null && s.audience === 'student').length
+  const ownedIds = new Set(studySheets.filter(s => s.owner_id === currentUserId).map(s => s.id))
+
+  const visible = studySheets
+    .filter(s => sheetTab(s) === activeTab)
+    .filter(s => {
+      const matchesSearch = s.title.toLowerCase().includes(search.toLowerCase())
+      const matchesLevel = selectedLevel === 'All' || s.level === selectedLevel
+      const matchesCategory = selectedCategory === 'All' || s.category === selectedCategory
+      return matchesSearch && matchesLevel && matchesCategory
+    })
+    .sort((a, b) =>
+      sort === 'title'
+        ? a.title.localeCompare(b.title)
+        : b.created_at.localeCompare(a.created_at)
+    )
+
+  const emptyMessage = activeTab === 'teaching' ? 'No private materials yet.' : 'No student worksheets yet.'
+
+  const selectStyle = { backgroundColor: 'white', borderColor: '#E0DFDC', color: '#4b5563' }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div style={{ backgroundColor: '#f9fafb', minHeight: '100%' }}>
+      <div className="p-6 max-w-6xl mx-auto">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
-          <h1 className="text-2xl font-semibold text-gray-900">Study Sheets & Exercises</h1>
-          <p className="text-sm text-gray-500 mt-1">{studySheets.length} sheets in library</p>
+        {/* Header */}
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Study Library</h1>
+            <p className="text-sm mt-1" style={{ color: '#4b5563' }}>
+              All your resources for planning and teaching
+            </p>
+          </div>
+          {isAdmin && (
+            <Button
+              onClick={() => router.push('/study-sheets/new')}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Study Sheet
+            </Button>
+          )}
         </div>
-        {isAdmin && (
-          <Button
-            onClick={() => router.push('/study-sheets/new')}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-            style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Study Sheet
-          </Button>
-        )}
-      </div>
 
-      {/* Search and filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            placeholder="Search study sheets..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
+        {/* Stat cards */}
+        <div className="flex flex-wrap gap-4 mb-6">
+          <StatCard icon={GraduationCap} label="Teaching Resources" value={teachingCount} caption="Private to you" />
+          <StatCard icon={Users} label="Student Worksheets" value={worksheetCount} caption="Available to assign" />
+        </div>
+
+        {/* Tab bar */}
+        <div className="flex gap-6 mb-6" style={{ borderBottom: '1px solid #E0DFDC' }}>
+          <TabButton
+            active={activeTab === 'teaching'}
+            onClick={() => setActiveTab('teaching')}
+            icon={<Lock className="w-4 h-4" />}
+            label="Teaching Materials"
+            caption="Private to you"
+          />
+          <TabButton
+            active={activeTab === 'student'}
+            onClick={() => setActiveTab('student')}
+            label="Student Worksheets"
+            caption="Assign and track student progress"
           />
         </div>
 
-        {/* Level filter */}
-        <div className="flex gap-1">
-          {LEVELS.map((level) => (
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#9ca3af' }} />
+            <Input
+              placeholder="Search study sheets..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+
+          <select
+            value={selectedLevel}
+            onChange={e => setSelectedLevel(e.target.value)}
+            className="px-3 py-2 rounded-md text-sm border"
+            style={selectStyle}
+          >
+            {LEVELS.map(l => (
+              <option key={l} value={l}>{l === 'All' ? 'All levels' : l}</option>
+            ))}
+          </select>
+
+          <select
+            value={selectedCategory}
+            onChange={e => setSelectedCategory(e.target.value)}
+            className="px-3 py-2 rounded-md text-sm border"
+            style={selectStyle}
+          >
+            <option value="All">All categories</option>
+            <option value="vocabulary">Vocabulary</option>
+            <option value="grammar">Grammar</option>
+          </select>
+
+          <select
+            value={sort}
+            onChange={e => setSort(e.target.value as SortKey)}
+            className="px-3 py-2 rounded-md text-sm border"
+            style={selectStyle}
+          >
+            <option value="recent">Recently added</option>
+            <option value="title">Title A-Z</option>
+          </select>
+
+          {/* View toggle */}
+          <div className="flex gap-1">
             <button
-              key={level}
-              onClick={() => setSelectedLevel(level)}
-              className={`px-3 py-1.5 rounded-md text-sm border transition-colors${selectedLevel === level ? ' btn-primary-hover' : ''}`}
-              onMouseEnter={selectedLevel === level ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
-              onMouseLeave={selectedLevel === level ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
-              style={
-                selectedLevel === level
-                  ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
-                  : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
-              }
+              onClick={() => setView('grid')}
+              className="p-2 rounded-md border"
+              aria-label="Grid view"
+              style={view === 'grid'
+                ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
+                : { backgroundColor: 'white', borderColor: '#E0DFDC', color: '#4b5563' }}
             >
-              {level}
+              <LayoutGrid className="w-4 h-4" />
             </button>
-          ))}
+            <button
+              onClick={() => setView('list')}
+              className="p-2 rounded-md border"
+              aria-label="List view"
+              style={view === 'list'
+                ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
+                : { backgroundColor: 'white', borderColor: '#E0DFDC', color: '#4b5563' }}
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Category filter */}
-        <div className="flex gap-1">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1.5 rounded-md text-sm border transition-colors capitalize${selectedCategory === cat ? ' btn-primary-hover' : ''}`}
-              onMouseEnter={selectedCategory === cat ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
-              onMouseLeave={selectedCategory === cat ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
-              style={
-                selectedCategory === cat
-                  ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
-                  : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
-              }
+        {/* Content */}
+        {view === 'grid' ? (
+          visible.length === 0 ? (
+            <div
+              className="rounded-xl px-6 py-12 text-center text-sm"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#9ca3af' }}
             >
-              {cat}
-            </button>
-          ))}
-        </div>
+              {emptyMessage}
+            </div>
+          ) : (
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}>
+              {visible.map(sheet => (
+                <SheetCard key={sheet.id} sheet={sheet} owned={ownedIds.has(sheet.id)} />
+              ))}
+            </div>
+          )
+        ) : (
+          <SheetTable rows={visible} ownedIds={ownedIds} emptyMessage={emptyMessage} />
+        )}
       </div>
-
-      {/* Teaching Material (audience = staff) */}
-      <SheetTable
-        heading="Teaching Material"
-        rows={teachingMaterial}
-        emptyMessage="No teaching material."
-      />
-
-      {/* Study Sheets (audience = student) */}
-      <SheetTable
-        heading="Study Sheets"
-        rows={studentSheets}
-        emptyMessage="No study sheets."
-      />
     </div>
   )
 }
