@@ -135,22 +135,22 @@ export default function StudentDetailClient({
     return (
       <div className="space-y-6">
 
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
+        <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+          <div className="bg-white rounded-xl shadow-sm p-4 text-center" style={{ border: '1px solid #f3f4f6' }}>
             <p className="text-2xl font-bold text-gray-900">{training.total_hours}h</p>
             <p className="text-xs text-gray-500 mt-1">Total Hours</p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
+          <div className="bg-white rounded-xl shadow-sm p-4 text-center" style={{ border: '1px solid #f3f4f6' }}>
             <p className="text-2xl font-bold text-gray-900">{training.hours_consumed}h</p>
             <p className="text-xs text-gray-500 mt-1">Hours Used</p>
           </div>
-          <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
+          <div className="bg-white rounded-xl shadow-sm p-4 text-center" style={{ border: '1px solid #f3f4f6' }}>
             <p className="text-2xl font-bold" style={{ color: '#FF8303' }}>{hoursRemaining}h</p>
             <p className="text-xs text-gray-500 mt-1">Remaining</p>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
           <div className="flex justify-between text-sm text-gray-600 mb-2">
             <span>Training Progress</span>
             <span>{progressPercent}%</span>
@@ -167,7 +167,7 @@ export default function StudentDetailClient({
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+        <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
           <h3 className="font-semibold text-gray-900">Training Details</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -193,7 +193,7 @@ export default function StudentDetailClient({
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+        <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
           <h3 className="font-semibold text-gray-900">Learning Profile</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
@@ -211,7 +211,7 @@ export default function StudentDetailClient({
           </div>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-gray-900">Notes</h3>
             {!editingNotes && (
@@ -274,7 +274,7 @@ export default function StudentDetailClient({
     return (
       <div className="space-y-3">
         {upcomingLessons.map(lesson => (
-          <div key={lesson.id} className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
+          <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4 flex items-center justify-between" style={{ border: '1px solid #f3f4f6' }}>
             <div>
               <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -309,13 +309,19 @@ export default function StudentDetailClient({
         {[...pastLessons].reverse().map(lesson => {
           const report = reportsByLessonId[lesson.id]
           return (
-            <div key={lesson.id} className="bg-white border border-gray-200 rounded-lg p-4">
+            <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
                 {report ? (
                   <span
-                    className="text-xs px-2 py-1 rounded-full text-white"
-                    style={{ backgroundColor: report.did_class_happen ? '#22c55e' : '#FD5602' }}
+                    className="text-xs px-2 py-1 rounded-full"
+                    style={
+                      report.did_class_happen
+                        ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                        : report.no_show_type === 'student'
+                        ? { backgroundColor: '#FFF8E8', color: '#B45309' }
+                        : { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                    }
                   >
                     {report.did_class_happen
                       ? 'Class taken'
@@ -349,20 +355,15 @@ export default function StudentDetailClient({
   // ── TAB: Messages ─────────────────────────────────────────────
   function MessagesTab() {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-6 flex flex-col items-center gap-4">
+      <div className="bg-white rounded-xl shadow-sm p-6 flex flex-col items-center gap-4" style={{ border: '1px solid #f3f4f6' }}>
         <p className="text-sm text-gray-500">Send a direct message to this student via the Messages page.</p>
         <Link
           href={`/messages?studentId=${student!.id}`}
           prefetch={false}
-          style={{
-            padding: '10px 24px',
-            backgroundColor: '#FF8303',
-            color: '#ffffff',
-            borderRadius: '8px',
-            fontSize: '13px',
-            fontWeight: '600',
-            textDecoration: 'none',
-          }}
+          className="text-sm font-semibold px-6 py-2.5 rounded-lg transition-colors"
+          style={{ border: '2px solid #d1d5db', backgroundColor: 'white', color: '#374151', textDecoration: 'none' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = '#FF8303'; e.currentTarget.style.color = '#FF8303' }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#374151' }}
         >
           Message {student!.full_name}
         </Link>
@@ -370,13 +371,15 @@ export default function StudentDetailClient({
     )
   }
 
+  const tabCounts: Record<string, number | undefined> = { 'Next Classes': upcomingLessons.length, 'Past Classes': pastLessons.length }
+
   // ── RENDER ────────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="space-y-6">
 
       <button
         onClick={() => router.push('/students')}
-        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 mb-4 transition-colors"
+        className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M19 12H5M12 5l-7 7 7 7"/>
@@ -384,7 +387,7 @@ export default function StudentDetailClient({
         Back to Students
       </button>
 
-      <div className="flex items-center gap-4 mb-6">
+      <div className="flex items-center gap-4">
         {student?.photo_url ? (
           <img
             src={student.photo_url}
@@ -405,7 +408,7 @@ export default function StudentDetailClient({
       </div>
 
       {/* Manual tab bar — shadcn Tabs not used due to Tailwind v4 incompatibility */}
-      <div className="flex border-b border-gray-200 mb-6">
+      <div className="flex border-b border-gray-200">
         {TABS.map(tab => (
           <button
             key={tab}
@@ -418,6 +421,9 @@ export default function StudentDetailClient({
             }
           >
             {tab}
+            {tabCounts[tab] !== undefined && (
+              <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{tabCounts[tab]}</span>
+            )}
           </button>
         ))}
       </div>
@@ -429,11 +435,12 @@ export default function StudentDetailClient({
 
       {/* ── Study Sheets (read-only, always visible below tabs) ── */}
       {assignments.length > 0 && (
-        <div className="mt-8">
+        <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-3">
-            Assigned Study Sheets ({assignments.length})
+            Assigned Study Sheets
+            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
           </h2>
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
