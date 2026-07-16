@@ -218,6 +218,7 @@ export default async function DashboardLayout({
             teacherName={profile?.full_name ?? 'Teacher'}
             teacherPhotoUrl={profile?.photo_url ?? null}
             announcements={announcements}
+            unreadMessageCount={unreadCount ?? 0}
           />
           <div className="flex flex-1 overflow-hidden">
             <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">

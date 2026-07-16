@@ -1,7 +1,7 @@
 // src/components/layout/TopHeader.tsx
 import Link from 'next/link'
 import Image from 'next/image'
-import { UserCircle, CalendarDays, ChevronDown } from 'lucide-react'
+import { UserCircle, CalendarDays, ChevronDown, MessageSquare } from 'lucide-react'
 import NotificationsBell from './NotificationsBell'
 
 type AnnouncementItem = {
@@ -15,9 +15,10 @@ type TopHeaderProps = {
   teacherName: string
   teacherPhotoUrl: string | null
   announcements: AnnouncementItem[]
+  unreadMessageCount: number
 }
 
-export default function TopHeader({ teacherName, teacherPhotoUrl, announcements }: TopHeaderProps) {
+export default function TopHeader({ teacherName, teacherPhotoUrl, announcements, unreadMessageCount }: TopHeaderProps) {
   return (
     <header
       style={{
@@ -38,10 +39,28 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, announcements 
           href="/schedule"
           prefetch={false}
           aria-label="Schedule"
+          title="Schedule"
           className="hover:bg-gray-100 rounded-lg p-2"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <CalendarDays size={20} color="#4b5563" />
+        </Link>
+
+        {/* Messages shortcut */}
+        <Link
+          href="/messages"
+          prefetch={false}
+          aria-label="Messages"
+          title="Messages"
+          className="hover:bg-gray-100 rounded-lg p-2"
+          style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <MessageSquare size={20} color="#4b5563" />
+          {unreadMessageCount > 0 && (
+            <span style={{ position: 'absolute', top: '2px', right: '2px', minWidth: '15px', height: '15px', borderRadius: '8px', backgroundColor: '#FF8303', color: '#ffffff', fontSize: '10px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>
+              {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
+            </span>
+          )}
         </Link>
 
         {/* Notifications bell — client island */}
