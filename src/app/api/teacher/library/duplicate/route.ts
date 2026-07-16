@@ -58,24 +58,30 @@ export async function POST(request: Request) {
   //   - allowed_roles - reset to the default below, not inherited.
   // Only the plain content jsonb (words + empty exercises) and file attachments
   // travel with the copy.
+  const insert: Record<string, unknown> = {
+    title: `${source.title} (Copy)`,
+    category: source.category,
+    level: typeof source.level === 'string' ? source.level : '',
+    intro_text: source.intro_text ?? null,
+    content: source.content ?? { words: [], exercises: [] },
+    // Server-fixed, never inherited from the source:
+    owner_id: user.id,
+    audience: 'staff',
+    is_active: true,
+    // Default, set explicitly. Required so the owner's own SELECT tier for a
+    // staff-audience sheet (allowed_roles @> ['teacher']) returns the row -
+    // both for the RETURNING below and for later file access via the proxy.
+    allowed_roles: ['teacher', 'teacher_exam'],
+  }
+
+  // difficulty is NOT NULL DEFAULT 1 - omit when not supplied so the DB
+  // default applies; an explicit null violates the constraint. (source rows
+  // always carry an integer, this is defensive parity.)
+  if (typeof source.difficulty === 'number') insert.difficulty = source.difficulty
+
   const { data: created, error: insertError } = await supabase
     .from('study_sheets')
-    .insert({
-      title: `${source.title} (Copy)`,
-      category: source.category,
-      level: typeof source.level === 'string' ? source.level : '',
-      difficulty: typeof source.difficulty === 'number' ? source.difficulty : null,
-      intro_text: source.intro_text ?? null,
-      content: source.content ?? { words: [], exercises: [] },
-      // Server-fixed, never inherited from the source:
-      owner_id: user.id,
-      audience: 'staff',
-      is_active: true,
-      // Default, set explicitly. Required so the owner's own SELECT tier for a
-      // staff-audience sheet (allowed_roles @> ['teacher']) returns the row -
-      // both for the RETURNING below and for later file access via the proxy.
-      allowed_roles: ['teacher', 'teacher_exam'],
-    })
+    .insert(insert)
     .select('id, title, category, level, difficulty')
     .single()
 

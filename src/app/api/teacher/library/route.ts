@@ -47,7 +47,6 @@ export async function POST(request: Request) {
     title,
     category,
     level: typeof level === 'string' ? level : '',
-    difficulty: typeof difficulty === 'number' ? difficulty : null,
     intro_text: typeof intro_text === 'string' ? intro_text : null,
     // Server-fixed, never client-supplied:
     owner_id: user.id,
@@ -66,6 +65,10 @@ export async function POST(request: Request) {
     // set explicitly so correctness never depends on the live default drifting.
     allowed_roles: ['teacher', 'teacher_exam'],
   }
+
+  // difficulty is NOT NULL DEFAULT 1 - omit when not supplied so the DB
+  // default applies; an explicit null violates the constraint.
+  if (typeof difficulty === 'number') insert.difficulty = difficulty
 
   // User-scoped insert: RLS is the gate. The DB mints the id.
   const { data, error } = await supabase
