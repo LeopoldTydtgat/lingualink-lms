@@ -3,7 +3,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
 import { Video, ArrowRight, BookOpen, Clock, Receipt } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
@@ -62,6 +61,35 @@ function formatClassTime(isoString: string, durationMinutes: number, timezone: s
 
 const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
 
+// Soft-orange filled panel button. Hover deepens the tint. Keeps full width,
+// icons, and onClick from the previous outline Button.
+function PanelButton({ onClick, className, children }: { onClick: () => void; className?: string; children: React.ReactNode }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={className}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        backgroundColor: hovered ? '#FFE4CC' : '#FFF0E0',
+        color: '#FF8303',
+        border: 'none',
+        fontWeight: 600,
+        cursor: 'pointer',
+        transition: 'background-color 0.18s ease',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function RightPanel({
   teacherId,
   teacherTimezone,
@@ -119,7 +147,7 @@ export default function RightPanel({
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
   return (
-    <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA' }}>
+    <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA', borderLeft: '1px solid #E5E7EB' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}
@@ -158,15 +186,13 @@ export default function RightPanel({
               </p>
 
               {/* See Training button — always visible */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange mb-2"
+              <PanelButton
+                className="w-full text-sm mb-2"
                 onClick={() => router.push('/students')}
               >
                 <BookOpen size={14} className="mr-2" />
                 See Training
-              </Button>
+              </PanelButton>
 
               {/* Join Class — always visible; greyed until 10 min before start, gone at end */}
               {nextLesson.teams_join_url ? (
@@ -240,15 +266,13 @@ export default function RightPanel({
               </span>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3 w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange"
+          <PanelButton
+            className="mt-3 w-full text-sm"
             onClick={() => router.push('/billing')}
           >
             Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
-          </Button>
+          </PanelButton>
         </section>
 
       </div>

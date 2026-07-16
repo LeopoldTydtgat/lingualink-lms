@@ -177,7 +177,6 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
       style={{
         border: '1px solid #f3f4f6',
         borderLeft: isNext ? '3px solid #FF8303'
-          : isCancelled ? '3px solid #FD5602'
           : '1px solid #f3f4f6',
         opacity: isCancelled ? 0.75 : undefined,
       }}
@@ -304,7 +303,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
-  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(true)
+  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -314,7 +313,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     } catch {}
     try {
       const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
-      if (stored === 'false') setCancelledSectionExpanded(false)
+      if (stored === 'true') setCancelledSectionExpanded(true)
     } catch {}
   }, [])
 
@@ -453,12 +452,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
               Hide cancelled
             </label>
           )}
-          <Button asChild variant="outline" size="sm">
-            <Link href="/schedule" prefetch={false}>
-              <CalendarDays />
-              View Calendar
-            </Link>
-          </Button>
         </div>
       </div>
 
