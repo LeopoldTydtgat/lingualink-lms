@@ -324,7 +324,7 @@ export default function ActivityPlayerClient({
             className="px-6 py-3 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#FF8303' }}
           >
-            Back
+            Previous
           </button>
         )}
 
