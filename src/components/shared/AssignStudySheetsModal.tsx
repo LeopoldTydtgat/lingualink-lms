@@ -75,8 +75,12 @@ export default function AssignStudySheetsModal({
         .select('id, title, category, level, difficulty, content, attachments')
         .eq('is_active', true)
         // Homework is student-facing only. Teaching Material (audience='staff') must
-        // never be assignable to a student, so restrict this list to student sheets.
+        // never be assignable to a student, so restrict this list to active,
+        // student-audience, admin-published sheets (owner_id IS NULL). RLS already
+        // prevents a teacher-owned row from having audience='student' - this filter
+        // is defensive, pinning that contract in code.
         .eq('audience', 'student')
+        .is('owner_id', null)
         .order('title')
       setSheets(data ?? [])
 

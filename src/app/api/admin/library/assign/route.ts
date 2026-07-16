@@ -37,6 +37,26 @@ export async function POST(request: Request) {
     )
   }
 
+  // Only admin-published student worksheets are assignable: must be active,
+  // audience='student', and owner_id null (teacher-owned material is private
+  // prep and is always audience='staff' - never assignable to students).
+  const { data: sheet, error: sheetError } = await supabase
+    .from('study_sheets')
+    .select('id, is_active, audience, owner_id')
+    .eq('id', study_sheet_id)
+    .maybeSingle()
+
+  if (sheetError || !sheet) {
+    return NextResponse.json({ error: 'Study sheet not found' }, { status: 404 })
+  }
+
+  if (sheet.is_active !== true || sheet.audience !== 'student' || sheet.owner_id !== null) {
+    return NextResponse.json(
+      { error: 'This sheet cannot be assigned to students' },
+      { status: 400 }
+    )
+  }
+
   // Check if already assigned (avoid duplicates for direct admin assignments)
   const { data: existing } = await supabase
     .from('assignments')
