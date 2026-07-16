@@ -915,6 +915,14 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     }
   }, [status])
 
+  // Mirrors fitMode for the ResizeObserver callback below, which must read the
+  // live value without listing fitMode as an effect dependency (that would
+  // re-create the observer on every fit toggle).
+  const fitModeRef = useRef(fitMode)
+  useEffect(() => {
+    fitModeRef.current = fitMode
+  }, [fitMode])
+
   // Re-measure overlay geometry on any container size change: window resize,
   // fullscreen transition, scrollbar appearance, and the margin:auto centring
   // shift that a width change causes. (Zoom is already handled by the render
@@ -922,10 +930,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   useEffect(() => {
     const container = containerRef.current
     if (!container || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => measurePages())
+    const ro = new ResizeObserver(() => {
+      measurePages()
+      if (fitModeRef.current) applyFitWidth()
+    })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [measurePages])
+  }, [measurePages, applyFitWidth])
 
   // Keep the fullscreen label/icon correct even when the user exits via Esc.
   // (Same pattern as MaterialFileViewer.)
