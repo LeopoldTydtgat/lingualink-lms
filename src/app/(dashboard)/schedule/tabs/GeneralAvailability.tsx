@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction } from 'react'
+import { Clock } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string }
@@ -416,10 +417,15 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-        <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 14px', textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3 }}>Offering per week</div>
-          <div style={{ fontSize: '16px', fontWeight: 500, color: '#0F172A', lineHeight: 1.3 }}>
-            {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '10px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', borderRadius: '999px', backgroundColor: '#FF8303', flexShrink: 0, boxShadow: '0 2px 6px rgba(255,131,3,0.35)' }}>
+            <Clock size={16} color="#ffffff" strokeWidth={2.5} />
+          </span>
+          <div>
+            <div style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500, lineHeight: 1.3 }}>Offering per week</div>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: '#111827', lineHeight: 1.3 }}>
+              {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
+            </div>
           </div>
         </div>
       </div>
