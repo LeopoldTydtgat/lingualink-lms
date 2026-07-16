@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useState, type ReactNode, type MouseEvent as ReactMouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,10 @@ import {
   Languages,
   ChevronRight,
   Plus,
+  MoreVertical,
+  Copy,
 } from 'lucide-react'
+import CreateResourceModal from './CreateResourceModal'
 
 type StudySheet = {
   id: string
@@ -68,6 +71,113 @@ function DifficultyBars({ count }: { count: number }) {
         }} />
       ))}
     </span>
+  )
+}
+
+// Kebab menu with a single "Duplicate to My Library" action. The dropdown is
+// fixed-positioned (computed from the button rect) so it escapes the list
+// table's overflow-hidden clip. Every handler stops propagation so the kebab
+// never triggers the parent card/row navigation.
+function DuplicateMenu({ sheetId }: { sheetId: string }) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggle(e: ReactMouseEvent) {
+    e.stopPropagation()
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setPos({ top: rect.bottom + 4, left: rect.right - 210 })
+    setError(null)
+    setOpen(v => !v)
+  }
+
+  async function duplicate(e: ReactMouseEvent) {
+    e.stopPropagation()
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/teacher/library/duplicate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_id: sheetId }),
+      })
+      if (res.status !== 201) {
+        let msg = 'Could not duplicate this sheet.'
+        try {
+          const j = await res.json()
+          if (j?.error) msg = j.error
+        } catch {}
+        setError(msg)
+        setBusy(false)
+        return
+      }
+      setBusy(false)
+      setOpen(false)
+      router.refresh()
+    } catch {
+      setError('Could not duplicate this sheet.')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label="More actions"
+        className="p-1 rounded-md"
+        style={{ color: '#9ca3af' }}
+        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f3f4f6')}
+        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+      >
+        <MoreVertical className="w-4 h-4" />
+      </button>
+
+      {open && pos && (
+        <>
+          <div
+            onClick={e => { e.stopPropagation(); setOpen(false) }}
+            style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+          />
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              width: '210px',
+              zIndex: 50,
+              backgroundColor: 'white',
+              border: '1px solid #E0DFDC',
+              borderRadius: '8px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              overflow: 'hidden',
+            }}
+          >
+            <button
+              type="button"
+              onClick={duplicate}
+              disabled={busy}
+              className="flex items-center gap-2 w-full text-left text-sm"
+              style={{ padding: '10px 12px', color: '#111827', backgroundColor: 'white' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+            >
+              <Copy className="w-4 h-4" style={{ color: '#FF8303' }} />
+              {busy ? 'Duplicating...' : 'Duplicate to My Library'}
+            </button>
+            {error && (
+              <p style={{ padding: '8px 12px', fontSize: '12px', color: '#FD5602', borderTop: '1px solid #E0DFDC' }}>
+                {error}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -165,7 +275,10 @@ function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
         >
           <Icon className="w-5 h-5" style={{ color: '#FF8303' }} />
         </span>
-        {owned && <Lock className="w-4 h-4 mt-1" style={{ color: '#9ca3af' }} aria-label="Private to you" />}
+        <div className="flex items-center gap-1">
+          {owned && <Lock className="w-4 h-4 mt-1" style={{ color: '#9ca3af' }} aria-label="Private to you" />}
+          <DuplicateMenu sheetId={sheet.id} />
+        </div>
       </div>
       <h3 className="font-medium text-sm mb-2" style={{ color: '#111827' }}>{sheet.title}</h3>
       <div className="mb-3">
@@ -189,7 +302,7 @@ function SheetTable({
   return (
     <div className="rounded-xl overflow-hidden" style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC' }}>
       <div
-        className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-3"
+        className="grid grid-cols-[1fr_120px_80px_100px_72px] gap-4 px-6 py-3"
         style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #E0DFDC' }}
       >
         <span className="text-xs font-medium uppercase tracking-wide" style={{ color: '#9ca3af' }}>Title</span>
@@ -206,7 +319,7 @@ function SheetTable({
           <div
             key={sheet.id}
             onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-            className="grid grid-cols-[1fr_120px_80px_100px_40px] gap-4 px-6 py-4 transition-colors"
+            className="grid grid-cols-[1fr_120px_80px_100px_72px] gap-4 px-6 py-4 transition-colors"
             style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
             onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -227,7 +340,10 @@ function SheetTable({
               </span>
             </span>
             <span><DifficultyBars count={sheet.difficulty} /></span>
-            <ChevronRight className="w-4 h-4 self-center" style={{ color: '#9ca3af' }} />
+            <span className="flex items-center justify-end gap-1 self-center">
+              <DuplicateMenu sheetId={sheet.id} />
+              <ChevronRight className="w-4 h-4" style={{ color: '#9ca3af' }} />
+            </span>
           </div>
         ))
       )}
@@ -243,6 +359,7 @@ export default function StudySheetsClient({ studySheets, isAdmin, currentUserId 
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [sort, setSort] = useState<SortKey>('recent')
   const [view, setView] = useState<ViewMode>('grid')
+  const [showCreate, setShowCreate] = useState(false)
 
   // Tab membership, independent of search/filters:
   //  - owned (owner_id === me)                        -> Teaching Materials (padlock)
@@ -289,17 +406,29 @@ export default function StudySheetsClient({ studySheets, isAdmin, currentUserId 
               All your resources for planning and teaching
             </p>
           </div>
-          {isAdmin && (
-            <Button
-              onClick={() => router.push('/study-sheets/new')}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Study Sheet
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Every teacher can author private staff material - not admin-gated. */}
+            {activeTab === 'teaching' && (
+              <Button
+                onClick={() => setShowCreate(true)}
+                style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Resource
+              </Button>
+            )}
+            {isAdmin && (
+              <Button
+                onClick={() => router.push('/study-sheets/new')}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+                style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Study Sheet
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Stat cards */}
@@ -414,6 +543,8 @@ export default function StudySheetsClient({ studySheets, isAdmin, currentUserId 
           <SheetTable rows={visible} ownedIds={ownedIds} emptyMessage={emptyMessage} />
         )}
       </div>
+
+      {showCreate && <CreateResourceModal onClose={() => setShowCreate(false)} />}
     </div>
   )
 }
