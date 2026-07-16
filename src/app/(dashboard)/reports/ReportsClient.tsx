@@ -66,7 +66,7 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   )
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="space-y-6">
 
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <div>

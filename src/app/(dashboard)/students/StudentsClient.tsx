@@ -139,7 +139,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Page header */}
       <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
