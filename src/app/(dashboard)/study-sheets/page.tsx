@@ -12,6 +12,8 @@ type SheetProgress = {
   activityCount: number
 }
 
+type AssignableStudent = { id: string; full_name: string; email: string }
+
 export default async function StudySheetsPage() {
   const supabase = await createClient()
 
@@ -59,6 +61,29 @@ export default async function StudySheetsPage() {
   // blind to admin-assigned worksheets and to other teachers' assignments.
   const adminClient = createAdminClient()
   const scopedStudentIds = await getTeacherScopedStudentIds(adminClient, user.id, isAdmin)
+
+  // Assignable roster for the "Assign to Students" modal. RLS blocks the teacher
+  // role from reading the students table directly, so this must be a service-role
+  // read, scoped to the teacher's Condition-B set (admin = all current students;
+  // a teacher with an empty scoped set fetches nothing). full_name is the students
+  // name column (verified: students has full_name NOT NULL, no first/last split).
+  let assignableStudents: AssignableStudent[] = []
+  if (scopedStudentIds === null) {
+    const { data } = await adminClient
+      .from('students')
+      .select('id, full_name, email')
+      .eq('status', 'current')
+      .order('full_name')
+    assignableStudents = (data ?? []) as AssignableStudent[]
+  } else if (scopedStudentIds.length > 0) {
+    const { data } = await adminClient
+      .from('students')
+      .select('id, full_name, email')
+      .in('id', scopedStudentIds)
+      .eq('status', 'current')
+      .order('full_name')
+    assignableStudents = (data ?? []) as AssignableStudent[]
+  }
 
   const studentSheetIds = sheets
     .filter(s => s.audience === 'student')
@@ -192,6 +217,7 @@ export default async function StudySheetsPage() {
       progressBySheet={progressBySheet}
       assignedThisWeek={assignedThisWeek}
       newSubmissions={newSubmissions}
+      assignableStudents={assignableStudents}
     />
   )
 }

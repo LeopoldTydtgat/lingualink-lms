@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react'
 import CreateResourceModal from './CreateResourceModal'
+import AssignWorksheetModal from './AssignWorksheetModal'
 
 type StudySheet = {
   id: string
@@ -42,6 +43,8 @@ type SheetProgress = {
   activityCount: number
 }
 
+type AssignableStudent = { id: string; full_name: string; email: string }
+
 type Props = {
   studySheets: StudySheet[]
   isAdmin: boolean
@@ -49,6 +52,7 @@ type Props = {
   progressBySheet: Record<string, SheetProgress>
   assignedThisWeek: number
   newSubmissions: number
+  assignableStudents: AssignableStudent[]
 }
 
 type TabKey = 'teaching' | 'student'
@@ -317,11 +321,20 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
   )
 }
 
-// Student Worksheets tab card: assignment/progress aggregates plus Preview + kebab.
-// No Assign / View Responses actions in this commit.
-function WorksheetCard({ sheet, progress }: { sheet: StudySheet; progress?: SheetProgress }) {
+// Student Worksheets tab card: assignment/progress aggregates, Preview, and the
+// "Assign to Students" action (opens the roster picker modal).
+function WorksheetCard({
+  sheet,
+  progress,
+  students,
+}: {
+  sheet: StudySheet
+  progress?: SheetProgress
+  students: AssignableStudent[]
+}) {
   const router = useRouter()
   const Icon = categoryIcon(sheet.category)
+  const [showAssign, setShowAssign] = useState(false)
 
   const assignedCount = progress?.assignedCount ?? 0
   const completedCount = progress?.completedCount ?? 0
@@ -405,6 +418,16 @@ function WorksheetCard({ sheet, progress }: { sheet: StudySheet; progress?: Shee
       <div className="flex items-center gap-2 mt-auto pt-1">
         <button
           type="button"
+          onClick={() => setShowAssign(true)}
+          className="text-sm px-3 py-1.5 rounded-md text-white font-medium"
+          style={{ backgroundColor: '#FF8303', border: '1px solid #FF8303' }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+        >
+          Assign to Students
+        </button>
+        <button
+          type="button"
           onClick={() => router.push(`/study-sheets/${sheet.id}`)}
           className="text-sm px-3 py-1.5 rounded-md border"
           style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
@@ -414,6 +437,16 @@ function WorksheetCard({ sheet, progress }: { sheet: StudySheet; progress?: Shee
           Preview
         </button>
       </div>
+
+      {showAssign && (
+        <AssignWorksheetModal
+          sheetId={sheet.id}
+          sheetTitle={sheet.title}
+          students={students}
+          onClose={() => setShowAssign(false)}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </div>
   )
 }
@@ -489,6 +522,7 @@ export default function StudySheetsClient({
   progressBySheet,
   assignedThisWeek,
   newSubmissions,
+  assignableStudents,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabKey>('teaching')
@@ -678,7 +712,12 @@ export default function StudySheetsClient({
               style={{ gridTemplateColumns: view === 'grid' ? 'repeat(auto-fill, minmax(280px, 1fr))' : '1fr' }}
             >
               {visible.map(sheet => (
-                <WorksheetCard key={sheet.id} sheet={sheet} progress={progressBySheet[sheet.id]} />
+                <WorksheetCard
+                  key={sheet.id}
+                  sheet={sheet}
+                  progress={progressBySheet[sheet.id]}
+                  students={assignableStudents}
+                />
               ))}
             </div>
           )
