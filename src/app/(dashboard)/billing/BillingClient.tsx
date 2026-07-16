@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { Receipt, CheckCircle2, Info, ChevronDown } from 'lucide-react'
 
 interface Profile {
   id: string
@@ -79,24 +80,24 @@ function getStatusLabel(lesson: { status: string; cancelled_by?: string | null; 
   }
 }
 
-function getLessonStatusColor(status: string): string {
+function getLessonStatusStyle(status: string): { bg: string; fg: string } {
   switch (status) {
-    case 'completed': return '#16a34a'
-    case 'student_no_show': return '#FF8303'
-    case 'teacher_no_show': return '#FD5602'
+    case 'completed': return { bg: '#DCFCE7', fg: '#15803D' }
+    case 'student_no_show': return { bg: '#FFF0E0', fg: '#C2410C' }
+    case 'teacher_no_show': return { bg: '#FFEEE6', fg: '#FD5602' }
     case 'cancelled':
     case 'cancelled_by_student':
-    case 'cancelled_by_teacher': return '#6b7280'
-    default: return '#6b7280'
+    case 'cancelled_by_teacher': return { bg: '#f3f4f6', fg: '#6b7280' }
+    default: return { bg: '#f3f4f6', fg: '#6b7280' }
   }
 }
 
-function getInvoiceStatusColor(status: string): string {
+function getInvoiceStatusStyle(status: string): { bg: string; fg: string } {
   switch (status) {
-    case 'paid': return '#16a34a'
-    case 'pending': return '#FF8303'
-    case 'overdue': return '#FD5602'
-    default: return '#6b7280'
+    case 'paid': return { bg: '#DCFCE7', fg: '#15803D' }
+    case 'pending': return { bg: '#FFF8E8', fg: '#B45309' }
+    case 'overdue': return { bg: '#FFEEE6', fg: '#FD5602' }
+    default: return { bg: '#f3f4f6', fg: '#6b7280' }
   }
 }
 
@@ -268,7 +269,7 @@ export default function BillingClient({
   }
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="max-w-5xl mx-auto space-y-6">
 
       <input
         ref={fileInputRef}
@@ -279,7 +280,7 @@ export default function BillingClient({
       />
 
       {/* Header + view switcher */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
         <h1 className="text-2xl font-bold text-gray-900">Billing &amp; Invoices</h1>
         <div className="flex gap-2">
           {(['billing', 'billingInfo'] as const).map(view => (
@@ -314,12 +315,51 @@ export default function BillingClient({
 
       {/* ── MY INVOICES ─────────────────────────────────────────────────────── */}
       {activeView === 'billing' && (
-        <div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 mb-4">
-            <strong>Invoice upload window: 1st–10th of each month.</strong> Late uploads are processed the following month. Payment is made within 15 days of receipt.
-          </div>
+        <div className="space-y-6">
+          {(() => {
+            const currentInv = allInvoices.find(i => i.billing_month === currentMonthDate)
+            const currentAmt = currentInv?.amount_eur != null ? Number(currentInv.amount_eur) : 0
+            const lastPaid = allInvoices.find(i => i.status === 'paid')
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Receipt size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Current Month</p>
+                  </div>
+                  <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827' }}>
+                    {sym}{currentAmt.toFixed(2)}
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#9ca3af' }}>{formatMonth(currentMonthDate)}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle2 size={14} color="#16a34a" style={{ flexShrink: 0 }} />
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Last Paid</p>
+                  </div>
+                  <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827' }}>
+                    {lastPaid ? `${sym}${Number(lastPaid.amount_eur ?? 0).toFixed(2)}` : '—'}
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+                    {lastPaid ? formatMonth(lastPaid.billing_month) : 'No paid invoices yet'}
+                  </p>
+                </div>
+              </div>
+            )
+          })()}
 
-          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between mb-6">
+          {isUploadWindow ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
+              Invoice upload window is open — upload by the 10th. Payment within 15 days of receipt.
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <Info size={14} className="text-gray-400" />
+              Invoices are uploaded between the 1st and 10th of each month. Late uploads are processed the following month.
+            </p>
+          )}
+
+          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
             <div>
               <p className="font-medium text-gray-900">Invoice Template</p>
               <p className="text-sm text-gray-500">Download the Lingualink branded template to complete your invoice</p>
@@ -333,19 +373,21 @@ export default function BillingClient({
             )}
           </div>
 
+          <div className="space-y-3">
           {allInvoices.map(invoice => {
             const isCurrentMonth = invoice.billing_month === currentMonthDate
             const isExpanded = expandedInvoice === invoice.id
             const lessons = lessonsByMonth[invoice.billing_month] || []
             const isThisUploading = uploading && targetInvoice?.id === invoice.id
+            const invStyle = getInvoiceStatusStyle(invoice.status)
 
             return (
               <div
                 key={invoice.id}
-                className="rounded-lg overflow-hidden mb-3 border"
+                className="rounded-xl overflow-hidden shadow-sm"
                 style={isCurrentMonth
-                  ? { borderColor: '#FF8303', backgroundColor: '#fff9f5' }
-                  : { borderColor: '#e5e7eb', backgroundColor: 'white' }}
+                  ? { border: '1px solid #f3f4f6', borderLeft: '3px solid #FF8303', backgroundColor: '#fff9f5' }
+                  : { border: '1px solid #f3f4f6', backgroundColor: 'white' }}
               >
                 <div className="p-4">
                   <div className="flex items-start justify-between">
@@ -367,16 +409,18 @@ export default function BillingClient({
                           : `${sym}0.00`}
                       </span>
                       <span
-                        className="text-xs font-medium px-2.5 py-1 rounded-full text-white"
-                        style={{ backgroundColor: getInvoiceStatusColor(invoice.status) }}
+                        className="text-xs font-medium px-2.5 py-1 rounded-full"
+                        style={{ backgroundColor: invStyle.bg, color: invStyle.fg }}
                       >
                         {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
                       </span>
                       <button
                         onClick={() => setExpandedInvoice(expandedInvoice === invoice.id ? null : invoice.id)}
-                        className="text-sm underline text-gray-500"
+                        className="text-sm"
+                        style={{ color: '#FF8303', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}
                       >
                         {isExpanded ? 'Hide Detail' : 'See Detail'}
+                        <ChevronDown size={14} style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }} />
                       </button>
                     </div>
                   </div>
@@ -403,39 +447,43 @@ export default function BillingClient({
                       const total = rows.reduce((s, { bill }) => bill.billableToTeacher ? s + bill.amount : s, 0)
                       return (
                         <div>
-                          <div className="flex items-center justify-between text-xs text-gray-400 font-medium pb-1 mb-1 border-b border-gray-200">
-                            <div className="flex items-center gap-6">
-                              <span className="w-40">Student</span>
-                              <span>Date &amp; Time</span>
-                              <span className="w-16">Duration</span>
-                            </div>
-                            <div className="flex items-center gap-6">
-                              <span>Status</span>
-                              <span className="w-20 text-right">Amount</span>
-                            </div>
+                          <div
+                            className="text-xs text-gray-400 font-medium pb-1 mb-1 border-b border-gray-200"
+                            style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 0.6fr 1fr 0.6fr', alignItems: 'center', gap: '12px' }}
+                          >
+                            <span>Student</span>
+                            <span>Date &amp; Time</span>
+                            <span>Duration</span>
+                            <span>Status</span>
+                            <span style={{ textAlign: 'right' }}>Amount</span>
                           </div>
-                          {rows.map(({ lesson, bill }) => (
-                            <div key={lesson.id} className="flex items-center justify-between text-sm py-1">
-                              <div className="flex items-center gap-6">
-                                <span className="font-medium text-gray-900 w-40 truncate">
+                          {rows.map(({ lesson, bill }) => {
+                            const lessonStyle = getLessonStatusStyle(lesson.status)
+                            return (
+                              <div
+                                key={lesson.id}
+                                className="text-sm py-1"
+                                style={{ display: 'grid', gridTemplateColumns: '1.4fr 1.2fr 0.6fr 1fr 0.6fr', alignItems: 'center', gap: '12px' }}
+                              >
+                                <span className="font-medium text-gray-900 truncate">
                                   {getStudentName(lesson)}
                                 </span>
                                 <span className="text-gray-500">{formatDateTime(lesson.scheduled_at)}</span>
-                                <span className="text-gray-500 w-16">{lesson.duration_minutes} min</span>
-                              </div>
-                              <div className="flex items-center gap-6">
-                                <span
-                                  className="text-xs px-2 py-0.5 rounded-full text-white"
-                                  style={{ backgroundColor: getLessonStatusColor(lesson.status) }}
-                                >
-                                  {getStatusLabel(lesson)}
+                                <span className="text-gray-500">{lesson.duration_minutes} min</span>
+                                <span>
+                                  <span
+                                    className="text-xs px-2 py-0.5 rounded-full"
+                                    style={{ backgroundColor: lessonStyle.bg, color: lessonStyle.fg }}
+                                  >
+                                    {getStatusLabel(lesson)}
+                                  </span>
                                 </span>
-                                <span className="text-sm text-gray-900 w-20 text-right">
+                                <span className="text-sm text-gray-900" style={{ textAlign: 'right' }}>
                                   {bill.billableToTeacher ? `${sym}${bill.amount.toFixed(2)}` : `${sym}0.00`}
                                 </span>
                               </div>
-                            </div>
-                          ))}
+                            )
+                          })}
                           <div className="flex justify-end pt-2 mt-1 border-t border-gray-200">
                             <span className="text-sm font-semibold text-gray-900">
                               Total: {sym}{total.toFixed(2)}
@@ -507,6 +555,7 @@ export default function BillingClient({
               </div>
             )
           })}
+          </div>
         </div>
       )}
 
@@ -605,8 +654,8 @@ export default function BillingClient({
                           </div>
                           <div className="flex items-center gap-3">
                             <span
-                              className="text-xs px-2 py-0.5 rounded-full text-white"
-                              style={{ backgroundColor: getInvoiceStatusColor(invoice.status) }}
+                              className="text-xs px-2 py-0.5 rounded-full"
+                              style={{ backgroundColor: getInvoiceStatusStyle(invoice.status).bg, color: getInvoiceStatusStyle(invoice.status).fg }}
                             >
                               {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
                             </span>
