@@ -469,10 +469,25 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               </button>
               {showGuide && (
                 <div className="bg-gray-50 border border-gray-200 border-t-0 rounded-b-xl p-4">
-                  <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '4px 8px', alignItems: 'start', paddingLeft: '10rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '4px 8px', alignItems: 'start' }}>
                     {Object.entries(CEFR_DESCRIPTIONS).map(([level, desc]) => (
                       <React.Fragment key={level}>
-                        <span className="text-xs font-bold text-gray-800">{level}</span>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '32px',
+                            height: '20px',
+                            borderRadius: '6px',
+                            backgroundColor: '#f3f4f6',
+                            color: '#374151',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {level}
+                        </span>
                         <span className="text-xs text-gray-600">{desc}</span>
                       </React.Fragment>
                     ))}
