@@ -64,7 +64,7 @@ function NavContent({
   return (
     <span
       className="flex items-center gap-3 w-full transition-opacity"
-      style={{ opacity: pending ? 0.55 : 1 }}
+      style={{ opacity: pending ? 0.55 : 1, color: pending ? '#FF8303' : undefined }}
     >
       {pending ? (
         <Loader2
