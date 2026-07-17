@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { MessageSquare } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -165,6 +166,7 @@ export default function MessagesClient({
   initialContact = null,
 }: MessagesClientProps) {
   const supabase = useMemo(() => createClient(), [])
+  const router = useRouter()
 
   const [contacts, setContacts] = useState<Contact[]>(initialContacts)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
@@ -239,7 +241,8 @@ export default function MessagesClient({
     setLoadingMessages(false)
     await markMessagesAsRead(contact.id)
     setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c))
-  }, [supabase, currentUser.id])
+    router.refresh()
+  }, [supabase, currentUser.id, router])
 
   const handleSelectContact = useCallback(async (contact: Contact) => {
     setSelectedContact(contact)
