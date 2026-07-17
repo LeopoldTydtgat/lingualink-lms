@@ -1077,7 +1077,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                 fontSize: '14px',
               }}
             >
-              No resources have been added yet. Shannon will add helpful links here for teachers.
+              No resources have been added yet. Your admin will add helpful links here for teachers.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
