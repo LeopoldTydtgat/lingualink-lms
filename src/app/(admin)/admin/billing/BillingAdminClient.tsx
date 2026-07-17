@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
-import { formatInstantInTz, tzLabel } from '@/lib/exportTime'
+import { formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -84,6 +84,28 @@ function formatDateTime(dateStr: string): string {
   const h = String(d.getHours()).padStart(2, '0')
   const m = String(d.getMinutes()).padStart(2, '0')
   return `${day}/${month}/${year} ${h}:${m}`
+}
+
+// The From/To date pickers select LOCAL CALENDAR DAYS in the settings-driven
+// export timezone, but scheduled_at is a timestamptz (an absolute instant).
+// Passing a bare 'YYYY-MM-DD' makes Postgres read it as UTC midnight, which
+// scopes the window in the wrong zone and drops part of the boundary days.
+// Resolve both edges in exportTz instead, as a HALF-OPEN [gte, lt) instant pair
+// — the same bounds the billing export route computes (NEW350), so the on-screen
+// rows and the exported CSV always cover the identical window. Each edge is
+// independently optional; an absent edge leaves that side of the range open.
+function resolveDayBounds(
+  from: string,
+  to: string,
+  tz: string
+): { gteIso: string | null; ltIso: string | null } {
+  if (from && to) {
+    const { gteIso, ltIso } = zonedDayRangeToUtcBounds(from, to, tz)
+    return { gteIso, ltIso }
+  }
+  if (from) return { gteIso: zonedDayRangeToUtcBounds(from, from, tz).gteIso, ltIso: null }
+  if (to) return { gteIso: null, ltIso: zonedDayRangeToUtcBounds(to, to, tz).ltIso }
+  return { gteIso: null, ltIso: null }
 }
 
 function currencySymbol(code: string | null | undefined): string {
@@ -420,6 +442,9 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     setSbLoading(true)
     setSbLoaded(false)
 
+    // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
+    const { gteIso, ltIso } = resolveDayBounds(sbFilterDateFrom, sbFilterDateTo, exportTz)
+
     let query = supabase
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
@@ -427,15 +452,15 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       .order('scheduled_at', { ascending: false })
 
     if (sbFilterStudent) query = query.eq('student_id', sbFilterStudent)
-    if (sbFilterDateFrom) query = query.gte('scheduled_at', sbFilterDateFrom)
-    if (sbFilterDateTo) query = query.lte('scheduled_at', sbFilterDateTo + 'T23:59:59')
+    if (gteIso) query = query.gte('scheduled_at', gteIso)
+    if (ltIso) query = query.lt('scheduled_at', ltIso)
 
     const { data: raw } = await query
     const hydrated = await hydrateLessons(raw || [])
     setSbLessons(hydrated)
     setSbLoading(false)
     setSbLoaded(true)
-  }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, hydrateLessons])
+  }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, exportTz, hydrateLessons])
 
   // ── Load Company Billing lessons ───────────────────────────────────────────
   const loadCompanyBilling = useCallback(async () => {
@@ -459,6 +484,11 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       return
     }
 
+    // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
+    // Must match the bounds /api/admin/billing/export computes from the same two
+    // filter values, so this table and its Export CSV never disagree at a boundary day.
+    const { gteIso, ltIso } = resolveDayBounds(cbFilterDateFrom, cbFilterDateTo, exportTz)
+
     let lessonsQuery = supabase
       .from('lessons')
       .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
@@ -466,15 +496,15 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       .in('status', SETTLED_LESSON_STATUSES)
       .order('scheduled_at', { ascending: false })
 
-    if (cbFilterDateFrom) lessonsQuery = lessonsQuery.gte('scheduled_at', cbFilterDateFrom)
-    if (cbFilterDateTo) lessonsQuery = lessonsQuery.lte('scheduled_at', cbFilterDateTo + 'T23:59:59')
+    if (gteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', gteIso)
+    if (ltIso) lessonsQuery = lessonsQuery.lt('scheduled_at', ltIso)
 
     const { data: raw } = await lessonsQuery
     const hydrated = await hydrateLessons(raw || [])
     setCbLessons(hydrated)
     setCbLoading(false)
     setCbLoaded(true)
-  }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, hydrateLessons])
+  }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, exportTz, hydrateLessons])
 
   // ── CSV export helper ──────────────────────────────────────────────────────
   // Uses fetch + blob (not window.open) so a failed export surfaces a friendly

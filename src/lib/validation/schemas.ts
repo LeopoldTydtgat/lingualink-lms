@@ -37,9 +37,9 @@ const PROFILE_STATUS = ['current', 'former', 'on_hold'] as const
 const CANCELLATION_POLICY = ['24hr', '48hr'] as const
 
 const CEFR_LEVELS = [
-  'A1', 'A1+', 'A2', 'A2+',
-  'B1', 'B1+', 'B2', 'B2+',
-  'C1', 'C1+', 'C2',
+  'A1', 'A2',
+  'B1', 'B2',
+  'C1', 'C2',
 ] as const
 
 // ─── Create Teacher ───────────────────────────────────────────────────────────
@@ -205,6 +205,14 @@ export const UpdateStudentSchema = z.object({
 })
 
 export type UpdateStudentInput = z.infer<typeof UpdateStudentSchema>
+
+// ─── Teacher-authored student notes ────────────────────────────────────────────
+
+export const TeacherNotesSchema = z.object({
+  notes: z.string().max(5000),
+})
+
+export type TeacherNotesInput = z.infer<typeof TeacherNotesSchema>
 
 // ─── Hours adjustment ─────────────────────────────────────────────────────────
 

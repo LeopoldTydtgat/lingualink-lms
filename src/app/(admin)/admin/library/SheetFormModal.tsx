@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { StudySheet, WordRow, ExerciseRow, SheetContent, Attachment } from './LibraryAdminClient'
+import { Tag, kindColor } from './TagManagerModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -12,13 +13,13 @@ type Props = {
   onSaved: () => Promise<void>
 }
 
-type FormTab = 'metadata' | 'vocabulary' | 'exercises' | 'files' | 'access'
+type FormTab = 'metadata' | 'vocabulary' | 'exercises' | 'files' | 'tags' | 'access'
 
 type SheetType = 'teaching_material' | 'study_sheet'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
+const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 const ACCEPTED_TYPES = [
   'application/pdf',
@@ -213,6 +214,91 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     return () => { cancelled = true }
   }, [])
 
+  // ── Tags ──────────────────────────────────────────────────────────────────
+  // tags and sheet_tags are service_role writes only, and the browser client is
+  // never used for them here — the vocabulary, this sheet's set, and the eventual
+  // replace all go through /api/admin routes.
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set())
+  const [tagsLoading, setTagsLoading] = useState(true)
+  // Set when the vocabulary or this sheet's set fails to load. The save PUT is a
+  // full replace, so a set we never read must never be written back.
+  const [tagsLoadError, setTagsLoadError] = useState(false)
+
+  // Mount-only, mirroring the exercises effect above: the modal remounts per open,
+  // so this runs once and won't clobber an in-progress selection.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const vocabRes = await fetch('/api/admin/tags')
+        if (cancelled) return
+        if (!vocabRes.ok) { setTagsLoadError(true); return }
+
+        const vocab = await vocabRes.json().catch(() => null)
+        if (cancelled) return
+        if (!Array.isArray(vocab)) { setTagsLoadError(true); return }
+        setAllTags(vocab)
+
+        // Create mode has no saved set yet — the row does not exist.
+        if (isEdit) {
+          const currentRes = await fetch(`/api/admin/library/${sheetId}/tags`)
+          if (cancelled) return
+          if (!currentRes.ok) { setTagsLoadError(true); return }
+
+          const current = await currentRes.json().catch(() => null)
+          if (cancelled) return
+          if (!current || !Array.isArray(current.tag_ids)) { setTagsLoadError(true); return }
+          setSelectedTagIds(new Set(current.tag_ids))
+        }
+      } catch {
+        // A rejected fetch must still land in a known state. Without this,
+        // tagsLoading would stay true and tagsLoadError false forever — the one
+        // combination that leaves saveTags unguarded and wipes the sheet's tags.
+        if (!cancelled) setTagsLoadError(true)
+      } finally {
+        if (!cancelled) setTagsLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const toggleTag = (tagId: string) => {
+    setSelectedTagIds(prev => {
+      const next = new Set(prev)
+      if (next.has(tagId)) next.delete(tagId)
+      else next.add(tagId)
+      return next
+    })
+  }
+
+  // Writes the sheet's tag set. Returns an error message, or null on success.
+  const saveTags = async (id: string): Promise<string | null> => {
+    // Fail-safe: the PUT replaces the whole set, so a selection built on a failed
+    // load would erase the sheet's real tags. Skip entirely — the server keeps
+    // what it has, and the Tags tab already says why. (handleSave additionally
+    // refuses to run while the load is still in flight, which is the other way
+    // selectedTagIds could be unrepresentative of the saved set.)
+    if (tagsLoadError) return null
+
+    try {
+      const res = await fetch(`/api/admin/library/${id}/tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag_ids: Array.from(selectedTagIds) }),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        return body.error || "The sheet was saved, but its tags weren't. Try saving again."
+      }
+    } catch {
+      return "The sheet was saved, but its tags weren't — the server couldn't be reached. Try saving again."
+    }
+
+    return null
+  }
+
   // ── Attachments ───────────────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<Attachment[]>(() => {
     const existing = sheet?.attachments
@@ -235,6 +321,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // ── Save state ────────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Create mode only: the row was created but a follow-up step (files, tags)
+  // failed. The row exists, so re-saving would POST the same id again and collide
+  // — the modal instead holds the reason on screen and offers only Close.
+  const [createdIncomplete, setCreatedIncomplete] = useState(false)
 
   // ── Word helpers ──────────────────────────────────────────────────────────
   const updateWord = (id: string, field: keyof WordRow, value: string) => {
@@ -355,11 +445,17 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    // The row already exists and its id is fixed — a second POST would collide.
+    if (createdIncomplete) return
     // Don't save until edit-mode exercises have loaded — a premature save would
     // delete-then-reinsert with an empty set and wipe the sheet's exercises.
     if (exercisesLoading) return
-    // Same hazard if the load FAILED: block the save so we don't persist an empty
-    // or partial exercise set over rows we couldn't read.
+    // Same hazard for tags: the PUT replaces the whole set, so saving before the
+    // sheet's saved tags arrive would send the still-empty initial selection and
+    // clear every tag on the sheet.
+    if (tagsLoading) return
+    // Same hazard if the exercises load FAILED: block the save so we don't persist
+    // an empty or partial exercise set over rows we couldn't read.
     if (exercisesLoadError) {
       setActiveTab('exercises')
       setError("Couldn't load this sheet's exercises. Close and reopen before saving — saving now could erase them.")
@@ -407,14 +503,25 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         return
       }
 
+      // Tags are a separate table, so a separate write. The sheet is already
+      // saved: on failure hold the modal open with the reason rather than
+      // closing over it — saving again simply re-runs both writes.
+      const tagsError = await saveTags(sheet!.id)
       setSaving(false)
+      if (tagsError) {
+        setActiveTab('tags')
+        setError(tagsError)
+        return
+      }
+
       await onSaved()
       return
     }
 
     // Create mode: save first, then upload (the upload route rejects files for
     // rows that don't exist yet). Order: (a) create the row, (b) upload staged
-    // files, (c) PATCH the resulting attachments onto the row, (d) finish.
+    // files, (c) PATCH the resulting attachments onto the row, (d) write tags,
+    // (e) finish.
     payload.id = sheetId
 
     // (a) Create the row with no attachments. On failure nothing else ran, so the
@@ -464,15 +571,70 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       })
     }
 
+    // (d) The row exists, so its tags can be written.
+    let tagsError: string | null = null
+    if (selectedTagIds.size > 0) {
+      tagsError = await saveTags(sheetId)
+    }
+
     setSaving(false)
 
-    // (d) The row exists regardless. If a file failed, tell the user — they can
-    // reopen the sheet (edit mode) and add it again, since re-upload now works.
-    if (anyFailed) {
-      setError("Sheet created, but some files didn't upload. Open the sheet to add them again.")
+    // (e) The row exists either way. If a file or the tags failed, the modal must
+    // STAY OPEN to say so: setError followed by onSaved() would unmount this
+    // component in the same render, and the message would never paint — the admin
+    // would see a clean close and believe everything saved. Close (below) is what
+    // refreshes the list from here.
+    if (anyFailed || tagsError) {
+      setCreatedIncomplete(true)
+      setError(
+        anyFailed && tagsError
+          ? "Sheet created, but some files and its tags didn't save. Close, then open the sheet to add them again."
+          : anyFailed
+            ? "Sheet created, but some files didn't upload. Close, then open the sheet to add them again."
+            : "Sheet created, but its tags didn't save. Close, then open the sheet to set them again."
+      )
+      return
     }
+
     await onSaved()
   }
+
+  // ── Tag picker ────────────────────────────────────────────────────────────
+  const topicTags = allTags.filter(t => t.kind === 'topic')
+  const skillTags = allTags.filter(t => t.kind === 'skill')
+
+  const renderTagGroup = (label: string, group: Tag[]) => (
+    <div>
+      <p className="text-xs font-medium text-gray-400 uppercase mb-2">{label}</p>
+      {group.length === 0 ? (
+        <p className="text-sm text-gray-400 italic">
+          No {label.toLowerCase()} yet. Create them with Manage Tags on the library page.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {group.map(tag => {
+            const selected = selectedTagIds.has(tag.id)
+            const color = kindColor(tag.kind)
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                onClick={() => toggleTag(tag.id)}
+                className="text-xs font-medium px-3 py-1.5 rounded-full border-2 transition-colors"
+                style={{
+                  borderColor: selected ? color : '#e5e7eb',
+                  backgroundColor: selected ? color : 'white',
+                  color: selected ? 'white' : '#6b7280',
+                }}
+              >
+                {tag.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
   const allTabs: { key: FormTab; label: string }[] = [
@@ -480,13 +642,15 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     { key: 'vocabulary', label: `Vocabulary (${words.length})` },
     { key: 'exercises', label: `Exercises (${exercisesLoading ? '…' : exercises.length})` },
     { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
+    { key: 'tags', label: `Tags (${tagsLoading ? '…' : selectedTagIds.size})` },
     { key: 'access', label: 'Access' },
   ]
-  // Teaching Material is a staff-only resource: Title + Files only.
+  // Teaching Material is a staff-only resource: Title + Files only (plus Tags,
+  // which classify library material of either kind).
   // Study Sheet keeps the full editor (metadata, vocabulary, exercises, files, access).
   const tabs = type === 'study_sheet'
     ? allTabs
-    : allTabs.filter(t => t.key === 'metadata' || t.key === 'files')
+    : allTabs.filter(t => t.key === 'metadata' || t.key === 'files' || t.key === 'tags')
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -962,6 +1126,34 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
             </div>
           )}
 
+          {/* ── TAGS TAB ── */}
+          {activeTab === 'tags' && (
+            <div className="space-y-5">
+              <p className="text-sm text-gray-500">
+                Tags classify this material for browsing and filtering. They do not affect who can see it —
+                that is the Type and Access settings.
+              </p>
+
+              {tagsLoading ? (
+                <p className="text-sm text-gray-400">Loading tags…</p>
+              ) : tagsLoadError ? (
+                <p className="text-sm text-red-600">
+                  Couldn&apos;t load tags. This sheet&apos;s existing tags are left untouched when you save —
+                  close and reopen to change them.
+                </p>
+              ) : allTags.length === 0 ? (
+                <p className="text-sm text-gray-400">
+                  No tags exist yet. Create them with Manage Tags on the library page.
+                </p>
+              ) : (
+                <div className="space-y-5">
+                  {renderTagGroup('Topics', topicTags)}
+                  {renderTagGroup('Skills', skillTags)}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── ACCESS TAB ── */}
           {activeTab === 'access' && type === 'study_sheet' && (
             <div className="space-y-4">
@@ -1019,20 +1211,22 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
         {/* Modal footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0">
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-red-500 pr-4">{error}</p>}
           {!error && <span />}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             <button
               type="button"
-              onClick={onClose}
+              // Once the row exists, dismissing must refresh the list — the sheet
+              // is real and has to appear, error or not.
+              onClick={createdIncomplete ? () => { void onSaved() } : onClose}
               className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
             >
-              Cancel
+              {createdIncomplete ? 'Close' : 'Cancel'}
             </button>
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || exercisesLoading || exercisesLoadError}
+              disabled={saving || exercisesLoading || exercisesLoadError || tagsLoading || createdIncomplete}
               className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
               style={{ backgroundColor: '#FF8303' }}
             >

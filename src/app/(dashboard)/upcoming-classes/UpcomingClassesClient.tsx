@@ -173,8 +173,13 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
   return (
     <div
-      className="rounded-xl bg-white shadow-md overflow-hidden"
-      style={{ border: '2px solid #d1d5db', borderLeft: isNext ? '3px solid #FF8303' : '2px solid #d1d5db', opacity: isCancelled ? 0.6 : undefined }}
+      className="rounded-xl bg-white shadow-sm overflow-hidden"
+      style={{
+        border: '1px solid #f3f4f6',
+        borderLeft: isNext ? '3px solid #FF8303'
+          : '1px solid #f3f4f6',
+        opacity: isCancelled ? 0.75 : undefined,
+      }}
     >
       <button
         onClick={() => setExpanded(!expanded)}
@@ -206,7 +211,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <p className="font-semibold" style={isCancelled ? { textDecoration: 'line-through' } : undefined}>{cls.student.full_name}</p>
+              <p className="font-semibold">{cls.student.full_name}</p>
               {isNext && (
                 <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
                   NEXT
@@ -230,14 +235,14 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
-            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#fef2f2', color: '#dc2626', borderRadius: '4px' }}>Cancelled</span>
+            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>Cancelled</span>
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </button>
 
       {expanded && (
-        <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '2px solid #d1d5db' }}>
+        <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '1px solid #f3f4f6' }}>
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Lesson Notes / To-do
@@ -273,7 +278,7 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, ne
         className="flex items-center gap-2 text-left w-full"
       >
         <span className="font-semibold text-gray-800">{heading}</span>
-        <span className="text-sm text-gray-400">
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
           {classes.length} {classes.length === 1 ? 'lesson' : 'lessons'}
         </span>
         <div className="ml-auto">
@@ -296,9 +301,10 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const router = useRouter()
 
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
+  const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
-  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(true)
+  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -308,7 +314,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     } catch {}
     try {
       const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
-      if (stored === 'false') setCancelledSectionExpanded(false)
+      if (stored === 'true') setCancelledSectionExpanded(true)
     } catch {}
   }, [])
 
@@ -382,7 +388,16 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     try { localStorage.setItem('lingualink_teacher_cancelled_section_expanded', String(next)) } catch {}
   }
 
+  function handleJumpToCancelled() {
+    if (hideCancelled) handleHideCancelledChange(false)
+    if (!cancelledSectionExpanded) handleCancelledSectionToggle()
+    requestAnimationFrame(() => {
+      document.getElementById('cancelled-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
   async function handleDismissBanner() {
+    setIsDismissing(true)
     try {
       const res = await fetch('/api/profile/dismiss-banner', { method: 'POST' })
       if (!res.ok) {
@@ -391,12 +406,14 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       }
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
+    } finally {
+      setIsDismissing(false)
     }
     setShowProfileBanner(false)
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
+    <div className="space-y-6">
 
       {showProfileBanner && (
         <div style={{
@@ -420,7 +437,8 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           </p>
           <button
             onClick={handleDismissBanner}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}
+            disabled={isDismissing}
+            style={{ background: 'none', border: 'none', cursor: isDismissing ? 'wait' : 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0, opacity: isDismissing ? 0.5 : 1 }}
             aria-label="Dismiss"
           >
             ×
@@ -428,29 +446,30 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       )}
 
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
-        <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Upcoming Classes</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {scheduledCount} {scheduledCount === 1 ? 'class' : 'classes'} scheduled
+            {cancelledClasses.length > 0 && (
+              <>
+                {' '}&middot;{' '}
+                <button
+                  type="button"
+                  onClick={handleJumpToCancelled}
+                  className="font-medium hover:underline"
+                  style={{ color: '#FF8303', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+                >
+                  {cancelledClasses.length} cancelled
+                </button>
+              </>
+            )}
+          </p>
+        </div>
       </div>
 
-      {classes.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={hideCancelled}
-              onChange={(e) => handleHideCancelledChange(e.target.checked)}
-              style={{ accentColor: '#FF8303' }}
-            />
-            Hide cancelled
-          </label>
-        </div>
-      )}
-
       {days.length === 0 ? (
-        <div className="flex flex-col items-center text-center py-16">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-[380px]">
@@ -481,19 +500,35 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       )}
 
-      {!hideCancelled && cancelledClasses.length > 0 && (
-        <div className="space-y-3">
-          <button
-            onClick={handleCancelledSectionToggle}
-            className="flex items-center gap-2 text-left w-full"
-          >
-            <span className="font-semibold text-gray-800">Cancelled ({cancelledClasses.length})</span>
-            <div className="ml-auto">
-              <ChevronIcon rotated={cancelledSectionExpanded} />
-            </div>
-          </button>
+      {cancelledClasses.length > 0 && (
+        <div id="cancelled-section" className="space-y-3 scroll-mt-6">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCancelledSectionToggle}
+              className="flex items-center gap-2 text-left flex-1"
+            >
+              <span className="font-semibold text-gray-800">Cancelled</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
+                {cancelledClasses.length}
+              </span>
+              <div className="ml-auto">
+                <ChevronIcon rotated={cancelledSectionExpanded} />
+              </div>
+            </button>
+            <span onClick={e => e.stopPropagation()}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={hideCancelled}
+                  onChange={(e) => handleHideCancelledChange(e.target.checked)}
+                  style={{ accentColor: '#FF8303' }}
+                />
+                Hide cancelled
+              </label>
+            </span>
+          </div>
 
-          {cancelledSectionExpanded && (
+          {cancelledSectionExpanded && !hideCancelled && (
             <div className="space-y-2">
               {cancelledClasses.map(cls => (
                 <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />

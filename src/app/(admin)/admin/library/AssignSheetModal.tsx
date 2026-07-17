@@ -68,7 +68,7 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
           <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
             <p className="text-xs text-gray-400 uppercase font-medium mb-0.5">Sheet</p>
             <p className="text-sm font-semibold text-gray-900">{sheet.title}</p>
-            <p className="text-xs text-gray-500 mt-0.5 capitalize">{sheet.category} · {sheet.level}</p>
+            <p className="text-xs text-gray-500 mt-0.5 capitalize">{[sheet.category, sheet.level].filter(Boolean).join(' ' + String.fromCharCode(183) + ' ')}</p>
           </div>
 
           {success ? (

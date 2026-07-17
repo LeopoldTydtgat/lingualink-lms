@@ -13,6 +13,8 @@ import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 import BillingRealtimeRefresher from '@/components/layout/BillingRealtimeRefresher'
+import { fetchWhatsNew } from '@/lib/whatsNew'
+import { weeklyGeneralMinutes } from '@/lib/availability'
 
 export default async function DashboardLayout({
   children,
@@ -26,7 +28,7 @@ export default async function DashboardLayout({
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, timezone')
+    .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at')
     .eq('id', user.id)
     .single()
 
@@ -163,6 +165,31 @@ export default async function DashboardLayout({
 
   const billingData = { currentAmount, projectedAmount }
 
+  // What's New feed — teacher-scoped, uses the same anon server client the
+  // students/lessons lookups above use.
+  const whatsNewItems = await fetchWhatsNew(supabase, profile.id)
+
+  // ── Availability ring: weekly offered hours vs the admin minimum target ────
+  // Weekly offered minutes from committed general-availability rows (anon client,
+  // RLS-scoped to this teacher). Mirrors the schedule page's per-row 30-min model.
+  const { data: availabilityRows } = await supabase
+    .from('availability')
+    .select('id, type')
+    .eq('teacher_id', profile.id)
+    .eq('type', 'general')
+  const offeredMinutes = weeklyGeneralMinutes(availabilityRows ?? [])
+
+  // Minimum-hours target from settings (service-role admin client). Fail SAFE:
+  // any missing/non-numeric value degrades to null so the card renders the
+  // neutral no-target state — never invent a target.
+  const { data: minHoursRow } = await admin
+    .from('settings')
+    .select('value')
+    .eq('key', 'min_available_hours')
+    .single()
+  const parsedMinHours = Number(minHoursRow?.value)
+  const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
+
   const { count: unreadCount } = await supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
@@ -200,39 +227,50 @@ export default async function DashboardLayout({
   })
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans overflow-hidden">
-      {/* Sidebar runs full height - logo lives here */}
-      <LeftNav
-        userRole={profile?.role ?? 'teacher'}
-        unreadMessageCount={unreadCount ?? 0}
-        userId={user.id}
-      />
+    <div className="flex flex-col h-screen bg-gray-50 font-sans overflow-hidden">
+      {/* Full-width gradient accent line — sits above nav + header */}
+      <div style={{ height: '6px', background: 'linear-gradient(90deg, #FFB942, #FF8303, #FD5602)', flexShrink: 0 }} />
 
-      {/* Right side: header on top, then content row below */}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <TopHeader
-          teacherName={profile?.full_name ?? 'Teacher'}
-          teacherPhotoUrl={profile?.photo_url ?? null}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar runs full height - logo lives here */}
+        <LeftNav
+          userRole={profile?.role ?? 'teacher'}
+          unreadMessageCount={unreadCount ?? 0}
+          userId={user.id}
         />
-        <div className="flex flex-1 overflow-hidden">
-          <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
-            <AnnouncementBanner
-              announcements={announcements}
-              userType="teacher"
-              userId={user.id}
-            />
-            <div className="p-6">
-              {children}
-            </div>
-          </main>
-          <RightPanel
-            teacherId={profile?.id ?? null}
-            teacherTimezone={profile.timezone}
-            announcements={announcements}
-            nextLesson={nextLesson}
-            billingData={billingData}
-            currency={currency}
+
+        {/* Right side: header on top, then content row below */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <TopHeader
+            teacherName={profile?.full_name ?? 'Teacher'}
+            teacherPhotoUrl={profile?.photo_url ?? null}
+            whatsNewItems={whatsNewItems}
+            whatsNewSeenAt={profile.whats_new_seen_at ?? null}
+            unreadMessageCount={unreadCount ?? 0}
           />
+          <div className="flex flex-1 overflow-hidden">
+            <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
+              <AnnouncementBanner
+                announcements={announcements}
+                userType="teacher"
+                userId={user.id}
+              />
+              <div className="p-6">
+                {children}
+              </div>
+            </main>
+            <RightPanel
+              teacherId={profile?.id ?? null}
+              teacherTimezone={profile.timezone}
+              nextLesson={nextLesson}
+              billingData={billingData}
+              currency={currency}
+              offeredMinutes={offeredMinutes}
+              minAvailableHours={minAvailableHours}
+              whatsNewItems={whatsNewItems}
+              whatsNewSeenAt={profile.whats_new_seen_at ?? null}
+            />
+          </div>
         </div>
       </div>
 

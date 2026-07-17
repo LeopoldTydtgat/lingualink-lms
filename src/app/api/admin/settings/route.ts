@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { EXPORT_TZ_ALLOWED } from '@/lib/exportTime'
 import { NextResponse } from 'next/server'
 
 // Keys we manage through this endpoint
@@ -87,6 +88,18 @@ export async function POST(request: Request) {
   for (const key of ALLOWED_KEYS) {
     if (key in body) {
       const raw = body[key]
+
+      if (key === 'export_timezone') {
+        if (typeof raw !== 'string' || !EXPORT_TZ_ALLOWED.includes(raw.trim())) {
+          return NextResponse.json(
+            { error: 'INVALID_TIMEZONE', message: 'Unsupported export timezone.' },
+            { status: 400 }
+          )
+        }
+        updates.push({ key, value: raw.trim() })
+        continue
+      }
+
       // Coerce to string for the key/value store
       updates.push({ key, value: String(raw) })
     }

@@ -78,6 +78,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.<table> TO service_role;
 
 Without explicit GRANTs, PostgREST returns `42501` permission-denied errors. Existing tables keep their current grants; this applies to every new table created after Oct 30, 2026 on existing projects.
 
+- EXCEPTION - public.activities: authenticated holds a COLUMN-LEVEL SELECT grant that deliberately excludes answer_key, and no write grants. This is the enforcement mechanism keeping answer keys out of PostgREST (verified 15 Jul 2026). Never "fix" it to a full table grant.
+
 ### Cron jobs
 
 Two Vercel cron jobs run daily at 08:00 UTC (configured in `vercel.json`):

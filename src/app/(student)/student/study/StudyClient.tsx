@@ -10,8 +10,8 @@ import { EmptyStudy } from '@/components/EmptyStudy'
 interface StudySheet {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
 }
 
@@ -66,7 +66,8 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-function CategoryBadge({ category }: { category: string }) {
+function CategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null
   const style =
     category === 'Vocabulary'
       ? { backgroundColor: '#fff7ed', color: '#c2410c' }
@@ -245,7 +246,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
             >
               <option value="">All Levels</option>
-              {['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2'].map((l) => (
+              {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>

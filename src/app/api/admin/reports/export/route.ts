@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getExportTimezone, tzLabel } from '@/lib/exportTime';
+import { getExportTimezone, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
@@ -12,8 +12,12 @@ export const runtime = 'nodejs';
 // Display formatters are built PER REQUEST inside GET() from the settings-driven
 // export timezone (was a hardcoded Africa/Johannesburg/SAST). Format style is
 // unchanged (en-GB, month:'short', hour12:false); only the zone + header labels
-// are now dynamic. NOTE: the +02:00 calendar-day QUERY BOUNDS below are separate
-// and intentionally left as-is (see the query and NEW271 notes).
+// are now dynamic. NEW273: the calendar-day QUERY BOUNDS below now resolve in
+// that SAME settings-driven zone (were hardcoded +02:00). Scoping and display
+// therefore agree — previously a non-SAST export zone scoped rows by SAST days
+// while rendering them in another zone, so boundary-day rows (each carrying an
+// Amount Owed to Teacher) could sit outside, or drop out of, the requested
+// window. At the SAST default the row set is unchanged.
 
 // Flatten a Supabase nested join result to its first element (project rule).
 function firstOf<T>(v: T | T[] | null | undefined): T | null {
@@ -89,7 +93,11 @@ export async function GET(request: NextRequest) {
       return `${dateFmt.format(d)}, ${timeFmt.format(d)}`;
     };
 
-    // SAST calendar-day bounds via literal offset strings (no Date construction, no toISOString).
+    // Calendar-day bounds resolved in the export timezone (NEW273). Half-open:
+    // [local 00:00 on dateFrom, local 00:00 on the day after dateTo) — both ends
+    // are full local days, with no 23:59:59 sub-second gap at the top.
+    const { gteIso, ltIso } = zonedDayRangeToUtcBounds(dateFrom, dateTo, exportTz);
+
     let query = admin
       .from('lessons')
       .select(`
@@ -99,8 +107,8 @@ export async function GET(request: NextRequest) {
         lesson_rate_snapshots ( hourly_rate ),
         lesson_join_clicks ( user_type, clicked_at )
       `)
-      .gte('scheduled_at', dateFrom + 'T00:00:00+02:00')
-      .lte('scheduled_at', dateTo + 'T23:59:59+02:00')
+      .gte('scheduled_at', gteIso)
+      .lt('scheduled_at', ltIso)
       .order('scheduled_at', { ascending: true });
 
     if (teacherId) query = query.eq('teacher_id', teacherId);

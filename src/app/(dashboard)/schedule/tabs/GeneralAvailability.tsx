@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction } from 'react'
+import { Clock } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
+import { weeklyGeneralMinutes } from '@/lib/availability'
 
 interface Profile { id: string; full_name: string; role: string }
 
@@ -9,6 +11,7 @@ interface Props {
   profile: Profile
   availability: AvailabilityRecord[]
   onAvailabilityChange: Dispatch<SetStateAction<AvailabilityRecord[]>>
+  minAvailableHours: number | null
 }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -79,7 +82,7 @@ function slotKeysBetween(fromKey: string, toKey: string): string[] {
   return keys
 }
 
-export default function GeneralAvailability({ profile, availability, onAvailabilityChange }: Props) {
+export default function GeneralAvailability({ profile, availability, onAvailabilityChange, minAvailableHours }: Props) {
   const generalSlots = useMemo(
     () => availability.filter(a => a.type === 'general'),
     [availability]
@@ -94,11 +97,10 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   const [dragPreview, setDragPreview] = useState<Set<string>>(new Set())
 
   const weeklyHours = useMemo(() => {
-    const committed = generalSlots.filter(a => !a.id.startsWith('temp-'))
-    const totalMinutes = committed.length * 30
+    const totalMinutes = weeklyGeneralMinutes(generalSlots)
     const hours = Math.floor(totalMinutes / 60)
     const minutes = totalMinutes % 60
-    return { hours, minutes }
+    return { hours, minutes, totalMinutes }
   }, [generalSlots])
 
   const runMap = useMemo(() => {
@@ -416,10 +418,32 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
       )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
-        <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '8px', padding: '8px 14px', textAlign: 'right' }}>
-          <div style={{ fontSize: '11px', color: '#64748B', lineHeight: 1.3 }}>Offering per week</div>
-          <div style={{ fontSize: '16px', fontWeight: 500, color: '#0F172A', lineHeight: 1.3 }}>
-            {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
+        <div style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '12px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: '12px', minWidth: '300px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '34px', height: '34px', borderRadius: '10px', backgroundColor: '#FFF0E0', flexShrink: 0 }}>
+            <Clock size={17} color="#FF8303" />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 500 }}>Offering per week</span>
+              {minAvailableHours != null && (
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>target {minAvailableHours}h</span>
+              )}
+            </div>
+            <div style={{ fontSize: '17px', fontWeight: 600, color: '#111827', lineHeight: 1.3 }}>
+              {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
+            </div>
+            {weeklyHours.totalMinutes === 0 ? (
+              <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>
+                Click or drag below to add slots
+              </div>
+            ) : minAvailableHours != null && minAvailableHours > 0 && (() => {
+              const pct = Math.min(100, Math.round((weeklyHours.totalMinutes / (minAvailableHours * 60)) * 100))
+              return (
+                <div style={{ height: '5px', backgroundColor: '#F3F4F6', borderRadius: '3px', marginTop: '6px', overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', backgroundColor: pct === 100 ? '#FF8303' : '#FFB942', borderRadius: '3px' }} />
+                </div>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -473,7 +497,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                             top: -1, left: 0, right: 0,
                             height: heightPx + 1,
                             backgroundColor: '#EDF2F7',
-                            border: '1px solid #C9D4E2',
+                            border: '1px dashed #C9D4E2',
                             borderRadius: '6px',
                             padding: '5px 7px',
                             pointerEvents: 'none',

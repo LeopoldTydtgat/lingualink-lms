@@ -9,8 +9,8 @@ import { Button } from '@/components/ui/button'
 type StudySheet = {
   id: string
   title: string
-  category: string
-  level: string
+  category: string | null
+  level: string | null
   difficulty: number
   content: { words?: unknown[]; exercises?: unknown[] } | null
   attachments: unknown[] | null
@@ -42,7 +42,7 @@ function DifficultyBars({ count }: { count: number }) {
 }
 
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  const cat = sheet.category.toLowerCase()
+  const cat = sheet.category?.toLowerCase()
   if (cat === 'vocabulary') return !(sheet.content?.words?.length)
   if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
   return false
@@ -75,8 +75,12 @@ export default function AssignStudySheetsModal({
         .select('id, title, category, level, difficulty, content, attachments')
         .eq('is_active', true)
         // Homework is student-facing only. Teaching Material (audience='staff') must
-        // never be assignable to a student, so restrict this list to student sheets.
+        // never be assignable to a student, so restrict this list to active,
+        // student-audience, admin-published sheets (owner_id IS NULL). RLS already
+        // prevents a teacher-owned row from having audience='student' - this filter
+        // is defensive, pinning that contract in code.
         .eq('audience', 'student')
+        .is('owner_id', null)
         .order('title')
       setSheets(data ?? [])
 
@@ -172,7 +176,7 @@ export default function AssignStudySheetsModal({
     onClose()
   }
 
-  const LEVELS = ['all', 'A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
+  const LEVELS = ['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
   return (
     <div
@@ -283,14 +287,20 @@ export default function AssignStudySheetsModal({
                         {sheet.title}
                       </p>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-gray-400 capitalize">{sheet.category}</span>
-                        <span className="text-xs text-gray-300">·</span>
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                          style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                        >
-                          {sheet.level}
-                        </span>
+                        {sheet.category && (
+                          <span className="text-xs text-gray-400 capitalize">{sheet.category}</span>
+                        )}
+                        {sheet.category && sheet.level && (
+                          <span className="text-xs text-gray-300">{String.fromCharCode(183)}</span>
+                        )}
+                        {sheet.level && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                          >
+                            {sheet.level}
+                          </span>
+                        )}
                         {!empty && <DifficultyBars count={sheet.difficulty} />}
                         {empty && (
                           <span className="text-xs text-gray-400 italic">No content yet</span>

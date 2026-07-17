@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { MessageSquare } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -116,26 +117,39 @@ function Avatar({ name, photoUrl, size = 10 }: {
 // ─── Read ticks ───────────────────────────────────────────────────────────────
 // Single tick = sent (grey). Double tick = read (orange).
 // Only shown on messages sent by the current user.
-function ReadTicks({ readAt }: { readAt: string | null }) {
+function ReadTicks({
+  readAt,
+  variant = 'default',
+  className = 'ml-1',
+}: {
+  readAt: string | null
+  // 'bubble' = on-bubble placement (WhatsApp-style, inside an own message bubble):
+  // lighter tick colours that read against the dark bubble fill. 'default' keeps the
+  // metadata-row colours (grey sent, orange read).
+  variant?: 'default' | 'bubble'
+  className?: string
+}) {
+  const single = variant === 'bubble' ? 'rgba(255,255,255,0.7)' : '#9ca3af'
+  const double = '#FF8303'
   if (readAt) {
     // Double tick — message has been read
     return (
-      <span className="inline-flex items-center gap-0.5 ml-1" aria-label="Read">
+      <span className={`inline-flex items-center gap-0.5 ${className}`} aria-label="Read">
         <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
         <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </span>
     )
   }
   // Single tick — sent, not yet read
   return (
-    <span className="inline-flex items-center ml-1" aria-label="Sent">
+    <span className={`inline-flex items-center ${className}`} aria-label="Sent">
       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-        <path d="M1 4L3.5 6.5L9 1" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M1 4L3.5 6.5L9 1" stroke={single} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     </span>
   )
@@ -543,11 +557,11 @@ export default function MessagesClient({
 
   return (
     <div
-      className="flex bg-white rounded-lg border border-gray-200 overflow-hidden"
-      style={{ height: 'calc(100vh - 120px)' }}
+      className="flex -m-6"
+      style={{ height: 'calc(100vh - 72px)' }}
     >
       {/* ── Left panel: contacts list ── */}
-      <div className="w-72 border-r border-gray-200 flex flex-col flex-shrink-0">
+      <div className="w-[300px] bg-white border-r border-[#f3f4f6] flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
             <h1 className="text-base font-semibold text-gray-900">Messages</h1>
@@ -583,8 +597,10 @@ export default function MessagesClient({
               <button
                 key={contact.id}
                 onClick={() => handleSelectContact(contact)}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
-                style={selectedContact?.id === contact.id ? { backgroundColor: '#FFF3E0' } : {}}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-100"
+                style={selectedContact?.id === contact.id
+                  ? { backgroundColor: '#FFF0E0', borderLeft: '3px solid #FF8303' }
+                  : { borderLeft: '3px solid transparent' }}
               >
                 <div className="relative flex-shrink-0">
                   <Avatar name={contact.name} photoUrl={contact.photo_url} size={10} />
@@ -622,12 +638,27 @@ export default function MessagesClient({
       </div>
 
       {/* ── Right panel: conversation ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-white">
         {!selectedContact ? (
-          <div className="flex-1 flex items-center justify-center text-gray-400">
+          <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="text-5xl mb-3">💬</div>
-              <p className="text-sm">Select a conversation or start a new one</p>
+              <div
+                className="mx-auto mb-3 flex items-center justify-center rounded-full"
+                style={{ width: '56px', height: '56px', backgroundColor: '#FFF3E0' }}
+              >
+                <MessageSquare size={24} color="#FF8303" />
+              </div>
+              <p className="text-sm font-semibold text-gray-900">Your messages</p>
+              <p className="text-sm text-gray-400 mt-1">Select a conversation or start a new one</p>
+              <button
+                onClick={() => setShowNewMessage(true)}
+                className="mt-4 rounded-lg px-4 py-2 text-sm font-medium text-white"
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+                style={{ backgroundColor: '#FF8303' }}
+              >
+                New conversation
+              </button>
             </div>
           </div>
         ) : (
@@ -651,6 +682,9 @@ export default function MessagesClient({
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentUser.id
                   const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
+                  // Own, non-emoji, non-empty messages render read ticks inside the
+                  // bubble (WhatsApp pattern) instead of in the metadata row below.
+                  const isBubbleTicked = isFromMe && hasContent && !isEmojiOnly(msg.content)
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -701,22 +735,30 @@ export default function MessagesClient({
                           ) : (
                           <>
                           {/* Bubble
-                              Sent:     #FF8303 orange, white text
-                              Received: #1F2937 dark charcoal, white text
+                              Sent:     #1f2937 dark charcoal, white text
+                              Received: #ffffff white, dark charcoal text
                               Two distinct colours = immediately obvious who said what
                               NEW302: hide the bubble entirely for an attachment-only
                               (empty-content) message so it doesn't render a blank box. */}
                           {hasContent && (
-                          <div
-                            className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={isEmojiOnly(msg.content)
-                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
-                              : isFromMe
-                                ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                                : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
-                            }
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
-                          />
+                          isBubbleTicked ? (
+                            <div
+                              className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed inline-flex items-end"
+                              style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
+                            >
+                              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                              <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
+                            </div>
+                          ) : (
+                            <div
+                              className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                              style={isEmojiOnly(msg.content)
+                                ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                                : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #f3f4f6', borderBottomLeftRadius: '4px' }
+                              }
+                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
+                            />
+                          )
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
@@ -736,7 +778,7 @@ export default function MessagesClient({
                           </>
                           )}
                           {/* Timestamp + read ticks row */}
-                          <div className={`flex items-center gap-1 mt-1 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`flex items-center gap-1 mt-0.5 ${isFromMe ? 'justify-end' : 'justify-start'}`}>
                             {/* Edit affordance: own messages only, within the 15-minute
                                 window (server re-checks authoritatively), never on a
                                 pending optimistic row. Hidden in read-only threads
@@ -746,20 +788,22 @@ export default function MessagesClient({
                               !msg.pending && isWithinEditWindow(msg.created_at) && (
                               <button
                                 onClick={() => handleStartEdit(msg)}
-                                className="text-xs text-gray-400 hover:text-gray-600"
+                                className="text-gray-400 hover:text-gray-600"
+                                style={{ fontSize: '11px' }}
                                 aria-label="Edit message"
                               >
                                 Edit
                               </button>
                             )}
                             {msg.edited_at && (
-                              <span className="text-xs text-gray-400 italic">(edited)</span>
+                              <span className="text-gray-400 italic" style={{ fontSize: '11px' }}>(edited)</span>
                             )}
-                            <span className="text-xs text-gray-400">
+                            <span className="text-gray-400" style={{ fontSize: '11px' }}>
                               {formatTime(msg.created_at)}
                             </span>
-                            {/* Read ticks only on messages I sent */}
-                            {isFromMe && <ReadTicks readAt={msg.read_at} />}
+                            {/* Read ticks only on messages I sent, and only when the
+                                bubble above isn't already rendering its own ticks. */}
+                            {isFromMe && !isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
                         </div>
                       </div>
@@ -803,119 +847,123 @@ export default function MessagesClient({
                 .message-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
                 .message-bubble li { margin: 0.1rem 0; }
               `}</style>
-              {/* Formatting toolbar */}
-              <div className="flex items-center gap-1 px-4 pt-3 pb-1">
-                <button
-                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
-                  className="px-2 py-1 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
-                  style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
-                >
-                  B
-                </button>
-                <button
-                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
-                  className="px-2 py-1 text-xs rounded italic text-gray-500 hover:bg-gray-100"
-                  style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
-                >
-                  I
-                </button>
-                <button
-                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
-                  className="px-2 py-1 text-xs rounded underline text-gray-500 hover:bg-gray-100"
-                  style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
-                >
-                  U
-                </button>
-                <button
-                  onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
-                  className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
-                  style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
-                >
-                  •≡
-                </button>
-                <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
-                  <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '4px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>😊</button>
-                  {showEmojiPicker && (
-                    <div style={{ position: 'absolute', bottom: '40px', left: 0, zIndex: 50 }}>
-                      <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              {/* Tiptap editor — bordered container shows the typing area clearly.
-                  The style tag above removes ProseMirror's OWN inner border so there
-                  is one clean box, not a box-within-a-box. */}
-              <div
-                className="messages-composer mx-4 mb-2 rounded-xl border border-gray-200 px-3 py-2 text-sm min-h-[72px] max-h-[120px] overflow-y-auto cursor-text focus-within:border-orange-300 transition-colors"
-                onClick={() => editor?.commands.focus()}
-              >
-                <EditorContent editor={editor} />
-              </div>
-
-              {/* Pending attachments list */}
-              {pendingAttachments.length > 0 && (
-                <div className="mx-4 mb-2 flex flex-col gap-1">
-                  {pendingAttachments.map((att, i) => (
-                    <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600">
-                      <span className="truncate max-w-[200px]">📎 {att.filename}</span>
-                      <button
-                        onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
-                        className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
-                        aria-label="Remove attachment"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {sendError && (
-                <div style={{ color: '#FD5602', fontSize: '13px', padding: '4px 16px' }}>
-                  {sendError}
-                </div>
-              )}
-              {/* Send row */}
-              <div className="flex items-center justify-between px-4 pb-3 pt-1">
-                <div className="flex items-center gap-2">
-                  {/* Hidden file input */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,application/pdf"
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
-                  {/* Paperclip button */}
+              {/* One bordered composer block: toolbar / typing area / attachments+error / send row. */}
+              <div className="mx-4 mt-3 mb-3 rounded-xl border border-[#e5e7eb] focus-within:border-orange-300 transition-colors">
+                {/* Row 1: formatting toolbar */}
+                <div className="flex items-center gap-1 px-3 py-1 border-b border-[#f3f4f6]">
                   <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors"
-                    title="Attach file"
-                    aria-label="Attach file"
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBold().run() }}
+                    className="px-2 py-1 text-xs rounded font-bold text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('bold') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
                   >
-                    {uploading ? (
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="animate-spin">
-                        <circle cx="8" cy="8" r="6" stroke="#9ca3af" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10" />
-                      </svg>
-                    ) : (
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                        <path d="M13.5 7.5L7.5 13.5C6.1 14.9 3.9 14.9 2.5 13.5C1.1 12.1 1.1 9.9 2.5 8.5L8.5 2.5C9.4 1.6 10.9 1.6 11.8 2.5C12.7 3.4 12.7 4.9 11.8 5.8L5.8 11.8C5.3 12.3 4.6 12.3 4.1 11.8C3.6 11.3 3.6 10.6 4.1 10.1L9.5 4.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                    B
+                  </button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleItalic().run() }}
+                    className="px-2 py-1 text-xs rounded italic text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('italic') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >
+                    I
+                  </button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleUnderline().run() }}
+                    className="px-2 py-1 text-xs rounded underline text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('underline') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >
+                    U
+                  </button>
+                  <button
+                    onMouseDown={e => { e.preventDefault(); editor?.chain().focus().toggleBulletList().run() }}
+                    className="px-2 py-1 text-xs rounded text-gray-500 hover:bg-gray-100"
+                    style={editor?.isActive('bulletList') ? { backgroundColor: '#E5E7EB', color: '#111827' } : {}}
+                  >
+                    •≡
+                  </button>
+                  <div style={{ position: 'relative', display: 'inline-block' }} ref={emojiPickerRef}>
+                    <button onClick={() => setShowEmojiPicker(v => !v)} title="Emoji" style={{ padding: '4px 6px', borderRadius: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>😊</button>
+                    {showEmojiPicker && (
+                      <div style={{ position: 'absolute', bottom: '40px', left: 0, zIndex: 50 }}>
+                        <EmojiPicker data={data} onEmojiSelect={(emoji: { native: string }) => { editor?.commands.insertContent(emoji.native); setShowEmojiPicker(false) }} theme="light" />
+                      </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Row 2: Tiptap typing area — the style tag above removes ProseMirror's
+                    OWN inner border so there is one clean box, not a box-within-a-box. */}
+                <div
+                  className="messages-composer px-3 py-2 text-sm min-h-[72px] max-h-[120px] overflow-y-auto cursor-text"
+                  onClick={() => editor?.commands.focus()}
+                >
+                  <EditorContent editor={editor} />
+                </div>
+
+                {/* Pending attachments list */}
+                {pendingAttachments.length > 0 && (
+                  <div className="px-3 pb-2 flex flex-col gap-1">
+                    {pendingAttachments.map((att, i) => (
+                      <div key={i} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600">
+                        <span className="truncate max-w-[200px]">📎 {att.filename}</span>
+                        <button
+                          onClick={() => setPendingAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                          className="ml-2 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                          aria-label="Remove attachment"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {sendError && (
+                  <div style={{ color: '#FD5602', fontSize: '13px', padding: '4px 12px' }}>
+                    {sendError}
+                  </div>
+                )}
+
+                {/* Row 3: paperclip left, Send right */}
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    {/* Paperclip button */}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                      className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-50 transition-colors"
+                      title="Attach file"
+                      aria-label="Attach file"
+                    >
+                      {uploading ? (
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="animate-spin">
+                          <circle cx="8" cy="8" r="6" stroke="#9ca3af" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10" />
+                        </svg>
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <path d="M13.5 7.5L7.5 13.5C6.1 14.9 3.9 14.9 2.5 13.5C1.1 12.1 1.1 9.9 2.5 8.5L8.5 2.5C9.4 1.6 10.9 1.6 11.8 2.5C12.7 3.4 12.7 4.9 11.8 5.8L5.8 11.8C5.3 12.3 4.6 12.3 4.1 11.8C3.6 11.3 3.6 10.6 4.1 10.1L9.5 4.7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleSend}
+                    disabled={sending}
+                    className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-opacity btn-primary-hover"
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+                    style={{ backgroundColor: '#FF8303' }}
+                  >
+                    {sending ? 'Sending...' : 'Send'}
                   </button>
                 </div>
-                <button
-                  onClick={handleSend}
-                  disabled={sending}
-                  className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-opacity btn-primary-hover"
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-                  style={{ backgroundColor: '#FF8303' }}
-                >
-                  {sending ? 'Sending...' : 'Send'}
-                </button>
               </div>
             </div>
             )}

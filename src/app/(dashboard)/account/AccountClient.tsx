@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   Lock,
+  CheckCircle2,
 } from 'lucide-react'
 import TimezoneSelect from '@/components/TimezoneSelect'
 import { toast } from 'sonner'
@@ -59,9 +60,8 @@ interface Review {
   id: string
   rating: number
   review_text: string | null
-  is_visible: boolean
-  created_at: string
-  student_id: string
+  submitted_at: string | null
+  student_id: string | null
   students: {
     full_name: string
     photo_url: string | null
@@ -121,8 +121,11 @@ function TagInput({
 
   function addTag() {
     const trimmed = input.trim()
-    if (trimmed && !values.includes(trimmed)) {
-      onChange([...values, trimmed])
+    // Capitalise on entry only: first letter upper, rest lower ("french" -> "French").
+    // Already-saved values loaded from the DB are never re-cased.
+    const cased = trimmed ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase() : ''
+    if (cased && !values.includes(cased)) {
+      onChange([...values, cased])
     }
     setInput('')
   }
@@ -183,7 +186,7 @@ function TagInput({
               addTag()
             }
           }}
-          placeholder={values.length === 0 ? placeholder : ''}
+          placeholder={placeholder}
           style={{
             border: 'none',
             outline: 'none',
@@ -194,9 +197,6 @@ function TagInput({
           }}
         />
       </div>
-      <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-        Press Enter or comma to add
-      </p>
     </div>
   )
 }
@@ -664,6 +664,20 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
       ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
       : null
 
+  // ── Live password validation (visual only — handler logic unchanged) ────────
+
+  const pwChecks = [
+    { ok: newPassword.length >= 8, label: 'At least 8 characters' },
+    { ok: /[A-Z]/.test(newPassword), label: 'One uppercase letter' },
+    { ok: /[a-z]/.test(newPassword), label: 'One lowercase letter' },
+    { ok: /[0-9]/.test(newPassword), label: 'One number' },
+  ]
+  const pwAllValid = pwChecks.every((c) => c.ok)
+  const confirmMismatch = confirmPassword.length > 0 && confirmPassword !== newPassword
+  const confirmMatches = confirmPassword.length > 0 && confirmPassword === newPassword
+  const passwordButtonDisabled =
+    passwordSaving || !pwAllValid || !confirmMatches || currentPassword.length === 0
+
   // ── Live profile for preview — reflects any unsaved changes ────────────────
 
   const liveProfile: Profile = {
@@ -679,8 +693,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ padding: '32px', maxWidth: '800px' }}>
-
+    <div className="space-y-6">
       {/* Timezone confirmation banner — shown when redirected from a time-sensitive page with ?confirm_tz=1 */}
       {mustConfirmTz && (
         <div style={{
@@ -700,7 +713,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
       )}
 
       {/* Page header */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111' }}>
           My Account
         </h1>
@@ -756,52 +769,52 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
       {/* ── Tab: General Info ─────────────────────────────────────────────── */}
       {activeTab === 'general' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100" style={{ maxWidth: '720px' }}>
+          <div style={{ maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
 
-          {/* Profile photo */}
-          <div>
-            <Label style={{ fontSize: '14px', fontWeight: 500, marginBottom: '12px', display: 'block' }}>
-              Profile Photo
-            </Label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-              <div
-                style={{
-                  width: '80px',
-                  height: '80px',
-                  borderRadius: '50%',
-                  overflow: 'hidden',
-                  backgroundColor: '#e0dfdc',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                {photoUrl ? (
-                  <img
-                    src={photoUrl}
-                    alt="Profile"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : (
-                  <User size={32} color="#9ca3af" />
-                )}
-              </div>
-              <div>
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploadingPhoto}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px' }}
+            {/* Photo row: avatar + upload button/hint, one horizontal unit */}
+            <div>
+              <Label style={{ fontSize: '14px', fontWeight: 500, marginBottom: '12px', display: 'block' }}>
+                Profile Photo
+              </Label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div
+                  style={{
+                    width: '72px',
+                    height: '72px',
+                    borderRadius: '50%',
+                    overflow: 'hidden',
+                    backgroundColor: '#e0dfdc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
                 >
-                  <Camera size={15} />
-                  {uploadingPhoto ? 'Uploading...' : 'Upload Photo'}
-                </Button>
-                <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
-                  JPG, PNG or WebP. Max 2MB.
-                </p>
+                  {photoUrl ? (
+                    <img
+                      src={photoUrl}
+                      alt="Profile"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <User size={30} color="#9ca3af" />
+                  )}
+                </div>
+                <div>
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '14px' }}
+                  >
+                    <Camera size={15} />
+                    {uploadingPhoto ? 'Uploading...' : 'Upload Photo'}
+                  </Button>
+                  <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '6px' }}>
+                    JPG, PNG or WebP. Max 2MB.
+                  </p>
+                </div>
               </div>
               <input
                 ref={fileInputRef}
@@ -811,93 +824,95 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                 style={{ display: 'none' }}
               />
             </div>
-          </div>
 
-          {/* Full name */}
-          <div>
-            <Label htmlFor="fullName" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
-              Full Name
-            </Label>
-            <Input
-              id="fullName"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              style={{ maxWidth: '400px', fontSize: '14px' }}
-            />
-          </div>
-
-          {/* Email — read only */}
-          <div>
-            <Label style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
-              Email Address
-            </Label>
-            <Input
-              value={profile.email}
-              readOnly
-              style={{
-                maxWidth: '400px',
-                fontSize: '14px',
-                backgroundColor: '#f9fafb',
-                color: '#6b7280',
-                cursor: 'not-allowed',
-              }}
-            />
-            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-              Email is assigned by admin and cannot be changed here.
-            </p>
-          </div>
-
-          {/* Timezone */}
-          <div>
-            <Label htmlFor="timezone" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
-              Timezone
-            </Label>
-            <div style={{ maxWidth: '400px' }}>
-              <TimezoneSelect value={timezone} onChange={setTimezone} />
+            {/* Full name */}
+            <div>
+              <Label htmlFor="fullName" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+                Full Name
+              </Label>
+              <Input
+                id="fullName"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                style={{ width: '100%', fontSize: '14px' }}
+              />
             </div>
-            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-              This controls how all class times are displayed for you.
-            </p>
-          </div>
 
-          <div>
-            <Button
-              onClick={saveGeneralInfo}
-              disabled={saving}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-              style={{
-                backgroundColor: '#FF8303',
-                color: 'white',
-                border: 'none',
-                fontSize: '14px',
-                fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer',
-                opacity: saving ? 0.7 : 1,
-              }}
-            >
-              {saving ? 'Saving...' : 'Save Changes'}
-            </Button>
+            {/* Email — read only */}
+            <div>
+              <Label style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+                Email Address
+              </Label>
+              <Input
+                value={profile.email}
+                readOnly
+                style={{
+                  width: '100%',
+                  fontSize: '14px',
+                  backgroundColor: '#f9fafb',
+                  color: '#6b7280',
+                  cursor: 'not-allowed',
+                }}
+              />
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                Email is assigned by admin and cannot be changed here.
+              </p>
+            </div>
+
+            {/* Timezone */}
+            <div>
+              <Label htmlFor="timezone" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
+                Timezone
+              </Label>
+              <div style={{ width: '100%' }}>
+                <TimezoneSelect value={timezone} onChange={setTimezone} />
+              </div>
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                This controls how all class times are displayed for you.
+              </p>
+            </div>
+
+            {/* Save — right-aligned to the column edge */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button
+                onClick={saveGeneralInfo}
+                disabled={saving}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+                style={{
+                  backgroundColor: '#FF8303',
+                  color: 'white',
+                  border: 'none',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                  opacity: saving ? 0.7 : 1,
+                }}
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
           </div>
         </div>
       )}
 
       {/* ── Tab: Professional Info ────────────────────────────────────────── */}
       {activeTab === 'professional' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100" style={{ maxWidth: '720px' }}>
+          <div style={{ maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '28px' }}>
 
           <TagInput
-            label="I Teach:"
+            label="I Teach"
             values={teachingLanguages}
             onChange={setTeachingLanguages}
-            placeholder="e.g. English"
+            placeholder="Add a language..."
           />
 
           <TagInput
             label="Speaking Languages"
             values={speakingLanguages}
             onChange={setSpeakingLanguages}
-            placeholder="e.g. French, German"
+            placeholder="Add a language..."
           />
 
           <div>
@@ -905,22 +920,23 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
               Self Introduction
             </Label>
             <p style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '8px' }}>
-              This appears on your public profile visible to students.
+              2-3 sentences students will see on your profile.
             </p>
             <Textarea
               id="bio"
               value={bio}
-              onChange={(e) => setBio(e.target.value)}
+              onChange={(e) => setBio(e.target.value.slice(0, 500))}
+              maxLength={500}
               rows={6}
               placeholder="Write a short introduction about yourself, your teaching style, and your experience..."
               style={{ fontSize: '14px', resize: 'vertical' }}
             />
             <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', textAlign: 'right' }}>
-              {bio.length} characters
+              {bio.length} / 500
             </p>
           </div>
 
-          <div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button
               onClick={saveProfessionalInfo}
               disabled={saving}
@@ -939,12 +955,14 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
               {saving ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
+          </div>
         </div>
       )}
 
       {/* ── Tab: Security ─────────────────────────────────────────────────── */}
       {activeTab === 'security' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', maxWidth: '400px' }}>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100" style={{ maxWidth: '720px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', maxWidth: '640px' }}>
 
           <div>
             <Label htmlFor="currentPassword" style={{ fontSize: '14px', fontWeight: 500, marginBottom: '6px', display: 'block' }}>
@@ -992,9 +1010,17 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                 {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-              At least 8 characters, including an uppercase letter, a lowercase letter and a number.
-            </p>
+            {/* Live requirement checklist — visual only, driven by newPassword */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
+              {pwChecks.map((check) => (
+                <div key={check.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <CheckCircle2 size={14} color={check.ok ? '#22C55E' : '#9ca3af'} />
+                  <span style={{ fontSize: '12px', color: check.ok ? '#22C55E' : '#9ca3af' }}>
+                    {check.label}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -1008,7 +1034,11 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Repeat new password"
-                style={{ fontSize: '14px', paddingRight: '40px' }}
+                style={{
+                  fontSize: '14px',
+                  paddingRight: '40px',
+                  ...(confirmMismatch ? { borderColor: '#FD5602' } : {}),
+                }}
               />
               <button
                 type="button"
@@ -1019,56 +1049,68 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                 {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
+            {confirmMismatch && (
+              <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
+                Passwords do not match
+              </p>
+            )}
           </div>
 
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
             <Button
               onClick={handleChangePassword}
-              disabled={passwordSaving}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+              disabled={passwordButtonDisabled}
+              onMouseEnter={e => { if (!passwordButtonDisabled) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!passwordButtonDisabled) e.currentTarget.style.backgroundColor = '#FF8303' }}
               style={{
                 backgroundColor: '#FF8303',
                 color: 'white',
                 border: 'none',
                 fontSize: '14px',
                 fontWeight: 600,
-                cursor: passwordSaving ? 'not-allowed' : 'pointer',
-                opacity: passwordSaving ? 0.7 : 1,
+                cursor: passwordButtonDisabled ? 'not-allowed' : 'pointer',
+                opacity: passwordButtonDisabled ? 0.5 : 1,
               }}
             >
               {passwordSaving ? 'Saving...' : 'Update Password'}
             </Button>
             {passwordSaved && (
-              <p style={{ fontSize: '13px', color: '#16a34a', fontWeight: 500, marginTop: '8px' }}>
+              <p style={{ fontSize: '13px', color: '#16a34a', fontWeight: 500 }}>
                 ✓ Password updated
               </p>
             )}
             {passwordError && (
-              <p style={{ fontSize: '13px', color: '#dc2626', marginTop: '8px' }}>
+              <p style={{ fontSize: '13px', color: '#dc2626' }}>
                 {passwordError}
               </p>
             )}
+          </div>
           </div>
         </div>
       )}
 
       {/* ── Tab: Useful Resources ─────────────────────────────────────────── */}
       {activeTab === 'resources' && (
-        <div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           {resources.length === 0 ? (
             <div
               style={{
-                backgroundColor: '#f9fafb',
-                border: '1px solid #e0dfdc',
-                borderRadius: '10px',
-                padding: '40px',
+                minHeight: '300px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                 textAlign: 'center',
-                color: '#9ca3af',
-                fontSize: '14px',
+                gap: '10px',
               }}
             >
-              No resources have been added yet. Shannon will add helpful links here for teachers.
+              <BookOpen size={40} color="#9ca3af" />
+              <p style={{ fontSize: '16px', fontWeight: 500, color: '#111827' }}>
+                No resources yet
+              </p>
+              <p style={{ fontSize: '14px', color: '#6b7280' }}>
+                Your admin will add helpful links and documents here.
+              </p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1084,7 +1126,8 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                     justifyContent: 'space-between',
                     padding: '16px 20px',
                     backgroundColor: 'white',
-                    border: '1px solid #e0dfdc',
+                    border: '1px solid #f3f4f6',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                     borderRadius: '10px',
                     textDecoration: 'none',
                     color: 'inherit',
@@ -1093,7 +1136,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                     (e.currentTarget as HTMLElement).style.borderColor = '#FF8303'
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.borderColor = '#e0dfdc'
+                    (e.currentTarget as HTMLElement).style.borderColor = '#f3f4f6'
                   }}
                 >
                   <div>
@@ -1114,20 +1157,26 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
       {/* ── Tab: Student Feedback ─────────────────────────────────────────── */}
       {activeTab === 'feedback' && (
-        <div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           {reviews.length === 0 ? (
             <div
               style={{
-                backgroundColor: '#f9fafb',
-                border: '1px solid #e0dfdc',
-                borderRadius: '10px',
-                padding: '40px',
+                minHeight: '300px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
                 textAlign: 'center',
-                color: '#9ca3af',
-                fontSize: '14px',
+                gap: '10px',
               }}
             >
-              No student reviews yet.
+              <Star size={40} color="#9ca3af" />
+              <p style={{ fontSize: '16px', fontWeight: 500, color: '#111827' }}>
+                No reviews yet
+              </p>
+              <p style={{ fontSize: '14px', color: '#6b7280' }}>
+                Reviews appear here after students rate your classes.
+              </p>
             </div>
           ) : (
             <>
@@ -1165,18 +1214,21 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                     ? review.students[0]
                     : review.students
 
-                  const dateStr = new Date(review.created_at).toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })
+                  const dateStr = review.submitted_at
+                    ? new Date(review.submitted_at).toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })
+                    : ''
 
                   return (
                     <div
                       key={review.id}
                       style={{
                         backgroundColor: 'white',
-                        border: '1px solid #e0dfdc',
+                        border: '1px solid #f3f4f6',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                         borderRadius: '10px',
                         padding: '20px',
                       }}

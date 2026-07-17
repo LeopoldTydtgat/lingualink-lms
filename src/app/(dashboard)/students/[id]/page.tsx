@@ -48,7 +48,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         timezone,
         learning_goals,
         interests,
-        language_preference
+        language_preference,
+        teacher_notes
       ),
       training_teachers (
         teacher_id,

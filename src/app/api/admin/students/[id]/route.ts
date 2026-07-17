@@ -343,6 +343,37 @@ export async function DELETE(
       }
     }
 
+    // 2b. Dual-identity preflight — if this student also has a profiles row
+    // (auth_user_id doubles as profiles.id), that profile may own study
+    // sheets. Deleting the profiles row in step 3m CASCADEs
+    // study_sheets.owner_id and everything under those sheets. Owned sheets
+    // must never be destroyed by a student purge — block, mirroring the
+    // teacher purge preflight.
+    if (student.auth_user_id) {
+      const { count: ownedSheetCount, error: sheetCountError } = await adminClient
+        .from('study_sheets')
+        .select('owner_id', { count: 'exact', head: true })
+        .eq('owner_id', student.auth_user_id)
+
+      // Fail closed: an errored (or null) count is unknown, never zero.
+      if (sheetCountError || ownedSheetCount === null) {
+        console.error('[purge student] study_sheets preflight failed:', sheetCountError)
+        return NextResponse.json(
+          { error: 'Failed to verify owned study sheets. Purge aborted; nothing was deleted.' },
+          { status: 500 }
+        )
+      }
+      if (ownedSheetCount > 0) {
+        return NextResponse.json(
+          {
+            error: 'Cannot purge: this account owns study sheets. Reassign or delete them first.',
+            blocking: [{ table: 'study_sheets', count: ownedSheetCount }],
+          },
+          { status: 409 }
+        )
+      }
+    }
+
     // 3. Cascade delete in dependency order
 
     // 3a. messages
@@ -399,7 +430,11 @@ export async function DELETE(
     // 3m. Delete Supabase auth user
     const authUserId = student.auth_user_id as string | null
     if (authUserId) {
-      // Cross-portal cleanup: ghost profiles row created by auth-trigger at student creation
+      // Dual-identity cleanup: no auth.users trigger exists (verified live
+      // 15 Jul 2026) — a profiles row is present only when this account was
+      // also given a staff identity. Delete it if present (no-op otherwise).
+      // Owned study sheets are guaranteed absent by the step 2b preflight,
+      // so this delete CASCADE-destroys nothing protected.
       await adminClient.from('profiles').delete().eq('id', authUserId)
       // Invalidate all active sessions for this user before deletion.
       // signOut with global scope kills every refresh token across every device.

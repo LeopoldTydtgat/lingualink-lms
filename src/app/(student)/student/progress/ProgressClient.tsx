@@ -52,11 +52,11 @@ interface Props {
 // ----- CEFR conversion -----
 
 const CEFR_TO_NUM: Record<string, number> = {
-  A1: 1, 'A1+': 1.5,
-  A2: 2, 'A2+': 2.5,
-  B1: 3, 'B1+': 3.5,
-  B2: 4, 'B2+': 4.5,
-  C1: 5, 'C1+': 5.5,
+  A1: 1,
+  A2: 2,
+  B1: 3,
+  B2: 4,
+  C1: 5,
   C2: 6,
 }
 
@@ -275,7 +275,7 @@ export default function ProgressClient({
 
             {/* CEFR scale hint */}
             <p className="text-xs text-gray-400 text-center mt-4">
-              Scale: A1 &#8594; A1+ &#8594; A2 &#8594; A2+ &#8594; B1 &#8594; B1+ &#8594; B2 &#8594; B2+ &#8594; C1 &#8594; C1+ &#8594; C2
+              Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
             </p>
           </div>
         ) : (

@@ -45,7 +45,7 @@ interface Report {
 interface Assignment {
   id:          string;
   assigned_at: string;
-  sheet:       { id: string; title: string; category: string; level: string; } | null;
+  sheet:       { id: string; title: string; category: string | null; level: string | null; } | null;
 }
 
 interface Props {
@@ -64,11 +64,11 @@ function formatDateTime(iso: string) {
 }
 
 const CEFR_TO_NUM: Record<string, number> = {
-  A1: 1, 'A1+': 1.5,
-  A2: 2, 'A2+': 2.5,
-  B1: 3, 'B1+': 3.5,
-  B2: 4, 'B2+': 4.5,
-  C1: 5, 'C1+': 5.5,
+  A1: 1,
+  A2: 2,
+  B1: 3,
+  B2: 4,
+  C1: 5,
   C2: 6,
 }
 
@@ -277,7 +277,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
               <div key={a.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                 <div>
                   <p className="text-sm font-medium text-gray-800">{a.sheet?.title ?? 'Untitled sheet'}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{a.sheet?.category} · {a.sheet?.level}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{[a.sheet?.category, a.sheet?.level].filter(Boolean).join(' ' + String.fromCharCode(183) + ' ')}</p>
                 </div>
                 <span className="text-xs text-gray-400">{a.assigned_at ? new Date(a.assigned_at).toLocaleDateString('en-GB') : ''}</span>
               </div>

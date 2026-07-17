@@ -277,6 +277,7 @@ export async function DELETE(
       { table: 'invoices',                query: countBy('invoices', 'teacher_id') },
       { table: 'reviews',                 query: countBy('reviews', 'teacher_id') },
       { table: 'student_reviews',         query: countBy('student_reviews', 'teacher_id') },
+      { table: 'study_sheets',            query: countBy('study_sheets', 'owner_id') },
       { table: 'training_teachers',       query: countBy('training_teachers', 'teacher_id') },
       {
         table: 'messages',
@@ -336,6 +337,8 @@ export async function DELETE(
     // 3. Purge — the account is pristine. DB CASCADEs on the profile delete
     // handle availability, availability_overrides, availability_templates, and
     // teacher_history_log.teacher_id; nothing else references this user.
+    // study_sheets.owner_id rows are blocked by preflight above, so none exist
+    // at purge time.
 
     // 3a. Kill every live session first. Non-fatal: on a retry after a partial
     // failure the auth user may already be gone, which makes this throw.

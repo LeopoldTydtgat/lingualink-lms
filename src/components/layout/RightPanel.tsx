@@ -3,19 +3,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
-import { Video, ArrowRight, BookOpen, Bell } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2 } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
+import type { WhatsNewItem } from '@/lib/whatsNew'
+import { WhatsNewRow } from '@/components/layout/whatsNewUi'
+import { WeekGridSpot } from '@/components/WeekGridSpot'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-interface AnnouncementItem {
-  id: string
-  title: string
-  message: string
-  is_dismissable: boolean
-}
 
 interface NextLesson {
   id: string
@@ -29,10 +24,13 @@ interface NextLesson {
 type RightPanelProps = {
   teacherId: string | null
   teacherTimezone: string | null
-  announcements?: AnnouncementItem[]
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
   currency?: string | null
+  offeredMinutes?: number
+  minAvailableHours?: number | null
+  whatsNewItems?: WhatsNewItem[]
+  whatsNewSeenAt?: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,13 +68,45 @@ function formatClassTime(isoString: string, durationMinutes: number, timezone: s
 
 const CURRENCY_SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
 
+// Soft-orange filled panel button. Hover deepens the tint. Keeps full width,
+// icons, and onClick from the previous outline Button.
+function PanelButton({ onClick, className, children }: { onClick: () => void; className?: string; children: React.ReactNode }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={className}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        backgroundColor: hovered ? '#FFE4CC' : '#FFF0E0',
+        color: '#FF8303',
+        border: 'none',
+        fontWeight: 600,
+        cursor: 'pointer',
+        transition: 'background-color 0.18s ease',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 export default function RightPanel({
   teacherId,
   teacherTimezone,
-  announcements = [],
   nextLesson = null,
   billingData,
   currency,
+  offeredMinutes = 0,
+  minAvailableHours = null,
+  whatsNewItems = [],
+  whatsNewSeenAt = null,
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
@@ -127,14 +157,32 @@ export default function RightPanel({
     : 0
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
+  // What's New seen split. The panel is passive — it never stamps; it only reads
+  // the server-provided marker to separate fresh from already-seen items. ISO UTC
+  // strings compare lexicographically in chronological order. Order within each
+  // group is preserved from fetchWhatsNew (attention first, then newest). Seen
+  // items are capped at 2 under an "Earlier" divider.
+  const isWhatsNewSeen = (item: WhatsNewItem) => whatsNewSeenAt != null && item.at <= whatsNewSeenAt
+  const unseenWhatsNew = whatsNewItems.filter((i) => !isWhatsNewSeen(i))
+  const seenWhatsNew = whatsNewItems.filter((i) => isWhatsNewSeen(i)).slice(0, 2)
+
+  // Availability ring. All inputs are server props (no Date, no state) so this is
+  // hydration-safe. pct is null when there is no numeric target — the card then
+  // shows offered hours without a ring rather than inventing a percentage.
+  const targetMinutes = minAvailableHours != null ? minAvailableHours * 60 : null
+  const pct = targetMinutes && targetMinutes > 0
+    ? Math.min(100, Math.round((offeredMinutes / targetMinutes) * 100))
+    : null
+  const offeredLabel = `${Math.floor(offeredMinutes / 60)}h ${String(offeredMinutes % 60).padStart(2, '0')}min`
+
   return (
-    <aside ref={panelRef} onWheel={handleWheel} className="w-72 border-l border-brand-grey flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#FFFCF8' }}>
+    <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA', borderLeft: '1px solid #E5E7EB' }}>
       <div className="p-4 space-y-4">
 
         {/* ── NEXT CLASS ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Next Class</p>
           </div>
 
@@ -167,15 +215,13 @@ export default function RightPanel({
               </p>
 
               {/* See Training button — always visible */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange mb-2"
+              <PanelButton
+                className="w-full text-sm mb-2"
                 onClick={() => router.push('/students')}
               >
                 <BookOpen size={14} className="mr-2" />
                 See Training
-              </Button>
+              </PanelButton>
 
               {/* Join Class — always visible; greyed until 10 min before start, gone at end */}
               {nextLesson.teams_join_url ? (
@@ -230,9 +276,9 @@ export default function RightPanel({
         </section>
 
         {/* ── BILLING SUMMARY ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <Receipt size={14} color="#FF8303" style={{ flexShrink: 0 }} />
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Billing</p>
           </div>
           <div className="space-y-1">
@@ -249,46 +295,122 @@ export default function RightPanel({
               </span>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="mt-3 w-full text-sm border-brand-grey hover:border-brand-orange hover:text-brand-orange"
+          <PanelButton
+            className="mt-3 w-full text-sm"
             onClick={() => router.push('/billing')}
           >
             Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
-          </Button>
+          </PanelButton>
+        </section>
+
+        {/* ── AVAILABILITY ── */}
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <CalendarClock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Availability</p>
+          </div>
+
+          {offeredMinutes === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              <WeekGridSpot />
+              <p style={{ fontSize: '14px', fontWeight: 600, color: '#111827', marginTop: '4px' }}>No availability set</p>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', marginBottom: '12px' }}>
+                Add weekly slots so students can book with you.
+              </p>
+              <PanelButton className="w-full text-sm" onClick={() => router.push('/schedule')}>
+                Set availability
+              </PanelButton>
+            </div>
+          ) : pct === null ? (
+            <>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
+                {`You're offering ${offeredLabel} this week.`}
+              </p>
+              <PanelButton className="w-full text-sm" onClick={() => router.push('/schedule')}>
+                Edit availability
+              </PanelButton>
+            </>
+          ) : pct === 100 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <CheckCircle2 size={14} color="#22C55E" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '12px', color: '#6b7280' }}>{offeredLabel} offered · target met</p>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{ position: 'relative', width: '84px', height: '84px', flexShrink: 0 }}>
+                  <svg width="84" height="84" viewBox="0 0 84 84">
+                    <circle cx="42" cy="42" r="34" fill="none" stroke="#F3F4F6" strokeWidth="8" />
+                    <circle
+                      cx="42"
+                      cy="42"
+                      r="34"
+                      fill="none"
+                      stroke="#FFB942"
+                      strokeWidth="8"
+                      strokeLinecap="round"
+                      strokeDasharray={`${(pct / 100) * 213.63} 213.63`}
+                      transform="rotate(-90 42 42)"
+                    />
+                  </svg>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: '16px', fontWeight: 500, color: '#111827', lineHeight: 1.1 }}>{pct}%</span>
+                    <span style={{ fontSize: '10px', color: '#9ca3af', lineHeight: 1.1 }}>of target</span>
+                  </div>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                    Almost there
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                    {`You're offering ${offeredLabel} of the ${minAvailableHours}h weekly target.`}
+                  </p>
+                </div>
+              </div>
+              <PanelButton className="mt-3 w-full text-sm" onClick={() => router.push('/schedule')}>
+                Edit availability
+              </PanelButton>
+            </>
+          )}
         </section>
 
         {/* ── WHAT'S NEW ── */}
-        <section className="bg-white rounded-xl p-4 border border-brand-grey">
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <Bell size={14} className="text-gray-400" />
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              What&apos;s New
-            </p>
-            {announcements.length > 0 && (
-              <span
-                className="ml-auto text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: '#FF8303', fontSize: '10px' }}
-              >
-                {announcements.length > 9 ? '9+' : announcements.length}
-              </span>
-            )}
+            <Sparkles size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What&apos;s New</p>
           </div>
-
-          {announcements.length === 0 ? (
-            <p className="text-sm text-gray-400 italic">No new notifications</p>
+          {whatsNewItems.length === 0 ? (
+            <p className="text-sm text-gray-500">No new activity</p>
           ) : (
-            <div className="space-y-3">
-              {announcements.map((a, index) => (
-                <div key={a.id}>
-                  {index > 0 && <div className="h-px bg-gray-200 mb-3" />}
-                  <p className="text-xs font-semibold text-gray-800">{a.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{a.message}</p>
-                </div>
+            <div className="flex flex-col">
+              {unseenWhatsNew.map((item) => (
+                <WhatsNewRow
+                  key={item.id}
+                  item={item}
+                  mounted={mounted}
+                  seen={false}
+                  onClick={() => router.push(item.href)}
+                />
               ))}
+              {seenWhatsNew.length > 0 && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 8px 4px' }}>
+                    <span className="text-gray-400 uppercase tracking-wider" style={{ fontSize: '11px' }}>Earlier</span>
+                    <span style={{ flex: 1, height: '1px', backgroundColor: '#f3f4f6' }} />
+                  </div>
+                  {seenWhatsNew.map((item) => (
+                    <WhatsNewRow
+                      key={item.id}
+                      item={item}
+                      mounted={mounted}
+                      seen={true}
+                      onClick={() => router.push(item.href)}
+                    />
+                  ))}
+                </>
+              )}
             </div>
           )}
         </section>

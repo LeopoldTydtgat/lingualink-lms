@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import ScheduleClient from './ScheduleClient'
 
@@ -31,10 +32,22 @@ export default async function SchedulePage() {
     .eq('teacher_id', profile.id)
     .order('start_at', { ascending: true })
 
+  // Minimum-hours target from settings (service-role admin client). Fail SAFE:
+  // any missing/non-numeric value degrades to null — never invent a target.
+  const admin = createAdminClient()
+  const { data: minHoursRow } = await admin
+    .from('settings')
+    .select('value')
+    .eq('key', 'min_available_hours')
+    .single()
+  const parsedMinHours = Number(minHoursRow?.value)
+  const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
+
   return (
     <ScheduleClient
       profile={profile}
       initialAvailability={availability ?? []}
+      minAvailableHours={minAvailableHours}
     />
   )
 }

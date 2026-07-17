@@ -84,3 +84,21 @@ export async function getBookedClassStudentIds(
   }
   return studentIds
 }
+
+/**
+ * Teacher-scoped student_ids for aggregate/reporting surfaces (e.g. worksheet
+ * progress). An admin sees every student, expressed as `null` = "no student
+ * filter"; a teacher is scoped to their Condition-B booked-class students. The
+ * array form drops straight into a Supabase `.in('student_id', ...)` filter.
+ * Reuses getBookedClassStudentIds so the Condition-B logic stays single-sourced.
+ */
+export async function getTeacherScopedStudentIds(
+  admin: AdminClient,
+  teacherUserId: string,
+  isAdmin: boolean,
+  now: Date = new Date(),
+): Promise<string[] | null> {
+  if (isAdmin) return null
+  const studentIds = await getBookedClassStudentIds(admin, teacherUserId, now)
+  return [...studentIds]
+}

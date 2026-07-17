@@ -41,6 +41,7 @@ type Props = {
 
 export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   const [search, setSearch] = useState('')
+  const [showAllCompleted, setShowAllCompleted] = useState(false)
 
   // Capture a single "now" so every pending check compares against the same instant
   const now = Date.now()
@@ -65,25 +66,36 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
       .includes(search.toLowerCase())
   )
 
-  return (
-    <div className="p-6 max-w-5xl mx-auto">
+  const isSearching = search.trim().length > 0
+  const displayCompleted = (showAllCompleted || isSearching)
+    ? filteredCompleted
+    : filteredCompleted.slice(0, 10)
 
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
-        <h1 className="text-2xl font-bold text-gray-900">Class Reports</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Complete a report within 12 hours of each class ending.
-        </p>
+  return (
+    <div className="space-y-6">
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Class Reports</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Complete a report within 12 hours of each class ending.
+          </p>
+        </div>
+        <input
+          type="text"
+          placeholder="Search completed by student..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-orange-400"
+        />
       </div>
 
       {/* Pending reports */}
       <section>
-        <div className="flex items-center gap-3 mb-4">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Pending Reports</h2>
-          </div>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-semibold text-gray-800">Pending Reports</span>
           {pendingReports.length > 0 && (
-            <span className="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFF8E8', color: '#B45309' }}>
               {pendingReports.length}
             </span>
           )}
@@ -100,62 +112,56 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
         )}
       </section>
 
-      <div style={{ borderTop: '1px solid #E0DFDC', marginTop: '24px', marginBottom: '24px' }} />
+      {/* Missed reports */}
+      {missedReports.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="font-semibold text-gray-800">Missed Reports</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFEEE6', color: '#FD5602' }}>
+              {missedReports.length}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {missedReports.map(report => (
+              <MissedReportCard key={report.id} report={report} isAdmin={isAdmin} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Completed reports */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Completed Reports</h2>
-          </div>
-          <input
-            type="text"
-            placeholder="Search by student name..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-orange-400"
-          />
+        <div className="flex items-center gap-2 mb-3">
+          <span className="font-semibold text-gray-800">Completed Reports</span>
+          <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#f3f4f6', color: '#6b7280' }}>
+            {filteredCompleted.length}
+          </span>
         </div>
 
         {filteredCompleted.length === 0 ? (
           <p className="text-sm text-gray-500">No completed reports yet.</p>
         ) : (
-          <div className="flex flex-col gap-3">
-            {filteredCompleted.map(report => (
-              <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {missedReports.length > 0 && (
-        <>
-          <div style={{ borderTop: '1px solid #E0DFDC', marginTop: '24px', marginBottom: '24px' }} />
-
-          {/* Missed reports */}
-          <section>
-            <div className="flex items-center gap-3 mb-4">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <div style={{ width: '3px', height: '16px', backgroundColor: '#dc2626', borderRadius: '2px', flexShrink: 0 }} />
-                <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Missed Reports</h2>
-              </div>
-              <span
-                className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
-                style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
-              >
-                {missedReports.length}
-              </span>
-            </div>
-
+          <>
             <div className="flex flex-col gap-3">
-              {missedReports.map(report => (
-                <MissedReportCard key={report.id} report={report} />
+              {displayCompleted.map(report => (
+                <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} />
               ))}
             </div>
-          </section>
-        </>
-      )}
+            {!showAllCompleted && !isSearching && filteredCompleted.length > 10 && (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setShowAllCompleted(true)}
+                  style={{ color: '#FF8303' }}
+                  className="text-sm font-medium py-2 cursor-pointer"
+                >
+                  Show all ({filteredCompleted.length})
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
 
     </div>
   )
@@ -174,9 +180,25 @@ function PendingReportCard({
   const deadlineLabel = report.deadline_at
     ? getDeadlineLabel(report.deadline_at)
     : null
+  const deadlineMs = report.deadline_at
+    ? new Date(report.deadline_at).getTime() - Date.now()
+    : null
+
+  let deadlineStyle: React.CSSProperties
+  if (deadlineLabel === 'Overdue') {
+    deadlineStyle = { backgroundColor: '#FFEEE6', color: '#FD5602', fontWeight: 700 }
+  } else if (deadlineMs !== null && deadlineMs <= 3 * 60 * 60 * 1000) {
+    deadlineStyle = { color: '#FD5602', fontWeight: 700 }
+  } else {
+    deadlineStyle = { color: '#B45309', fontWeight: 500 }
+  }
+  const isOverdue = deadlineLabel === 'Overdue'
 
   return (
-    <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 flex items-center justify-between">
+    <div
+      className="rounded-xl p-4 flex items-center justify-between shadow-sm"
+      style={{ backgroundColor: '#FFFDF5', border: '1px solid #f3f4f6', borderLeft: '3px solid #FFB942' }}
+    >
       <div className="flex items-center gap-4">
         {student?.photo_url ? (
           <img
@@ -208,7 +230,16 @@ function PendingReportCard({
 
       <div className="flex items-center gap-4">
         {deadlineLabel && (
-          <span className="text-xs text-yellow-700 font-medium">{deadlineLabel}</span>
+          isOverdue ? (
+            <span
+              className="text-xs"
+              style={{ ...deadlineStyle, borderRadius: '9999px', padding: '2px 10px' }}
+            >
+              Overdue
+            </span>
+          ) : (
+            <span className="text-xs" style={deadlineStyle}>{deadlineLabel}</span>
+          )
         )}
         <a
           href={`/reports/${report.id}`}
@@ -234,32 +265,21 @@ function CompletedReportCard({
 }) {
   const lesson = report.lesson
   const student = lesson?.student
-  const [reopening, setReopening] = useState(false)
-  const [reopenError, setReopenError] = useState<string | null>(null)
 
-  const statusConfig: Record<string, { label: string; colour: string }> = {
-    completed: { label: 'Class taken', colour: 'bg-green-100 text-green-700' },
-    flagged: { label: 'Flagged — no report', colour: 'bg-red-100 text-red-700' },
-    reopened: { label: 'Reopened', colour: 'bg-orange-100 text-orange-700' },
-    pending: { label: 'Pending', colour: 'bg-yellow-100 text-yellow-700' },
+  const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
+    completed: { label: 'Class taken', bg: '#DCFCE7', fg: '#15803D' },
+    flagged: { label: 'Flagged — no report', bg: '#FFEEE6', fg: '#FD5602' },
+    reopened: { label: 'Reopened', bg: '#FFF0E0', fg: '#C2410C' },
+    pending: { label: 'Pending', bg: '#FFF8E8', fg: '#B45309' },
   }
 
-  const { label, colour } = statusConfig[report.status] ?? statusConfig.completed
-
-  // Call the server action to reopen the report
-  async function handleReopen() {
-    setReopening(true)
-    setReopenError(null)
-    const result = await reopenReport(report.id)
-    if (result.error) {
-      setReopenError(result.error)
-      setReopening(false)
-    }
-    // On success, revalidatePath in the action refreshes the page automatically
-  }
+  const { label, bg, fg } = statusConfig[report.status] ?? statusConfig.completed
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between">
+    <div
+      className="bg-white rounded-xl p-4 flex items-center justify-between shadow-sm"
+      style={{ border: '1px solid #f3f4f6' }}
+    >
       <div className="flex items-center gap-4">
         {student?.photo_url ? (
           <img
@@ -286,32 +306,23 @@ function CompletedReportCard({
               By {lesson?.teacher?.full_name ?? 'Unknown teacher'}
             </p>
           )}
-          {reopenError && (
-            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
-          )}
         </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <span className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${colour}`}>
+        <span
+          className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+          style={{ backgroundColor: bg, color: fg }}
+        >
           {label}
         </span>
         <a
           href={`/reports/${report.id}`}
-          className="text-sm text-gray-500 hover:text-gray-700 underline"
+          className="text-sm"
+          style={{ color: '#FF8303', fontWeight: 500 }}
         >
           View
         </a>
-        {/* Reopen button — admin only, flagged reports only */}
-        {isAdmin && report.status === 'flagged' && (
-          <button
-            onClick={handleReopen}
-            disabled={reopening}
-            className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50"
-          >
-            {reopening ? 'Reopening...' : 'Reopen'}
-          </button>
-        )}
       </div>
     </div>
   )
@@ -320,16 +331,32 @@ function CompletedReportCard({
 // --- Missed report card ---
 function MissedReportCard({
   report,
+  isAdmin,
 }: {
   report: Report
+  isAdmin: boolean
 }) {
   const lesson = report.lesson
   const student = lesson?.student
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState<string | null>(null)
+
+  // Call the server action to reopen the report
+  async function handleReopen() {
+    setReopening(true)
+    setReopenError(null)
+    const result = await reopenReport(report.id)
+    if (result.error) {
+      setReopenError(result.error)
+      setReopening(false)
+    }
+    // On success, revalidatePath in the action refreshes the page automatically
+  }
 
   return (
     <div
-      className="rounded-xl p-4 flex items-center justify-between"
-      style={{ backgroundColor: '#fff5f5', border: '0.5px solid #fecaca' }}
+      className="rounded-xl p-4 flex items-center justify-between shadow-sm"
+      style={{ backgroundColor: '#FFF8F5', border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602' }}
     >
       <div className="flex items-center gap-4">
         {student?.photo_url ? (
@@ -355,22 +382,35 @@ function MissedReportCard({
               ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
               : 'Unknown time'}
           </p>
+          {reopenError && (
+            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
+          )}
         </div>
       </div>
 
       <div className="flex items-center gap-3">
         <span
           className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
-          style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+          style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}
         >
           Missed — payment forfeited
         </span>
         <a
           href={`/reports/${report.id}`}
-          className="text-sm text-gray-500 hover:text-gray-700 underline"
+          className="text-sm"
+          style={{ color: '#FF8303', fontWeight: 500 }}
         >
           View
         </a>
+        {isAdmin && (
+          <button
+            onClick={handleReopen}
+            disabled={reopening}
+            className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50"
+          >
+            {reopening ? 'Reopening...' : 'Reopen'}
+          </button>
+        )}
       </div>
     </div>
   )

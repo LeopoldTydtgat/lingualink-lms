@@ -1,3 +1,46 @@
+## Session 208 - 15 July 2026 - Messaging hardening and export timezone alignment
+
+### What was built
+- src/app/(student)/student/messages/actions.ts - student sendMessage now validates the client-supplied receiverType against the recipient's actual profile role, mirroring the dashboard-side NEW275 block; 'student' recipients are rejected outright (commit 058086c, NEW349)
+- src/app/(student)/student/messages/page.tsx - student contact list now includes historical threads with teachers no longer assigned; counterparts resolve from the union of assigned and historical profiles, and the existing isBlockedContact logic renders historical threads read-only (commit 262bff7, NEW283)
+- src/lib/exportTime.ts - new pure helper zonedDayRangeToUtcBounds resolving inclusive local calendar-day ranges into half-open UTC instant pairs, with two-pass DST-safe offset math and a fail-safe fallback to the old +02:00 bounds (commit 6957a0b, NEW273)
+- src/app/api/admin/reports/export/route.ts - XLSX export row bounds now resolve in the settings-driven export timezone instead of hardcoded SAST days (commit 6957a0b, NEW273)
+- src/app/api/admin/billing/export/route.ts - company_billing, student_progress, and pending_reports branches now scope their date windows via zonedDayRangeToUtcBounds in the export timezone; previously bare YYYY-MM-DD strings were read as UTC midnight, silently dropping the entire dateTo day from the billing window (commit 287a6be, NEW350)
+- src/app/(admin)/admin/billing/BillingAdminClient.tsx - Student Billing and Company Billing table loaders now resolve their date filters with the same helper and timezone, so the on-screen tables and the exported CSVs always cover the identical window (commit 5dd1709, NEW350 follow-up)
+- src/app/api/admin/settings/route.ts and src/lib/exportTime.ts - server-side allowlist for the export_timezone setting; only the six zones the export day-boundary math guarantees are accepted, exported as EXPORT_TZ_ALLOWED from a single source of truth (commit 20cafdf, NEW351)
+
+### Break/Fix Log
+Issue 1: Reports XLSX export included or excluded boundary-day lessons incorrectly for non-SAST export timezones / Cause: query bounds hardcoded to +02:00 while display columns rendered in the configured zone / Fix: new zonedDayRangeToUtcBounds helper resolving bounds in the same zone the export renders in, verified by the code reviewer with an empirical sweep across all configured zones and DST transitions / Lesson: a date filter on a timestamptz column must be resolved in an explicit timezone; a bare date string is a silent UTC assumption
+
+Issue 2: Billing CSV export dropped the entire final day of the selected range / Cause: bare YYYY-MM-DD passed to .lte on a timestamptz column reads as UTC midnight at the start of that day / Fix: half-open gte/lt bounds from the shared helper, applied across all three affected export branches / Lesson: audit the same pattern across every branch of a file before fixing one occurrence
+
+Issue 3: Fixing the export alone would have made the on-screen billing tables disagree with the CSV at boundary days / Cause: the tables used the same bare-date pattern, so they were previously wrong together with the export / Fix: same bounds resolution applied to both table loaders in the same session / Lesson: when a fix changes a shared convention, sweep the surfaces that consumed the old behaviour or the fix creates a visible inconsistency
+
+### Session result
+Two messaging fixes and a full export timezone alignment shipped: student message sends are validated server-side, historical teacher threads are visible read-only, and every billing and reports export now scopes and renders its date window in one settings-driven timezone, with the setting itself locked to a server-validated allowlist. Six commits pushed to dev.
+
+## Session 207 - 15 July 2026 - Attachment proxy, Realtime send race, and a cross-session bug sweep
+
+### What was built
+
+The centrepiece of this session is a new same-origin auth proxy for message attachments (commit 35c0233). Previously, uploading a file to any message thread baked a 7-day signed Supabase Storage URL directly into the stored attachments JSON, and nothing ever re-signed it, so every attachment link died a week after sending. The new route at /api/message-file/[source]/[messageId]/[index] streams the bytes from the private messages bucket after verifying the requester is a genuine participant of the message, handling the mixed identity model (teacher and admin ids are auth uuids, student ids are table PKs requiring an auth_user_id lookup). All seven attachment render sites across the teacher, student, and admin portals now link through the proxy via a shared helper, and legacy rows with long-expired URLs work through it unchanged, so no data migration was needed.
+
+The proxy went through a full security review cycle. The reviewer's key finding was that a participant could plant a foreign storage path into their own message and have the service-role download read it back, so a sender-binding check was added: the uuid in the storage path must resolve to the row's own sender. The write-side validator was also tightened to pin the bucket path prefix, and a live database grant check confirmed attachments are immutable after insert, which is the invariant the whole design rests on. The review also surfaced an unrelated pre-existing gap in the student send action (client-supplied receiver type stored unvalidated), which was logged as its own task rather than bundled in.
+
+Alongside that, a Realtime race in the admin support console was fixed (6297e96): the admin's own sent message could arrive back over the Realtime channel before the send response resolved, appending a duplicate row with a duplicate React key. The fix tracks the in-flight optimistic send in a ref so whichever of the two arrives first resolves it and the other becomes a no-op.
+
+A parallel working session closed four more items. Teams meeting subjects were standardised to one format across the student booking, admin booking, and reschedule paths (c8bfcf9), consolidating duplicate name queries in the admin route along the way. A tab underline sizing bug, where the active underline shrank to the label's text width, was fixed in the teacher account page (40d00fa), then swept across every manual tab bar in the repo (039ed74) and finally closed in the admin support console (1407d7e) once that file was free. The sweep also confirmed three suspect files use pill-style tabs with no underline element at all, so they were audited and cleared rather than blindly patched. On the database side, two SQL-only items were completed directly in the Supabase SQL editor: open read policies and anon grants were removed from dead availability tables ahead of the repository going public, and a missing training_teachers junction row was backfilled for an Intensive training.
+
+### Break/Fix Log
+
+The first prompt for the proxy work claimed optimistic pending rows existed in only two of the seven render sites; the implementation pass found them in four and correctly extended the pending fallback to all of them, since routing a temp row with no database id through the proxy would have returned a permanent 404. A mid-task build also silently collided with a still-running earlier build holding the Next.js lock; the second build was queued behind it rather than force-killed, and completed clean.
+
+### Session result
+
+Six commits pushed to origin/dev (99cdcc2..1407d7e), two database-only fixes verified live, one new task raised from review findings. Attachment links no longer expire, the admin support console no longer duplicates sent messages, Teams meeting titles are consistent, and the underline bug is closed repo-wide. Remaining fix queue: three items.
+
+---
+
 ## Session 206 - 14 July 2026 - Deleting a forbidden capability, and gating support on the sender
 
 ### What was built

@@ -57,13 +57,14 @@ export async function GET(
 
     // Scope this route to STUDENTS. lesson_annotations also has teacher/admin
     // SELECT policies with NO cutoff, so a teacher/admin hitting this route would
-    // be gated by THOSE instead of the student read-after-cutoff policy. Because
-    // the teacher INSERT policy does not verify study-sheet access, a teacher
-    // could otherwise self-mint a row for an arbitrary study_sheet UUID and read
-    // its private bytes here, bypassing the audience gate /api/library-file
-    // enforces for teachers. Students have NO write policy and cannot mint rows,
-    // so restricting to students makes the student policy the only path through —
-    // which is exactly this route's purpose.
+    // be gated by THOSE instead of the student read-after-cutoff policy this
+    // route exists to serve. (The INSERT/UPDATE policies DO verify study-sheet
+    // access — visibility since 20260703120000, plus the owner_id clause since
+    // 20260715150000 — so the historical self-mint bypass is closed at the
+    // policy level; the guard is kept because teachers/admins already have their
+    // own read paths and this route's contract is student-only.) Students have
+    // NO write policy and cannot mint rows, so restricting to students makes the
+    // student read-after-cutoff policy the only path through.
     const { data: student } = await supabase
       .from('students')
       .select('id')

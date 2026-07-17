@@ -506,7 +506,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   const [scale, setScale] = useState(1.2)
   // Fit-to-width mode: while on, the scale tracks the container width (and
   // re-tracks on resize). Any manual zoom releases it.
-  const [fitMode, setFitMode] = useState(false)
+  const [fitMode, setFitMode] = useState(true)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
 
@@ -664,6 +664,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     setErrorMsg('')
     setNumPages(0)
     setCurrentPage(1)
+    setFitMode(true)
     firstPageWidthRef.current = 0
     pdfDocRef.current = null
     // A different document means a fresh history and a re-seeded annotation
@@ -737,6 +738,15 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       if (loadingTask && !loadingTask.destroyed) loadingTask.destroy()
     }
   }, [fileUrl])
+
+  // Default view: fit the page to the available width as soon as the document
+  // is ready (and again whenever fit mode is re-entered). Manual zoom releases
+  // fit mode via the existing zoomIn/zoomOut paths.
+  useEffect(() => {
+    if (status !== 'ready') return
+    if (!fitMode) return
+    applyFitWidth()
+  }, [status, fitMode, applyFitWidth])
 
   // Render every page to its own canvas, stacked vertically, whenever the
   // document becomes ready or the zoom changes.
@@ -905,6 +915,14 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     }
   }, [status])
 
+  // Mirrors fitMode for the ResizeObserver callback below, which must read the
+  // live value without listing fitMode as an effect dependency (that would
+  // re-create the observer on every fit toggle).
+  const fitModeRef = useRef(fitMode)
+  useEffect(() => {
+    fitModeRef.current = fitMode
+  }, [fitMode])
+
   // Re-measure overlay geometry on any container size change: window resize,
   // fullscreen transition, scrollbar appearance, and the margin:auto centring
   // shift that a width change causes. (Zoom is already handled by the render
@@ -912,10 +930,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   useEffect(() => {
     const container = containerRef.current
     if (!container || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => measurePages())
+    const ro = new ResizeObserver(() => {
+      measurePages()
+      if (fitModeRef.current) applyFitWidth()
+    })
     ro.observe(container)
     return () => ro.disconnect()
-  }, [measurePages])
+  }, [measurePages, applyFitWidth])
 
   // Keep the fullscreen label/icon correct even when the user exits via Esc.
   // (Same pattern as MaterialFileViewer.)
@@ -1087,9 +1108,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   }, [])
 
   function zoomOut() {
+    setFitMode(false)
     setScale((s) => Math.max(MIN_SCALE, Math.round((s - SCALE_STEP) * 100) / 100))
   }
   function zoomIn() {
+    setFitMode(false)
     setScale((s) => Math.min(MAX_SCALE, Math.round((s + SCALE_STEP) * 100) / 100))
   }
 

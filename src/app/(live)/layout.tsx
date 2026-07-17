@@ -43,5 +43,5 @@ export default async function LiveLayout({
 
   if (!profile) redirect('/login')
 
-  return <div className="min-h-screen bg-white">{children}</div>
+  return <div className="min-h-screen" style={{ backgroundColor: '#f9fafb' }}>{children}</div>
 }

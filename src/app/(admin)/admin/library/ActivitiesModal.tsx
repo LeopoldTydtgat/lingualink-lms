@@ -1,0 +1,271 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import ActivityFormModal from './ActivityFormModal'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Props = {
+  sheetId: string
+  sheetTitle: string
+  onClose: () => void
+}
+
+// Exactly the columns the admin list route returns — no answer_key.
+type ActivityRow = {
+  id: string
+  position: number
+  type: string
+  title: string | null
+  content: { questions?: unknown[] } | null
+  updated_at: string
+}
+
+const ORANGE = '#FF8303'
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function questionCount(activity: ActivityRow): number {
+  const questions = activity.content?.questions
+  return Array.isArray(questions) ? questions.length : 0
+}
+
+// Date only, built from the Date object's local getters. Deliberately avoids
+// toLocaleDateString/toLocaleTimeString (banned in components that can render on
+// both server and client) and toISOString (never used for local dates here).
+function formatUpdated(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props) {
+  const [activities, setActivities] = useState<ActivityRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  // Every read goes through the admin route: activities are service_role writes
+  // only, and the list route is the surface that omits answer_key.
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(false)
+
+    try {
+      const res = await fetch(`/api/admin/library/${sheetId}/activities`)
+      if (!res.ok) {
+        setLoadError(true)
+        setActivities([])
+        setLoading(false)
+        return
+      }
+
+      const data = await res.json().catch(() => null)
+      if (!Array.isArray(data)) {
+        setLoadError(true)
+        setActivities([])
+        setLoading(false)
+        return
+      }
+
+      setActivities(data)
+      setLoading(false)
+    } catch {
+      setLoadError(true)
+      setActivities([])
+      setLoading(false)
+    }
+  }, [sheetId])
+
+  useEffect(() => { load() }, [load])
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id)
+    setDeleteError(null)
+
+    try {
+      const res = await fetch(`/api/admin/library/${sheetId}/activities/${id}`, { method: 'DELETE' })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        // 409 = the activity has student attempts, which the route refuses to
+        // cascade away. Surfaced as-is: it is an explanation, not a failure.
+        setDeleteError(body.error || 'Could not delete the activity. Please try again.')
+        setDeletingId(null)
+        setConfirmDeleteId(null)
+        return
+      }
+
+      setDeletingId(null)
+      setConfirmDeleteId(null)
+      await load()
+    } catch {
+      setDeleteError('Could not reach the server. Check your connection and try again.')
+      setDeletingId(null)
+      setConfirmDeleteId(null)
+    }
+  }
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+      >
+        <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-gray-900">Activities</h2>
+              <p className="text-xs text-gray-400 truncate mt-0.5">{sheetTitle}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none flex-shrink-0">✕</button>
+          </div>
+
+          {/* Body */}
+          <div className="overflow-y-auto flex-1 px-6 py-5 thin-scroll">
+            {deleteError && (
+              <p className="text-sm text-red-600 mb-4">{deleteError}</p>
+            )}
+
+            {loading ? (
+              <p className="text-sm text-gray-400">Loading activities…</p>
+            ) : loadError ? (
+              <p className="text-sm text-red-600">
+                Couldn&apos;t load this sheet&apos;s activities. Close and reopen to try again.
+              </p>
+            ) : activities.length === 0 ? (
+              <p className="text-sm text-gray-400">
+                No activities yet. Click Add Activity to create the first one.
+              </p>
+            ) : (
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                {/* Column headers */}
+                <div
+                  className="grid gap-3 px-4 py-2.5 text-xs font-medium text-gray-400 uppercase border-b border-gray-100 bg-gray-50"
+                  style={{ gridTemplateColumns: '46% 14% 18% 22%' }}
+                >
+                  <span>Title</span>
+                  <span className="text-center">Questions</span>
+                  <span>Updated</span>
+                  <span>Actions</span>
+                </div>
+
+                <div className="divide-y divide-gray-50">
+                  {activities.map(activity => (
+                    <div
+                      key={activity.id}
+                      className="grid gap-3 px-4 py-3 items-center text-sm"
+                      style={{ gridTemplateColumns: '46% 14% 18% 22%' }}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">
+                          {activity.title || 'Untitled activity'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5 uppercase">{activity.type}</p>
+                      </div>
+
+                      <span className="text-center text-gray-600">{questionCount(activity)}</span>
+
+                      <span className="text-gray-500 text-xs">{formatUpdated(activity.updated_at)}</span>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => { setEditingId(activity.id); setShowForm(true) }}
+                          className="text-xs underline"
+                          style={{ color: ORANGE }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => { setDeleteError(null); setConfirmDeleteId(activity.id) }}
+                          className="text-xs underline text-red-400 hover:text-red-600"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Add — hidden while the list is unknown, so nothing is authored blind */}
+            {!loading && !loadError && (
+              <button
+                type="button"
+                onClick={() => { setEditingId(null); setShowForm(true) }}
+                className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+              >
+                + Add Activity
+              </button>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end px-6 py-4 border-t border-gray-200 flex-shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete confirmation */}
+      {confirmDeleteId && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 60 }}
+        >
+          <div className="bg-white rounded-xl p-7" style={{ width: '440px', maxWidth: '90vw' }}>
+            <h3 className="text-base font-bold text-gray-900 mt-0">Delete Activity?</h3>
+            <p className="text-sm text-gray-500">
+              Are you sure you want to delete this activity? This cannot be undone.
+            </p>
+            <div className="flex gap-2.5 justify-end mt-4">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                disabled={deletingId === confirmDeleteId}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDeleteId)}
+                disabled={deletingId === confirmDeleteId}
+                className="px-4 py-2 text-sm rounded-lg text-white font-semibold disabled:opacity-50"
+                style={{ backgroundColor: '#DC2626' }}
+              >
+                {deletingId === confirmDeleteId ? 'Deleting…' : 'Yes, Delete Activity'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create / Edit activity */}
+      {showForm && (
+        <ActivityFormModal
+          sheetId={sheetId}
+          activityId={editingId}
+          onClose={() => { setShowForm(false); setEditingId(null) }}
+          onSaved={async () => { setShowForm(false); setEditingId(null); await load() }}
+        />
+      )}
+    </>
+  )
+}

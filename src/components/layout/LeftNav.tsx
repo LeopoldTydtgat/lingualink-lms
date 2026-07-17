@@ -67,11 +67,16 @@ function NavContent({
       style={{ opacity: pending ? 0.55 : 1 }}
     >
       {pending ? (
-        <Loader2 size={18} className={cn('animate-spin', active ? 'text-white' : 'text-gray-400')} />
+        <Loader2
+          size={18}
+          className={cn('animate-spin', active ? '' : 'text-gray-400')}
+          color={active ? '#FF8303' : undefined}
+        />
       ) : (
         <Icon
           size={18}
-          className={cn('transition-transform', active ? 'text-white' : 'text-gray-400 group-hover:translate-x-0.5')}
+          className={cn('transition-transform', active ? '' : 'text-gray-400 group-hover:translate-x-0.5')}
+          color={active ? '#FF8303' : undefined}
         />
       )}
       {label}
@@ -79,7 +84,7 @@ function NavContent({
       {label === 'Messages' && unreadCount > 0 && (
         <span
           className="ml-auto text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
-          style={{ backgroundColor: active ? '#ffffff' : '#FF8303', color: active ? '#FF8303' : '#ffffff', fontSize: '10px' }}
+          style={{ backgroundColor: '#FF8303', color: '#ffffff', fontSize: '10px' }}
         >
           {unreadCount > 9 ? '9+' : unreadCount}
         </span>
@@ -144,10 +149,10 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
 
   return (
     <nav className="w-60 bg-white flex flex-col shrink-0 h-screen overflow-y-auto thin-scroll">
-      {/* Logo area — gradient matches header, no dividing line */}
+      {/* Logo area — white, bottom border aligns with the header */}
       <div
         className="flex items-center justify-center px-4 shrink-0"
-        style={{ height: '72px', background: 'linear-gradient(to right, #ffffff, #fff3e8)' }}
+        style={{ height: '72px', background: '#ffffff', borderBottom: '1px solid #E0DFDC' }}
       >
         <Link href="/dashboard" prefetch={false}>
           <img src="/lingualink-logo-clean.svg" alt="Lingualink Online" style={{ height: '56px', width: 'auto' }} />
@@ -164,11 +169,11 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
               <Link
                 href={item.href}
                 prefetch={false}
-                style={active ? { clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' } : undefined}
+                style={active ? { clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)', backgroundColor: '#FFF0E0', color: '#FF8303', borderLeft: '3px solid #FF8303' } : { borderLeft: '3px solid transparent' }}
                 className={cn(
                   'group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                   active
-                    ? 'bg-brand-orange text-white'
+                    ? ''
                     : 'text-gray-600 hover:bg-brand-grey hover:text-gray-900'
                 )}
               >

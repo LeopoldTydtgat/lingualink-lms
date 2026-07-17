@@ -521,9 +521,9 @@ export default function StudentMessagesClient({
   // Mirrors the teacher client's isBlockedContact gate. Two independent reasons a
   // thread is read-only, both re-checked authoritatively by the server actions:
   //
-  //  1. NEW275 assignment — the contact is not in the currently-assigned set. The page
-  //     only lists assigned contacts at load, so this only bites a session left open
-  //     across an unassignment.
+  //  1. NEW275 assignment — the contact is not in the currently-assigned set. As of
+  //     NEW283 the page also lists historical (unassigned) counterparts, so this path
+  //     is reachable on a first load, exactly like reason 2 below.
   //  2. NEW346 status — the teacher/admin account is no longer 'current'. This one is
   //     reachable on a first load: the CONTACTS list is deliberately NOT status-filtered
   //     (the picker is — see filteredTeachers above), so a former teacher's existing

@@ -50,6 +50,38 @@ export async function sendMessage(
     return { error: 'You can only message teachers assigned to your training.' }
   }
 
+  // NEW349: receiver_type is client-supplied and was previously written to the row
+  // unvalidated. The NEW275 gate above only constrains receiverId (always a profiles.id
+  // of an assigned teacher) — it says nothing about the TYPE claim, so a hostile client
+  // could persist receiver_type 'student' alongside a teacher auth uuid. That mismatch
+  // row is unreadable downstream: the message-file proxy resolves the counterpart by
+  // receiver_type and 403s its attachments. Mirrors the dashboard action's recipient
+  // role-match block: the claim is now server-verified against the recipient's ACTUAL
+  // profile role, so no client-supplied mismatch can reach the insert.
+  //   - 'student' is never legitimate from a student sender (the assignment gate only
+  //     passes teacher profile ids), so reject it outright.
+  //   - 'admin' requires recipientProfile.role === 'admin'.
+  //   - 'teacher' requires an existing profile row whose role is not 'admin'.
+  // Fail closed: a lookup error or a missing row denies rather than falling through.
+  if (receiverType === 'student') {
+    return { error: 'Invalid recipient.' }
+  }
+  const { data: recipientProfile, error: recipientError } = await accessDb
+    .from('profiles')
+    .select('id, role')
+    .eq('id', receiverId)
+    .maybeSingle()
+  if (recipientError) {
+    return { error: 'Could not verify access. Please try again.' }
+  }
+  const roleMatches =
+    receiverType === 'admin'
+      ? recipientProfile?.role === 'admin'
+      : !!recipientProfile && recipientProfile.role !== 'admin'
+  if (!recipientProfile || !roleMatches) {
+    return { error: 'Invalid recipient.' }
+  }
+
   // NEW346: the counterpart account must still be current. The assignment gate above
   // only proves a training_teachers row exists — a FORMER teacher keeps that row, so
   // without this the send succeeds and the new-message email below fires to an account

@@ -47,6 +47,14 @@ export function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd
   return aStart < bEnd && aEnd > bStart
 }
 
+// Total weekly minutes offered via committed general-availability slots. Each
+// general row is one 30-min slot, so the count of rows × 30 is the weekly total.
+// The `temp-` id filter is a client optimistic-UI concern (drag-in-progress
+// placeholders); it is a no-op for server-fetched rows, which never carry temp ids.
+export function weeklyGeneralMinutes(records: { id: string; type: string }[]): number {
+  return records.filter(r => r.type === 'general' && !r.id.startsWith('temp-')).length * 30
+}
+
 // Returns true if every 30-min segment of the requested booking falls within
 // the teacher's set availability. Does NOT check lesson-vs-lesson clash
 // (handled separately) and does NOT enforce the 24h rule (handled separately).

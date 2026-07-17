@@ -27,6 +27,7 @@ export interface AvailabilityRecord {
 interface Props {
   profile: Profile
   initialAvailability: AvailabilityRecord[]
+  minAvailableHours: number | null
 }
 
 type TabId = 'general' | 'daytodday' | 'holidays'
@@ -37,7 +38,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'holidays',   label: 'Holidays' },
 ]
 
-export default function ScheduleClient({ profile, initialAvailability }: Props) {
+export default function ScheduleClient({ profile, initialAvailability, minAvailableHours }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
   // The FULL availability list lives here.
@@ -71,7 +72,7 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
               ].join(' ')}
               style={
                 isActive
-                  ? { backgroundColor: '#FF8303', color: 'white', padding: '9px 16px', borderRadius: '8px' }
+                  ? { backgroundColor: '#FFF3E0', color: '#FF8303', padding: '8px 15px', borderRadius: '8px', border: '1px solid #FFD9A8' }
                   : { padding: '0 4px 10px' }
               }
             >
@@ -81,14 +82,15 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
                   aria-hidden="true"
                   style={{
                     position: 'absolute',
-                    bottom: '-6px',
+                    bottom: '-8px',
                     left: '50%',
                     transform: 'translateX(-50%)',
                     width: 0,
                     height: 0,
-                    borderLeft: '7px solid transparent',
-                    borderRight: '7px solid transparent',
-                    borderTop: '7px solid #FF8303',
+                    borderLeft: '10px solid transparent',
+                    borderRight: '10px solid transparent',
+                    borderTop: '8px solid #FFD9A8',
+                    zIndex: 1,
                   }}
                 />
               )}
@@ -104,6 +106,7 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
             profile={profile}
             availability={availability}
             onAvailabilityChange={setAvailability}
+            minAvailableHours={minAvailableHours}
           />
         )}
         {activeTab === 'daytodday' && (
