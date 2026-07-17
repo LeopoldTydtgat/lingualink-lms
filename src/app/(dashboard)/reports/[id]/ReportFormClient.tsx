@@ -442,7 +442,11 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               <button
                 type="button"
                 onClick={() => setShowGuide(v => !v)}
-                className="w-full flex items-center justify-between bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-left"
+                style={showGuide ? { borderBottom: 'none' } : undefined}
+                className={[
+                  'w-full flex items-center justify-between bg-gray-50 border border-gray-200 px-4 py-3 text-left',
+                  showGuide ? 'rounded-t-xl' : 'rounded-xl',
+                ].join(' ')}
               >
                 <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">CEFR Level Guide</span>
                 <svg
@@ -465,7 +469,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               </button>
               {showGuide && (
                 <div className="bg-gray-50 border border-gray-200 border-t-0 rounded-b-xl p-4">
-                  <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '4px 8px', alignItems: 'start' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr', gap: '4px 8px', alignItems: 'start', paddingLeft: '10rem' }}>
                     {Object.entries(CEFR_DESCRIPTIONS).map(([level, desc]) => (
                       <React.Fragment key={level}>
                         <span className="text-xs font-bold text-gray-800">{level}</span>
@@ -477,26 +481,25 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
-              {SKILLS.map(skill => (
-                <div key={skill.key} className="flex items-center gap-4">
+            <div className="flex flex-col">
+              {SKILLS.map((skill, idx) => (
+                <div
+                  key={skill.key}
+                  className="flex items-center gap-4"
+                  style={{
+                    paddingTop: '10px',
+                    paddingBottom: '10px',
+                    borderBottom: idx === SKILLS.length - 1 ? 'none' : '1px solid #f8f9fa',
+                  }}
+                >
                   <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
                   <LevelTrack
                     value={levelData[skill.key]}
                     onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
                     editable={isEditable}
                   />
-                  {!isEditable && (
-                    levelData[skill.key] ? (
-                      <span
-                        className="inline-flex items-center rounded-full text-xs font-semibold px-3 py-1"
-                        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-                      >
-                        {levelData[skill.key]}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-gray-400">Not assessed</span>
-                    )
+                  {!isEditable && !levelData[skill.key] && (
+                    <span className="text-xs text-gray-400">Not assessed</span>
                   )}
                 </div>
               ))}
