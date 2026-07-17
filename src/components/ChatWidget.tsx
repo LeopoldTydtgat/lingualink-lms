@@ -539,8 +539,8 @@ export default function ChatWidget({
 
   const tabStyle = (tab: 'messages' | 'faq') =>
     activeTab === tab
-      ? { backgroundColor: 'rgba(255,255,255,0.25)', color: 'white', borderRadius: '6px' }
-      : { color: 'rgba(255,255,255,0.65)' }
+      ? { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', borderRadius: '6px' }
+      : { color: '#6b7280', border: '1px solid transparent', borderRadius: '6px' }
 
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
@@ -551,7 +551,7 @@ export default function ChatWidget({
           style={{ width: '360px', height: '520px', border: '1px solid #f3f4f6' }}
         >
           {/* Header */}
-          <div className="px-4 pt-4 pb-0 flex-shrink-0" style={{ backgroundColor: '#FF8303' }}>
+          <div className="px-4 pt-4 pb-0 flex-shrink-0" style={{ backgroundColor: '#ffffff', borderTop: '3px solid #FF8303', borderBottom: '1px solid #E0DFDC' }}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <Avatar name={adminName} photoUrl={adminPhotoUrl} size={9} />
@@ -559,14 +559,14 @@ export default function ChatWidget({
               </div>
               <button
                 onClick={() => { setIsOpen(false); setMessagesLoaded(false) }}
-                className="text-white/80 hover:text-white transition-colors"
+                className="text-gray-400 hover:text-gray-600 transition-colors"
                 aria-label="Close chat"
               >
                 <X size={18} />
               </button>
             </div>
-            <p className="text-white font-semibold text-sm mb-0.5">Questions? Chat with us.</p>
-            <p className="text-white/75 text-xs mb-3">We typically reply within an hour.</p>
+            <p className="text-gray-900 font-semibold text-sm mb-0.5">Questions? Chat with us.</p>
+            <p className="text-gray-500 text-xs mb-3">We typically reply within an hour.</p>
             <div className="flex gap-1 pb-3">
               <button
                 onClick={() => setActiveTab('faq')}
