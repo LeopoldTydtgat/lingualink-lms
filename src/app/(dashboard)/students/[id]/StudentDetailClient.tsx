@@ -60,6 +60,7 @@ type Report = {
 type Assignment = {
   id: string
   assigned_at: string
+  completed: boolean
   study_sheet: {
     title: string
     category: string | null
@@ -94,21 +95,6 @@ function nonCancelledStatusLabel(status: string): string {
       return spaced.charAt(0).toUpperCase() + spaced.slice(1)
     }
   }
-}
-
-function CategoryBadge({ category }: { category: string | null }) {
-  if (!category) return null
-  const style =
-    category.toLowerCase() === 'vocabulary'
-      ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
-      : category.toLowerCase() === 'grammar'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : { backgroundColor: '#f3f4f6', color: '#374151' }
-  return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
-      {category}
-    </span>
-  )
 }
 
 export default function StudentDetailClient({
@@ -312,6 +298,51 @@ export default function StudentDetailClient({
           )}
         </div>
 
+        {/* ── Assigned Study Sheets (read-only) ── */}
+        {assignments.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">
+              Assigned Study Sheets
+              <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
+            </h3>
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Sheet</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Category</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Level</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignments.map(a => (
+                    <tr key={a.id} className="border-b border-gray-50 last:border-0">
+                      <td className="px-4 py-3 font-medium text-gray-900">{a.study_sheet.title}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{a.study_sheet.category ?? '—'}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{a.study_sheet.level ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {new Date(a.assigned_at).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`text-xs px-2 py-1 rounded-full${a.completed ? '' : ' bg-gray-100 text-gray-500'}`}
+                          style={a.completed ? { backgroundColor: '#DCFCE7', color: '#15803D' } : undefined}
+                        >
+                          {a.completed ? 'Completed' : 'Pending'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
       </div>
     )
   }
@@ -496,53 +527,6 @@ export default function StudentDetailClient({
       {activeTab === 'Next Classes' && NextClassesTab()}
       {activeTab === 'Past Classes' && PastClassesTab()}
       {activeTab === 'Messages' && MessagesTab()}
-
-      {/* ── Study Sheets (read-only, always visible below tabs) ── */}
-      {assignments.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">
-            Assigned Study Sheets
-            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
-          </h2>
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Sheet</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Category</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Level</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {assignments.map(a => (
-                  <tr key={a.id} className="border-b border-gray-50 last:border-0">
-                    <td className="px-4 py-3 font-medium text-gray-900">{a.study_sheet.title}</td>
-                    <td className="px-4 py-3">
-                      <CategoryBadge category={a.study_sheet.category} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {a.study_sheet.level && (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                          style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                        >
-                          {a.study_sheet.level}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {new Date(a.assigned_at).toLocaleDateString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
     </div>
   )
