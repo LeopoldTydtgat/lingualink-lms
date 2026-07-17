@@ -246,7 +246,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
             >
               <option value="">All Levels</option>
-              {['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2'].map((l) => (
+              {['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((l) => (
                 <option key={l} value={l}>{l}</option>
               ))}
             </select>

@@ -41,7 +41,7 @@ export type StudySheet = {
   id: string
   title: string
   category: string | null // 'Vocabulary' | 'Grammar'; null for teacher private resources
-  level: string | null    // A1, A1+, A2 ... C2; null for teacher private resources
+  level: string | null    // A1, A2 ... C2; null for teacher private resources
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
   is_active: boolean
@@ -60,7 +60,7 @@ type StudentOption = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
+const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 // Shared by the table header and its rows — they must never drift apart.
 const GRID_COLUMNS = '3% 22% 10% 6% 8% 13% 7% 31%'

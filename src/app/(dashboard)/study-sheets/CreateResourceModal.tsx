@@ -16,7 +16,7 @@ import { X, Trash2, FileText, Upload } from 'lucide-react'
 type Props = { onClose: () => void }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
-const LEVELS = ['A1', 'A1+', 'A2', 'A2+', 'B1', 'B1+', 'B2', 'B2+', 'C1', 'C1+', 'C2']
+const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const ACCEPT = '.pdf,.doc,.docx,.ppt,.pptx'
 const ACCEPT_EXT = ['.pdf', '.doc', '.docx', '.ppt', '.pptx']
 

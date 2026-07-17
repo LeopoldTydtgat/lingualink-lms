@@ -64,11 +64,11 @@ function formatDateTime(iso: string) {
 }
 
 const CEFR_TO_NUM: Record<string, number> = {
-  A1: 1, 'A1+': 1.5,
-  A2: 2, 'A2+': 2.5,
-  B1: 3, 'B1+': 3.5,
-  B2: 4, 'B2+': 4.5,
-  C1: 5, 'C1+': 5.5,
+  A1: 1,
+  A2: 2,
+  B1: 3,
+  B2: 4,
+  C1: 5,
   C2: 6,
 }
 

@@ -73,9 +73,9 @@ interface Props {
 // ─── CEFR level → numeric for radar chart ─────────────────────────────────────
 
 const LEVEL_ORDER = [
-  'A1', 'A1+', 'A2', 'A2+',
-  'B1', 'B1+', 'B2', 'B2+',
-  'C1', 'C1+', 'C2',
+  'A1', 'A2',
+  'B1', 'B2',
+  'C1', 'C2',
 ];
 
 function levelToNumber(level: string | undefined): number {
@@ -208,7 +208,7 @@ export default function PastClassDetailClient({
   const radarData = SKILLS.map((skill) => ({
     skill: skill.label,
     value: levelToNumber(lesson.report?.level_data?.[skill.key]),
-    fullMark: 11,
+    fullMark: 6,
   }));
 
   const hasLevelData =
