@@ -301,6 +301,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const router = useRouter()
 
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
+  const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
   const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
@@ -396,6 +397,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   }
 
   async function handleDismissBanner() {
+    setIsDismissing(true)
     try {
       const res = await fetch('/api/profile/dismiss-banner', { method: 'POST' })
       if (!res.ok) {
@@ -404,6 +406,8 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       }
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
+    } finally {
+      setIsDismissing(false)
     }
     setShowProfileBanner(false)
   }
@@ -433,7 +437,8 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           </p>
           <button
             onClick={handleDismissBanner}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0 }}
+            disabled={isDismissing}
+            style={{ background: 'none', border: 'none', cursor: isDismissing ? 'wait' : 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0, opacity: isDismissing ? 0.5 : 1 }}
             aria-label="Dismiss"
           >
             ×

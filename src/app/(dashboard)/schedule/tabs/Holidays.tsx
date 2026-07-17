@@ -37,6 +37,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
   const [error, setError] = useState('')
   const [deleteError, setDeleteError] = useState('')
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Filter down to just holiday records for display
   const holidays = availability.filter(a => a.type === 'holiday')
@@ -93,13 +94,18 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
   async function confirmDelete() {
     if (!pendingDelete) return
     setDeleteError('')
-    const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
-    if (res.ok) {
-      onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
-    } else {
-      setDeleteError('Failed to remove this holiday period. Please try again.')
+    setIsDeleting(true)
+    try {
+      const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
+      if (res.ok) {
+        onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
+      } else {
+        setDeleteError('Failed to remove this holiday period. Please try again.')
+      }
+      setPendingDelete(null)
+    } finally {
+      setIsDeleting(false)
     }
-    setPendingDelete(null)
   }
 
   return (
@@ -309,13 +315,14 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
               </button>
               <button
                 onClick={confirmDelete}
+                disabled={isDeleting}
                 style={{
                   padding: '8px 20px', borderRadius: '6px', border: 'none',
                   backgroundColor: '#DC2626', color: '#ffffff', fontSize: '13px',
-                  fontWeight: '600', cursor: 'pointer',
+                  fontWeight: '600', cursor: isDeleting ? 'wait' : 'pointer', opacity: isDeleting ? 0.7 : 1,
                 }}
               >
-                Remove
+                {isDeleting ? 'Removing...' : 'Remove'}
               </button>
             </div>
           </div>

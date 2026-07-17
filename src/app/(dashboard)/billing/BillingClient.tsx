@@ -150,6 +150,7 @@ export default function BillingClient({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [targetInvoice, setTargetInvoice] = useState<{ id: string; billing_month: string } | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [viewingInvoiceId, setViewingInvoiceId] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null)
 
@@ -233,14 +234,19 @@ export default function BillingClient({
     // Signing happens server-side. The browser client can't read invoices
     // outside RLS, and we want admin viewing to work without exposing private
     // file paths to the page.
-    const res = await fetch('/api/teacher/invoice/sign-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceId }),
-    })
-    if (!res.ok) return
-    const { signedUrl } = await res.json()
-    if (signedUrl) window.open(signedUrl, '_blank')
+    setViewingInvoiceId(invoiceId)
+    try {
+      const res = await fetch('/api/teacher/invoice/sign-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId }),
+      })
+      if (!res.ok) return
+      const { signedUrl } = await res.json()
+      if (signedUrl) window.open(signedUrl, '_blank')
+    } finally {
+      setViewingInvoiceId(null)
+    }
   }
 
   const handleMarkPaid = async (invoiceId: string) => {
@@ -500,9 +506,10 @@ export default function BillingClient({
                     <>
                       <button
                         onClick={() => handleViewInvoice(invoice.id)}
-                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                        disabled={viewingInvoiceId === invoice.id}
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
-                        View Invoice
+                        {viewingInvoiceId === invoice.id ? 'Opening...' : 'View Invoice'}
                       </button>
                       <div className="flex items-center gap-1.5 text-sm text-gray-500">
                         <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">

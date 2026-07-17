@@ -306,6 +306,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // the two can disagree by a day.
   const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(tzTodayDate(displayTz)))
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [classDetail, setClassDetail] = useState<{
     studentName: string
     dayIdx: number
@@ -692,6 +694,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   async function confirmDelete() {
     if (!pendingDelete) return
     const id = pendingDelete
+    setIsDeleting(true)
     try {
       const res = await fetch(`/api/teacher/availability/${id}`, { method: 'DELETE' })
       if (res.ok || res.status === 404) {
@@ -708,10 +711,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       setActionError('Failed to remove block. Please try again.')
     } finally {
       setPendingDelete(null)
+      setIsDeleting(false)
     }
   }
 
   async function exportClassesToCalendar() {
+    setIsExporting(true)
     try {
       const nowIso = new Date().toISOString()
       const upcoming = await fetchClassesInRange(nowIso)
@@ -755,6 +760,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     } catch {
       setExportMsg('Could not load classes — please try again')
       setTimeout(() => setExportMsg(''), 3000)
+    } finally {
+      setIsExporting(false)
     }
   }
 
@@ -972,6 +979,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           )}
           <button
             onClick={exportClassesToCalendar}
+            disabled={isExporting}
             title={`Exports all your upcoming classes as a calendar file. All times shown in ${displayTz}.`}
             style={{
               display: 'inline-flex',
@@ -984,11 +992,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
               borderRadius: '8px',
               fontSize: '13px',
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: isExporting ? 'wait' : 'pointer',
+              opacity: isExporting ? 0.7 : 1,
             }}
           >
             <Download size={14} />
-            Export
+            {isExporting ? 'Exporting...' : 'Export'}
           </button>
         </div>
       </div>
@@ -1433,13 +1442,14 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
               </button>
               <button
                 onClick={confirmDelete}
+                disabled={isDeleting}
                 style={{
                   padding: '8px 20px', borderRadius: '6px', border: 'none',
                   backgroundColor: '#DC2626', color: '#ffffff', fontSize: '13px',
-                  fontWeight: '600', cursor: 'pointer',
+                  fontWeight: '600', cursor: isDeleting ? 'wait' : 'pointer', opacity: isDeleting ? 0.7 : 1,
                 }}
               >
-                Remove
+                {isDeleting ? 'Removing...' : 'Remove'}
               </button>
             </div>
           </div>
