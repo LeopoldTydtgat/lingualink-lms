@@ -117,6 +117,42 @@ function FaqAccordion({ faqs }: { faqs: FaqItem[] }) {
   )
 }
 
+// ─── Read ticks ─────────────────────────────────────────────
+// Single tick = sent (grey). Double tick = read (orange).
+// Only shown on messages sent by the current user.
+function ReadTicks({
+  readAt,
+  variant = 'default',
+  className = 'ml-1',
+}: {
+  readAt: string | null
+  variant?: 'default' | 'bubble'
+  className?: string
+}) {
+  const single = variant === 'bubble' ? 'rgba(255,255,255,0.7)' : '#9ca3af'
+  const double = '#FF8303'
+  if (readAt) {
+    return (
+      <span className={`inline-flex items-center gap-0.5 ${className}`} aria-label="Read">
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </span>
+    )
+  }
+  return (
+    <span className={`inline-flex items-center ${className}`} aria-label="Sent">
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke={single} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    </span>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ChatWidget({
@@ -568,6 +604,7 @@ export default function ChatWidget({
                   messages.map(msg => {
                     const isFromMe = msg.sender_role === 'user'
                     const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
+                    const isBubbleTicked = isFromMe && hasContent && !isEmojiOnly(msg.content)
                     return (
                       <div
                         key={msg.id}
@@ -607,16 +644,26 @@ export default function ChatWidget({
                           ) : (
                           <>
                           {hasContent && (
-                          <div
-                            className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
-                            style={isEmojiOnly(msg.content)
-                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
-                              : isFromMe
-                              ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #f3f4f6', borderBottomLeftRadius: '4px' }
-                            }
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
-                          />
+                            isBubbleTicked ? (
+                              <div
+                                className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed inline-flex items-end"
+                                style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
+                              >
+                                <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                                <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
+                              </div>
+                            ) : (
+                              <div
+                                className="widget-bubble px-3 py-2 rounded-2xl text-sm leading-relaxed"
+                                style={isEmojiOnly(msg.content)
+                                  ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                                  : isFromMe
+                                  ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                                  : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #f3f4f6', borderBottomLeftRadius: '4px' }
+                                }
+                                dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
+                              />
+                            )
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className={`flex flex-col gap-0.5 ${hasContent ? 'mt-1' : ''} ${isFromMe ? 'items-end' : 'items-start'}`}>
@@ -654,15 +701,7 @@ export default function ChatWidget({
                               <span className="text-xs text-gray-400 italic">(edited)</span>
                             )}
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
-                            {isFromMe && (
-                              <span
-                                className="text-xs font-bold leading-none"
-                                style={{ color: msg.read_at ? '#FF8303' : '#9ca3af' }}
-                                title={msg.read_at ? 'Read' : 'Sent'}
-                              >
-                                {msg.read_at ? '✓✓' : '✓'}
-                              </span>
-                            )}
+                            {isFromMe && !isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
                         </div>
                       </div>
