@@ -32,6 +32,9 @@ interface StudentLeftNavProps {
 // Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
 // state. While the clicked route loads, dim the row and swap the icon for a
 // spinner. `student-nav-icon` stays on the icon so hover-translate still works.
+// Mirrors the teacher LeftNav NavContent exactly: active rows are peach-bg with
+// #FF8303 text/icon, so the pending cue is a plain orange tint on both active and
+// inactive rows (no active-vs-inactive guard needed).
 function StudentNavContent({
   Icon,
   label,
@@ -53,19 +56,19 @@ function StudentNavContent({
         width: '100%',
         transition: 'opacity .18s ease',
         opacity: pending ? 0.55 : 1,
-        // Mirror LeftNav's pending-orange cue. Active rows are white-on-orange, so
-        // orange text there would be invisible — restrict the tint to inactive rows;
-        // the active spinner already stays white. Inline style, never a Tailwind class.
-        color: pending && !active ? '#FF8303' : undefined,
+        // Pending → orange text on both states. Inactive rows inherit #4b5563 when
+        // idle; active rows already inherit #FF8303 from the Link. Inline style,
+        // never a Tailwind class.
+        color: pending ? '#FF8303' : undefined,
       }}
     >
       {pending ? (
-        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#ffffff' : '#9ca3af' }} />
+        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#FF8303' : '#9ca3af' }} />
       ) : (
         <Icon
           size={18}
           className={!active ? 'student-nav-icon' : undefined}
-          style={{ color: active ? '#ffffff' : '#9ca3af' }}
+          style={{ color: active ? '#FF8303' : '#9ca3af' }}
         />
       )}
       {label}
@@ -73,8 +76,8 @@ function StudentNavContent({
         <span
           style={{
             marginLeft: 'auto',
-            backgroundColor: active ? '#ffffff' : '#FF8303',
-            color: active ? '#FF8303' : '#ffffff',
+            backgroundColor: '#FF8303',
+            color: '#ffffff',
             fontSize: '10px',
             fontWeight: 700,
             minWidth: '18px',
@@ -151,7 +154,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
     >
       <style>{`
         .student-nav-item { transition: background-color .18s ease; }
-        .student-nav-item:hover { background-color: rgba(0,0,0,0.04); }
+        .student-nav-item:hover { background-color: #E0DFDC; }
         .student-nav-icon { transition: transform .18s ease; }
         .student-nav-item:hover .student-nav-icon { transform: translateX(2px); }
         @media (prefers-reduced-motion: reduce) {
@@ -159,14 +162,17 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
           .student-nav-item:hover .student-nav-icon { transform: none; }
         }
       `}</style>
-      {/* Logo area - matches the height of the orange header on the right */}
+      {/* Logo area — white with a bottom hairline that aligns with the header,
+          matching the teacher LeftNav. */}
       <div
         style={{
-          height: '72px', background: 'linear-gradient(to right, #ffffff, #fff3e8)',
+          height: '72px',
+          background: '#ffffff',
+          borderBottom: '1px solid #E0DFDC',
           display: 'flex',
           alignItems: 'center',
-          padding: '0 16px', justifyContent: 'center',
-
+          padding: '0 16px',
+          justifyContent: 'center',
           flexShrink: 0,
         }}
       >
@@ -195,8 +201,12 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 margin: '2px 8px',
                 fontSize: '14px',
                 fontWeight: isActive ? '600' : '500',
-                color: isActive ? '#ffffff' : '#4b5563',
-                backgroundColor: isActive ? '#FF8303' : undefined,
+                // Active state copied from the teacher LeftNav: peach bg (#FFF0E0),
+                // orange text/border-left, arrow clip. Inactive keeps the 3px
+                // transparent border so widths never shift between states.
+                color: isActive ? '#FF8303' : '#4b5563',
+                backgroundColor: isActive ? '#FFF0E0' : undefined,
+                borderLeft: isActive ? '3px solid #FF8303' : '3px solid transparent',
                 textDecoration: 'none',
                 borderRadius: '6px',
                 clipPath: isActive ? 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' : undefined,

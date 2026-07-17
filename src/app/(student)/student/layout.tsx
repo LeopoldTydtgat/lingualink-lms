@@ -142,38 +142,44 @@ export default async function StudentDashboardLayout({
   })
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      {/* Sidebar runs full height - logo lives here */}
-      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* Full-width gradient accent line — sits above nav + header (matches the teacher layout) */}
+      <div style={{ height: '6px', background: 'linear-gradient(90deg, #FFB942, #FF8303, #FD5602)', flexShrink: 0 }} />
 
-      {/* Right side: header on top, then content row below */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        <StudentTopHeader
-          studentName={student.full_name}
-          photoUrl={student.photo_url ?? null}
-        />
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
-            <AnnouncementBanner
-              announcements={announcements}
-              userType="student"
-              userId={student.id}
-            />
-            <div style={{ padding: '32px' }}>
-              {children}
-            </div>
-          </main>
-          <StudentRightPanel
-            studentId={student.id}
-            studentTimezone={studentTimezone}
-            nextLesson={nextLesson ?? null}
-            teacherName={nextLessonTeacherName}
-            hoursRemaining={hoursRemaining}
-            totalHours={training?.total_hours ?? 0}
-            trainingEndDate={training?.end_date ?? null}
-            assignedExercises={assignedCount ?? 0}
-            completedExercises={completedCount ?? 0}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* Sidebar runs full height - logo lives here */}
+        <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
+
+        {/* Right side: header on top, then content row below */}
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <StudentTopHeader
+            studentName={student.full_name}
+            photoUrl={student.photo_url ?? null}
+            unreadMessageCount={unreadMessageCount ?? 0}
           />
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
+              <AnnouncementBanner
+                announcements={announcements}
+                userType="student"
+                userId={student.id}
+              />
+              <div style={{ padding: '32px' }}>
+                {children}
+              </div>
+            </main>
+            <StudentRightPanel
+              studentId={student.id}
+              studentTimezone={studentTimezone}
+              nextLesson={nextLesson ?? null}
+              teacherName={nextLessonTeacherName}
+              hoursRemaining={hoursRemaining}
+              totalHours={training?.total_hours ?? 0}
+              trainingEndDate={training?.end_date ?? null}
+              assignedExercises={assignedCount ?? 0}
+              completedExercises={completedCount ?? 0}
+            />
+          </div>
         </div>
       </div>
 
