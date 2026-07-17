@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 type Student = {
   id: string
@@ -37,6 +39,10 @@ type Lesson = {
   status: string
   teams_join_url: string | null
   teacher_id: string
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   profiles: { full_name: string } | null
 }
 
@@ -54,6 +60,7 @@ type Report = {
 type Assignment = {
   id: string
   assigned_at: string
+  completed: boolean
   study_sheet: {
     title: string
     category: string | null
@@ -74,19 +81,35 @@ type Props = {
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
 
-function CategoryBadge({ category }: { category: string | null }) {
-  if (!category) return null
-  const style =
-    category.toLowerCase() === 'vocabulary'
-      ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
-      : category.toLowerCase() === 'grammar'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
-      : { backgroundColor: '#f3f4f6', color: '#374151' }
-  return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
-      {category}
-    </span>
-  )
+// Past Classes filter chips (order shown left-to-right).
+const PAST_FILTERS = ['All', 'Class taken', 'No report', 'Absent', 'Cancelled'] as const
+
+// Bucket a past lesson for the filter chips. Cancelled (incl. reschedule legs)
+// wins first; then a report decides taken vs absent; otherwise no report.
+function pastLessonCategory(
+  cancelled: boolean,
+  report: Report | undefined
+): 'Cancelled' | 'Class taken' | 'Absent' | 'No report' {
+  if (cancelled) return 'Cancelled'
+  if (report && report.did_class_happen) return 'Class taken'
+  if (report && !report.did_class_happen) return 'Absent'
+  return 'No report'
+}
+
+// Label for a NON-cancelled lesson status. Cancelled-family rows are handled
+// separately via getCancellationLabel; this never receives them.
+function nonCancelledStatusLabel(status: string): string {
+  switch (status) {
+    case 'scheduled': return 'Scheduled'
+    case 'completed': return 'Completed'
+    case 'student_no_show': return 'Student absent'
+    case 'teacher_no_show': return 'Teacher absent'
+    case 'missed': return 'Missed'
+    default: {
+      const spaced = status.replace(/_/g, ' ')
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+    }
+  }
 }
 
 export default function StudentDetailClient({
@@ -105,6 +128,9 @@ export default function StudentDetailClient({
   const [editingNotes, setEditingNotes] = useState(false)
   const [isSavingNotes, setIsSavingNotes] = useState(false)
   const [notesError, setNotesError] = useState('')
+  const [pastFilter, setPastFilter] = useState<string>('All')
+  // null => use the default collapse (newest month expanded, all others collapsed).
+  const [collapsedMonths, setCollapsedMonths] = useState<Set<string> | null>(null)
 
   async function handleSaveNotes() {
     if (!student) return
@@ -158,7 +184,7 @@ export default function StudentDetailClient({
   // ── TAB: General Info ──────────────────────────────────────────
   function GeneralInfoTab() {
     return (
-      <div className="space-y-6">
+      <div className="space-y-8">
 
         <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
           <div className="bg-white rounded-xl shadow-sm p-4 text-center" style={{ border: '1px solid #f3f4f6' }}>
@@ -192,53 +218,66 @@ export default function StudentDetailClient({
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
-          <h3 className="font-semibold text-gray-900">Training Details</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="text-gray-500">Package</p>
-              <p className="font-medium text-gray-900">{training.package_type ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Status</p>
-              <p className="font-medium capitalize text-gray-900">{training.status}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Assigned Teachers</p>
-              <p className="font-medium text-gray-900">{assignedTeacherNames.length ? assignedTeacherNames.join(', ') : '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Student Level (self-assessed)</p>
-              <p className="font-medium text-gray-900">{student?.self_assessed_level ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Timezone</p>
-              <p className="font-medium text-gray-900">{student?.timezone ?? '—'}</p>
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h3 className="text-base font-semibold text-gray-900">Training Details</h3>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-gray-500">Package</p>
+                <p className="font-medium text-gray-900">{training.package_type ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Status</p>
+                <p className="font-medium capitalize text-gray-900">{training.status}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Assigned Teachers</p>
+                <p className="font-medium text-gray-900">{assignedTeacherNames.length ? assignedTeacherNames.join(', ') : '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Student Level (self-assessed)</p>
+                <p className="font-medium text-gray-900">{student?.self_assessed_level ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Timezone</p>
+                <p className="font-medium text-gray-900">{student?.timezone ?? '—'}</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
-          <h3 className="font-semibold text-gray-900">Learning Profile</h3>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="text-gray-500">Learning Goals</p>
-              <p className="font-medium text-gray-900">{student?.learning_goals ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Interests</p>
-              <p className="font-medium text-gray-900">{student?.interests ?? '—'}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Language Preference</p>
-              <p className="font-medium text-gray-900">{student?.language_preference ?? '—'}</p>
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h3 className="text-base font-semibold text-gray-900">Learning Profile</h3>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <p className="text-gray-500">Learning Goals</p>
+                <p className="font-medium text-gray-900">{student?.learning_goals ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Interests</p>
+                <p className="font-medium text-gray-900">{student?.interests ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">Language Preference</p>
+                <p className="font-medium text-gray-900">{student?.language_preference ?? '—'}</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-gray-900">Notes</h3>
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h3 className="text-base font-semibold text-gray-900">Notes</h3>
+            </div>
             {!editingNotes && (
               <button
                 onClick={() => setEditingNotes(true)}
@@ -248,6 +287,7 @@ export default function StudentDetailClient({
               </button>
             )}
           </div>
+          <div className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
           {editingNotes ? (
             <div className="space-y-2">
               <textarea
@@ -288,7 +328,56 @@ export default function StudentDetailClient({
               {notes || <span className="text-gray-400 italic">No notes yet.</span>}
             </p>
           )}
+          </div>
         </div>
+
+        {/* ── Assigned Study Sheets (read-only) ── */}
+        {assignments.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h3 className="text-base font-semibold text-gray-900">
+                Assigned Study Sheets
+                <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
+              </h3>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Sheet</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Category</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Level</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assignments.map(a => (
+                    <tr key={a.id} className="border-b border-gray-50 last:border-0">
+                      <td className="px-4 py-3 font-medium text-gray-900">{a.study_sheet.title}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{a.study_sheet.category ?? '—'}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{a.study_sheet.level ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {new Date(a.assigned_at).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`text-xs px-2 py-1 rounded-full${a.completed ? '' : ' bg-gray-100 text-gray-500'}`}
+                          style={a.completed ? { backgroundColor: '#DCFCE7', color: '#15803D' } : undefined}
+                        >
+                          {a.completed ? 'Completed' : 'Pending'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
       </div>
     )
@@ -311,14 +400,16 @@ export default function StudentDetailClient({
             </div>
             <div className="flex gap-2">
               <span
-                className="text-xs px-2 py-1 rounded-full border capitalize"
+                className="text-xs px-2 py-1 rounded-full border"
                 style={
                   lesson.status === 'scheduled'
                     ? { borderColor: '#FF8303', color: '#FF8303' }
                     : { borderColor: '#d1d5db', color: '#6b7280' }
                 }
               >
-                {lesson.status}
+                {isCancelledStatus(lesson.status)
+                  ? getCancellationLabel(lesson, 'teacher') ?? 'Cancelled'
+                  : nonCancelledStatusLabel(lesson.status)}
               </span>
             </div>
           </div>
@@ -332,50 +423,164 @@ export default function StudentDetailClient({
     if (pastLessons.length === 0) {
       return <p className="text-sm text-gray-400 text-center py-12">No past classes yet.</p>
     }
+
+    // Chip counts from the FULL past set (not the filtered view).
+    const counts: Record<string, number> = { All: pastLessons.length, 'Class taken': 0, 'No report': 0, Absent: 0, Cancelled: 0 }
+    for (const l of pastLessons) {
+      const cat = pastLessonCategory(isCancelledStatus(l.status), reportsByLessonId[l.id])
+      counts[cat] += 1
+    }
+
+    // Filtered set that feeds the grouped view.
+    const filtered = pastFilter === 'All'
+      ? pastLessons
+      : pastLessons.filter(l => pastLessonCategory(isCancelledStatus(l.status), reportsByLessonId[l.id]) === pastFilter)
+
+    // Group by month (local time). Newest month first; newest lesson first within a month.
+    const groupMap = new Map<string, { key: string; label: string; lessons: Lesson[] }>()
+    for (const lesson of filtered) {
+      const d = new Date(lesson.scheduled_at)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      let group = groupMap.get(key)
+      if (!group) {
+        const labelDate = new Date(d.getFullYear(), d.getMonth(), 1)
+        group = { key, label: labelDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), lessons: [] }
+        groupMap.set(key, group)
+      }
+      group.lessons.push(lesson)
+    }
+    const groups = [...groupMap.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
+    for (const g of groups) {
+      g.lessons.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+    }
+
+    // Default collapse: newest month expanded, all others collapsed. null state uses this.
+    const defaultCollapsed = new Set(groups.slice(1).map(g => g.key))
+    const effectiveCollapsed = collapsedMonths ?? defaultCollapsed
+
+    function toggleMonth(key: string) {
+      setCollapsedMonths(prev => {
+        const next = new Set(prev ?? defaultCollapsed)
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+        return next
+      })
+    }
+
     return (
-      <div className="space-y-3">
-        {[...pastLessons].reverse().map(lesson => {
-          const report = reportsByLessonId[lesson.id]
-          return (
-            <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
-                {report ? (
-                  <span
-                    className="text-xs px-2 py-1 rounded-full"
-                    style={
-                      report.did_class_happen
-                        ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-                        : report.no_show_type === 'student'
-                        ? { backgroundColor: '#FFF8E8', color: '#B45309' }
-                        : { backgroundColor: '#FFEEE6', color: '#FD5602' }
-                    }
+      <div className="space-y-4">
+        {/* Filter chips */}
+        <div className="flex flex-wrap gap-2">
+          {PAST_FILTERS.map(f => {
+            const active = pastFilter === f
+            return (
+              <button
+                key={f}
+                onClick={() => { setPastFilter(f); setCollapsedMonths(null) }}
+                className="text-xs px-3 py-1.5 rounded-full border transition-colors"
+                style={
+                  active
+                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
+                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#d1d5db' }
+                }
+              >
+                {f}
+                <span className="ml-1.5 opacity-80">{counts[f]}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {groups.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-12">No classes match this filter.</p>
+        ) : (
+          <div className="space-y-4">
+            {groups.map(group => {
+              const collapsed = effectiveCollapsed.has(group.key)
+              return (
+                <div key={group.key} className="space-y-3">
+                  <button
+                    onClick={() => toggleMonth(group.key)}
+                    className="w-full flex items-center justify-between px-1 py-1 text-left"
                   >
-                    {report.did_class_happen
-                      ? 'Class taken'
-                      : report.no_show_type === 'student'
-                      ? 'Student absent'
-                      : report.no_show_type === 'teacher'
-                      ? 'Teacher absent'
-                      : 'Class missed'}
-                  </span>
-                ) : (
-                  <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">
-                    No report
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-500">
-                By {lesson.profiles?.full_name ?? 'Unknown teacher'} · {lesson.duration_minutes} min
-              </p>
-              {report?.feedback_text && (
-                <p className="text-sm text-gray-600 mt-2 line-clamp-2 italic">
-                  &ldquo;{report.feedback_text}&rdquo;
-                </p>
-              )}
-            </div>
-          )
-        })}
+                    <span className="flex items-center gap-2">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                        className="text-gray-400"
+                        style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}
+                      >
+                        <path d="M6 9l6 6 6-6"/>
+                      </svg>
+                      <span className="font-semibold text-gray-900">{group.label}</span>
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {group.lessons.length} {group.lessons.length === 1 ? 'class' : 'classes'}
+                    </span>
+                  </button>
+
+                  {!collapsed && (
+                    <div className="space-y-3">
+                      {group.lessons.map(lesson => {
+                        const report = reportsByLessonId[lesson.id]
+                        const cancelled = isCancelledStatus(lesson.status)
+                        return (
+                          <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
+                              {cancelled ? (
+                                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+                                  {getCancellationLabel(lesson, 'teacher') ?? 'Cancelled'}
+                                </span>
+                              ) : report ? (
+                                <span
+                                  className="text-xs px-2 py-1 rounded-full"
+                                  style={
+                                    report.did_class_happen
+                                      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                                      : report.no_show_type === 'student'
+                                      ? { backgroundColor: '#FFF8E8', color: '#B45309' }
+                                      : { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                                  }
+                                >
+                                  {report.did_class_happen
+                                    ? 'Class taken'
+                                    : report.no_show_type === 'student'
+                                    ? 'Student absent'
+                                    : report.no_show_type === 'teacher'
+                                    ? 'Teacher absent'
+                                    : 'Class missed'}
+                                </span>
+                              ) : (
+                                <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+                                  No report
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              By {lesson.profiles?.full_name ?? 'Unknown teacher'} · {lesson.duration_minutes} min
+                            </p>
+                            {cancelled && lesson.cancelled_at && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                Cancelled {formatDate(lesson.cancelled_at)}
+                                {lesson.cancellation_reason ? ` · ${lesson.cancellation_reason}` : ''}
+                              </p>
+                            )}
+                            {!cancelled && report?.feedback_text && (
+                              <p className="text-sm text-gray-600 mt-2 line-clamp-2 italic">
+                                &ldquo;{report.feedback_text}&rdquo;
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     )
   }
@@ -461,53 +666,6 @@ export default function StudentDetailClient({
       {activeTab === 'Next Classes' && NextClassesTab()}
       {activeTab === 'Past Classes' && PastClassesTab()}
       {activeTab === 'Messages' && MessagesTab()}
-
-      {/* ── Study Sheets (read-only, always visible below tabs) ── */}
-      {assignments.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">
-            Assigned Study Sheets
-            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
-          </h2>
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Sheet</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Category</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Level</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
-                </tr>
-              </thead>
-              <tbody>
-                {assignments.map(a => (
-                  <tr key={a.id} className="border-b border-gray-50 last:border-0">
-                    <td className="px-4 py-3 font-medium text-gray-900">{a.study_sheet.title}</td>
-                    <td className="px-4 py-3">
-                      <CategoryBadge category={a.study_sheet.category} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {a.study_sheet.level && (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                          style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                        >
-                          {a.study_sheet.level}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {new Date(a.assigned_at).toLocaleDateString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                      })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
     </div>
   )

@@ -6,6 +6,10 @@
 // reports, low hours, ending trainings, missing invoice) are current-state and
 // are not windowed. Cap 6, attention items first, then newest first.
 //
+// Dismissed items (per-teacher rows in whats_new_dismissals, keyed by the item
+// id) are filtered out BEFORE the cap, so dismissing one item surfaces the next
+// older one rather than leaving a gap.
+//
 // Date rules (root CLAUDE.md): booked-class time is formatted in the teacher's
 // account timezone via utcInstantToTzParts — never toISOString for local dates,
 // never toLocaleTimeString. Date-only columns (end_date, billing_month) are
@@ -101,6 +105,7 @@ export async function fetchWhatsNew(
     flaggedRes,
     paidRes,
     curMonthInvoiceRes,
+    dismissalsRes,
   ] = await Promise.all([
     // All of this teacher's training assignments — assigned_at drives the "new
     // student" event; the training ids also drive the hours-low / ending checks.
@@ -151,10 +156,21 @@ export async function fetchWhatsNew(
       .eq('billing_month', currentMonthKey)
       .limit(1)
       .maybeSingle(),
+    // Per-teacher dismissed item keys — filtered out before the cap below. RLS on
+    // whats_new_dismissals already scopes to the teacher; the explicit eq mirrors
+    // every other query here and keeps the intent obvious.
+    supabase
+      .from('whats_new_dismissals')
+      .select('item_key')
+      .eq('teacher_id', teacherId),
   ])
 
   const ttRows = ttRes.data ?? []
   const trainingIds = [...new Set(ttRows.map((r) => r.training_id))]
+
+  // Set of dismissed item keys (== WhatsNewItem.id). Used to drop items before
+  // the slice, so dismissing one reveals the next older item.
+  const dismissedKeys = new Set((dismissalsRes.data ?? []).map((r) => r.item_key))
 
   // Lessons referenced by the reopened/flagged reports — for the student name and
   // class day woven into those texts.
@@ -238,7 +254,7 @@ export async function fetchWhatsNew(
       id: `booked-${l.id}`,
       kind: 'class_booked',
       text: `${nameOf(l.student_id)} booked a class - ${formatClassMoment(l.scheduled_at, tz)}`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.created_at,
     })
   }
@@ -254,7 +270,7 @@ export async function fetchWhatsNew(
       text: shortNotice
         ? `${nameOf(l.student_id)} cancelled within 24hr - you are paid for this class`
         : `${nameOf(l.student_id)} cancelled a class`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.cancelled_at,
     })
   }
@@ -266,7 +282,7 @@ export async function fetchWhatsNew(
       id: `rescheduled-${l.id}`,
       kind: 'class_rescheduled',
       text: `${nameOf(l.student_id)} rescheduled a class`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.rescheduled_at,
     })
   }
@@ -364,13 +380,17 @@ export async function fetchWhatsNew(
     }
   }
 
-  // Attention items first, then newest first.
-  items.sort((a, b) => {
+  // Drop dismissed items BEFORE the cap so dismissing surfaces the next older
+  // item instead of leaving a gap. Then sort (attention first, newest first) and
+  // slice to the display cap.
+  const visibleItems = items.filter((i) => !dismissedKeys.has(i.id))
+
+  visibleItems.sort((a, b) => {
     if (!!a.attention !== !!b.attention) return a.attention ? -1 : 1
     return new Date(b.at).getTime() - new Date(a.at).getTime()
   })
 
-  return items.slice(0, 6)
+  return visibleItems.slice(0, 6)
 }
 
 // True iff a date-only 'YYYY-MM-DD' end date is between today and `days` days out

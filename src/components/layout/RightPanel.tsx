@@ -2,13 +2,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2 } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
 import { WeekGridSpot } from '@/components/WeekGridSpot'
+import { dismissWhatsNewItem } from '@/app/(dashboard)/actions/whatsNewDismiss'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -110,10 +111,17 @@ export default function RightPanel({
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
+  const pathname = usePathname()
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState(0)
   const [joinHovered, setJoinHovered] = useState(false)
+  const [viewAllHovered, setViewAllHovered] = useState(false)
+  // Optimistically hidden keys: rows the user just dismissed, removed immediately
+  // while the server write + router.refresh() catch up. Cleared naturally once the
+  // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys).
+  // Mirrors NotificationsBell so both surfaces get the same per-item cross.
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
 
   const panelRef = useRef<HTMLElement>(null)
 
@@ -160,11 +168,35 @@ export default function RightPanel({
   // What's New seen split. The panel is passive — it never stamps; it only reads
   // the server-provided marker to separate fresh from already-seen items. ISO UTC
   // strings compare lexicographically in chronological order. Order within each
-  // group is preserved from fetchWhatsNew (attention first, then newest). Seen
-  // items are capped at 2 under an "Earlier" divider.
+  // group is preserved from fetchWhatsNew (attention first, then newest). The
+  // panel shows at most 3 items total: unseen first, then seen items fill any
+  // remaining slots under an "Earlier" divider. "View all" opens the bell for
+  // the rest.
   const isWhatsNewSeen = (item: WhatsNewItem) => whatsNewSeenAt != null && item.at <= whatsNewSeenAt
-  const unseenWhatsNew = whatsNewItems.filter((i) => !isWhatsNewSeen(i))
-  const seenWhatsNew = whatsNewItems.filter((i) => isWhatsNewSeen(i)).slice(0, 2)
+  // Exclude optimistically-dismissed rows BEFORE slicing so hiding one surfaces
+  // the next within the 3-item cap.
+  const visibleWhatsNew = whatsNewItems.filter((i) => !hiddenKeys.has(i.id))
+  const unseenWhatsNew = visibleWhatsNew.filter((i) => !isWhatsNewSeen(i)).slice(0, 3)
+  const seenWhatsNew = visibleWhatsNew
+    .filter((i) => isWhatsNewSeen(i))
+    .slice(0, Math.max(0, 3 - unseenWhatsNew.length))
+
+  // Dismiss one item: hide it locally for instant feedback, AWAIT the write, then
+  // refresh so the server feed becomes the source of truth. Same await-then-refresh
+  // order as NotificationsBell.handleDismiss.
+  const handleDismiss = async (key: string) => {
+    setHiddenKeys((prev) => {
+      const next = new Set(prev)
+      next.add(key)
+      return next
+    })
+    try {
+      await dismissWhatsNewItem(key)
+    } catch {
+      // write failed; the next full load will restore the row honestly
+    }
+    router.refresh()
+  }
 
   // Availability ring. All inputs are server props (no Date, no state) so this is
   // hydration-safe. pct is null when there is no numeric target — the card then
@@ -391,7 +423,11 @@ export default function RightPanel({
                   item={item}
                   mounted={mounted}
                   seen={false}
-                  onClick={() => router.push(item.href)}
+                  onDismiss={() => handleDismiss(item.id)}
+                  onClick={() => {
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
+                  }}
                 />
               ))}
               {seenWhatsNew.length > 0 && (
@@ -406,12 +442,38 @@ export default function RightPanel({
                       item={item}
                       mounted={mounted}
                       seen={true}
-                      onClick={() => router.push(item.href)}
+                      onDismiss={() => handleDismiss(item.id)}
+                      onClick={() => {
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
+                  }}
                     />
                   ))}
                 </>
               )}
             </div>
+          )}
+          {whatsNewItems.length > 3 && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('open-whats-new'))}
+              onMouseEnter={() => setViewAllHovered(true)}
+              onMouseLeave={() => setViewAllHovered(false)}
+              style={{
+                marginTop: '8px',
+                alignSelf: 'flex-start',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: viewAllHovered ? '#FD5602' : '#FF8303',
+                backgroundColor: 'transparent',
+                border: 'none',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                transition: 'color 0.15s ease',
+              }}
+            >
+              View all
+            </button>
           )}
         </section>
 

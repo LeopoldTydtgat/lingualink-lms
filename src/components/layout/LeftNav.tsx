@@ -3,7 +3,7 @@
 import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
-import { useState, useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard,
@@ -64,7 +64,7 @@ function NavContent({
   return (
     <span
       className="flex items-center gap-3 w-full transition-opacity"
-      style={{ opacity: pending ? 0.55 : 1 }}
+      style={{ opacity: pending ? 0.55 : 1, color: pending ? '#FF8303' : undefined }}
     >
       {pending ? (
         <Loader2
@@ -97,14 +97,20 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
-  const [liveUnreadCount, setLiveUnreadCount] = useState(unreadMessageCount)
-
-  useEffect(() => {
-    setLiveUnreadCount(unreadMessageCount)
-  }, [unreadMessageCount])
+  // Debounce ref: coalesce bursts of message events into a single layout
+  // re-count. The badge value is the server prop; realtime only triggers the
+  // refresh that re-runs the layout query feeding BOTH nav badges.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!userId) return
+
+    const scheduleRefresh = () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      refreshTimer.current = setTimeout(() => {
+        router.refresh()
+      }, 500)
+    }
 
     const channel = supabase
       .channel(`nav-unread-${userId}`)
@@ -113,23 +119,20 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${userId}`,
-      }, () => {
-        setLiveUnreadCount(prev => prev + 1)
-      })
+      }, scheduleRefresh)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${userId}`,
-      }, (payload) => {
-        if (payload.new.read_at && !payload.old.read_at) {
-          setLiveUnreadCount(prev => Math.max(0, prev - 1))
-        }
-      })
+      }, scheduleRefresh)
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
-  }, [userId, supabase])
+    return () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      supabase.removeChannel(channel)
+    }
+  }, [userId, supabase, router])
 
   const isAdmin = userRole === 'admin'
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin)
@@ -181,7 +184,7 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
                   Icon={Icon}
                   label={item.label}
                   active={active}
-                  unreadCount={liveUnreadCount}
+                  unreadCount={unreadMessageCount}
                 />
               </Link>
             </li>

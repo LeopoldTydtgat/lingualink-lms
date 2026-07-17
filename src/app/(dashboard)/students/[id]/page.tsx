@@ -8,6 +8,7 @@ type RawSheetJoin = { title: string; category: string; level: string } | null
 type RawAssignmentRow = {
   id: string
   assigned_at: string
+  study_sheet_id: string
   study_sheets: RawSheetJoin | RawSheetJoin[]
 }
 
@@ -124,6 +125,10 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       status,
       teams_join_url,
       teacher_id,
+      cancelled_at,
+      cancellation_reason,
+      cancelled_by,
+      rescheduled_by,
       profiles!lessons_teacher_id_fkey (
         full_name
       )
@@ -161,17 +166,89 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const { data: rawAssignments } = studentId
     ? await adminClient
         .from('assignments')
-        .select('id, assigned_at, study_sheets(title, category, level)')
+        .select('id, assigned_at, study_sheet_id, study_sheets(title, category, level)')
         .eq('student_id', studentId)
         .order('assigned_at', { ascending: false })
     : { data: [] }
 
-  const assignments = ((rawAssignments ?? []) as RawAssignmentRow[]).map((a) => {
+  const assignmentRows = (rawAssignments ?? []) as RawAssignmentRow[]
+
+  // Per-assignment completion via the NEW345 bimodal rule (see study-sheets/page.tsx):
+  // an assignment is complete when a legacy exercise_completions row is keyed to it, OR
+  // the sheet has activities and every one has an attempt under that assignment.
+  const assignmentIds = assignmentRows.map(a => a.id)
+  const sheetIds = [...new Set(assignmentRows.map(a => a.study_sheet_id))]
+
+  type ActivityRow = { id: string; sheet_id: string }
+  type CompletionRow = { assignment_id: string | null; completed_at: string }
+  type AttemptRow = { activity_id: string; assignment_id: string | null; created_at: string }
+
+  // activities has NO is_active column (verified: 20260715120000 migration).
+  let activityRows: ActivityRow[] = []
+  if (sheetIds.length > 0) {
+    const { data } = await adminClient
+      .from('activities')
+      .select('id, sheet_id')
+      .in('sheet_id', sheetIds)
+    activityRows = (data ?? []) as ActivityRow[]
+  }
+
+  let completionRows: CompletionRow[] = []
+  let attemptRows: AttemptRow[] = []
+  if (assignmentIds.length > 0) {
+    const [{ data: comps }, { data: atts }] = await Promise.all([
+      adminClient
+        .from('exercise_completions')
+        .select('assignment_id, completed_at')
+        .in('assignment_id', assignmentIds),
+      adminClient
+        .from('activity_attempts')
+        .select('activity_id, assignment_id, created_at')
+        .in('assignment_id', assignmentIds),
+    ])
+    completionRows = (comps ?? []) as CompletionRow[]
+    attemptRows = (atts ?? []) as AttemptRow[]
+  }
+
+  const activitiesBySheet = new Map<string, string[]>()
+  for (const a of activityRows) {
+    const arr = activitiesBySheet.get(a.sheet_id) ?? []
+    arr.push(a.id)
+    activitiesBySheet.set(a.sheet_id, arr)
+  }
+
+  // Legacy path: an exercise_completions row keyed to the assignment means done.
+  const legacyDoneAssignments = new Set<string>()
+  for (const c of completionRows) {
+    if (c.assignment_id) legacyDoneAssignments.add(c.assignment_id)
+  }
+
+  // NEW345 path: which activities each assignment has an attempt for.
+  const attemptsByAssignment = new Map<string, Set<string>>()
+  for (const t of attemptRows) {
+    if (!t.assignment_id) continue
+    const set = attemptsByAssignment.get(t.assignment_id) ?? new Set<string>()
+    set.add(t.activity_id)
+    attemptsByAssignment.set(t.assignment_id, set)
+  }
+
+  function assignmentComplete(assignmentId: string, sheetId: string): boolean {
+    if (legacyDoneAssignments.has(assignmentId)) return true
+    const acts = activitiesBySheet.get(sheetId)
+    if (acts && acts.length > 0) {
+      const done = attemptsByAssignment.get(assignmentId)
+      if (done && acts.every(id => done.has(id))) return true
+    }
+    return false
+  }
+
+  const assignments = assignmentRows.map((a) => {
     const rawSheet: unknown = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
     const sheet = rawSheet as RawSheetJoin
     return {
       id: a.id,
       assigned_at: a.assigned_at,
+      completed: assignmentComplete(a.id, a.study_sheet_id),
       study_sheet: {
         title: sheet?.title ?? '—',
         category: sheet?.category ?? '—',

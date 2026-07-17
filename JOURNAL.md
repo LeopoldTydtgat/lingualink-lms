@@ -1,3 +1,24 @@
+## Session 209 - 17 July 2026 - Realtime notifications across the teacher portal
+
+### What was built
+Made every unread indicator in the teacher portal update live, so a teacher no longer has to reload or navigate to see new activity. Four surfaces were brought onto realtime, all driven by Supabase postgres_changes subscriptions feeding a single server-side re-count rather than any client-side counter drift.
+
+The What's New feed gained per-item dismissal. Because the feed is derived at request time from source tables rather than stored as notification rows, dismissal is recorded in a new whats_new_dismissals table keyed on the synthetic item id, and filtered out before the six-item cap so hiding one item surfaces the next. The bell dropdown got a per-row cross (hover-revealed) plus a Clear all that drains the entire feed, not just the visible page, and shows an "All caught up" confirmation once empty. The right-hand panel was trimmed to three items with a View all link that opens the bell, and later given the same per-item crosses at the client's request so both surfaces behave identically. The whole feed now refreshes in real time by subscribing to its source tables (lessons, reports, invoices, training_teachers, trainings), debounced so a burst of changes triggers one refetch.
+
+The unread messages badges were the second surface. The top-nav messages icon had no subscription at all and only updated on a full reload; the left-nav badge used a fragile optimistic plus-or-minus-one counter that drifted when events were missed. Both were replaced with a single realtime subscription that triggers a debounced layout re-count, so the one authoritative server figure feeds both badges. Reading a thread now also fires a refresh, so the badges clear the moment a conversation is opened rather than lagging until the next navigation.
+
+The chat widget bubble was the third. Its realtime channel was gated so it only listened while the widget was open, meaning a support reply arriving while the widget was closed never bumped the bubble until reload. The subscription now runs for the widget's whole lifetime, with read-marking still confined to when the widget is actually open on the Messages tab.
+
+### Break/Fix Log
+- What's New "reappearing" after Clear all was two stacked causes: a refresh firing before the dismissal write committed (fixed by awaiting the write before refreshing), and the filter-before-cap design correctly paging in older items, which read as resurrection. Clear all was then reworked to drain the full feed server-side.
+- The teacher read-decrement was diagnosed mid-session but the fix was initially missed at commit time; markMessagesAsRead was writing read_at correctly (confirmed zero unread rows in the DB) but nothing refreshed the layout, so the badge stayed stale. Adding router.refresh() after the read-mark closed it.
+- A Turbopack module-factory runtime error surfaced during testing; a clean .next wipe and dev restart cleared it, confirming stale dev chunks rather than a code fault.
+
+### Session result
+Four commits on dev: realtime What's New with per-item and full-feed dismissal on both nav surfaces; unread messages badges via single layout re-count; chat widget bubble live while closed; and immediate badge decrement on reading a thread. Student and admin portals noted in TODO for the same read-decrement check when those portals are built. All four surfaces verified live with two-account testing.
+
+---
+
 ## Session 208 - 15 July 2026 - Messaging hardening and export timezone alignment
 
 ### What was built

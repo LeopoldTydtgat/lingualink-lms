@@ -306,7 +306,6 @@ export default function ChatWidget({
 
   // Real-time: new messages on this participant's thread
   useEffect(() => {
-    if (!isOpen) return
     const channel = supabase
       .channel(`support-${participantAuthId}`)
       .on(
@@ -327,7 +326,7 @@ export default function ChatWidget({
           // admin — but only if the user is actually looking at the Messages tab. On the FAQ
           // tab, leave it unread and bump the badge instead.
           if (msg.sender_role === 'admin') {
-            if (activeTab === 'messages') {
+            if (isOpen && activeTab === 'messages') {
               markAdminMessagesRead()
             } else {
               setUnreadCount(c => c + 1)
