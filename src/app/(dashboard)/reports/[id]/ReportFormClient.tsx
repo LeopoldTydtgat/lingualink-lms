@@ -93,6 +93,63 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 const cardStyle: React.CSSProperties = { border: '1px solid #f3f4f6' }
 const cardClass = 'bg-white rounded-xl shadow-sm p-5 mb-6'
 
+function LevelTrack({
+  value,
+  onChange,
+  editable,
+}: {
+  value: string | undefined
+  onChange?: (level: string) => void
+  editable: boolean
+}) {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const selectedIndex = value ? CEFR_LEVELS.indexOf(value) : -1
+
+  return (
+    <div className="flex flex-1" style={{ maxWidth: `${CEFR_LEVELS.length * 72}px` }}>
+      {CEFR_LEVELS.map((level, i) => {
+        const isFilled = selectedIndex >= 0 && i <= selectedIndex
+        const isSelected = i === selectedIndex
+        const isHovered = editable && !isFilled && hoverIndex === i
+
+        const style: React.CSSProperties = {
+          position: 'relative',
+          zIndex: isSelected ? 1 : 0,
+          flex: 1,
+          maxWidth: '72px',
+          height: '36px',
+          marginLeft: i === 0 ? 0 : '-1px',
+          border: '1px solid',
+          borderColor: isSelected ? '#FF8303' : isFilled ? '#FFD9A8' : '#d1d5db',
+          backgroundColor: isFilled ? '#FFF3E0' : isHovered ? '#FAFAFA' : 'white',
+          color: isFilled ? '#FF8303' : '#9CA3AF',
+          fontWeight: isSelected ? 700 : 600,
+        }
+
+        return (
+          <button
+            key={level}
+            type="button"
+            disabled={!editable}
+            onClick={() => onChange?.(level)}
+            onMouseEnter={() => editable && !isFilled && setHoverIndex(i)}
+            onMouseLeave={() => editable && setHoverIndex(null)}
+            style={style}
+            className={[
+              'flex items-center justify-center text-xs font-semibold transition-colors',
+              i === 0 ? 'rounded-l-lg' : '',
+              i === CEFR_LEVELS.length - 1 ? 'rounded-r-lg' : '',
+              editable ? 'cursor-pointer' : 'cursor-default',
+            ].join(' ')}
+          >
+            {level}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets }: Props) {
   const router = useRouter()
 
@@ -424,33 +481,22 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               {SKILLS.map(skill => (
                 <div key={skill.key} className="flex items-center gap-4">
                   <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
-                  {isEditable ? (
-                    <div className="flex flex-wrap gap-2">
-                      {CEFR_LEVELS.map(level => (
-                        <button
-                          key={level}
-                          disabled={!isEditable}
-                          onClick={() => setSkillLevel(skill.key, level)}
-                          style={
-                            levelData[skill.key] === level
-                              ? { backgroundColor: '#FFF3E0', color: '#FF8303', borderColor: '#FFD9A8', minWidth: '44px', textAlign: 'center' }
-                              : { backgroundColor: 'white', color: '#4B5563', borderColor: '#d1d5db', minWidth: '44px', textAlign: 'center' }
-                          }
-                          className="px-3 py-1 rounded-md text-xs font-semibold border transition-colors"
-                        >
-                          {level}
-                        </button>
-                      ))}
-                    </div>
-                  ) : levelData[skill.key] ? (
-                    <span
-                      className="inline-flex items-center rounded-full text-xs font-semibold px-3 py-1"
-                      style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-                    >
-                      {levelData[skill.key]}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-400">Not assessed</span>
+                  <LevelTrack
+                    value={levelData[skill.key]}
+                    onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
+                    editable={isEditable}
+                  />
+                  {!isEditable && (
+                    levelData[skill.key] ? (
+                      <span
+                        className="inline-flex items-center rounded-full text-xs font-semibold px-3 py-1"
+                        style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                      >
+                        {levelData[skill.key]}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">Not assessed</span>
+                    )
                   )}
                 </div>
               ))}
