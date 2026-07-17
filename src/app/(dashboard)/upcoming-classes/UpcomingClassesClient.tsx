@@ -425,7 +425,11 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     if (hideCancelled) handleHideCancelledChange(false)
     if (!cancelledSectionExpanded) handleCancelledSectionToggle()
     requestAnimationFrame(() => {
-      document.getElementById('cancelled-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      const el = document.getElementById('cancelled-section')
+      const main = document.querySelector('main')
+      if (!el || !main) return
+      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 16
+      main.scrollTo({ top, behavior: 'smooth' })
     })
   }
 
