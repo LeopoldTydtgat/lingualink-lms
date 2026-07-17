@@ -41,6 +41,7 @@ type Props = {
 
 export default function ReportsClient({ reports, profile, isAdmin }: Props) {
   const [search, setSearch] = useState('')
+  const [showAllCompleted, setShowAllCompleted] = useState(false)
 
   // Capture a single "now" so every pending check compares against the same instant
   const now = Date.now()
@@ -64,6 +65,11 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
       .toLowerCase()
       .includes(search.toLowerCase())
   )
+
+  const isSearching = search.trim().length > 0
+  const displayCompleted = (showAllCompleted || isSearching)
+    ? filteredCompleted
+    : filteredCompleted.slice(0, 10)
 
   return (
     <div className="space-y-6">
@@ -136,11 +142,24 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
         {filteredCompleted.length === 0 ? (
           <p className="text-sm text-gray-500">No completed reports yet.</p>
         ) : (
-          <div className="flex flex-col gap-3">
-            {filteredCompleted.map(report => (
-              <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} />
-            ))}
-          </div>
+          <>
+            <div className="flex flex-col gap-3">
+              {displayCompleted.map(report => (
+                <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} />
+              ))}
+            </div>
+            {!showAllCompleted && !isSearching && filteredCompleted.length > 10 && (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setShowAllCompleted(true)}
+                  style={{ color: '#FF8303' }}
+                  className="text-sm font-medium py-2 cursor-pointer"
+                >
+                  Show all ({filteredCompleted.length})
+                </button>
+              </div>
+            )}
+          </>
         )}
       </section>
 
