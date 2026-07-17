@@ -3,6 +3,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { UserCircle, CalendarDays, ChevronDown, MessageSquare } from 'lucide-react'
 import NotificationsBell from './NotificationsBell'
+import HeaderShortcut from './HeaderShortcut'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 
 type TopHeaderProps = {
@@ -33,33 +34,19 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems,
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         {/* Calendar shortcut */}
-        <Link
-          href="/schedule"
-          prefetch={false}
-          aria-label="Schedule"
-          title="Schedule"
-          className="hover:bg-gray-100 rounded-lg p-2"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
+        <HeaderShortcut href="/schedule" ariaLabel="Schedule" title="Schedule">
           <CalendarDays size={20} color="#4b5563" />
-        </Link>
+        </HeaderShortcut>
 
         {/* Messages shortcut */}
-        <Link
-          href="/messages"
-          prefetch={false}
-          aria-label="Messages"
-          title="Messages"
-          className="hover:bg-gray-100 rounded-lg p-2"
-          style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-        >
+        <HeaderShortcut href="/messages" ariaLabel="Messages" title="Messages">
           <MessageSquare size={20} color="#4b5563" />
           {unreadMessageCount > 0 && (
             <span style={{ position: 'absolute', top: '2px', right: '2px', minWidth: '15px', height: '15px', borderRadius: '8px', backgroundColor: '#FF8303', color: '#ffffff', fontSize: '10px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>
               {unreadMessageCount > 9 ? '9+' : unreadMessageCount}
             </span>
           )}
-        </Link>
+        </HeaderShortcut>
 
         {/* Notifications bell — client island */}
         <NotificationsBell items={whatsNewItems} seenAt={whatsNewSeenAt} />

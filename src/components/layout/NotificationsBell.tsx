@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Bell } from 'lucide-react'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
@@ -27,6 +27,7 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
   // close — swaps the empty-state copy to a friendlier "All caught up".
   const [clearedJustNow, setClearedJustNow] = useState(false)
   const router = useRouter()
+  const pathname = usePathname()
   const containerRef = useRef<HTMLDivElement>(null)
   const prevOpen = useRef(false)
   const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -287,7 +288,8 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
                   onDismiss={() => handleDismiss(item.id)}
                   onClick={() => {
                     setOpen(false)
-                    router.push(item.href)
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
                   }}
                 />
               ))}

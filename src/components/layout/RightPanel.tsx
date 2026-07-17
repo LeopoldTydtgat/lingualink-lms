@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2 } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
@@ -111,6 +111,7 @@ export default function RightPanel({
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
+  const pathname = usePathname()
   const [secondsUntil, setSecondsUntil] = useState<number | null>(null)
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState(0)
@@ -423,7 +424,10 @@ export default function RightPanel({
                   mounted={mounted}
                   seen={false}
                   onDismiss={() => handleDismiss(item.id)}
-                  onClick={() => router.push(item.href)}
+                  onClick={() => {
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
+                  }}
                 />
               ))}
               {seenWhatsNew.length > 0 && (
@@ -439,7 +443,10 @@ export default function RightPanel({
                       mounted={mounted}
                       seen={true}
                       onDismiss={() => handleDismiss(item.id)}
-                      onClick={() => router.push(item.href)}
+                      onClick={() => {
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
+                  }}
                     />
                   ))}
                 </>
