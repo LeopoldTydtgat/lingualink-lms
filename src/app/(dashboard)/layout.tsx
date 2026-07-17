@@ -13,6 +13,7 @@ import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 import BillingRealtimeRefresher from '@/components/layout/BillingRealtimeRefresher'
+import { fetchWhatsNew } from '@/lib/whatsNew'
 
 export default async function DashboardLayout({
   children,
@@ -26,7 +27,7 @@ export default async function DashboardLayout({
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, timezone')
+    .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at')
     .eq('id', user.id)
     .single()
 
@@ -163,6 +164,10 @@ export default async function DashboardLayout({
 
   const billingData = { currentAmount, projectedAmount }
 
+  // What's New feed — teacher-scoped, uses the same anon server client the
+  // students/lessons lookups above use.
+  const whatsNewItems = await fetchWhatsNew(supabase, profile.id)
+
   const { count: unreadCount } = await supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
@@ -217,7 +222,8 @@ export default async function DashboardLayout({
           <TopHeader
             teacherName={profile?.full_name ?? 'Teacher'}
             teacherPhotoUrl={profile?.photo_url ?? null}
-            announcements={announcements}
+            whatsNewItems={whatsNewItems}
+            whatsNewSeenAt={profile.whats_new_seen_at ?? null}
             unreadMessageCount={unreadCount ?? 0}
           />
           <div className="flex flex-1 overflow-hidden">
@@ -237,6 +243,8 @@ export default async function DashboardLayout({
               nextLesson={nextLesson}
               billingData={billingData}
               currency={currency}
+              whatsNewItems={whatsNewItems}
+              whatsNewSeenAt={profile.whats_new_seen_at ?? null}
             />
           </div>
         </div>

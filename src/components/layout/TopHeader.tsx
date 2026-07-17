@@ -3,22 +3,17 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { UserCircle, CalendarDays, ChevronDown, MessageSquare } from 'lucide-react'
 import NotificationsBell from './NotificationsBell'
-
-type AnnouncementItem = {
-  id: string
-  title: string
-  message: string
-  is_dismissable: boolean
-}
+import type { WhatsNewItem } from '@/lib/whatsNew'
 
 type TopHeaderProps = {
   teacherName: string
   teacherPhotoUrl: string | null
-  announcements: AnnouncementItem[]
+  whatsNewItems: WhatsNewItem[]
+  whatsNewSeenAt: string | null
   unreadMessageCount: number
 }
 
-export default function TopHeader({ teacherName, teacherPhotoUrl, announcements, unreadMessageCount }: TopHeaderProps) {
+export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems, whatsNewSeenAt, unreadMessageCount }: TopHeaderProps) {
   return (
     <header
       style={{
@@ -64,7 +59,7 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, announcements,
         </Link>
 
         {/* Notifications bell — client island */}
-        <NotificationsBell announcements={announcements} />
+        <NotificationsBell items={whatsNewItems} seenAt={whatsNewSeenAt} />
 
         {/* Vertical divider */}
         <div style={{ width: '1px', height: '24px', backgroundColor: '#E0DFDC' }} />

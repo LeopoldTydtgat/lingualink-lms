@@ -1,22 +1,48 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Bell } from 'lucide-react'
-
-type AnnouncementItem = {
-  id: string
-  title: string
-  message: string
-  is_dismissable: boolean
-}
+import type { WhatsNewItem } from '@/lib/whatsNew'
+import { WhatsNewRow } from '@/components/layout/whatsNewUi'
+import { markWhatsNewSeen } from '@/app/(dashboard)/actions/whatsNewSeen'
 
 type NotificationsBellProps = {
-  announcements: AnnouncementItem[]
+  items: WhatsNewItem[]
+  seenAt: string | null
 }
 
-export default function NotificationsBell({ announcements }: NotificationsBellProps) {
+export default function NotificationsBell({ items, seenAt }: NotificationsBellProps) {
   const [open, setOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [localSeenAt, setLocalSeenAt] = useState<string | null>(seenAt)
+  const router = useRouter()
   const containerRef = useRef<HTMLDivElement>(null)
+  const prevOpen = useRef(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  // Persist the seen stamp when the dropdown OPENS (server-side), but only advance
+  // the LOCAL stamp when it CLOSES — so rows keep their unseen styling while being
+  // read, and the badge clears once the user is done. Skips the initial mount (no
+  // open→close transition), so nothing is marked seen until the user actually opens.
+  useEffect(() => {
+    if (open && !prevOpen.current) {
+      markWhatsNewSeen().catch(() => {})
+    } else if (!open && prevOpen.current) {
+      setLocalSeenAt(new Date().toISOString())
+    }
+    prevOpen.current = open
+  }, [open])
+
+  // Effective marker = the later of the server-provided stamp and the local
+  // close-of-dropdown stamp. The server action refreshes the route, so seenAt
+  // advances on its own; useState would otherwise pin us to the mount-time value.
+  const effectiveSeenAt =
+    localSeenAt != null && (seenAt == null || localSeenAt > seenAt) ? localSeenAt : seenAt
+  const isSeen = (item: WhatsNewItem) => effectiveSeenAt != null && item.at <= effectiveSeenAt
 
   // Close on outside click and Escape.
   useEffect(() => {
@@ -39,7 +65,9 @@ export default function NotificationsBell({ announcements }: NotificationsBellPr
     }
   }, [open])
 
-  const count = announcements.length
+  // Badge counts all unseen items; seen-state clears it honestly. Hidden entirely
+  // while the dropdown is open (the user is looking straight at them).
+  const count = items.filter((i) => !isSeen(i)).length
 
   return (
     <div ref={containerRef} style={{ position: 'relative', display: 'flex' }}>
@@ -51,7 +79,7 @@ export default function NotificationsBell({ announcements }: NotificationsBellPr
         style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
         <Bell size={20} color="#4b5563" />
-        {count > 0 && (
+        {count > 0 && !open && (
           <span
             style={{
               position: 'absolute',
@@ -103,27 +131,25 @@ export default function NotificationsBell({ announcements }: NotificationsBellPr
             </p>
           </div>
 
-          {count === 0 ? (
+          {items.length === 0 ? (
             <div style={{ padding: '16px' }}>
               <p style={{ fontSize: '14px', color: '#9ca3af', fontStyle: 'italic' }}>
                 No new notifications
               </p>
             </div>
           ) : (
-            <div>
-              {announcements.map((a, index) => (
-                <div
-                  key={a.id}
-                  style={{
-                    padding: '12px 16px',
-                    borderTop: index > 0 ? '1px solid #E0DFDC' : 'none',
+            <div style={{ padding: '8px' }}>
+              {items.map((item) => (
+                <WhatsNewRow
+                  key={item.id}
+                  item={item}
+                  mounted={mounted}
+                  seen={isSeen(item)}
+                  onClick={() => {
+                    setOpen(false)
+                    router.push(item.href)
                   }}
-                >
-                  <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827' }}>{a.title}</p>
-                  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px', lineHeight: 1.5 }}>
-                    {a.message}
-                  </p>
-                </div>
+                />
               ))}
             </div>
           )}

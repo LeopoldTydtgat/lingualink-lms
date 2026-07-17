@@ -3,9 +3,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Video, ArrowRight, BookOpen, Clock, Receipt } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
+import type { WhatsNewItem } from '@/lib/whatsNew'
+import { WhatsNewRow } from '@/components/layout/whatsNewUi'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,8 @@ type RightPanelProps = {
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
   currency?: string | null
+  whatsNewItems?: WhatsNewItem[]
+  whatsNewSeenAt?: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -96,6 +100,8 @@ export default function RightPanel({
   nextLesson = null,
   billingData,
   currency,
+  whatsNewItems = [],
+  whatsNewSeenAt = null,
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
@@ -145,6 +151,15 @@ export default function RightPanel({
     ? Math.max(0, Math.floor((classEndTime - now) / 1000))
     : 0
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+
+  // What's New seen split. The panel is passive — it never stamps; it only reads
+  // the server-provided marker to separate fresh from already-seen items. ISO UTC
+  // strings compare lexicographically in chronological order. Order within each
+  // group is preserved from fetchWhatsNew (attention first, then newest). Seen
+  // items are capped at 2 under an "Earlier" divider.
+  const isWhatsNewSeen = (item: WhatsNewItem) => whatsNewSeenAt != null && item.at <= whatsNewSeenAt
+  const unseenWhatsNew = whatsNewItems.filter((i) => !isWhatsNewSeen(i))
+  const seenWhatsNew = whatsNewItems.filter((i) => isWhatsNewSeen(i)).slice(0, 2)
 
   return (
     <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA', borderLeft: '1px solid #E5E7EB' }}>
@@ -273,6 +288,46 @@ export default function RightPanel({
             Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
           </PanelButton>
+        </section>
+
+        {/* ── WHAT'S NEW ── */}
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What&apos;s New</p>
+          </div>
+          {whatsNewItems.length === 0 ? (
+            <p className="text-sm text-gray-500">No new activity</p>
+          ) : (
+            <div className="flex flex-col">
+              {unseenWhatsNew.map((item) => (
+                <WhatsNewRow
+                  key={item.id}
+                  item={item}
+                  mounted={mounted}
+                  seen={false}
+                  onClick={() => router.push(item.href)}
+                />
+              ))}
+              {seenWhatsNew.length > 0 && (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 8px 4px' }}>
+                    <span className="text-gray-400 uppercase tracking-wider" style={{ fontSize: '11px' }}>Earlier</span>
+                    <span style={{ flex: 1, height: '1px', backgroundColor: '#f3f4f6' }} />
+                  </div>
+                  {seenWhatsNew.map((item) => (
+                    <WhatsNewRow
+                      key={item.id}
+                      item={item}
+                      mounted={mounted}
+                      seen={true}
+                      onClick={() => router.push(item.href)}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </section>
 
       </div>
