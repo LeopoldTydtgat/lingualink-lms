@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction } from 'react'
 import { Clock } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
+import { weeklyGeneralMinutes } from '@/lib/availability'
 
 interface Profile { id: string; full_name: string; role: string }
 
@@ -95,8 +96,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
   const [dragPreview, setDragPreview] = useState<Set<string>>(new Set())
 
   const weeklyHours = useMemo(() => {
-    const committed = generalSlots.filter(a => !a.id.startsWith('temp-'))
-    const totalMinutes = committed.length * 30
+    const totalMinutes = weeklyGeneralMinutes(generalSlots)
     const hours = Math.floor(totalMinutes / 60)
     const minutes = totalMinutes % 60
     return { hours, minutes }

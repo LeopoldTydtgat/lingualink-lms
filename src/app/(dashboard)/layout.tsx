@@ -14,6 +14,7 @@ import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 import BillingRealtimeRefresher from '@/components/layout/BillingRealtimeRefresher'
 import { fetchWhatsNew } from '@/lib/whatsNew'
+import { weeklyGeneralMinutes } from '@/lib/availability'
 
 export default async function DashboardLayout({
   children,
@@ -168,6 +169,27 @@ export default async function DashboardLayout({
   // students/lessons lookups above use.
   const whatsNewItems = await fetchWhatsNew(supabase, profile.id)
 
+  // ── Availability ring: weekly offered hours vs the admin minimum target ────
+  // Weekly offered minutes from committed general-availability rows (anon client,
+  // RLS-scoped to this teacher). Mirrors the schedule page's per-row 30-min model.
+  const { data: availabilityRows } = await supabase
+    .from('availability')
+    .select('id, type')
+    .eq('teacher_id', profile.id)
+    .eq('type', 'general')
+  const offeredMinutes = weeklyGeneralMinutes(availabilityRows ?? [])
+
+  // Minimum-hours target from settings (service-role admin client). Fail SAFE:
+  // any missing/non-numeric value degrades to null so the card renders the
+  // neutral no-target state — never invent a target.
+  const { data: minHoursRow } = await admin
+    .from('settings')
+    .select('value')
+    .eq('key', 'min_available_hours')
+    .single()
+  const parsedMinHours = Number(minHoursRow?.value)
+  const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
+
   const { count: unreadCount } = await supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
@@ -243,6 +265,8 @@ export default async function DashboardLayout({
               nextLesson={nextLesson}
               billingData={billingData}
               currency={currency}
+              offeredMinutes={offeredMinutes}
+              minAvailableHours={minAvailableHours}
               whatsNewItems={whatsNewItems}
               whatsNewSeenAt={profile.whats_new_seen_at ?? null}
             />

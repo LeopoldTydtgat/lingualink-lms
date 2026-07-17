@@ -3,11 +3,12 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2 } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
+import { WeekGridSpot } from '@/components/WeekGridSpot'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,8 @@ type RightPanelProps = {
   nextLesson?: NextLesson | null
   billingData?: { currentAmount: number; projectedAmount: number }
   currency?: string | null
+  offeredMinutes?: number
+  minAvailableHours?: number | null
   whatsNewItems?: WhatsNewItem[]
   whatsNewSeenAt?: string | null
 }
@@ -100,6 +103,8 @@ export default function RightPanel({
   nextLesson = null,
   billingData,
   currency,
+  offeredMinutes = 0,
+  minAvailableHours = null,
   whatsNewItems = [],
   whatsNewSeenAt = null,
 }: RightPanelProps) {
@@ -160,6 +165,15 @@ export default function RightPanel({
   const isWhatsNewSeen = (item: WhatsNewItem) => whatsNewSeenAt != null && item.at <= whatsNewSeenAt
   const unseenWhatsNew = whatsNewItems.filter((i) => !isWhatsNewSeen(i))
   const seenWhatsNew = whatsNewItems.filter((i) => isWhatsNewSeen(i)).slice(0, 2)
+
+  // Availability ring. All inputs are server props (no Date, no state) so this is
+  // hydration-safe. pct is null when there is no numeric target — the card then
+  // shows offered hours without a ring rather than inventing a percentage.
+  const targetMinutes = minAvailableHours != null ? minAvailableHours * 60 : null
+  const pct = targetMinutes && targetMinutes > 0
+    ? Math.min(100, Math.round((offeredMinutes / targetMinutes) * 100))
+    : null
+  const offeredLabel = `${Math.floor(offeredMinutes / 60)}h ${String(offeredMinutes % 60).padStart(2, '0')}min`
 
   return (
     <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA', borderLeft: '1px solid #E5E7EB' }}>
@@ -288,6 +302,77 @@ export default function RightPanel({
             Billing &amp; Invoices
             <ArrowRight size={14} className="ml-2" />
           </PanelButton>
+        </section>
+
+        {/* ── AVAILABILITY ── */}
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <CalendarClock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Availability</p>
+          </div>
+
+          {offeredMinutes === 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+              <WeekGridSpot />
+              <p style={{ fontSize: '14px', fontWeight: 600, color: '#111827', marginTop: '4px' }}>No availability set</p>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px', marginBottom: '12px' }}>
+                Add weekly slots so students can book with you.
+              </p>
+              <PanelButton className="w-full text-sm" onClick={() => router.push('/schedule')}>
+                Set availability
+              </PanelButton>
+            </div>
+          ) : pct === null ? (
+            <>
+              <p style={{ fontSize: '12px', color: '#6b7280', marginBottom: '12px' }}>
+                {`You're offering ${offeredLabel} this week.`}
+              </p>
+              <PanelButton className="w-full text-sm" onClick={() => router.push('/schedule')}>
+                Edit availability
+              </PanelButton>
+            </>
+          ) : pct === 100 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <CheckCircle2 size={14} color="#22C55E" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '12px', color: '#6b7280' }}>{offeredLabel} offered · target met</p>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{ position: 'relative', width: '84px', height: '84px', flexShrink: 0 }}>
+                  <svg width="84" height="84" viewBox="0 0 84 84">
+                    <circle cx="42" cy="42" r="34" fill="none" stroke="#F3F4F6" strokeWidth="8" />
+                    <circle
+                      cx="42"
+                      cy="42"
+                      r="34"
+                      fill="none"
+                      stroke="#FFB942"
+                      strokeWidth="8"
+                      strokeLinecap="round"
+                      strokeDasharray={`${(pct / 100) * 213.63} 213.63`}
+                      transform="rotate(-90 42 42)"
+                    />
+                  </svg>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ fontSize: '16px', fontWeight: 500, color: '#111827', lineHeight: 1.1 }}>{pct}%</span>
+                    <span style={{ fontSize: '10px', color: '#9ca3af', lineHeight: 1.1 }}>of target</span>
+                  </div>
+                </div>
+                <div>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                    Almost there
+                  </p>
+                  <p style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                    {`You're offering ${offeredLabel} of the ${minAvailableHours}h weekly target.`}
+                  </p>
+                </div>
+              </div>
+              <PanelButton className="mt-3 w-full text-sm" onClick={() => router.push('/schedule')}>
+                Edit availability
+              </PanelButton>
+            </>
+          )}
         </section>
 
         {/* ── WHAT'S NEW ── */}
