@@ -1170,7 +1170,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
-                  const greenDot = <div style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16A34A', flexShrink: 0 }} />
                   return (
                     <div
                       key={`av-${b.recordId}`}
@@ -1178,8 +1177,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#FFFFFF',
-                        border: '1px solid #E5E7EB',
+                        backgroundColor: '#F0FDF4',
+                        border: '1px solid #BBF7D0',
+                        borderLeft: '3px solid #16A34A',
                         borderRadius: '8px',
                         boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
                         padding: '3px 6px',
@@ -1191,7 +1191,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       {height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                            {greenDot}
                             <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#374151' }}>Available</span>
                           </div>
                           <div style={{ fontSize: '11px', color: '#6B7280' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
@@ -1201,7 +1200,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          {greenDot}
                           <span style={{ fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
                         </div>
                       )}
@@ -1214,7 +1212,6 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
-                  const redDot = <div style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#DC2626', flexShrink: 0 }} />
                   return (
                     <div
                       key={`un-${b.recordId}`}
@@ -1222,8 +1219,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
-                        backgroundColor: '#FFF5F5',
+                        backgroundColor: '#FEF2F2',
                         border: '1px solid #FECACA',
+                        borderLeft: '3px solid #DC2626',
                         borderRadius: '8px',
                         padding: '3px 6px',
                         cursor: 'pointer',
@@ -1234,14 +1232,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       {height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                            {redDot}
                             <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#B91C1C' }}>Unavailable</span>
                           </div>
                           <div style={{ fontSize: '11px', color: '#B91C1C' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          {redDot}
                           <span style={{ fontSize: '11px', color: '#B91C1C', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
                         </div>
                       )}
@@ -1263,8 +1259,8 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                     <div key={`cl-${i}`} title={b.studentName} onClick={() => setClassDetail({ studentName: b.studentName, dayIdx: b.dayIdx, startMin: b.startMin, endMin: b.endMin })} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
-                      backgroundColor: '#FFFFFF',
-                      border: '1px solid #E5E7EB',
+                      backgroundColor: isPastClass ? '#F9FAFB' : '#FFF3E0',
+                      border: isPastClass ? '1px solid #E5E7EB' : '1px solid #FFD9A8',
                       borderLeft: isPastClass ? '3px solid #D6D3CE' : '3px solid #FF8303',
                       borderRadius: '8px',
                       boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
