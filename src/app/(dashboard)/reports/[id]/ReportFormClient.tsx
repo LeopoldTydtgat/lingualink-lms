@@ -392,7 +392,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             ) : (
               <p className="whitespace-pre-wrap text-sm text-gray-700">{feedbackText}</p>
             )}
-            {isEditable && feedbackText.trim().length < 150 && (
+            {isEditable && feedbackText.length > 0 && feedbackText.trim().length < 150 && (
               <p className="text-xs text-red-500 mt-1">
                 Minimum 150 characters required ({150 - feedbackText.trim().length} remaining)
               </p>
@@ -603,16 +603,18 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
       {/* Save button */}
       {isEditable && (
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          style={{ backgroundColor: saving ? '#fdba74' : '#FF8303' }}
-          onMouseEnter={!saving ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
-          onMouseLeave={!saving ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
-          className={`w-full py-3 rounded-xl text-white font-semibold text-sm transition-colors cursor-pointer${!saving ? ' btn-primary-hover' : ''}`}
-        >
-          {saving ? 'Saving...' : 'Submit Report'}
-        </button>
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{ backgroundColor: saving ? '#fdba74' : '#FF8303', width: '220px' }}
+            onMouseEnter={!saving ? e => (e.currentTarget.style.backgroundColor = '#e67300') : undefined}
+            onMouseLeave={!saving ? e => (e.currentTarget.style.backgroundColor = '#FF8303') : undefined}
+            className={`py-3 rounded-xl text-white font-semibold text-sm transition-colors cursor-pointer${!saving ? ' btn-primary-hover' : ''}`}
+          >
+            {saving ? 'Saving...' : 'Submit Report'}
+          </button>
+        </div>
       )}
 
       {/* Assignment modal */}
