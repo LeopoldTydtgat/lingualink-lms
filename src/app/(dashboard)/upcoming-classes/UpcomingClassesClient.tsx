@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
-import { CalendarDays, Plus } from 'lucide-react'
+import { CalendarDays, Plus, History } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -17,6 +17,19 @@ type Student = {
   photo_url: string | null
 }
 
+type PrevReportSheet = {
+  id: string
+  title: string
+  category: string
+  level: string
+}
+
+type PrevReport = {
+  scheduledAt: string
+  feedbackText: string
+  sheets: PrevReportSheet[]
+}
+
 type Class = {
   id: string
   training_id: string
@@ -24,7 +37,7 @@ type Class = {
   ends_at: string
   status: string
   teams_link: string | null
-  lesson_notes: string | null
+  prevReport: PrevReport | null
   cancelled_at: string | null
   cancellation_reason: string | null
   cancelled_by: string | null
@@ -162,6 +175,73 @@ function ActionButton({ label, onClick }: { label: string; onClick?: () => void 
   )
 }
 
+function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevReport: PrevReport; teacherTimezone: string; mounted: boolean }) {
+  const [showFull, setShowFull] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const textRef = useRef<HTMLParagraphElement | null>(null)
+
+  useEffect(() => {
+    const el = textRef.current
+    if (!el) return
+    // Only offer a toggle when the clamped text actually overflows 3 lines.
+    setOverflows(el.scrollHeight > el.clientHeight + 1)
+  }, [prevReport.feedbackText, showFull, mounted])
+
+  return (
+    <div className="rounded-md p-3" style={{ backgroundColor: '#f9fafb', borderLeft: '3px solid #E0DFDC' }}>
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          <History size={14} className="inline-block mr-1.5 text-gray-400" style={{ verticalAlign: 'text-bottom' }} />
+          Last time&apos;s recap
+          {mounted && (
+            <span className="ml-2 font-normal normal-case tracking-normal text-gray-400">
+              {formatDate(prevReport.scheduledAt, teacherTimezone)}
+            </span>
+          )}
+        </p>
+        {/* line-clamp via Tailwind's line-clamp-3 utility, NOT inline -webkit-box:
+            React does not reliably apply the -webkit-box-orient inline style, so the
+            previous inline clamp never took effect and the toggle never appeared. */}
+        <p
+          ref={textRef}
+          className={`text-sm text-gray-700 whitespace-pre-line${showFull ? '' : ' line-clamp-3'}`}
+        >
+          {prevReport.feedbackText}
+        </p>
+        {(overflows || showFull) && (
+          <button
+            onClick={() => setShowFull(!showFull)}
+            className="text-xs font-medium"
+            style={{ color: '#FF8303', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            {showFull ? 'Show less' : 'Show more'}
+          </button>
+        )}
+
+        {prevReport.sheets.length > 0 && (
+          <div className="pt-1">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Assigned last time
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {prevReport.sheets.map(sheet => (
+                <span
+                  key={sheet.id}
+                  className="text-xs rounded-full px-3 py-1"
+                  style={{ backgroundColor: '#FFE8C2', color: '#9a4a00' }}
+                >
+                  <span className="font-medium">{sheet.title}</span>
+                  <span style={{ opacity: 0.75 }}> &middot; {sheet.category} &middot; {sheet.level}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
   const [expanded, setExpanded] = useState(false)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
@@ -205,12 +285,15 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
         opacity: isCancelled ? 0.75 : undefined,
       }}
     >
-      <button
+      <div
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-4 p-4 text-left hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center gap-4 p-4 text-left hover:bg-gray-50 transition-colors cursor-pointer"
       >
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+        <Link
+          href={`/students/${cls.training_id}`}
+          prefetch={false}
+          onClick={e => e.stopPropagation()}
+          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{ backgroundColor: '#FFE8C2' }}
         >
           {cls.student.photo_url ? (
@@ -224,25 +307,17 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
               {cls.student.full_name.charAt(0)}
             </span>
           )}
-        </div>
+        </Link>
 
         <div className="flex-1 min-w-0">
-          <a
-            href={`/students/${cls.training_id}`}
-            onClick={e => e.stopPropagation()}
-            style={{ color: 'inherit', textDecoration: 'none' }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#FF8303')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'inherit')}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <p className="font-semibold">{cls.student.full_name}</p>
-              {isNext && (
-                <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
-                  NEXT
-                </span>
-              )}
-            </div>
-          </a>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p className="font-semibold">{cls.student.full_name}</p>
+            {isNext && (
+              <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
+                NEXT
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500">
             {mounted
               ? isCancelled
@@ -258,7 +333,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '1px solid #f3f4f6' }}>
@@ -276,18 +351,13 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             </div>
           )}
 
-          <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-              Lesson Notes / To-do
-            </p>
-            <p className="text-sm text-gray-700">
-              {cls.lesson_notes ?? 'No notes added yet.'}
-            </p>
-          </div>
+          {cls.prevReport && (
+            <PrevReportSection prevReport={cls.prevReport} teacherTimezone={teacherTimezone} mounted={mounted} />
+          )}
 
           <div className="flex flex-wrap gap-2">
             {showReschedule && (
-              <ActionButton label="Reschedule" onClick={() => onReschedule(cls)} />
+              <ActionButton label="Cancel Class" onClick={() => onReschedule(cls)} />
             )}
             <ActionButton
               label={'Message ' + cls.student.full_name.split(' ')[0]}
@@ -336,15 +406,10 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [hideCancelled, setHideCancelled] = useState(false)
   const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    try {
-      const stored = localStorage.getItem('lingualink_teacher_hide_cancelled')
-      if (stored === 'true') setHideCancelled(true)
-    } catch {}
     try {
       const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
       if (stored === 'true') setCancelledSectionExpanded(true)
@@ -408,13 +473,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     }
   }
 
-  function handleHideCancelledChange(checked: boolean) {
-    setHideCancelled(checked)
-    try {
-      localStorage.setItem('lingualink_teacher_hide_cancelled', String(checked))
-    } catch {}
-  }
-
   function handleCancelledSectionToggle() {
     const next = !cancelledSectionExpanded
     setCancelledSectionExpanded(next)
@@ -422,7 +480,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   }
 
   function handleJumpToCancelled() {
-    if (hideCancelled) handleHideCancelledChange(false)
     if (!cancelledSectionExpanded) handleCancelledSectionToggle()
     requestAnimationFrame(() => {
       const el = document.getElementById('cancelled-section')
@@ -552,20 +609,9 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                 <ChevronIcon rotated={cancelledSectionExpanded} />
               </div>
             </button>
-            <span onClick={e => e.stopPropagation()}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#6b7280', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={hideCancelled}
-                  onChange={(e) => handleHideCancelledChange(e.target.checked)}
-                  style={{ accentColor: '#FF8303' }}
-                />
-                Hide cancelled
-              </label>
-            </span>
           </div>
 
-          {cancelledSectionExpanded && !hideCancelled && (
+          {cancelledSectionExpanded && (
             <div className="space-y-2">
               {cancelledClasses.map(cls => (
                 <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />
@@ -610,7 +656,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             ) : (
               <>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#111827', marginBottom: '4px' }}>
-                  Cancel class & request reschedule
+                  Cancel this class?
                 </h2>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>
                   Class with {rescheduleTarget.student.full_name} - {mounted ? `${formatDate(rescheduleTarget.starts_at, teacherTimezone)}, ${formatTime(rescheduleTarget.starts_at, teacherTimezone)}` : ''}
@@ -619,12 +665,12 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   Message to student <span style={{ color: '#ef4444' }}>*</span>
                 </p>
                 <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '10px', lineHeight: 1.5 }}>
-                  Write a message to your student explaining why. The class will be cancelled and they will book a new time themselves. This message is required.
+                  Write a message to your student explaining the cancellation. Their hours will be refunded and they can book a new time. This message is required.
                 </p>
                 <textarea
                   value={rescheduleMessage}
                   onChange={e => setRescheduleMessage(e.target.value)}
-                  placeholder="Hi, I'm sorry but I need to reschedule our class on..."
+                  placeholder="Hi, I'm sorry but I can't make our class on..."
                   rows={4}
                   style={{
                     width: '100%', padding: '10px 12px', borderRadius: '8px', fontSize: '14px',
@@ -644,7 +690,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                       border: '2px solid #d1d5db', backgroundColor: 'white', cursor: 'pointer', color: '#374151'
                     }}
                   >
-                    Cancel
+                    Keep class
                   </button>
                   <button
                     onClick={handleConfirmReschedule}
@@ -655,7 +701,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                       color: 'white', border: 'none', cursor: rescheduleLoading ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    {rescheduleLoading ? 'Sending...' : 'Send message & cancel class'}
+                    {rescheduleLoading ? 'Sending...' : 'Cancel class & notify student'}
                   </button>
                 </div>
               </>

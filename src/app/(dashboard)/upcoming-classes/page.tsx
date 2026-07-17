@@ -46,10 +46,75 @@ export default async function UpcomingClassesPage() {
     console.error('Error fetching lessons:', error)
   }
 
+  // Build a "last time's recap" per student: the most recent PAST lesson that has a
+  // written report, plus the study sheets assigned in that lesson. No teacher_id filter —
+  // cross-teacher recap is intended so a substitute sees the prior teacher's notes.
+  const studentIds = Array.from(
+    new Set(
+      (rawLessons ?? [])
+        .map((l: any) => (Array.isArray(l.students) ? l.students[0] : l.students)?.id)
+        .filter((id: string | undefined): id is string => Boolean(id))
+    )
+  )
+
+  // prevByStudent: student_id -> { lessonId, scheduledAt, feedbackText }
+  const prevByStudent = new Map<string, { lessonId: string; scheduledAt: string; feedbackText: string }>()
+
+  if (studentIds.length > 0) {
+    const { data: pastLessons } = await adminClient
+      .from('lessons')
+      .select('id, student_id, scheduled_at, reports ( feedback_text )')
+      .in('student_id', studentIds)
+      .in('status', ['completed', 'student_no_show', 'teacher_no_show'])
+      .lt('scheduled_at', new Date().toISOString())
+      .order('scheduled_at', { ascending: false })
+
+    // Rows arrive newest-first; the FIRST row per student with non-empty feedback wins.
+    for (const pl of (pastLessons ?? []) as any[]) {
+      if (prevByStudent.has(pl.student_id)) continue
+      const report = Array.isArray(pl.reports) ? pl.reports[0] : pl.reports
+      const feedbackText: string | null = report?.feedback_text ?? null
+      if (!feedbackText || feedbackText.trim() === '') continue
+      prevByStudent.set(pl.student_id, {
+        lessonId: pl.id,
+        scheduledAt: pl.scheduled_at,
+        feedbackText,
+      })
+    }
+  }
+
+  // Fetch the study sheets assigned in each selected previous lesson.
+  const prevLessonIds = Array.from(prevByStudent.values()).map((p) => p.lessonId)
+  const sheetsByLesson = new Map<string, { id: string; title: string; category: string; level: string }[]>()
+
+  if (prevLessonIds.length > 0) {
+    const { data: assignments } = await adminClient
+      .from('assignments')
+      .select('lesson_id, study_sheet:study_sheets ( id, title, category, level )')
+      .in('lesson_id', prevLessonIds)
+
+    for (const a of (assignments ?? []) as any[]) {
+      if (!a.lesson_id) continue
+      const sheet = Array.isArray(a.study_sheet) ? a.study_sheet[0] : a.study_sheet
+      if (!sheet) continue
+      const list = sheetsByLesson.get(a.lesson_id) ?? []
+      list.push({ id: sheet.id, title: sheet.title, category: sheet.category, level: sheet.level })
+      sheetsByLesson.set(a.lesson_id, list)
+    }
+  }
+
   const classes = (rawLessons ?? []).map((l: any) => {
     const student = Array.isArray(l.students) ? l.students[0] : l.students
     const scheduledAt = new Date(l.scheduled_at)
     const endsAt = new Date(scheduledAt.getTime() + l.duration_minutes * 60 * 1000)
+    const prev = student?.id ? prevByStudent.get(student.id) : undefined
+    const prevReport = prev
+      ? {
+          scheduledAt: prev.scheduledAt,
+          feedbackText: prev.feedbackText,
+          sheets: sheetsByLesson.get(prev.lessonId) ?? [],
+        }
+      : null
     return {
       id: l.id,
       training_id: l.training_id,
@@ -57,7 +122,7 @@ export default async function UpcomingClassesPage() {
       ends_at: endsAt.toISOString(),
       status: l.status,
       teams_link: l.teams_join_url,
-      lesson_notes: null,
+      prevReport,
       cancelled_at: l.cancelled_at ?? null,
       cancellation_reason: l.cancellation_reason ?? null,
       cancelled_by: l.cancelled_by ?? null,
