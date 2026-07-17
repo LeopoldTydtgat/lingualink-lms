@@ -27,6 +27,7 @@ export interface AvailabilityRecord {
 interface Props {
   profile: Profile
   initialAvailability: AvailabilityRecord[]
+  minAvailableHours: number | null
 }
 
 type TabId = 'general' | 'daytodday' | 'holidays'
@@ -37,7 +38,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'holidays',   label: 'Holidays' },
 ]
 
-export default function ScheduleClient({ profile, initialAvailability }: Props) {
+export default function ScheduleClient({ profile, initialAvailability, minAvailableHours }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
   // The FULL availability list lives here.
@@ -105,6 +106,7 @@ export default function ScheduleClient({ profile, initialAvailability }: Props) 
             profile={profile}
             availability={availability}
             onAvailabilityChange={setAvailability}
+            minAvailableHours={minAvailableHours}
           />
         )}
         {activeTab === 'daytodday' && (
