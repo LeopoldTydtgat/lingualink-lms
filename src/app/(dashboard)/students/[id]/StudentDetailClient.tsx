@@ -219,7 +219,10 @@ export default function StudentDetailClient({
         </div>
 
         <div>
-          <h3 className="text-base font-semibold text-gray-900 mb-3">Training Details</h3>
+          <div className="flex items-center gap-2 mb-3">
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h3 className="text-base font-semibold text-gray-900">Training Details</h3>
+          </div>
           <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
@@ -247,7 +250,10 @@ export default function StudentDetailClient({
         </div>
 
         <div>
-          <h3 className="text-base font-semibold text-gray-900 mb-3">Learning Profile</h3>
+          <div className="flex items-center gap-2 mb-3">
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h3 className="text-base font-semibold text-gray-900">Learning Profile</h3>
+          </div>
           <div className="bg-white rounded-xl shadow-sm p-4 space-y-3" style={{ border: '1px solid #f3f4f6' }}>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
@@ -268,7 +274,10 @@ export default function StudentDetailClient({
 
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-base font-semibold text-gray-900">Notes</h3>
+            <div className="flex items-center gap-2">
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h3 className="text-base font-semibold text-gray-900">Notes</h3>
+            </div>
             {!editingNotes && (
               <button
                 onClick={() => setEditingNotes(true)}
@@ -325,10 +334,13 @@ export default function StudentDetailClient({
         {/* ── Assigned Study Sheets (read-only) ── */}
         {assignments.length > 0 && (
           <div>
-            <h3 className="text-base font-semibold text-gray-900 mb-3">
-              Assigned Study Sheets
-              <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
-            </h3>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h3 className="text-base font-semibold text-gray-900">
+                Assigned Study Sheets
+                <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{assignments.length}</span>
+              </h3>
+            </div>
             <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
               <table className="w-full text-sm">
                 <thead>
