@@ -685,6 +685,14 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   <button
                     onClick={handleCloseReschedule}
                     disabled={rescheduleLoading}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.backgroundColor = '#f9fafb'
+                      e.currentTarget.style.borderColor = '#9ca3af'
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.backgroundColor = 'white'
+                      e.currentTarget.style.borderColor = '#d1d5db'
+                    }}
                     style={{
                       flex: 1, padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 500,
                       border: '2px solid #d1d5db', backgroundColor: 'white', cursor: 'pointer', color: '#374151'
@@ -695,6 +703,12 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
                   <button
                     onClick={handleConfirmReschedule}
                     disabled={rescheduleLoading}
+                    onMouseEnter={e => {
+                      if (!rescheduleLoading) e.currentTarget.style.backgroundColor = '#E67502'
+                    }}
+                    onMouseLeave={e => {
+                      if (!rescheduleLoading) e.currentTarget.style.backgroundColor = '#FF8303'
+                    }}
                     style={{
                       flex: 1, padding: '10px', borderRadius: '8px', fontSize: '14px', fontWeight: 600,
                       backgroundColor: rescheduleLoading ? '#fbbf24' : '#FF8303',
