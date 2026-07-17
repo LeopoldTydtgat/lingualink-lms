@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
-import { isCancelledStatus } from '@/lib/billing/billability'
+import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
 import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
@@ -171,6 +171,30 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
   const isNext = mounted && cls.id === nextId && !isCancelled
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
+  const hoursBeforeStart = cls.cancelled_at
+    ? Math.floor((new Date(cls.starts_at).getTime() - new Date(cls.cancelled_at).getTime()) / 3600000)
+    : null
+
+  // Student-side cancellations only: excludes teacher cancellations and reschedule
+  // legs (rescheduled_by set). Payment turns on the 24hr notice window; the 48hr
+  // B2B policy must never surface in teacher UI, so cancellationPolicy is hardcoded.
+  const isStudentCancellation =
+    isCancelled &&
+    !cls.rescheduled_by &&
+    (cls.status === 'cancelled_by_student' || cls.cancelled_by === 'student')
+
+  const cancellationBillability =
+    isStudentCancellation && cls.cancelled_at
+      ? getBillability({
+          status: cls.status,
+          scheduledAt: cls.starts_at,
+          cancelledAt: cls.cancelled_at,
+          cancellationPolicy: '24hr',
+          hourlyRate: 0,
+          durationMinutes: durationMin,
+        })
+      : null
+
   return (
     <div
       className="rounded-xl bg-white shadow-sm overflow-hidden"
@@ -226,16 +250,11 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
                 : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
               : ''}
           </p>
-          {(cls.cancelled_by || cls.rescheduled_by) && cancelLabel && (
-            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
-              {cancelLabel}
-            </p>
-          )}
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
-            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>Cancelled</span>
+            ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>{cancelLabel ?? 'Cancelled'}</span>
             : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
@@ -243,6 +262,20 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
       {expanded && (
         <div className="p-4 space-y-4 bg-gray-50" style={{ borderTop: '1px solid #f3f4f6' }}>
+          {isCancelled && cls.cancelled_at && (
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">
+                {`Cancelled ${formatDate(cls.cancelled_at, teacherTimezone)}, ${hoursBeforeStart}h before class`}
+                {cls.cancellation_reason ? ` · ${cls.cancellation_reason}` : ''}
+              </p>
+              {cancellationBillability && (
+                cancellationBillability.billableToTeacher
+                  ? <p className="text-xs" style={{ color: '#15803D' }}>You are paid for this class</p>
+                  : <p className="text-xs" style={{ color: '#6b7280' }}>Not paid - cancelled more than 24h in advance</p>
+              )}
+            </div>
+          )}
+
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
               Lesson Notes / To-do
