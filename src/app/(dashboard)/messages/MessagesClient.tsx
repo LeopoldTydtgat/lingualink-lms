@@ -130,7 +130,7 @@ function ReadTicks({
   className?: string
 }) {
   const single = variant === 'bubble' ? 'rgba(255,255,255,0.7)' : '#9ca3af'
-  const double = variant === 'bubble' ? '#ffffff' : '#FF8303'
+  const double = '#FF8303'
   if (readAt) {
     // Double tick — message has been read
     return (
