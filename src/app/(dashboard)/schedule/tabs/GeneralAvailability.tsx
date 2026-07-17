@@ -493,7 +493,7 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
                             top: -1, left: 0, right: 0,
                             height: heightPx + 1,
                             backgroundColor: '#EDF2F7',
-                            border: '1px solid #C9D4E2',
+                            border: '1px dashed #C9D4E2',
                             borderRadius: '6px',
                             padding: '5px 7px',
                             pointerEvents: 'none',

@@ -6,6 +6,7 @@ import { localTimeToUtcMs } from '@/lib/availability'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { getMondayWeekStart, addDays, getWeekDays, formatWeekLabel } from '@/lib/utils/week'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
+import { Download } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string; timezone: string }
@@ -843,75 +844,50 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
   return (
     <div>
-      {/* Mode buttons + Export */}
-      <div className="flex items-center gap-3 mb-4">
-        {viewMode === 'week' && (
-          <>
+      {/* Sticky toolbar: rows 1 & 2 stick to the scrolling <main> */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 20, backgroundColor: '#F9FAFB', borderBottom: '1px solid #E5E7EB', paddingTop: '12px', paddingBottom: '12px', marginBottom: '12px' }}>
+      {/* Row 1: mode buttons + hint */}
+      {viewMode === 'week' && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
         <button
           onClick={() => setMode(mode === 'available' ? null : 'available')}
           style={{
-            padding: '8px 18px',
-            backgroundColor: mode === 'available' ? '#15803D' : '#16A34A',
-            color: '#ffffff',
-            border: mode === 'available' ? '2px solid #14532D' : '2px solid transparent',
-            borderRadius: '999px',
-            fontSize: '13px',
-            fontWeight: '600',
+            backgroundColor: mode === 'available' ? '#16A34A' : '#F0FDF4',
+            color: mode === 'available' ? '#ffffff' : '#15803D',
+            border: mode === 'available' ? '1px solid #16A34A' : '1px solid #BBF7D0',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            fontSize: '12px',
+            fontWeight: 500,
             cursor: 'pointer',
-            boxShadow: mode === 'available' ? 'inset 0 2px 4px rgba(0,0,0,0.2)' : 'none',
           }}
         >
-          {mode === 'available' ? '✓ Adding Availability' : '+ Add Availability'}
+          + Availability
         </button>
 
         <button
           onClick={() => setMode(mode === 'unavailable' ? null : 'unavailable')}
           style={{
-            padding: '8px 18px',
-            backgroundColor: mode === 'unavailable' ? '#B91C1C' : '#DC2626',
-            color: '#ffffff',
-            border: mode === 'unavailable' ? '2px solid #7F1D1D' : '2px solid transparent',
-            borderRadius: '999px',
-            fontSize: '13px',
-            fontWeight: '600',
+            backgroundColor: mode === 'unavailable' ? '#DC2626' : '#FEF2F2',
+            color: mode === 'unavailable' ? '#ffffff' : '#B91C1C',
+            border: mode === 'unavailable' ? '1px solid #DC2626' : '1px solid #FECACA',
+            borderRadius: '8px',
+            padding: '6px 12px',
+            fontSize: '12px',
+            fontWeight: 500,
             cursor: 'pointer',
-            boxShadow: mode === 'unavailable' ? 'inset 0 2px 4px rgba(0,0,0,0.2)' : 'none',
           }}
         >
-          {mode === 'unavailable' ? '✓ Adding Unavailability' : '+ Add Unavailability'}
+          + Unavailability
         </button>
 
-        <span style={{ fontSize: '13px', color: '#6B7280' }}>
-          {isSaving
-            ? 'Saving...'
-            : mode === 'available'
-            ? 'Click or drag on the calendar to mark yourself available'
-            : mode === 'unavailable'
-            ? 'Click or drag on the calendar to mark yourself unavailable'
-            : 'Select a mode, drag to add blocks. Press Esc to exit.'}
-        </span>
-          </>
+        {mode && (
+          <span style={{ fontSize: '12px', color: '#6b7280' }}>
+            {isSaving ? 'Saving…' : 'Drag to add blocks · Esc to exit'}
+          </span>
         )}
-
-        <button
-          onClick={exportClassesToCalendar}
-          style={{
-            marginLeft: 'auto',
-            padding: '8px 16px',
-            backgroundColor: '#ffffff',
-            color: '#374151',
-            border: '1px solid #E5E7EB',
-            borderRadius: '6px',
-            fontSize: '13px',
-            fontWeight: '600',
-            cursor: 'pointer',
-          }}
-        >
-          Export Classes
-        </button>
       </div>
-
-      <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px', textAlign: 'right' }}>Exports all your upcoming classes as a calendar file</p>
+      )}
 
       {exportMsg && (
         <p style={{ fontSize: '12px', color: '#6B7280', marginBottom: '8px', textAlign: 'right' }}>
@@ -937,30 +913,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         </p>
       )}
 
-      {/* Legend - dot pills */}
-      {viewMode === 'week' && (
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
-        {[
-          { color: '#FF8303', label: 'Booked class' },
-          { color: '#16A34A', label: 'Available (specific)' },
-          { color: '#94A3B8', label: 'Weekly availability' },
-          { color: '#DC2626', label: 'Unavailable' },
-        ].map(item => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', border: '1px solid #E5E7EB', backgroundColor: '#ffffff' }}>
-            <div style={{
-              width: '8px', height: '8px', borderRadius: '50%',
-              backgroundColor: item.color,
-            }} />
-            <span style={{ fontSize: '12px', color: '#374151' }}>{item.label}</span>
-          </div>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#9CA3AF' }}>All times in {displayTz}</span>
-      </div>
-      )}
-
       {/* Week navigation */}
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', padding: '0 4px' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 4px' }}>
+        <div style={{ flex: '1 1 0', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-start' }}>
           <button
             onClick={() => (viewMode === 'month' ? gotoMonth(-1) : gotoWeek(-7))}
             aria-label={viewMode === 'month' ? 'Previous month' : 'Previous week'}
@@ -997,9 +952,46 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             </button>
           </div>
         </div>
-        <span style={{ flex: 1, textAlign: 'center', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{viewMode === 'month' ? `${MONTHS_LONG[monthAnchor.getMonth()]} ${monthAnchor.getFullYear()}` : formatWeekLabel(weekStart)}</span>
-        {/* right spacer balances the left nav group so the title stays centered */}
-        <div style={{ width: '310px' }} />
+        <span style={{ flex: 'none', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{viewMode === 'month' ? `${MONTHS_LONG[monthAnchor.getMonth()]} ${monthAnchor.getFullYear()}` : formatWeekLabel(weekStart)}</span>
+        {/* right side: legend (week only) then Export */}
+        <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: '14px', justifyContent: 'flex-end' }}>
+          {viewMode === 'week' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+              {[
+                { color: '#FF8303', label: 'Booked' },
+                { color: '#16A34A', label: 'Available' },
+                { color: '#C9D4E2', label: 'Weekly' },
+                { color: '#DC2626', label: 'Unavailable' },
+              ].map(item => (
+                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: item.color }} />
+                  <span style={{ fontSize: '11px', color: '#6b7280' }}>{item.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={exportClassesToCalendar}
+            title={`Exports all your upcoming classes as a calendar file. All times shown in ${displayTz}.`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 14px',
+              backgroundColor: '#ffffff',
+              color: '#374151',
+              border: '1px solid #E5E7EB',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <Download size={14} />
+            Export
+          </button>
+        </div>
+      </div>
       </div>
 
       {viewMode === 'week' && (
@@ -1272,12 +1264,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       {height >= 44 ? (
                         <>
                           <div style={{ fontSize: '11.5px', fontWeight: 600, color: isPastClass ? '#9CA3AF' : '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.studentName}</div>
-                          <div style={{ fontSize: '11px', color: isPastClass ? '#9CA3AF' : '#6B7280' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ fontSize: '11px', color: isPastClass ? '#9CA3AF' : '#4B5563' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                           <span style={{ fontSize: '10.5px', fontWeight: 600, color: isPastClass ? '#9CA3AF' : '#111827', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1 }}>{b.studentName}</span>
-                          <span style={{ fontSize: '10.5px', color: isPastClass ? '#9CA3AF' : '#6B7280', whiteSpace: 'nowrap', flexShrink: 0 }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                          <span style={{ fontSize: '10.5px', color: isPastClass ? '#9CA3AF' : '#4B5563', whiteSpace: 'nowrap', flexShrink: 0 }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
                         </div>
                       )}
                     </div>
