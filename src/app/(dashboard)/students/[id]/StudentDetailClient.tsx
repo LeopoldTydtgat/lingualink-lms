@@ -13,6 +13,7 @@ type Student = {
   learning_goals: string | null
   interests: string | null
   language_preference: string | null
+  teacher_notes: string | null
 }
 
 type Training = {
@@ -98,10 +99,34 @@ export default function StudentDetailClient({
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('General Info')
-  const [notes, setNotes] = useState(training.notes ?? '')
-  const [editingNotes, setEditingNotes] = useState(false)
-
   const student = training.students
+  const [notes, setNotes] = useState(student?.teacher_notes ?? '')
+  const [savedNotes, setSavedNotes] = useState(student?.teacher_notes ?? '')
+  const [editingNotes, setEditingNotes] = useState(false)
+  const [isSavingNotes, setIsSavingNotes] = useState(false)
+  const [notesError, setNotesError] = useState('')
+
+  async function handleSaveNotes() {
+    if (!student) return
+    setNotesError('')
+    setIsSavingNotes(true)
+    try {
+      const res = await fetch(`/api/teacher/students/${student.id}/notes`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes }),
+      })
+      if (!res.ok) {
+        setNotesError('Could not save notes. Please try again.')
+        return
+      }
+      const data = await res.json()
+      setSavedNotes(data.teacher_notes ?? notes)
+      setEditingNotes(false)
+    } finally {
+      setIsSavingNotes(false)
+    }
+  }
 
   function getInitials(name: string) {
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -233,26 +258,29 @@ export default function StudentDetailClient({
                 style={{ '--tw-ring-color': '#FF8303' } as React.CSSProperties}
                 placeholder="Add notes about this student (not visible to the student)..."
               />
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    // TODO: wire up save to Supabase in a later step
-                    setEditingNotes(false)
-                  }}
+                  onClick={handleSaveNotes}
+                  disabled={isSavingNotes}
                   className="text-xs px-3 py-1 rounded text-white"
-                  style={{ backgroundColor: '#FF8303' }}
+                  style={{ backgroundColor: '#FF8303', cursor: isSavingNotes ? 'wait' : 'pointer', opacity: isSavingNotes ? 0.7 : 1 }}
                 >
-                  Save
+                  {isSavingNotes ? 'Saving...' : 'Save'}
                 </button>
                 <button
                   onClick={() => {
-                    setNotes(training.notes ?? '')
+                    setNotes(savedNotes)
+                    setNotesError('')
                     setEditingNotes(false)
                   }}
+                  disabled={isSavingNotes}
                   className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600"
                 >
                   Cancel
                 </button>
+                {notesError && (
+                  <p className="text-xs" style={{ color: '#FD5602' }}>{notesError}</p>
+                )}
               </div>
             </div>
           ) : (
@@ -428,10 +456,11 @@ export default function StudentDetailClient({
         ))}
       </div>
 
-      {activeTab === 'General Info' && <GeneralInfoTab />}
-      {activeTab === 'Next Classes' && <NextClassesTab />}
-      {activeTab === 'Past Classes' && <PastClassesTab />}
-      {activeTab === 'Messages' && <MessagesTab />}
+      {/* Invoked as functions, not JSX: inner components get a new identity each render and would remount (textarea loses focus per keystroke) */}
+      {activeTab === 'General Info' && GeneralInfoTab()}
+      {activeTab === 'Next Classes' && NextClassesTab()}
+      {activeTab === 'Past Classes' && PastClassesTab()}
+      {activeTab === 'Messages' && MessagesTab()}
 
       {/* ── Study Sheets (read-only, always visible below tabs) ── */}
       {assignments.length > 0 && (

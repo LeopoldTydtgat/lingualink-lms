@@ -206,6 +206,14 @@ export const UpdateStudentSchema = z.object({
 
 export type UpdateStudentInput = z.infer<typeof UpdateStudentSchema>
 
+// ─── Teacher-authored student notes ────────────────────────────────────────────
+
+export const TeacherNotesSchema = z.object({
+  notes: z.string().max(5000),
+})
+
+export type TeacherNotesInput = z.infer<typeof TeacherNotesSchema>
+
 // ─── Hours adjustment ─────────────────────────────────────────────────────────
 
 export const HoursAdjustmentSchema = z.object({
