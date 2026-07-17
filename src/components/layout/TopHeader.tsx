@@ -25,7 +25,10 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems,
         justifyContent: 'flex-end',
         padding: '0 24px',
         flexShrink: 0,
-        zIndex: 10,
+        // Header must stack above all page-content sticky elements (page stickies
+        // stay <= 20); dropdowns inside the header (e.g. NotificationsBell) rely
+        // on this to paint above the Schedule page's sticky toolbar (zIndex: 20).
+        zIndex: 40,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
