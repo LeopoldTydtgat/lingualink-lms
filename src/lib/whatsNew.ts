@@ -254,7 +254,7 @@ export async function fetchWhatsNew(
       id: `booked-${l.id}`,
       kind: 'class_booked',
       text: `${nameOf(l.student_id)} booked a class - ${formatClassMoment(l.scheduled_at, tz)}`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.created_at,
     })
   }
@@ -270,7 +270,7 @@ export async function fetchWhatsNew(
       text: shortNotice
         ? `${nameOf(l.student_id)} cancelled within 24hr - you are paid for this class`
         : `${nameOf(l.student_id)} cancelled a class`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.cancelled_at,
     })
   }
@@ -282,7 +282,7 @@ export async function fetchWhatsNew(
       id: `rescheduled-${l.id}`,
       kind: 'class_rescheduled',
       text: `${nameOf(l.student_id)} rescheduled a class`,
-      href: '/',
+      href: '/upcoming-classes',
       at: l.rescheduled_at,
     })
   }
