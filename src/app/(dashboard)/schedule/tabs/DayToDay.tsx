@@ -852,7 +852,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   return (
     <div>
       {/* Sticky toolbar: rows 1 & 2 stick to the scrolling <main> */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, backgroundColor: '#F9FAFB', borderBottom: '1px solid #E5E7EB', paddingTop: '12px', paddingBottom: '12px', marginBottom: '12px' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 20, backgroundColor: '#F9FAFB', borderBottom: viewMode === 'week' ? 'none' : '1px solid #E5E7EB', paddingTop: '12px', paddingBottom: viewMode === 'week' ? 0 : '12px', marginBottom: viewMode === 'week' ? 0 : '12px' }}>
       {/* Row 1: mode buttons + hint */}
       {viewMode === 'week' && (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
@@ -922,7 +922,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
       {/* Week navigation */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 4px' }}>
-        <div style={{ flex: '1 1 0', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-start' }}>
           <button
             onClick={() => (viewMode === 'month' ? gotoMonth(-1) : gotoWeek(-7))}
             aria-label={viewMode === 'month' ? 'Previous month' : 'Previous week'}
@@ -959,63 +959,67 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             </button>
           </div>
         </div>
-        <span style={{ flex: 'none', fontSize: '16px', fontWeight: 600, color: '#111827' }}>{viewMode === 'month' ? `${MONTHS_LONG[monthAnchor.getMonth()]} ${monthAnchor.getFullYear()}` : formatWeekLabel(weekStart)}</span>
-        {/* right side: legend (week only) then Export */}
-        <div style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', gap: '14px', justifyContent: 'flex-end' }}>
-          {viewMode === 'week' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-              {[
-                { color: '#FF8303', label: 'Booked' },
-                { color: '#16A34A', label: 'Available' },
-                { color: '#C9D4E2', label: 'Weekly' },
-                { color: '#DC2626', label: 'Unavailable' },
-              ].map(item => (
-                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: item.color }} />
-                  <span style={{ fontSize: '11px', color: '#6b7280' }}>{item.label}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={exportClassesToCalendar}
-            disabled={isExporting}
-            title={`Exports all your upcoming classes as a calendar file. All times shown in ${displayTz}.`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '7px 14px',
-              backgroundColor: '#ffffff',
-              color: '#374151',
-              border: '1px solid #E5E7EB',
-              borderRadius: '8px',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: isExporting ? 'wait' : 'pointer',
-              opacity: isExporting ? 0.7 : 1,
-            }}
-          >
-            <Download size={14} />
-            {isExporting ? 'Exporting...' : 'Export'}
-          </button>
+        <span style={{ flex: 'none', fontSize: '16px', fontWeight: 600, color: '#111827', whiteSpace: 'nowrap', padding: '0 12px' }}>{viewMode === 'month' ? `${MONTHS_LONG[monthAnchor.getMonth()]} ${monthAnchor.getFullYear()}` : formatWeekLabel(weekStart)}</span>
+        <div style={{ flex: '1 1 0', display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          onClick={exportClassesToCalendar}
+          disabled={isExporting}
+          title={`Exports all your upcoming classes as a calendar file. All times shown in ${displayTz}.`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '7px 14px',
+            backgroundColor: '#ffffff',
+            color: '#374151',
+            border: '1px solid #E5E7EB',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: 600,
+            cursor: isExporting ? 'wait' : 'pointer',
+            opacity: isExporting ? 0.7 : 1,
+          }}
+        >
+          <Download size={14} />
+          {isExporting ? 'Exporting...' : 'Export'}
+        </button>
         </div>
       </div>
+      {viewMode === 'week' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '8px 14px', backgroundColor: '#ffffff', border: '1px solid #E0DFDC', borderBottom: '1px solid #E5E7EB', borderRadius: '8px 8px 0 0', marginTop: '12px' }}>
+          {[
+            { color: '#FF8303', label: 'Booked' },
+            { color: '#16A34A', label: 'Available' },
+            { color: '#C9D4E2', label: 'Weekly' },
+            { color: '#DC2626', label: 'Unavailable' },
+          ].map(item => (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: item.color }} />
+              <span style={{ fontSize: '11px', color: '#6b7280' }}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
       </div>
 
       {viewMode === 'week' && (
         <>
       {/* Calendar grid */}
+      <div style={{
+        background: '#ffffff',
+        borderRadius: '0 0 8px 8px',
+        border: '1px solid #E0DFDC',
+        borderTop: 'none',
+        overflow: 'hidden',
+      }}>
       <div
         ref={scrollRef}
         className="thin-scroll"
         style={{
           background: '#ffffff',
-          borderRadius: '8px',
           padding: '0',
-          border: '1px solid #E0DFDC',
           cursor: mode ? 'crosshair' : 'default',
-          maxHeight: '700px',
+          maxHeight: 'calc(100vh - 300px)',
           overflowY: 'auto',
           userSelect: 'none',
         }}
@@ -1338,6 +1342,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             )
           })}
         </div>
+      </div>
       </div>
 
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
