@@ -53,6 +53,10 @@ function StudentNavContent({
         width: '100%',
         transition: 'opacity .18s ease',
         opacity: pending ? 0.55 : 1,
+        // Mirror LeftNav's pending-orange cue. Active rows are white-on-orange, so
+        // orange text there would be invisible — restrict the tint to inactive rows;
+        // the active spinner already stays white. Inline style, never a Tailwind class.
+        color: pending && !active ? '#FF8303' : undefined,
       }}
     >
       {pending ? (
