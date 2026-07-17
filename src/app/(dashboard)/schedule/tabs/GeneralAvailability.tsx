@@ -432,7 +432,11 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
             <div style={{ fontSize: '17px', fontWeight: 600, color: '#111827', lineHeight: 1.3 }}>
               {weeklyHours.hours}h {String(weeklyHours.minutes).padStart(2, '0')}min
             </div>
-            {minAvailableHours != null && minAvailableHours > 0 && (() => {
+            {weeklyHours.totalMinutes === 0 ? (
+              <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '4px' }}>
+                Click or drag below to add slots
+              </div>
+            ) : minAvailableHours != null && minAvailableHours > 0 && (() => {
               const pct = Math.min(100, Math.round((weeklyHours.totalMinutes / (minAvailableHours * 60)) * 100))
               return (
                 <div style={{ height: '5px', backgroundColor: '#F3F4F6', borderRadius: '3px', marginTop: '6px', overflow: 'hidden' }}>
