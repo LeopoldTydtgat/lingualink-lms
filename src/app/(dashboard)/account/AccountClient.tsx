@@ -59,9 +59,8 @@ interface Review {
   id: string
   rating: number
   review_text: string | null
-  is_visible: boolean
-  created_at: string
-  student_id: string
+  submitted_at: string | null
+  student_id: string | null
   students: {
     full_name: string
     photo_url: string | null
@@ -1172,11 +1171,13 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
                     ? review.students[0]
                     : review.students
 
-                  const dateStr = new Date(review.created_at).toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })
+                  const dateStr = review.submitted_at
+                    ? new Date(review.submitted_at).toLocaleDateString('en-GB', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })
+                    : ''
 
                   return (
                     <div

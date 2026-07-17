@@ -31,14 +31,18 @@ export default async function AccountPage() {
     .eq('is_active', true)
     .order('display_order')
 
-  const { data: reviews } = await supabase
-    .from('reviews')
+  // Live review data lives in student_reviews (the `reviews` table is orphaned).
+  // Read it through the admin client (RLS on student_reviews has no teacher SELECT
+  // policy). The .eq('teacher_id', user.id) filter below is the security boundary
+  // because the admin client bypasses RLS — it is mandatory.
+  const { data: reviews } = await admin
+    .from('student_reviews')
     .select(`
       id,
       rating,
       review_text,
-      is_visible,
-      created_at,
+      admin_edited_text,
+      submitted_at,
       student_id,
       students (
         full_name,
@@ -46,13 +50,20 @@ export default async function AccountPage() {
       )
     `)
     .eq('teacher_id', user.id)
-    .eq('is_visible', true)
-    .order('created_at', { ascending: false })
+    .order('submitted_at', { ascending: false })
 
-  const flatReviews = (reviews ?? []).map(r => ({
-    ...r,
-    students: Array.isArray(r.students) ? r.students[0] : r.students,
-  }))
+  const flatReviews = (reviews ?? []).map(r => {
+    const student = Array.isArray(r.students) ? r.students[0] : r.students
+    return {
+      id: r.id,
+      rating: r.rating,
+      // Admins may edit the student's original text; show the edited version when present.
+      review_text: r.admin_edited_text ?? r.review_text,
+      submitted_at: r.submitted_at,
+      student_id: r.student_id,
+      students: student ?? null,
+    }
+  })
 
   // Provide sensible defaults if profile is null; always overlay email from
   // auth.users since it is not stored in the profiles table.
