@@ -124,6 +124,10 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       status,
       teams_join_url,
       teacher_id,
+      cancelled_at,
+      cancellation_reason,
+      cancelled_by,
+      rescheduled_by,
       profiles!lessons_teacher_id_fkey (
         full_name
       )

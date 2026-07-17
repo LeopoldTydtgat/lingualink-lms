@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { isCancelledStatus } from '@/lib/billing/billability'
 
 type Student = {
   id: string
@@ -37,6 +39,10 @@ type Lesson = {
   status: string
   teams_join_url: string | null
   teacher_id: string
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  cancelled_by: string | null
+  rescheduled_by: string | null
   profiles: { full_name: string } | null
 }
 
@@ -73,6 +79,22 @@ type Props = {
 }
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
+
+// Label for a NON-cancelled lesson status. Cancelled-family rows are handled
+// separately via getCancellationLabel; this never receives them.
+function nonCancelledStatusLabel(status: string): string {
+  switch (status) {
+    case 'scheduled': return 'Scheduled'
+    case 'completed': return 'Completed'
+    case 'student_no_show': return 'Student absent'
+    case 'teacher_no_show': return 'Teacher absent'
+    case 'missed': return 'Missed'
+    default: {
+      const spaced = status.replace(/_/g, ' ')
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+    }
+  }
+}
 
 function CategoryBadge({ category }: { category: string | null }) {
   if (!category) return null
@@ -311,14 +333,16 @@ export default function StudentDetailClient({
             </div>
             <div className="flex gap-2">
               <span
-                className="text-xs px-2 py-1 rounded-full border capitalize"
+                className="text-xs px-2 py-1 rounded-full border"
                 style={
                   lesson.status === 'scheduled'
                     ? { borderColor: '#FF8303', color: '#FF8303' }
                     : { borderColor: '#d1d5db', color: '#6b7280' }
                 }
               >
-                {lesson.status}
+                {isCancelledStatus(lesson.status)
+                  ? getCancellationLabel(lesson, 'teacher') ?? 'Cancelled'
+                  : nonCancelledStatusLabel(lesson.status)}
               </span>
             </div>
           </div>
@@ -336,11 +360,16 @@ export default function StudentDetailClient({
       <div className="space-y-3">
         {[...pastLessons].reverse().map(lesson => {
           const report = reportsByLessonId[lesson.id]
+          const cancelled = isCancelledStatus(lesson.status)
           return (
             <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
-                {report ? (
+                {cancelled ? (
+                  <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-500">
+                    {getCancellationLabel(lesson, 'teacher') ?? 'Cancelled'}
+                  </span>
+                ) : report ? (
                   <span
                     className="text-xs px-2 py-1 rounded-full"
                     style={
@@ -368,7 +397,13 @@ export default function StudentDetailClient({
               <p className="text-xs text-gray-500">
                 By {lesson.profiles?.full_name ?? 'Unknown teacher'} · {lesson.duration_minutes} min
               </p>
-              {report?.feedback_text && (
+              {cancelled && lesson.cancelled_at && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Cancelled {formatDate(lesson.cancelled_at)}
+                  {lesson.cancellation_reason ? ` · ${lesson.cancellation_reason}` : ''}
+                </p>
+              )}
+              {!cancelled && report?.feedback_text && (
                 <p className="text-sm text-gray-600 mt-2 line-clamp-2 italic">
                   &ldquo;{report.feedback_text}&rdquo;
                 </p>
