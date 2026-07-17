@@ -106,6 +106,24 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
         )}
       </section>
 
+      {/* Missed reports */}
+      {missedReports.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <span className="font-semibold text-gray-800">Missed Reports</span>
+            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFEEE6', color: '#FD5602' }}>
+              {missedReports.length}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {missedReports.map(report => (
+              <MissedReportCard key={report.id} report={report} isAdmin={isAdmin} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Completed reports */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -125,24 +143,6 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
           </div>
         )}
       </section>
-
-      {/* Missed reports */}
-      {missedReports.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="font-semibold text-gray-800">Missed Reports</span>
-            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFEEE6', color: '#FD5602' }}>
-              {missedReports.length}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {missedReports.map(report => (
-              <MissedReportCard key={report.id} report={report} />
-            ))}
-          </div>
-        </section>
-      )}
 
     </div>
   )
@@ -246,8 +246,6 @@ function CompletedReportCard({
 }) {
   const lesson = report.lesson
   const student = lesson?.student
-  const [reopening, setReopening] = useState(false)
-  const [reopenError, setReopenError] = useState<string | null>(null)
 
   const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
     completed: { label: 'Class taken', bg: '#DCFCE7', fg: '#15803D' },
@@ -257,18 +255,6 @@ function CompletedReportCard({
   }
 
   const { label, bg, fg } = statusConfig[report.status] ?? statusConfig.completed
-
-  // Call the server action to reopen the report
-  async function handleReopen() {
-    setReopening(true)
-    setReopenError(null)
-    const result = await reopenReport(report.id)
-    if (result.error) {
-      setReopenError(result.error)
-      setReopening(false)
-    }
-    // On success, revalidatePath in the action refreshes the page automatically
-  }
 
   return (
     <div
@@ -301,9 +287,6 @@ function CompletedReportCard({
               By {lesson?.teacher?.full_name ?? 'Unknown teacher'}
             </p>
           )}
-          {reopenError && (
-            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
-          )}
         </div>
       </div>
 
@@ -321,16 +304,6 @@ function CompletedReportCard({
         >
           View
         </a>
-        {/* Reopen button — admin only, flagged reports only */}
-        {isAdmin && report.status === 'flagged' && (
-          <button
-            onClick={handleReopen}
-            disabled={reopening}
-            className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50"
-          >
-            {reopening ? 'Reopening...' : 'Reopen'}
-          </button>
-        )}
       </div>
     </div>
   )
@@ -339,11 +312,27 @@ function CompletedReportCard({
 // --- Missed report card ---
 function MissedReportCard({
   report,
+  isAdmin,
 }: {
   report: Report
+  isAdmin: boolean
 }) {
   const lesson = report.lesson
   const student = lesson?.student
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState<string | null>(null)
+
+  // Call the server action to reopen the report
+  async function handleReopen() {
+    setReopening(true)
+    setReopenError(null)
+    const result = await reopenReport(report.id)
+    if (result.error) {
+      setReopenError(result.error)
+      setReopening(false)
+    }
+    // On success, revalidatePath in the action refreshes the page automatically
+  }
 
   return (
     <div
@@ -374,6 +363,9 @@ function MissedReportCard({
               ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
               : 'Unknown time'}
           </p>
+          {reopenError && (
+            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
+          )}
         </div>
       </div>
 
@@ -391,6 +383,15 @@ function MissedReportCard({
         >
           View
         </a>
+        {isAdmin && (
+          <button
+            onClick={handleReopen}
+            disabled={reopening}
+            className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50"
+          >
+            {reopening ? 'Reopening...' : 'Reopen'}
+          </button>
+        )}
       </div>
     </div>
   )
