@@ -293,7 +293,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       {/* Page header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Study Library</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Lesson Library</h1>
         </div>
         <div className="flex items-center gap-3">
           <button

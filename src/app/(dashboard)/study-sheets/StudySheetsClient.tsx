@@ -588,7 +588,7 @@ export default function StudySheetsClient({
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Study Library</h1>
+            <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Lesson Library</h1>
             <p className="text-sm mt-1" style={{ color: '#4b5563' }}>
               All your resources for planning and teaching
             </p>
