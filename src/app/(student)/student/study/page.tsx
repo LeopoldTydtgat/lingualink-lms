@@ -46,7 +46,7 @@ export default async function StudyPage() {
   // Fetch all active study sheets for the "Practice on Your Own" library
   const { data: libraryRaw } = await supabase
     .from('study_sheets')
-    .select('id, title, category, level, difficulty')
+    .select('id, title, category, level, difficulty, is_active')
     .eq('is_active', true)
     .eq('audience', 'student')
     .order('title', { ascending: true })

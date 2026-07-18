@@ -13,6 +13,7 @@ interface StudySheet {
   category: string | null
   level: string | null
   difficulty: number
+  is_active: boolean
 }
 
 interface Assignment {
@@ -97,18 +98,18 @@ export default function StudyClient({ studentId, assignments, completions, libra
   const [filterLevel, setFilterLevel] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
 
-  // Count pending (incomplete) assignments
-  const pendingCount = assignments.filter(
-    (a) => a.study_sheet && !isAssignmentCompleted(a.id, completions)
-  ).length
-
-  // Separate pending vs completed assignments
+  // Separate pending vs completed assignments.
+  // Pending on a deactivated sheet is hidden entirely; completed on a
+  // deactivated sheet stays visible (rendered non-clickable below).
   const pendingAssignments = assignments.filter(
-    (a) => a.study_sheet && !isAssignmentCompleted(a.id, completions)
+    (a) => a.study_sheet && a.study_sheet.is_active && !isAssignmentCompleted(a.id, completions)
   )
   const completedAssignments = assignments.filter(
     (a) => a.study_sheet && isAssignmentCompleted(a.id, completions)
   )
+
+  // Badge counts only pending, active-sheet assignments
+  const pendingCount = pendingAssignments.length
 
   // Filter the library based on search and dropdowns
   const filteredLibrary = library.filter((sheet) => {
@@ -174,7 +175,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
       {/* ── ASSIGNED SECTION ──────────────────────────────────────────────── */}
       {activeSection === 'assigned' && (
         <div>
-          {assignments.length === 0 ? (
+          {pendingAssignments.length === 0 && completedAssignments.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <EmptyStudy />
               <p className="text-sm">No assignments yet. Your teacher will assign study sheets after your classes.</p>
@@ -212,6 +213,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
                         key={a.id}
                         assignment={a}
                         status="completed"
+                        deactivated={!a.study_sheet!.is_active}
                         onStart={() => openSheet(a.study_sheet!.id, a.id)}
                       />
                     ))}
@@ -329,10 +331,12 @@ function AssignmentCard({
   assignment,
   status,
   onStart,
+  deactivated = false,
 }: {
   assignment: Assignment
   status: 'pending' | 'completed'
   onStart: () => void
+  deactivated?: boolean
 }) {
   const sheet = assignment.study_sheet!
 
@@ -340,21 +344,21 @@ function AssignmentCard({
     <div
       className="flex items-center justify-between px-4 py-4 rounded-xl border bg-white"
       style={{
-        borderColor: status === 'pending' ? '#fed7aa' : '#d1fae5',
-        backgroundColor: status === 'pending' ? '#fffbf5' : '#f0fdf4',
+        borderColor: deactivated ? '#e5e7eb' : status === 'pending' ? '#fed7aa' : '#d1fae5',
+        backgroundColor: deactivated ? '#f9fafb' : status === 'pending' ? '#fffbf5' : '#f0fdf4',
       }}
     >
       <div className="flex items-start gap-3">
         <div
           className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
           style={{
-            backgroundColor: status === 'pending' ? '#fff7ed' : '#dcfce7',
+            backgroundColor: deactivated ? '#f3f4f6' : status === 'pending' ? '#fff7ed' : '#dcfce7',
           }}
         >
           {status === 'pending' ? (
             <Clock size={15} style={{ color: '#FF8303' }} />
           ) : (
-            <CheckCircle size={15} className="text-green-600" />
+            <CheckCircle size={15} style={{ color: deactivated ? '#9ca3af' : '#16a34a' }} />
           )}
         </div>
 
@@ -371,17 +375,23 @@ function AssignmentCard({
         </div>
       </div>
 
-      <button
-        onClick={onStart}
-        className="ml-4 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
-        style={
-          status === 'pending'
-            ? { backgroundColor: '#FF8303', color: '#ffffff' }
-            : { backgroundColor: '#f3f4f6', color: '#374151' }
-        }
-      >
-        {status === 'pending' ? 'Start' : 'Review'}
-      </button>
+      {deactivated ? (
+        <span className="ml-4 text-xs font-medium" style={{ color: '#9ca3af' }}>
+          No longer available
+        </span>
+      ) : (
+        <button
+          onClick={onStart}
+          className="ml-4 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
+          style={
+            status === 'pending'
+              ? { backgroundColor: '#FF8303', color: '#ffffff' }
+              : { backgroundColor: '#f3f4f6', color: '#374151' }
+          }
+        >
+          {status === 'pending' ? 'Start' : 'Review'}
+        </button>
+      )}
     </div>
   )
 }

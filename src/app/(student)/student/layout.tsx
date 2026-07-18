@@ -97,16 +97,33 @@ export default async function StudentDashboardLayout({
     .limit(1)
     .maybeSingle()
 
-  const { count: assignedCount } = await supabase
+  const { data: assignmentRows } = await supabase
     .from('assignments')
-    .select('*', { count: 'exact', head: true })
+    .select('id, study_sheets ( is_active )')
     .eq('student_id', student.id)
 
-  const { count: completedCount } = await supabase
+  const { data: assignedCompletions } = await supabase
     .from('exercise_completions')
-    .select('*', { count: 'exact', head: true })
+    .select('assignment_id')
     .eq('student_id', student.id)
     .not('assignment_id', 'is', null)
+
+  const completedAssignmentIds = new Set(
+    (assignedCompletions ?? []).map((c) => c.assignment_id as string)
+  )
+
+  // Pending assignments on deactivated sheets are excluded from the counts;
+  // completed assignments on deactivated sheets stay counted (they remain visible).
+  const visibleAssignments = (assignmentRows ?? []).filter((a) => {
+    const sheet = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
+    const completed = completedAssignmentIds.has(a.id as string)
+    return (sheet?.is_active ?? false) || completed
+  })
+
+  const assignedCount = visibleAssignments.length
+  const completedCount = visibleAssignments.filter((a) =>
+    completedAssignmentIds.has(a.id as string)
+  ).length
 
   const { count: unreadMessageCount } = await supabase
     .from('messages')
@@ -176,8 +193,8 @@ export default async function StudentDashboardLayout({
               hoursRemaining={hoursRemaining}
               totalHours={training?.total_hours ?? 0}
               trainingEndDate={training?.end_date ?? null}
-              assignedExercises={assignedCount ?? 0}
-              completedExercises={completedCount ?? 0}
+              assignedExercises={assignedCount}
+              completedExercises={completedCount}
             />
           </div>
         </div>
