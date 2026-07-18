@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
-import { McqActivityAuthorSchema } from '@/lib/validation/activities'
+import { McqActivityAuthorSchema, WritingTaskActivityAuthorSchema } from '@/lib/validation/activities'
 
 const ACTIVITY_LIST_COLUMNS = 'id, sheet_id, position, type, title, content, created_at, updated_at'
 
@@ -52,7 +52,7 @@ export async function GET(
   return NextResponse.json(data)
 }
 
-// PATCH /api/admin/library/[id]/activities/[activityId] — edit an MCQ activity
+// PATCH /api/admin/library/[id]/activities/[activityId] — edit an activity
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; activityId: string }> }
@@ -70,18 +70,13 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => null)
-  const parsed = McqActivityAuthorSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid activity data.', details: parsed.error.flatten() },
-      { status: 400 }
-    )
-  }
-  const { title, content, answer_key } = parsed.data
 
   const adminClient = createAdminClient()
 
   // Ownership: the activity must belong to this sheet before anything is written.
+  // Its STORED type — not any `type` the body claims — selects which author
+  // schema validates the edit, so a body cannot masquerade as a different type
+  // to slip past the wrong checks.
   const { data: existing, error: existingError } = await adminClient
     .from('activities')
     .select('id, type')
@@ -97,35 +92,77 @@ export async function PATCH(
     return NextResponse.json({ error: 'Activity not found.' }, { status: 404 })
   }
 
-  // This body is validated as MCQ. Writing it over a gap_fill (or any other
-  // type) would leave content the player for that type cannot read.
-  if (existing.type !== 'mcq') {
-    return NextResponse.json(
-      { error: 'This activity is not a multiple-choice activity and cannot be edited here.' },
-      { status: 422 }
-    )
+  if (existing.type === 'mcq') {
+    const parsed = McqActivityAuthorSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid activity data.', details: parsed.error.flatten() },
+        { status: 400 }
+      )
+    }
+    const { title, content, answer_key } = parsed.data
+
+    // activities has no updated_at trigger — the column is maintained here.
+    const { data, error } = await adminClient
+      .from('activities')
+      .update({
+        title: title.trim(),
+        content,
+        answer_key,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', activityId)
+      .eq('sheet_id', id)
+      .select(ACTIVITY_LIST_COLUMNS)
+      .single()
+
+    if (error) {
+      console.error('admin activity update error:', activityId, error)
+      return NextResponse.json({ error: 'Could not save the activity.' }, { status: 500 })
+    }
+
+    return NextResponse.json(data)
   }
 
-  // activities has no updated_at trigger — the column is maintained here.
-  const { data, error } = await adminClient
-    .from('activities')
-    .update({
-      title: title.trim(),
-      content,
-      answer_key,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', activityId)
-    .eq('sheet_id', id)
-    .select(ACTIVITY_LIST_COLUMNS)
-    .single()
+  if (existing.type === 'writing_task') {
+    const parsed = WritingTaskActivityAuthorSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid activity data.', details: parsed.error.flatten() },
+        { status: 400 }
+      )
+    }
+    const { title, content } = parsed.data
 
-  if (error) {
-    console.error('admin activity update error:', activityId, error)
-    return NextResponse.json({ error: 'Could not save the activity.' }, { status: 500 })
+    // answer_key is deliberately NOT written: a writing task has none, so the
+    // column stays null. updated_at is still maintained here (no DB trigger) —
+    // it is load-bearing for attempt-mismatch detection, exactly as for MCQ.
+    const { data, error } = await adminClient
+      .from('activities')
+      .update({
+        title: title.trim(),
+        content,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', activityId)
+      .eq('sheet_id', id)
+      .select(ACTIVITY_LIST_COLUMNS)
+      .single()
+
+    if (error) {
+      console.error('admin activity update error:', activityId, error)
+      return NextResponse.json({ error: 'Could not save the activity.' }, { status: 500 })
+    }
+
+    return NextResponse.json(data)
   }
 
-  return NextResponse.json(data)
+  // Any other stored type has no editor here. Writing this body over it would
+  // leave content the player for that type cannot read.
+  return NextResponse.json(
+    { error: 'This activity type cannot be edited here.' },
+    { status: 422 }
+  )
 }
 
 // DELETE /api/admin/library/[id]/activities/[activityId]

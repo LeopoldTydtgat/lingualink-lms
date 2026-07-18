@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
-import { McqActivityAuthorSchema } from '@/lib/validation/activities'
+import { McqActivityAuthorSchema, WritingTaskActivityAuthorSchema } from '@/lib/validation/activities'
 
 // answer_key is deliberately absent. This is the list surface: it feeds the
 // activities panel, which never needs answers. Only the single-activity GET
@@ -41,7 +41,7 @@ export async function GET(
   return NextResponse.json(data ?? [])
 }
 
-// POST /api/admin/library/[id]/activities — create an MCQ activity for a sheet
+// POST /api/admin/library/[id]/activities — create an activity for a sheet
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -57,14 +57,48 @@ export async function POST(
 
   // A malformed or absent JSON body is a 400, never a 500.
   const body = await request.json().catch(() => null)
-  const parsed = McqActivityAuthorSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid activity data.', details: parsed.error.flatten() },
-      { status: 400 }
-    )
+
+  // Discriminate on the body's declared `type`. MCQ carries no `type` field and
+  // is the default; a writing task declares itself. Each type is validated by
+  // its own author schema, so a body shaped for one type can never satisfy the
+  // other's schema — an MCQ body has no `content.prompt`, and a writing-task
+  // body has neither `content.questions` nor `answer_key`.
+  const declaredType =
+    body != null && typeof body === 'object'
+      ? (body as { type?: unknown }).type
+      : undefined
+
+  let activityType: 'mcq' | 'writing_task'
+  let title: string
+  let content: unknown
+  // MCQ carries an answer key; a writing task never does — the column stays null.
+  let answerKey: unknown
+
+  if (declaredType === 'writing_task') {
+    const parsed = WritingTaskActivityAuthorSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid activity data.', details: parsed.error.flatten() },
+        { status: 400 }
+      )
+    }
+    activityType = 'writing_task'
+    title = parsed.data.title
+    content = parsed.data.content
+    answerKey = null
+  } else {
+    const parsed = McqActivityAuthorSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid activity data.', details: parsed.error.flatten() },
+        { status: 400 }
+      )
+    }
+    activityType = 'mcq'
+    title = parsed.data.title
+    content = parsed.data.content
+    answerKey = parsed.data.answer_key
   }
-  const { title, content, answer_key } = parsed.data
 
   const adminClient = createAdminClient()
 
@@ -108,10 +142,10 @@ export async function POST(
     .insert({
       sheet_id: id,
       position,
-      type: 'mcq',
+      type: activityType,
       title: title.trim(),
       content,
-      answer_key,
+      answer_key: answerKey,
     })
     .select(ACTIVITY_LIST_COLUMNS)
     .single()

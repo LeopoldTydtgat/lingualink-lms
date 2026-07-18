@@ -5,6 +5,8 @@ import ActivityFormModal from './ActivityFormModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type ActivityType = 'mcq' | 'writing_task'
+
 type Props = {
   sheetId: string
   sheetTitle: string
@@ -30,6 +32,14 @@ function questionCount(activity: ActivityRow): number {
   return Array.isArray(questions) ? questions.length : 0
 }
 
+// Human label for the row's stored type. Writing tasks have no auto-graded
+// questions, so their "Questions" cell shows a dash rather than 0.
+function typeLabel(type: string): string {
+  if (type === 'writing_task') return 'Writing task'
+  if (type === 'mcq') return 'MCQ'
+  return type
+}
+
 // Date only, built from the Date object's local getters. Deliberately avoids
 // toLocaleDateString/toLocaleTimeString (banned in components that can render on
 // both server and client) and toISOString (never used for local dates here).
@@ -49,6 +59,11 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
 
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Only meaningful when opening the form in create mode (editingId === null):
+  // the activity type chosen in the add-activity flow.
+  const [createType, setCreateType] = useState<ActivityType>('mcq')
+  // Toggles the inline type picker under the list.
+  const [showTypeMenu, setShowTypeMenu] = useState(false)
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -87,6 +102,13 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
   }, [sheetId])
 
   useEffect(() => { load() }, [load])
+
+  const openCreate = (type: ActivityType) => {
+    setCreateType(type)
+    setEditingId(null)
+    setShowTypeMenu(false)
+    setShowForm(true)
+  }
 
   const handleDelete = async (id: string) => {
     setDeletingId(id)
@@ -172,10 +194,12 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
                         <p className="font-medium text-gray-900 truncate">
                           {activity.title || 'Untitled activity'}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5 uppercase">{activity.type}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{typeLabel(activity.type)}</p>
                       </div>
 
-                      <span className="text-center text-gray-600">{questionCount(activity)}</span>
+                      <span className="text-center text-gray-600">
+                        {activity.type === 'mcq' ? questionCount(activity) : '—'}
+                      </span>
 
                       <span className="text-gray-500 text-xs">{formatUpdated(activity.updated_at)}</span>
 
@@ -202,13 +226,42 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
 
             {/* Add — hidden while the list is unknown, so nothing is authored blind */}
             {!loading && !loadError && (
-              <button
-                type="button"
-                onClick={() => { setEditingId(null); setShowForm(true) }}
-                className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
-              >
-                + Add Activity
-              </button>
+              showTypeMenu ? (
+                <div className="mt-4 rounded-lg border-2 border-dashed border-gray-300 p-3 space-y-2">
+                  <p className="text-xs font-medium text-gray-400 uppercase px-1">Choose activity type</p>
+                  <button
+                    type="button"
+                    onClick={() => openCreate('mcq')}
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5 hover:border-orange-300"
+                  >
+                    <span className="block text-sm font-medium text-gray-900">Multiple choice</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">Auto-graded questions, each with a set of options.</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCreate('writing_task')}
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5 hover:border-orange-300"
+                  >
+                    <span className="block text-sm font-medium text-gray-900">Writing task</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">A free-text prompt the student writes a response to. Not auto-graded.</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTypeMenu(false)}
+                    className="text-xs text-gray-400 hover:text-gray-600 px-1 pt-0.5"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowTypeMenu(true)}
+                  className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                >
+                  + Add Activity
+                </button>
+              )
             )}
           </div>
 
@@ -262,6 +315,7 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
         <ActivityFormModal
           sheetId={sheetId}
           activityId={editingId}
+          createType={createType}
           onClose={() => { setShowForm(false); setEditingId(null) }}
           onSaved={async () => { setShowForm(false); setEditingId(null); await load() }}
         />
