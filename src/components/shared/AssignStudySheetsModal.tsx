@@ -56,6 +56,8 @@ function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolea
 
 const EMPTY_TAG_SET: Set<string> = new Set()
 
+const historyDateFmt = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+
 export default function AssignStudySheetsModal({
   studentName,
   lessonId,
@@ -72,6 +74,9 @@ export default function AssignStudySheetsModal({
   const [tags, setTags] = useState<Tag[]>([])
   // sheet_id -> set of tag_ids, built from sheet_tags.
   const [sheetTagMap, setSheetTagMap] = useState<Map<string, Set<string>>>(new Map())
+  // sheet id -> most recent assigned_at / completed_at for this student.
+  const [assignedHistory, setAssignedHistory] = useState<Map<string, string>>(new Map())
+  const [completedHistory, setCompletedHistory] = useState<Map<string, string>>(new Map())
   const [search, setSearch] = useState('')
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
   const [levelFilter, setLevelFilter] = useState('all')
@@ -116,6 +121,33 @@ export default function AssignStudySheetsModal({
         map.set(r.sheet_id, set)
       }
       setSheetTagMap(map)
+
+      // Per-student assignment/completion history, to badge sheets this student
+      // has already been given or finished. RLS scopes assignments to this
+      // teacher's own rows; that gap is accepted for now (NEW381 tracked).
+      const { data: histRows } = await supabase
+        .from('assignments')
+        .select('study_sheet_id, assigned_at')
+        .eq('student_id', studentId)
+      const assignedMap = new Map<string, string>()
+      for (const r of histRows ?? []) {
+        if (!r.study_sheet_id || !r.assigned_at) continue
+        const prev = assignedMap.get(r.study_sheet_id)
+        if (!prev || r.assigned_at > prev) assignedMap.set(r.study_sheet_id, r.assigned_at)
+      }
+      setAssignedHistory(assignedMap)
+
+      const { data: compRows } = await supabase
+        .from('exercise_completions')
+        .select('sheet_id, completed_at')
+        .eq('student_id', studentId)
+      const completedMap = new Map<string, string>()
+      for (const r of compRows ?? []) {
+        if (!r.sheet_id || !r.completed_at) continue
+        const prev = completedMap.get(r.sheet_id)
+        if (!prev || r.completed_at > prev) completedMap.set(r.sheet_id, r.completed_at)
+      }
+      setCompletedHistory(completedMap)
 
       setLoading(false)
     }
@@ -380,6 +412,23 @@ export default function AssignStudySheetsModal({
                           <span className="text-xs text-gray-500">{sheet.level}</span>
                         )}
                         {!empty && <DifficultyBars count={sheet.difficulty} />}
+                        {!empty && (
+                          completedHistory.has(sheet.id) ? (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                              style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+                            >
+                              Completed {historyDateFmt.format(new Date(completedHistory.get(sheet.id)!))}
+                            </span>
+                          ) : assignedHistory.has(sheet.id) ? (
+                            <span
+                              className="text-xs px-1.5 py-0.5 rounded-full font-medium"
+                              style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+                            >
+                              Assigned {historyDateFmt.format(new Date(assignedHistory.get(sheet.id)!))}
+                            </span>
+                          ) : null
+                        )}
                         {empty && (
                           <span className="text-xs text-gray-400 italic">No content yet</span>
                         )}
