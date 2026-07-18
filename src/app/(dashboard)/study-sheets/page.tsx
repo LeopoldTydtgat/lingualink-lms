@@ -90,9 +90,8 @@ export default async function StudySheetsPage() {
     .filter(s => s.audience === 'student')
     .map(s => s.id)
 
-  type AssignmentRow = { id: string; study_sheet_id: string; student_id: string; assigned_at: string }
+  type AssignmentRow = { id: string; study_sheet_id: string; student_id: string; assigned_at: string; marked_done_at: string | null }
   type ActivityRow = { id: string; sheet_id: string }
-  type CompletionRow = { assignment_id: string | null; completed_at: string }
   type AttemptRow = { activity_id: string; assignment_id: string | null; created_at: string }
 
   // A teacher with no booked-class students ([]) reads nothing; admin (null) is unfiltered.
@@ -102,7 +101,7 @@ export default async function StudySheetsPage() {
   if (studentSheetIds.length > 0 && hasScopeRows) {
     let q = adminClient
       .from('assignments')
-      .select('id, study_sheet_id, student_id, assigned_at')
+      .select('id, study_sheet_id, student_id, assigned_at, marked_done_at')
       .in('study_sheet_id', studentSheetIds)
     if (scopedStudentIds !== null) q = q.in('student_id', scopedStudentIds)
     const { data } = await q
@@ -122,20 +121,12 @@ export default async function StudySheetsPage() {
     activityRows = (data ?? []) as ActivityRow[]
   }
 
-  let completionRows: CompletionRow[] = []
   let attemptRows: AttemptRow[] = []
   if (assignmentIds.length > 0) {
-    const [{ data: comps }, { data: atts }] = await Promise.all([
-      adminClient
-        .from('exercise_completions')
-        .select('assignment_id, completed_at')
-        .in('assignment_id', assignmentIds),
-      adminClient
-        .from('activity_attempts')
-        .select('activity_id, assignment_id, created_at')
-        .in('assignment_id', assignmentIds),
-    ])
-    completionRows = (comps ?? []) as CompletionRow[]
+    const { data: atts } = await adminClient
+      .from('activity_attempts')
+      .select('activity_id, assignment_id, created_at')
+      .in('assignment_id', assignmentIds)
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
@@ -166,9 +157,12 @@ export default async function StudySheetsPage() {
   }
 
   // Bimodal completion rule, single-sourced (see lib/study/assignmentCompletion).
+  const markedDoneAssignmentIds = new Set(
+    assignmentRows.filter(a => a.marked_done_at).map(a => a.id)
+  )
   const { isComplete, activityIdsBySheet } = buildAssignmentCompletion(
     activityRows,
-    completionRows,
+    markedDoneAssignmentIds,
     attemptRows,
   )
 
@@ -205,7 +199,7 @@ export default async function StudySheetsPage() {
     a => new Date(a.assigned_at).getTime() >= weekAgoMs
   ).length
   const newSubmissions =
-    completionRows.filter(c => new Date(c.completed_at).getTime() >= weekAgoMs).length +
+    assignmentRows.filter(a => a.marked_done_at && new Date(a.marked_done_at).getTime() >= weekAgoMs).length +
     attemptRows.filter(t => new Date(t.created_at).getTime() >= weekAgoMs).length
 
   return (

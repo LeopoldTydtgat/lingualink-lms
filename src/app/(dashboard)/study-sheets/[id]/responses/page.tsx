@@ -76,12 +76,12 @@ export default async function WorksheetResponsesPage({
   const hasScopeRows = scopedStudentIds === null || scopedStudentIds.length > 0
 
   // Assignments for this sheet, scoped to the teacher's students.
-  type AssignmentRow = { id: string; student_id: string; assigned_at: string }
+  type AssignmentRow = { id: string; student_id: string; assigned_at: string; marked_done_at: string | null }
   let assignmentRows: AssignmentRow[] = []
   if (hasScopeRows) {
     let q = adminClient
       .from('assignments')
-      .select('id, student_id, assigned_at')
+      .select('id, student_id, assigned_at, marked_done_at')
       .eq('study_sheet_id', id)
     if (scopedStudentIds !== null) q = q.in('student_id', scopedStudentIds)
     const { data } = await q
@@ -133,8 +133,7 @@ export default async function WorksheetResponsesPage({
     nameById.set(s.id, s.full_name)
   }
 
-  // Completion + attempt rows, keyed to this sheet's assignments.
-  type CompletionRow = { assignment_id: string | null; completed_at: string }
+  // Attempt rows, keyed to this sheet's assignments.
   type AttemptRow = {
     activity_id: string
     assignment_id: string | null
@@ -142,23 +141,19 @@ export default async function WorksheetResponsesPage({
     score: number | null
     created_at: string
   }
-  const [{ data: comps }, { data: atts }] = await Promise.all([
-    adminClient
-      .from('exercise_completions')
-      .select('assignment_id, completed_at')
-      .in('assignment_id', assignmentIds),
-    adminClient
-      .from('activity_attempts')
-      .select('activity_id, assignment_id, answers, score, created_at')
-      .in('assignment_id', assignmentIds),
-  ])
-  const completionRows = (comps ?? []) as CompletionRow[]
+  const { data: atts } = await adminClient
+    .from('activity_attempts')
+    .select('activity_id, assignment_id, answers, score, created_at')
+    .in('assignment_id', assignmentIds)
   const attemptRows = (atts ?? []) as AttemptRow[]
 
   // Shared bimodal completion rule (single-sourced with the C1 aggregates).
+  const markedDoneAssignmentIds = new Set(
+    assignmentRows.filter(a => a.marked_done_at).map(a => a.id)
+  )
   const { isComplete } = buildAssignmentCompletion(
     activityRows.map(a => ({ id: a.id, sheet_id: id })),
-    completionRows,
+    markedDoneAssignmentIds,
     attemptRows.map(t => ({ activity_id: t.activity_id, assignment_id: t.assignment_id })),
   )
 

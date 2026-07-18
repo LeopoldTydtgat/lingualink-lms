@@ -1,17 +1,15 @@
 // NEW345 bimodal assignment-completion rule, single-sourced.
 //
 // An assignment is complete when EITHER:
-//   - a legacy `exercise_completions` row is keyed to its assignment_id, OR
+//   - its `assignments.marked_done_at` is set (the student marked the whole
+//     sheet done - the completion path for a sheet with zero activities), OR
 //   - the sheet has >= 1 activity and every one of those activities has an
 //     `activity_attempts` row under that assignment_id.
 //
-// Lifted verbatim from the two inline copies previously in
-// study-sheets/page.tsx and students/[id]/page.tsx - no behavioural change.
-// The returned predicate and the exposed `activityIdsBySheet` map reproduce
-// exactly what those pages built inline.
+// The returned predicate and the exposed `activityIdsBySheet` map are shared by
+// every caller that displays worksheet progress.
 
 type SheetActivityRow = { id: string; sheet_id: string }
-type CompletionRow = { assignment_id: string | null }
 type AttemptActivityRow = { activity_id: string; assignment_id: string | null }
 
 export type AssignmentCompletion = {
@@ -23,7 +21,7 @@ export type AssignmentCompletion = {
 
 export function buildAssignmentCompletion(
   activityRows: SheetActivityRow[],
-  completionRows: CompletionRow[],
+  markedDoneAssignmentIds: Set<string>,
   attemptRows: AttemptActivityRow[],
 ): AssignmentCompletion {
   const activityIdsBySheet = new Map<string, string[]>()
@@ -33,13 +31,7 @@ export function buildAssignmentCompletion(
     activityIdsBySheet.set(a.sheet_id, arr)
   }
 
-  // Legacy path: an exercise_completions row keyed to the assignment means done.
-  const legacyDoneAssignments = new Set<string>()
-  for (const c of completionRows) {
-    if (c.assignment_id) legacyDoneAssignments.add(c.assignment_id)
-  }
-
-  // NEW345 path: which activities each assignment has an attempt for.
+  // Which activities each assignment has an attempt for.
   const attemptsByAssignment = new Map<string, Set<string>>()
   for (const t of attemptRows) {
     if (!t.assignment_id) continue
@@ -49,7 +41,7 @@ export function buildAssignmentCompletion(
   }
 
   function isComplete(assignmentId: string, sheetId: string): boolean {
-    if (legacyDoneAssignments.has(assignmentId)) return true
+    if (markedDoneAssignmentIds.has(assignmentId)) return true
     const acts = activityIdsBySheet.get(sheetId)
     if (acts && acts.length > 0) {
       const done = attemptsByAssignment.get(assignmentId)

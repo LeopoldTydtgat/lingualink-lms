@@ -10,6 +10,7 @@ type RawAssignmentRow = {
   id: string
   assigned_at: string
   study_sheet_id: string
+  marked_done_at: string | null
   study_sheets: RawSheetJoin | RawSheetJoin[]
 }
 
@@ -167,7 +168,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const { data: rawAssignments } = studentId
     ? await adminClient
         .from('assignments')
-        .select('id, assigned_at, study_sheet_id, study_sheets(title, category, level)')
+        .select('id, assigned_at, study_sheet_id, marked_done_at, study_sheets(title, category, level)')
         .eq('student_id', studentId)
         .order('assigned_at', { ascending: false })
     : { data: [] }
@@ -175,13 +176,12 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const assignmentRows = (rawAssignments ?? []) as RawAssignmentRow[]
 
   // Per-assignment completion via the NEW345 bimodal rule (see lib/study/assignmentCompletion):
-  // an assignment is complete when a legacy exercise_completions row is keyed to it, OR
-  // the sheet has activities and every one has an attempt under that assignment.
+  // an assignment is complete when its marked_done_at is set, OR the sheet has
+  // activities and every one has an attempt under that assignment.
   const assignmentIds = assignmentRows.map(a => a.id)
   const sheetIds = [...new Set(assignmentRows.map(a => a.study_sheet_id))]
 
   type ActivityRow = { id: string; sheet_id: string }
-  type CompletionRow = { assignment_id: string | null; completed_at: string }
   type AttemptRow = { activity_id: string; assignment_id: string | null; created_at: string }
 
   // activities has NO is_active column (verified: 20260715120000 migration).
@@ -194,24 +194,19 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     activityRows = (data ?? []) as ActivityRow[]
   }
 
-  let completionRows: CompletionRow[] = []
   let attemptRows: AttemptRow[] = []
   if (assignmentIds.length > 0) {
-    const [{ data: comps }, { data: atts }] = await Promise.all([
-      adminClient
-        .from('exercise_completions')
-        .select('assignment_id, completed_at')
-        .in('assignment_id', assignmentIds),
-      adminClient
-        .from('activity_attempts')
-        .select('activity_id, assignment_id, created_at')
-        .in('assignment_id', assignmentIds),
-    ])
-    completionRows = (comps ?? []) as CompletionRow[]
+    const { data: atts } = await adminClient
+      .from('activity_attempts')
+      .select('activity_id, assignment_id, created_at')
+      .in('assignment_id', assignmentIds)
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
-  const { isComplete } = buildAssignmentCompletion(activityRows, completionRows, attemptRows)
+  const markedDoneAssignmentIds = new Set(
+    assignmentRows.filter(a => a.marked_done_at).map(a => a.id)
+  )
+  const { isComplete } = buildAssignmentCompletion(activityRows, markedDoneAssignmentIds, attemptRows)
 
   const assignments = assignmentRows.map((a) => {
     const rawSheet: unknown = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
