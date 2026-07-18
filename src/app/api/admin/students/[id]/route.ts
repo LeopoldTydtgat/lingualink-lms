@@ -382,9 +382,6 @@ export async function DELETE(
       .delete()
       .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
 
-    // 3b. exercise_completions (keyed by student_id)
-    await adminClient.from('exercise_completions').delete().eq('student_id', id)
-
     // 3c. assignments (keyed by student_id)
     await adminClient.from('assignments').delete().eq('student_id', id)
 
