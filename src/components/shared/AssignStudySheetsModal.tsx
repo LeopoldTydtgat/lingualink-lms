@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import { X, Search, Eye } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -47,11 +48,12 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
+// A sheet is empty (non-assignable) when it has zero content words AND zero
+// activities. Category no longer factors in, and attachments do not count as
+// content — attachment-only sheets stay teaching material. This deliberately
+// unlocks activities-only sheets for assignment (S318).
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  const cat = sheet.category?.toLowerCase()
-  if (cat === 'vocabulary') return !(sheet.content?.words?.length)
-  if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
-  return false
+  return !(sheet.content?.words?.length) && (counts[sheet.id] ?? 0) === 0
 }
 
 const EMPTY_TAG_SET: Set<string> = new Set()
@@ -69,8 +71,8 @@ export default function AssignStudySheetsModal({
   const supabase = createClient()
 
   const [sheets, setSheets] = useState<StudySheet[]>([])
-  // Per-sheet exercise counts from the exercises table (the grammar empty-gate).
-  const [exCounts, setExCounts] = useState<Record<string, number>>({})
+  // Per-sheet activity counts from the activities table (part of the empty-gate).
+  const [actCounts, setActCounts] = useState<Record<string, number>>({})
   const [tags, setTags] = useState<Tag[]>([])
   // sheet_id -> set of tag_ids, built from sheet_tags.
   const [sheetTagMap, setSheetTagMap] = useState<Map<string, Set<string>>>(new Map())
@@ -100,14 +102,15 @@ export default function AssignStudySheetsModal({
         .order('title')
       setSheets(data ?? [])
 
-      // Grammar "empty" is gated on exercise count, which now lives in the
-      // exercises table rather than content.exercises.
-      const { data: exRows } = await supabase.from('exercises').select('study_sheet_id')
+      // Part of the "empty" gate is activity count, which lives in the
+      // activities table rather than content.exercises. Select only id, sheet_id
+      // — never content/answer_key (column-level grants silently null extras).
+      const { data: actRows } = await supabase.from('activities').select('id, sheet_id')
       const counts: Record<string, number> = {}
-      for (const r of exRows ?? []) {
-        counts[r.study_sheet_id] = (counts[r.study_sheet_id] ?? 0) + 1
+      for (const r of actRows ?? []) {
+        counts[r.sheet_id] = (counts[r.sheet_id] ?? 0) + 1
       }
-      setExCounts(counts)
+      setActCounts(counts)
 
       // Tag taxonomy and per-sheet tag links, for the topic/skill filter chips.
       const { data: tagRows } = await supabase.from('tags').select('id, name, kind').order('name')
@@ -124,10 +127,11 @@ export default function AssignStudySheetsModal({
 
       // Per-student assignment/completion history, to badge sheets this student
       // has already been given or finished. RLS scopes assignments to this
-      // teacher's own rows; that gap is accepted for now (NEW381 tracked).
+      // teacher's own (assigned_by) rows; that gap is accepted for now (NEW381
+      // tracked).
       const { data: histRows } = await supabase
         .from('assignments')
-        .select('study_sheet_id, assigned_at')
+        .select('id, study_sheet_id, assigned_at, marked_done_at')
         .eq('student_id', studentId)
       const assignedMap = new Map<string, string>()
       for (const r of histRows ?? []) {
@@ -137,15 +141,38 @@ export default function AssignStudySheetsModal({
       }
       setAssignedHistory(assignedMap)
 
-      const { data: compRows } = await supabase
-        .from('exercise_completions')
-        .select('sheet_id, completed_at')
+      // Completion is the bimodal rule (marked_done_at OR every activity
+      // attempted under the assignment). Reuse the activities rows already
+      // fetched for the empty gate plus this student's attempts.
+      const { data: attemptRows } = await supabase
+        .from('activity_attempts')
+        .select('activity_id, assignment_id, created_at')
         .eq('student_id', studentId)
+      const markedDoneAssignmentIds = new Set<string>()
+      for (const r of histRows ?? []) {
+        if (r.marked_done_at) markedDoneAssignmentIds.add(r.id)
+      }
+      const { isComplete } = buildAssignmentCompletion(
+        actRows ?? [],
+        markedDoneAssignmentIds,
+        attemptRows ?? [],
+      )
+      // Latest attempt timestamp per assignment, for the completion date when a
+      // sheet was completed by attempting activities (no marked_done_at).
+      const latestAttemptByAssignment = new Map<string, string>()
+      for (const r of attemptRows ?? []) {
+        if (!r.assignment_id || !r.created_at) continue
+        const prev = latestAttemptByAssignment.get(r.assignment_id)
+        if (!prev || r.created_at > prev) latestAttemptByAssignment.set(r.assignment_id, r.created_at)
+      }
       const completedMap = new Map<string, string>()
-      for (const r of compRows ?? []) {
-        if (!r.sheet_id || !r.completed_at) continue
-        const prev = completedMap.get(r.sheet_id)
-        if (!prev || r.completed_at > prev) completedMap.set(r.sheet_id, r.completed_at)
+      for (const r of histRows ?? []) {
+        if (!r.study_sheet_id) continue
+        if (!isComplete(r.id, r.study_sheet_id)) continue
+        const date = r.marked_done_at ?? latestAttemptByAssignment.get(r.id)
+        if (!date) continue
+        const prev = completedMap.get(r.study_sheet_id)
+        if (!prev || date > prev) completedMap.set(r.study_sheet_id, date)
       }
       setCompletedHistory(completedMap)
 
@@ -367,7 +394,7 @@ export default function AssignStudySheetsModal({
           ) : (
             <div className="space-y-1">
               {filtered.map(sheet => {
-                const empty = isSheetEmpty(sheet, exCounts)
+                const empty = isSheetEmpty(sheet, actCounts)
                 const isSelected = selected.has(sheet.id)
                 return (
                   <div

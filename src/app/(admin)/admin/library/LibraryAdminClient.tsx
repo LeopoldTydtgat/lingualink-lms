@@ -81,15 +81,16 @@ function rolesPillStyle(roles: string[]): { backgroundColor: string; color: stri
   return { backgroundColor: '#DCFCE7', color: '#15803D' }
 }
 
-function exerciseCount(sheet: StudySheet, counts: Record<string, number>): number {
+function activityCount(sheet: StudySheet, counts: Record<string, number>): number {
   return counts[sheet.id] ?? 0
 }
 
+// A sheet is empty (non-assignable) when it has zero content words AND zero
+// activities. Category no longer factors in, and attachments do not count as
+// content — attachment-only sheets stay teaching material. This deliberately
+// unlocks activities-only sheets for assignment (S318).
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  const cat = sheet.category?.toLowerCase()
-  if (cat === 'vocabulary') return !(sheet.content?.words?.length)
-  if (cat === 'grammar') return (counts[sheet.id] ?? 0) === 0
-  return false
+  return !(sheet.content?.words?.length) && (counts[sheet.id] ?? 0) === 0
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -99,8 +100,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [sheets, setSheets] = useState<StudySheet[]>([])
-  // Per-sheet exercise counts sourced from the exercises table (not content).
-  const [exCounts, setExCounts] = useState<Record<string, number>>({})
+  // Per-sheet activity counts sourced from the activities table (not content).
+  const [actCounts, setActCounts] = useState<Record<string, number>>({})
   const [students, setStudents] = useState<StudentOption[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -143,14 +144,15 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       .order('title', { ascending: true })
     setSheets(data || [])
 
-    // Exercise counts come from the exercises table — content.exercises is no
+    // Activity counts come from the activities table — content.exercises is no
     // longer written. One lightweight query, reduced to a per-sheet count map.
-    const { data: exRows } = await supabase.from('exercises').select('study_sheet_id')
+    // Select only id, sheet_id — never content/answer_key (column-level grants).
+    const { data: actRows } = await supabase.from('activities').select('id, sheet_id')
     const counts: Record<string, number> = {}
-    for (const r of exRows ?? []) {
-      counts[r.study_sheet_id] = (counts[r.study_sheet_id] ?? 0) + 1
+    for (const r of actRows ?? []) {
+      counts[r.sheet_id] = (counts[r.sheet_id] ?? 0) + 1
     }
-    setExCounts(counts)
+    setActCounts(counts)
 
     setLoading(false)
   }, [])
@@ -480,14 +482,14 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
             <span>Level</span>
             <span>Difficulty</span>
             <span>Access</span>
-            <span className="text-center">Exercises</span>
+            <span className="text-center">Activities</span>
             <span>Actions</span>
           </div>
 
           {/* Rows */}
           <div className="divide-y divide-gray-50">
             {filtered.map(sheet => {
-              const empty = isSheetEmpty(sheet, exCounts)
+              const empty = isSheetEmpty(sheet, actCounts)
               return (
                 <div
                   key={sheet.id}
@@ -534,8 +536,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     {rolesToLabel(sheet.allowed_roles)}
                   </span>
 
-                  {/* Exercise count */}
-                  <span className="text-center text-gray-600">{exerciseCount(sheet, exCounts)}</span>
+                  {/* Activity count */}
+                  <span className="text-center text-gray-600">{activityCount(sheet, actCounts)}</span>
 
                   {/* Actions */}
                   <div className="flex items-center gap-3 flex-shrink-0">
