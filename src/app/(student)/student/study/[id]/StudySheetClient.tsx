@@ -60,8 +60,13 @@ export default function StudySheetClient({
 }: Props) {
   const router = useRouter()
 
-  // Which view is active — vocabulary list or exercises
-  const [activeTab, setActiveTab] = useState<'vocab' | 'exercises'>('vocab')
+  const words: VocabWord[] = sheet.content?.words ?? []
+
+  // Which view is active — vocabulary list or exercises. Default to the vocab
+  // tab only when the sheet has words; otherwise open straight to exercises.
+  const [activeTab, setActiveTab] = useState<'vocab' | 'exercises'>(
+    words.length > 0 ? 'vocab' : 'exercises'
+  )
 
   // Exercise state
   const [currentExerciseIdx, setCurrentExerciseIdx] = useState(0)
@@ -77,7 +82,6 @@ export default function StudySheetClient({
   const [markedDone, setMarkedDone] = useState(false)
   const [markError, setMarkError] = useState('')
 
-  const words: VocabWord[] = sheet.content?.words ?? []
   const currentExercise = exercises[currentExerciseIdx]
   const totalExercises = exercises.length
   const scorePct = totalExercises > 0 ? Math.round((correctCount / totalExercises) * 100) : 100
@@ -277,7 +281,7 @@ export default function StudySheetClient({
               No vocabulary words added to this sheet yet.
             </p>
           ) : (
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
+            <div className="rounded-xl overflow-hidden bg-white shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
@@ -329,16 +333,32 @@ export default function StudySheetClient({
 
           {/* Prompt to do exercises */}
           {totalExercises > 0 && (
-            <div className="mt-6 p-4 rounded-xl border border-orange-100 bg-orange-50 flex items-center justify-between">
+            <div
+              className="mt-6 p-4 rounded-xl flex items-center justify-between"
+              style={
+                alreadyCompleted
+                  ? { border: '1px solid #f3f4f6', backgroundColor: '#f9fafb' }
+                  : { border: '1px solid #ffedd5', backgroundColor: '#fff7ed' }
+              }
+            >
               <p className="text-sm text-gray-700">
-                Ready to test yourself? There are <strong>{totalExercises}</strong> exercises for this sheet.
+                Ready to test yourself?{' '}
+                {totalExercises === 1 ? (
+                  <>There is <strong>1</strong> exercise for this sheet.</>
+                ) : (
+                  <>There are <strong>{totalExercises}</strong> exercises for this sheet.</>
+                )}
               </p>
               <button
                 onClick={() => setActiveTab('exercises')}
-                className="ml-4 flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#FF8303' }}
+                className="ml-4 flex items-center gap-1 px-4 py-2 rounded-lg text-sm font-semibold"
+                style={
+                  alreadyCompleted
+                    ? { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8' }
+                    : { backgroundColor: '#FF8303', color: '#ffffff' }
+                }
               >
-                Start Exercises <ChevronRight size={14} />
+                {alreadyCompleted ? 'Redo Exercises' : 'Start Exercises'} <ChevronRight size={14} />
               </button>
             </div>
           )}
@@ -401,14 +421,6 @@ export default function StudySheetClient({
                 </button>
               </div>
             </div>
-          ) : alreadyCompleted ? (
-            /* ── Already completed notice ── */
-            <div className="mb-6 p-4 rounded-xl border border-green-100 bg-green-50 flex items-center gap-3">
-              <CheckCircle size={18} className="text-green-600 flex-shrink-0" />
-              <p className="text-sm text-gray-700">
-                You have already completed this sheet. You can redo the exercises for practice — your score will not be recorded again.
-              </p>
-            </div>
           ) : null}
 
           {/* Exercise card — shown when not in completion state */}
@@ -434,7 +446,7 @@ export default function StudySheetClient({
               </div>
 
               {/* Question */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
+              <div className="bg-white rounded-xl p-5 mb-4 shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
                 <p className="font-semibold text-gray-900 text-base leading-snug mb-5">
                   {currentExercise.question_text}
                 </p>
@@ -541,9 +553,19 @@ export default function StudySheetClient({
 
       {/* Mark as done — completion path independent of the exercises */}
       {alreadyCompleted || markedDone || sessionComplete ? (
-        <div className="mt-8 p-4 rounded-xl border border-green-100 bg-green-50 flex items-center gap-3">
-          <CheckCircle size={18} className="text-green-600 flex-shrink-0" />
-          <p className="text-sm font-medium text-green-700">Completed</p>
+        <div
+          className="mt-8 p-4 rounded-xl flex items-start gap-3"
+          style={{ backgroundColor: '#f0fdf4', border: '1px solid #f3f4f6', borderLeft: '3px solid #16A34A' }}
+        >
+          <CheckCircle size={18} className="text-green-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-green-700">Completed</p>
+            {totalExercises > 0 && (
+              <p className="text-xs text-gray-600 mt-0.5">
+                You can redo the exercises for practice — your score will not be recorded again.
+              </p>
+            )}
+          </div>
         </div>
       ) : (
         <div className="mt-8">
