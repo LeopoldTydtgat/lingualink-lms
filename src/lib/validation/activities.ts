@@ -174,6 +174,18 @@ export const WritingTaskSubmissionSchema = z.object({
   assignment_id: z.string().uuid('Must be a valid ID').optional(),
 })
 
+// ─── Teacher review ───────────────────────────────────────────────────────────
+// Request body for POST /api/teacher/attempts/[attemptId]/review. Written to
+// activity_attempts.teacher_feedback after trimming; the `.refine` rejects
+// whitespace-only text (which trims to nothing), mirroring nonBlankString.
+
+export const TeacherReviewSchema = z.object({
+  feedback: z
+    .string()
+    .max(5000, 'Feedback is too long (5000 characters max).')
+    .refine(s => s.trim().length > 0, 'Feedback is required.'),
+})
+
 export type McqQuestion = z.infer<typeof McqQuestionSchema>
 export type McqContent = z.infer<typeof McqContentSchema>
 export type McqAnswerKeyEntry = z.infer<typeof McqAnswerKeyEntrySchema>
@@ -183,3 +195,4 @@ export type WritingTaskContent = z.infer<typeof WritingTaskContentSchema>
 export type WritingTaskActivityAuthorInput = z.infer<typeof WritingTaskActivityAuthorSchema>
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionSchema>
 export type WritingTaskSubmissionInput = z.infer<typeof WritingTaskSubmissionSchema>
+export type TeacherReviewInput = z.infer<typeof TeacherReviewSchema>

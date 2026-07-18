@@ -139,6 +139,32 @@ export default async function StudySheetsPage() {
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
+  // Pending review-queue count for the header entry point (NEW345 step 5). Counted
+  // the same way the /study-sheets/reviews page builds its list: needs_review
+  // attempts in the teacher's Condition-B scope whose activity is a writing_task
+  // (assignment-independent — attempts can carry a null assignment_id, so the
+  // assignment-scoped attemptRows above cannot be reused).
+  let pendingReviewCount = 0
+  if (hasScopeRows) {
+    let rq = adminClient
+      .from('activity_attempts')
+      .select('id, activity_id')
+      .eq('needs_review', true)
+    if (scopedStudentIds !== null) rq = rq.in('student_id', scopedStudentIds)
+    const { data: reviewData } = await rq
+    const pendingRows = (reviewData ?? []) as { id: string; activity_id: string }[]
+    if (pendingRows.length > 0) {
+      const pendingActivityIds = [...new Set(pendingRows.map(r => r.activity_id))]
+      const { data: wtData } = await adminClient
+        .from('activities')
+        .select('id')
+        .in('id', pendingActivityIds)
+        .eq('type', 'writing_task')
+      const writingTaskIds = new Set(((wtData ?? []) as { id: string }[]).map(a => a.id))
+      pendingReviewCount = pendingRows.filter(r => writingTaskIds.has(r.activity_id)).length
+    }
+  }
+
   // Bimodal completion rule, single-sourced (see lib/study/assignmentCompletion).
   const { isComplete, activityIdsBySheet } = buildAssignmentCompletion(
     activityRows,
@@ -191,6 +217,7 @@ export default async function StudySheetsPage() {
       assignedThisWeek={assignedThisWeek}
       newSubmissions={newSubmissions}
       assignableStudents={assignableStudents}
+      pendingReviewCount={pendingReviewCount}
     />
   )
 }

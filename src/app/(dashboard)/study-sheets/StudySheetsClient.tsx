@@ -53,6 +53,7 @@ type Props = {
   assignedThisWeek: number
   newSubmissions: number
   assignableStudents: AssignableStudent[]
+  pendingReviewCount: number
 }
 
 type TabKey = 'teaching' | 'student'
@@ -538,6 +539,7 @@ export default function StudySheetsClient({
   assignedThisWeek,
   newSubmissions,
   assignableStudents,
+  pendingReviewCount,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabKey>('teaching')
@@ -594,6 +596,26 @@ export default function StudySheetsClient({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Review-queue entry point (NEW345 step 5): tinted-outline secondary,
+                count computed server-side for this teacher's Condition-B scope. */}
+            <button
+              type="button"
+              onClick={() => router.push('/study-sheets/reviews')}
+              className="inline-flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-md"
+              style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#FFE4C4')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFF0E0')}
+            >
+              Review queue
+              {pendingReviewCount > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-xs font-semibold"
+                  style={{ backgroundColor: '#FF8303', color: 'white' }}
+                >
+                  {pendingReviewCount}
+                </span>
+              )}
+            </button>
             {/* Every teacher can author private staff material - not admin-gated. */}
             {activeTab === 'teaching' && (
               <Button
