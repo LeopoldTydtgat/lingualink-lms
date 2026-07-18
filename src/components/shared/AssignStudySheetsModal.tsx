@@ -16,6 +16,12 @@ type StudySheet = {
   attachments: unknown[] | null
 }
 
+type Tag = {
+  id: string
+  name: string
+  kind: string
+}
+
 type Props = {
   studentName: string
   lessonId: string
@@ -48,6 +54,8 @@ function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolea
   return false
 }
 
+const EMPTY_TAG_SET: Set<string> = new Set()
+
 export default function AssignStudySheetsModal({
   studentName,
   lessonId,
@@ -61,8 +69,11 @@ export default function AssignStudySheetsModal({
   const [sheets, setSheets] = useState<StudySheet[]>([])
   // Per-sheet exercise counts from the exercises table (the grammar empty-gate).
   const [exCounts, setExCounts] = useState<Record<string, number>>({})
+  const [tags, setTags] = useState<Tag[]>([])
+  // sheet_id -> set of tag_ids, built from sheet_tags.
+  const [sheetTagMap, setSheetTagMap] = useState<Map<string, Set<string>>>(new Map())
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set())
   const [levelFilter, setLevelFilter] = useState('all')
   const [selected, setSelected] = useState<Set<string>>(new Set(alreadyAssigned))
   const [saving, setSaving] = useState(false)
@@ -93,21 +104,69 @@ export default function AssignStudySheetsModal({
       }
       setExCounts(counts)
 
+      // Tag taxonomy and per-sheet tag links, for the topic/skill filter chips.
+      const { data: tagRows } = await supabase.from('tags').select('id, name, kind').order('name')
+      setTags(tagRows ?? [])
+
+      const { data: sheetTagRows } = await supabase.from('sheet_tags').select('sheet_id, tag_id')
+      const map = new Map<string, Set<string>>()
+      for (const r of sheetTagRows ?? []) {
+        const set = map.get(r.sheet_id) ?? new Set<string>()
+        set.add(r.tag_id)
+        map.set(r.sheet_id, set)
+      }
+      setSheetTagMap(map)
+
       setLoading(false)
     }
     load()
   }, [])
 
+  // Group the currently-selected tag ids by their kind, so the filter applies
+  // OR-within-kind / AND-across-kind semantics.
+  const selectedTagsByKind = new Map<string, string[]>()
+  for (const tagId of selectedTags) {
+    const tag = tags.find(t => t.id === tagId)
+    if (!tag) continue
+    const arr = selectedTagsByKind.get(tag.kind) ?? []
+    arr.push(tagId)
+    selectedTagsByKind.set(tag.kind, arr)
+  }
+
   const filtered = sheets.filter(sheet => {
     const matchesSearch = sheet.title.toLowerCase().includes(search.toLowerCase())
-    const matchesCategory = categoryFilter === 'all' || sheet.category === categoryFilter
     const matchesLevel = levelFilter === 'all' || sheet.level === levelFilter
-    return matchesSearch && matchesCategory && matchesLevel
+
+    // A sheet passes when, for every kind that has a selected tag, it carries at
+    // least one of that kind's selected tags. Sheets with no tags fail any active
+    // tag filter. No selected tags means no tag filtering.
+    const sheetTagIds = sheetTagMap.get(sheet.id) ?? EMPTY_TAG_SET
+    let matchesTags = true
+    for (const [, tagIds] of selectedTagsByKind) {
+      if (!tagIds.some(id => sheetTagIds.has(id))) {
+        matchesTags = false
+        break
+      }
+    }
+
+    return matchesSearch && matchesLevel && matchesTags
   })
 
   function toggleSheet(id: string, empty: boolean) {
     if (empty) return
     setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  function toggleTag(id: string) {
+    setSelectedTags(prev => {
       const next = new Set(prev)
       if (next.has(id)) {
         next.delete(id)
@@ -178,6 +237,9 @@ export default function AssignStudySheetsModal({
 
   const LEVELS = ['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
+  const topicTags = tags.filter(t => t.kind === 'topic')
+  const skillTags = tags.filter(t => t.kind === 'skill')
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -210,22 +272,43 @@ export default function AssignStudySheetsModal({
               className="pl-9"
             />
           </div>
+          {topicTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {topicTags.map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
+                  className="px-3 py-1 rounded-md text-xs border"
+                  style={
+                    selectedTags.has(tag.id)
+                      ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
+                      : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
+                  }
+                >
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {skillTags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {skillTags.map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
+                  className="px-3 py-1 rounded-md text-xs border"
+                  style={
+                    selectedTags.has(tag.id)
+                      ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
+                      : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
+                  }
+                >
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-1">
-            {['all', 'vocabulary', 'grammar'].map(cat => (
-              <button
-                key={cat}
-                onClick={() => setCategoryFilter(cat)}
-                className="px-3 py-1 rounded-md text-xs border capitalize"
-                style={
-                  categoryFilter === cat
-                    ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }
-                    : { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#374151' }
-                }
-              >
-                {cat}
-              </button>
-            ))}
-            <span className="w-px bg-gray-200 mx-1" />
             {LEVELS.map(l => (
               <button
                 key={l}
@@ -294,12 +377,7 @@ export default function AssignStudySheetsModal({
                           <span className="text-xs text-gray-300">{String.fromCharCode(183)}</span>
                         )}
                         {sheet.level && (
-                          <span
-                            className="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                            style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
-                          >
-                            {sheet.level}
-                          </span>
+                          <span className="text-xs text-gray-500">{sheet.level}</span>
                         )}
                         {!empty && <DifficultyBars count={sheet.difficulty} />}
                         {empty && (
