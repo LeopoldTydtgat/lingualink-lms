@@ -7,6 +7,7 @@ import WritingTaskPlayerClient from './WritingTaskPlayerClient'
 
 interface Props {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ assignment?: string }>
 }
 
 function Unavailable() {
@@ -19,12 +20,18 @@ function Unavailable() {
   )
 }
 
-export default async function ActivityPage({ params }: Props) {
+export default async function ActivityPage({ params, searchParams }: Props) {
   const { id } = await params
+  const { assignment } = await searchParams
 
   // A non-uuid segment can never name a row; without this it reaches Postgres
   // as a 22P02 cast error rather than a clean not-found.
   if (!z.string().uuid().safeParse(id).success) notFound()
+
+  // A malformed assignment param must not kill access to a valid activity -
+  // treat anything that isn't a uuid as absent (attempt records null).
+  const assignmentId =
+    assignment && z.string().uuid().safeParse(assignment).success ? assignment : null
 
   const supabase = await createClient()
 
@@ -108,6 +115,7 @@ export default async function ActivityPage({ params }: Props) {
     return (
       <WritingTaskPlayerClient
         activityId={activity.id}
+        assignmentId={assignmentId}
         title={activity.title}
         prompt={parsedWriting.data.prompt}
         latestAttempt={
@@ -150,6 +158,7 @@ export default async function ActivityPage({ params }: Props) {
   return (
     <ActivityPlayerClient
       activityId={activity.id}
+      assignmentId={assignmentId}
       title={activity.title}
       questions={parsedContent.data.questions}
       previousScore={lastAttempt?.score ?? null}

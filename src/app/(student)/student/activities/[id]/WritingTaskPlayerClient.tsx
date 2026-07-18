@@ -31,6 +31,7 @@ interface LatestAttempt {
 
 interface Props {
   activityId: string
+  assignmentId: string | null
   title: string | null
   prompt: string
   latestAttempt: LatestAttempt | null
@@ -40,6 +41,7 @@ interface Props {
 
 export default function WritingTaskPlayerClient({
   activityId,
+  assignmentId,
   title,
   prompt,
   latestAttempt,
@@ -68,7 +70,7 @@ export default function WritingTaskPlayerClient({
       const res = await fetch(`/api/student/activities/${activityId}/submit-writing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response_text: text }),
+        body: JSON.stringify({ response_text: text, assignment_id: assignmentId ?? undefined }),
       })
 
       const data = await res.json().catch(() => ({}))
