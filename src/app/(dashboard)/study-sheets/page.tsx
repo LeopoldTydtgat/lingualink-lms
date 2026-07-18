@@ -205,7 +205,6 @@ export default async function StudySheetsPage() {
   return (
     <StudySheetsClient
       studySheets={sheets}
-      isAdmin={isAdmin}
       currentUserId={user.id}
       progressBySheet={progressBySheet}
       assignedThisWeek={assignedThisWeek}

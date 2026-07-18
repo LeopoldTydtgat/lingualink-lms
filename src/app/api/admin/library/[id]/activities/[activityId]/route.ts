@@ -205,8 +205,8 @@ export async function DELETE(
   // against it, with no warning and no undo. That is the same hazard the D4
   // decision refuses for teacher sheet deletes
   // (20260715180000_new345_teacher_write_policies.sql: a hard DELETE would
-  // cascade lesson_annotations and exercise_completions). Attempted activities
-  // are therefore blocked here rather than quietly cascaded.
+  // cascade lesson_annotations). Attempted activities are therefore blocked here
+  // rather than quietly cascaded.
   const { count, error: countError } = await adminClient
     .from('activity_attempts')
     .select('id', { count: 'exact', head: true })

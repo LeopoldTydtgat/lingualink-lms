@@ -20,17 +20,8 @@ export type WordRow = {
   audio_url: string
 }
 
-export type ExerciseRow = {
-  id: string
-  question: string
-  options: [string, string, string, string]
-  correct_index: number
-  explanation: string
-}
-
 export type SheetContent = {
   words?: WordRow[]
-  exercises?: ExerciseRow[]
 }
 
 export type Attachment = {

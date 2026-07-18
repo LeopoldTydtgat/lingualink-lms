@@ -47,7 +47,6 @@ type AssignableStudent = { id: string; full_name: string; email: string }
 
 type Props = {
   studySheets: StudySheet[]
-  isAdmin: boolean
   currentUserId: string
   progressBySheet: Record<string, SheetProgress>
   assignedThisWeek: number
@@ -533,7 +532,6 @@ function SheetTable({
 
 export default function StudySheetsClient({
   studySheets,
-  isAdmin,
   currentUserId,
   progressBySheet,
   assignedThisWeek,
@@ -624,17 +622,6 @@ export default function StudySheetsClient({
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Resource
-              </Button>
-            )}
-            {isAdmin && (
-              <Button
-                onClick={() => router.push('/study-sheets/new')}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-                style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Study Sheet
               </Button>
             )}
           </div>
