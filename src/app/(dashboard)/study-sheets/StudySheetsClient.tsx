@@ -620,7 +620,7 @@ export default function StudySheetsClient({
 
         {/* Stat cards */}
         <div className="flex flex-wrap gap-4">
-          <StatCard icon={GraduationCap} label="Teaching Resources" value={teachingCount} caption="Private to you" />
+          <StatCard icon={GraduationCap} label="My Resources" value={teachingCount} caption="Private to you" />
           <StatCard icon={Users} label="Student Worksheets" value={worksheetCount} caption="Available to assign" />
           <StatCard icon={CalendarDays} label="Assigned This Week" value={assignedThisWeek} caption="Across your students" />
           <StatCard icon={ClipboardCheck} label="New Submissions" value={newSubmissions} caption="In the last 7 days" />
