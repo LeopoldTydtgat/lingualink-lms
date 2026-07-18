@@ -25,32 +25,15 @@ interface Assignment {
   study_sheet: StudySheet | null
 }
 
-interface Completion {
-  id: string
-  sheet_id: string
-  assignment_id: string | null
-  completed_at: string
-  score: number | null
-}
-
 interface Props {
   studentId: string
   assignments: Assignment[]
-  completions: Completion[]
+  completedAssignmentIds: string[]
+  practicedSheetIds: string[]
   library: StudySheet[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Returns true if any completion row references this assignment */
-function isAssignmentCompleted(assignmentId: string, completions: Completion[]) {
-  return completions.some((c) => c.assignment_id === assignmentId)
-}
-
-/** Returns true if the student has done self-directed practice on this sheet */
-function isPracticed(sheetId: string, completions: Completion[]) {
-  return completions.some((c) => c.sheet_id === sheetId && c.assignment_id === null)
-}
 
 /** Category pill, shared styling keyed on canonical lowercase casing */
 function CategoryBadge({ category }: { category: string | null }) {
@@ -145,21 +128,24 @@ function StatCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completions, library }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
 
+  const completedAssignmentIdSet = new Set(completedAssignmentIds)
+  const practicedSheetIdSet = new Set(practicedSheetIds)
+
   // Separate pending vs completed assignments.
   // Pending on a deactivated sheet is hidden entirely; completed on a
   // deactivated sheet stays visible (rendered non-clickable below).
   const pendingAssignments = assignments.filter(
-    (a) => a.study_sheet && a.study_sheet.is_active && !isAssignmentCompleted(a.id, completions)
+    (a) => a.study_sheet && a.study_sheet.is_active && !completedAssignmentIdSet.has(a.id)
   )
   const completedAssignments = assignments.filter(
-    (a) => a.study_sheet && isAssignmentCompleted(a.id, completions)
+    (a) => a.study_sheet && completedAssignmentIdSet.has(a.id)
   )
 
   // "This Week" — assignments (any status) on an active sheet assigned in the last 7 days
@@ -369,7 +355,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {filteredLibrary.map((sheet) => {
-                const practiced = isPracticed(sheet.id, completions)
+                const practiced = practicedSheetIdSet.has(sheet.id)
                 return (
                   <div
                     key={sheet.id}

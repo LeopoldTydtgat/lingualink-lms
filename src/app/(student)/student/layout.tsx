@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireTz } from '@/lib/time/requireTz'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -99,30 +100,53 @@ export default async function StudentDashboardLayout({
 
   const { data: assignmentRows } = await supabase
     .from('assignments')
-    .select('id, study_sheets ( is_active )')
+    .select('id, study_sheet_id, marked_done_at, study_sheets ( is_active )')
     .eq('student_id', student.id)
 
-  const { data: assignedCompletions } = await supabase
-    .from('exercise_completions')
-    .select('assignment_id')
-    .eq('student_id', student.id)
-    .not('assignment_id', 'is', null)
+  // NEW345 bimodal completion (single-sourced): marked_done_at set, OR sheet has
+  // >= 1 activity and every activity has an attempt under that assignment.
+  const assignmentSheetIds = [
+    ...new Set((assignmentRows ?? []).map((a) => a.study_sheet_id as string)),
+  ]
 
-  const completedAssignmentIds = new Set(
-    (assignedCompletions ?? []).map((c) => c.assignment_id as string)
+  let activityRows: { id: string; sheet_id: string }[] = []
+  if (assignmentSheetIds.length > 0) {
+    const { data } = await supabase
+      .from('activities')
+      .select('id, sheet_id')
+      .in('sheet_id', assignmentSheetIds)
+    activityRows = (data ?? []) as { id: string; sheet_id: string }[]
+  }
+
+  const { data: attemptsRaw } = await supabase
+    .from('activity_attempts')
+    .select('activity_id, assignment_id')
+    .eq('student_id', student.id)
+  const attemptRows = (attemptsRaw ?? []) as {
+    activity_id: string
+    assignment_id: string | null
+  }[]
+
+  const markedDoneAssignmentIds = new Set(
+    (assignmentRows ?? []).filter((a) => a.marked_done_at).map((a) => a.id as string)
+  )
+  const { isComplete } = buildAssignmentCompletion(
+    activityRows,
+    markedDoneAssignmentIds,
+    attemptRows,
   )
 
   // Pending assignments on deactivated sheets are excluded from the counts;
   // completed assignments on deactivated sheets stay counted (they remain visible).
   const visibleAssignments = (assignmentRows ?? []).filter((a) => {
     const sheet = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
-    const completed = completedAssignmentIds.has(a.id as string)
+    const completed = isComplete(a.id as string, a.study_sheet_id as string)
     return (sheet?.is_active ?? false) || completed
   })
 
   const assignedCount = visibleAssignments.length
   const completedCount = visibleAssignments.filter((a) =>
-    completedAssignmentIds.has(a.id as string)
+    isComplete(a.id as string, a.study_sheet_id as string)
   ).length
 
   const { count: unreadMessageCount } = await supabase

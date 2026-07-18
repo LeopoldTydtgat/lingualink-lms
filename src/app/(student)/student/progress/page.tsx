@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import ProgressClient from './ProgressClient'
 
 export default async function ProgressPage() {
@@ -59,18 +60,57 @@ export default async function ProgressPage() {
     ? reportsWithLevel[0]
     : null
 
-  // Get total assignments for this student
-  const { count: totalAssigned } = await supabase
+  // Assignments with sheet activity/attempt state so Progress counts match the
+  // layout's visible-assignment rule (NEW345 bimodal completion, single-sourced).
+  // Deliberate small behaviour change: totals count VISIBLE assignments (active
+  // sheet OR complete), not every assignment row.
+  const { data: progressAssignmentRows } = await supabase
     .from('assignments')
-    .select('id', { count: 'exact', head: true })
+    .select('id, study_sheet_id, marked_done_at, study_sheets ( is_active )')
     .eq('student_id', student.id)
 
-  // Get completed exercises for this student
-  const { count: totalCompleted } = await supabase
-    .from('exercise_completions')
-    .select('id', { count: 'exact', head: true })
+  const progressAssignments = progressAssignmentRows ?? []
+  const progressSheetIds = [
+    ...new Set(progressAssignments.map((a) => a.study_sheet_id as string)),
+  ]
+
+  let progressActivityRows: { id: string; sheet_id: string }[] = []
+  if (progressSheetIds.length > 0) {
+    const { data } = await supabase
+      .from('activities')
+      .select('id, sheet_id')
+      .in('sheet_id', progressSheetIds)
+    progressActivityRows = (data ?? []) as { id: string; sheet_id: string }[]
+  }
+
+  const { data: progressAttemptsRaw } = await supabase
+    .from('activity_attempts')
+    .select('activity_id, assignment_id')
     .eq('student_id', student.id)
-    .not('assignment_id', 'is', null)
+  const progressAttemptRows = (progressAttemptsRaw ?? []) as {
+    activity_id: string
+    assignment_id: string | null
+  }[]
+
+  const progressMarkedDone = new Set(
+    progressAssignments.filter((a) => a.marked_done_at).map((a) => a.id as string)
+  )
+  const { isComplete: isAssignmentComplete } = buildAssignmentCompletion(
+    progressActivityRows,
+    progressMarkedDone,
+    progressAttemptRows,
+  )
+
+  const visibleProgressAssignments = progressAssignments.filter((a) => {
+    const sheet = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
+    const completed = isAssignmentComplete(a.id as string, a.study_sheet_id as string)
+    return ((sheet as { is_active?: boolean } | null)?.is_active ?? false) || completed
+  })
+
+  const totalAssigned = visibleProgressAssignments.length
+  const totalCompleted = visibleProgressAssignments.filter((a) =>
+    isAssignmentComplete(a.id as string, a.study_sheet_id as string)
+  ).length
 
   return (
     <ProgressClient
@@ -79,8 +119,8 @@ export default async function ProgressPage() {
       completedLessons={completedLessons ?? []}
       latestLevelData={latestLevelReport?.level_data ?? null}
       latestLevelDate={latestLevelReport?.completed_at ?? null}
-      totalAssigned={totalAssigned ?? 0}
-      totalCompleted={totalCompleted ?? 0}
+      totalAssigned={totalAssigned}
+      totalCompleted={totalCompleted}
     />
   )
 }
