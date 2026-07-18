@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
+import DifficultyBars from '@/components/study/DifficultyBars'
 import SheetFormModal from './SheetFormModal'
 import AssignSheetModal from './AssignSheetModal'
 import ActivitiesModal from './ActivitiesModal'
@@ -72,27 +74,11 @@ function rolesToLabel(roles: string[]): string {
   return 'All Teachers'
 }
 
-function rolesColor(roles: string[]): string {
-  if (!roles || roles.length === 0) return '#16a34a'
-  if (roles.includes('admin') && roles.length === 1) return '#6b7280'
-  if (roles.includes('teacher_exam') && !roles.includes('teacher')) return '#2563eb'
-  return '#16a34a'
-}
-
-function DifficultyBars({ count }: { count: number }) {
-  return (
-    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
-      {[1, 2, 3].map(n => (
-        <span key={n} style={{
-          display: 'inline-block',
-          width: '5px',
-          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
-          borderRadius: '2px',
-          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
-        }} />
-      ))}
-    </span>
-  )
+function rolesPillStyle(roles: string[]): { backgroundColor: string; color: string } {
+  if (!roles || roles.length === 0) return { backgroundColor: '#DCFCE7', color: '#15803D' }
+  if (roles.includes('admin') && roles.length === 1) return { backgroundColor: '#f3f4f6', color: '#4b5563' }
+  if (roles.includes('teacher_exam') && !roles.includes('teacher')) return { backgroundColor: '#FFF8E8', color: '#B45309' }
+  return { backgroundColor: '#DCFCE7', color: '#15803D' }
 }
 
 function exerciseCount(sheet: StudySheet, counts: Record<string, number>): number {
@@ -288,12 +274,13 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-6 space-y-6">
 
       {/* Page header */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Lesson Library</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage the shared library of lesson materials</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -313,7 +300,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            Add Study Sheet
+            Add Sheet
           </button>
         </div>
       </div>
@@ -325,21 +312,21 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           placeholder="Search by title…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 w-56"
+          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700 w-56"
         />
         <select
           value={filterCategory}
           onChange={e => setFilterCategory(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Categories</option>
-          <option value="Vocabulary">Vocabulary</option>
-          <option value="Grammar">Grammar</option>
+          <option value="vocabulary">Vocabulary</option>
+          <option value="grammar">Grammar</option>
         </select>
         <select
           value={filterLevel}
           onChange={e => setFilterLevel(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Levels</option>
           {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
@@ -347,17 +334,17 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <select
           value={filterDifficulty}
           onChange={e => setFilterDifficulty(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Difficulties</option>
-          <option value="1">▁ Easy</option>
-          <option value="2">▁▂ Medium</option>
-          <option value="3">▁▂▃ Hard</option>
+          <option value="1">Easy</option>
+          <option value="2">Medium</option>
+          <option value="3">Hard</option>
         </select>
         <select
           value={filterRoles}
           onChange={e => setFilterRoles(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
         >
           <option value="">All Access</option>
           <option value="all">All Teachers</option>
@@ -367,7 +354,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         {(search || filterCategory || filterLevel || filterDifficulty || filterRoles) && (
           <button
             onClick={() => { setSearch(''); setFilterCategory(''); setFilterLevel(''); setFilterDifficulty(''); setFilterRoles('') }}
-            className="text-sm text-gray-400 underline"
+            className="text-sm font-medium"
+            style={{ color: '#FF8303' }}
           >
             Clear filters
           </button>
@@ -379,7 +367,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
       {/* Delete failure — the sheet(s) below are still real */}
       {deleteError && (
-        <div className="mb-4 border border-red-200 bg-red-50 rounded-lg px-4 py-3 flex items-start gap-3">
+        <div
+          className="mb-4 rounded-xl px-4 py-3 flex items-start gap-3"
+          style={{ border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6' }}
+        >
           <p className="text-sm text-red-700 flex-1">{deleteError}</p>
           <button
             onClick={() => setDeleteError(null)}
@@ -393,7 +384,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
       {/* Bulk action bar — shown when items selected */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-4 mb-4 bg-orange-50 border border-orange-200 rounded-lg px-4 py-3">
+        <div
+          className="flex items-center gap-4 mb-4 rounded-lg px-4 py-3"
+          style={{ border: '1px solid #FFD9A8', backgroundColor: '#FFF0E0' }}
+        >
           <span className="text-sm font-medium text-gray-700">
             {selectedIds.size} selected
           </span>
@@ -442,7 +436,11 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               >
                 {bulkDeleting ? 'Deleting…' : 'Confirm Delete'}
               </button>
-              <button onClick={() => setConfirmBulkDelete(false)} className="text-sm text-gray-400 underline">
+              <button
+                onClick={() => setConfirmBulkDelete(false)}
+                className="text-sm"
+                style={{ color: '#6b7280' }}
+              >
                 Cancel
               </button>
             </div>
@@ -450,7 +448,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
           <button
             onClick={() => { setSelectedIds(new Set()); setConfirmBulkDelete(false) }}
-            className="ml-auto text-sm text-gray-400 underline"
+            className="ml-auto text-sm"
+            style={{ color: '#6b7280' }}
           >
             Clear selection
           </button>
@@ -462,10 +461,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <p className="text-sm text-gray-400">Loading library…</p>
       ) : filtered.length === 0 ? (
         <p className="text-sm text-gray-400">
-          {sheets.length === 0 ? 'No study sheets yet. Click Add Study Sheet to create the first one.' : 'No sheets match the current filters.'}
+          {sheets.length === 0 ? 'No sheets yet. Click Add Sheet to create the first one.' : 'No sheets match the current filters.'}
         </p>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
 
           {/* Column headers */}
           <div className="grid gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100 bg-gray-50"
@@ -515,7 +514,11 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   </div>
 
                   {/* Category */}
-                  <span className="text-gray-600">{sheet.category}</span>
+                  {sheet.category ? (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={categoryBadgeStyle(sheet.category)}>{sheet.category}</span>
+                  ) : (
+                    <span className="text-xs text-gray-300">-</span>
+                  )}
 
                   {/* Level */}
                   <span className="font-mono text-gray-700">{sheet.level}</span>
@@ -525,8 +528,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
                   {/* Access */}
                   <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full text-white inline-block"
-                    style={{ backgroundColor: rolesColor(sheet.allowed_roles) }}
+                    className="text-xs font-medium px-2 py-0.5 rounded-full inline-block"
+                    style={rolesPillStyle(sheet.allowed_roles)}
                   >
                     {rolesToLabel(sheet.allowed_roles)}
                   </span>
@@ -540,31 +543,36 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
                       disabled={empty}
                       title={empty ? 'No content yet' : undefined}
-                      className="text-xs"
+                      className="text-xs font-medium"
                       style={{
-                        color: empty ? '#d1d5db' : '#9ca3af',
+                        color: empty ? '#d1d5db' : '#FF8303',
                         cursor: empty ? 'not-allowed' : 'pointer',
-                        textDecoration: empty ? 'none' : 'underline',
                       }}
                     >
                       Assign
                     </button>
                     <button
                       onClick={() => setActivitiesSheet(sheet)}
-                      className="text-xs underline text-gray-400 hover:text-gray-600"
+                      className="text-xs"
+                      style={{ color: '#6b7280' }}
+                      onMouseEnter={e => { e.currentTarget.style.color = '#374151' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = '#6b7280' }}
                     >
                       Activities
                     </button>
                     <button
                       onClick={() => { setEditingSheet(sheet); setShowForm(true) }}
-                      className="text-xs underline"
+                      className="text-xs font-medium"
                       style={{ color: '#FF8303' }}
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => { setDeleteError(null); setConfirmDeleteId(sheet.id) }}
-                      className="text-xs underline text-red-400 hover:text-red-600"
+                      className="text-xs"
+                      style={{ color: '#FD5602' }}
+                      onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                      onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                     >
                       Delete
                     </button>
@@ -609,7 +617,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                 disabled={deletingId === confirmDeleteId}
                 style={{
                   padding: '9px 18px', borderRadius: '7px', border: 'none',
-                  backgroundColor: deletingId === confirmDeleteId ? '#E5E7EB' : '#DC2626',
+                  backgroundColor: deletingId === confirmDeleteId ? '#E5E7EB' : '#FD5602',
                   color: deletingId === confirmDeleteId ? '#9CA3AF' : 'white',
                   fontSize: '13px', fontWeight: 600,
                   cursor: deletingId === confirmDeleteId ? 'not-allowed' : 'pointer',
