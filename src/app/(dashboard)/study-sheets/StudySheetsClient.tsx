@@ -420,7 +420,7 @@ function WorksheetCard({
         </div>
       )}
 
-      <div className="flex items-center gap-2 mt-auto pt-1">
+      <div className="flex items-center gap-2 mt-auto pt-1 flex-wrap">
         <button
           type="button"
           onClick={() => setShowAssign(true)}
@@ -430,6 +430,16 @@ function WorksheetCard({
           onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
         >
           Assign to Students
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push(`/study-sheets/${sheet.id}/responses`)}
+          className="text-sm px-3 py-1.5 rounded-md border"
+          style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+        >
+          View Responses
         </button>
         <button
           type="button"

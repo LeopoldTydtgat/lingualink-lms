@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect, notFound } from 'next/navigation'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudentDetailClient from './StudentDetailClient'
 
 type RawSheetJoin = { title: string; category: string; level: string } | null
@@ -173,7 +174,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
   const assignmentRows = (rawAssignments ?? []) as RawAssignmentRow[]
 
-  // Per-assignment completion via the NEW345 bimodal rule (see study-sheets/page.tsx):
+  // Per-assignment completion via the NEW345 bimodal rule (see lib/study/assignmentCompletion):
   // an assignment is complete when a legacy exercise_completions row is keyed to it, OR
   // the sheet has activities and every one has an attempt under that assignment.
   const assignmentIds = assignmentRows.map(a => a.id)
@@ -210,37 +211,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
-  const activitiesBySheet = new Map<string, string[]>()
-  for (const a of activityRows) {
-    const arr = activitiesBySheet.get(a.sheet_id) ?? []
-    arr.push(a.id)
-    activitiesBySheet.set(a.sheet_id, arr)
-  }
-
-  // Legacy path: an exercise_completions row keyed to the assignment means done.
-  const legacyDoneAssignments = new Set<string>()
-  for (const c of completionRows) {
-    if (c.assignment_id) legacyDoneAssignments.add(c.assignment_id)
-  }
-
-  // NEW345 path: which activities each assignment has an attempt for.
-  const attemptsByAssignment = new Map<string, Set<string>>()
-  for (const t of attemptRows) {
-    if (!t.assignment_id) continue
-    const set = attemptsByAssignment.get(t.assignment_id) ?? new Set<string>()
-    set.add(t.activity_id)
-    attemptsByAssignment.set(t.assignment_id, set)
-  }
-
-  function assignmentComplete(assignmentId: string, sheetId: string): boolean {
-    if (legacyDoneAssignments.has(assignmentId)) return true
-    const acts = activitiesBySheet.get(sheetId)
-    if (acts && acts.length > 0) {
-      const done = attemptsByAssignment.get(assignmentId)
-      if (done && acts.every(id => done.has(id))) return true
-    }
-    return false
-  }
+  const { isComplete } = buildAssignmentCompletion(activityRows, completionRows, attemptRows)
 
   const assignments = assignmentRows.map((a) => {
     const rawSheet: unknown = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
@@ -248,7 +219,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     return {
       id: a.id,
       assigned_at: a.assigned_at,
-      completed: assignmentComplete(a.id, a.study_sheet_id),
+      completed: isComplete(a.id, a.study_sheet_id),
       study_sheet: {
         title: sheet?.title ?? '—',
         category: sheet?.category ?? '—',

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { getTeacherScopedStudentIds } from '@/lib/access/bookedClass'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudySheetsClient from './StudySheetsClient'
 
 type SheetProgress = {
@@ -138,40 +139,12 @@ export default async function StudySheetsPage() {
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
-  // Lookups.
-  const activitiesBySheet = new Map<string, string[]>()
-  for (const a of activityRows) {
-    const arr = activitiesBySheet.get(a.sheet_id) ?? []
-    arr.push(a.id)
-    activitiesBySheet.set(a.sheet_id, arr)
-  }
-
-  // Legacy path: an exercise_completions row keyed to the assignment means done.
-  const legacyDoneAssignments = new Set<string>()
-  for (const c of completionRows) {
-    if (c.assignment_id) legacyDoneAssignments.add(c.assignment_id)
-  }
-
-  // NEW345 path: which activities each assignment has an attempt for.
-  const attemptsByAssignment = new Map<string, Set<string>>()
-  for (const t of attemptRows) {
-    if (!t.assignment_id) continue
-    const set = attemptsByAssignment.get(t.assignment_id) ?? new Set<string>()
-    set.add(t.activity_id)
-    attemptsByAssignment.set(t.assignment_id, set)
-  }
-
-  // An assignment is complete when a legacy completion row exists for it, OR the
-  // sheet has activities and every one has an attempt under that assignment.
-  function assignmentComplete(assignmentId: string, sheetId: string): boolean {
-    if (legacyDoneAssignments.has(assignmentId)) return true
-    const acts = activitiesBySheet.get(sheetId)
-    if (acts && acts.length > 0) {
-      const done = attemptsByAssignment.get(assignmentId)
-      if (done && acts.every(id => done.has(id))) return true
-    }
-    return false
-  }
+  // Bimodal completion rule, single-sourced (see lib/study/assignmentCompletion).
+  const { isComplete, activityIdsBySheet } = buildAssignmentCompletion(
+    activityRows,
+    completionRows,
+    attemptRows,
+  )
 
   const progressBySheet: Record<string, SheetProgress> = {}
   for (const sheetId of studentSheetIds) {
@@ -181,7 +154,7 @@ export default async function StudySheetsPage() {
     let latest: string | null = null
     for (const r of rows) {
       if (latest === null || new Date(r.assigned_at) > new Date(latest)) latest = r.assigned_at
-      const done = assignmentComplete(r.id, sheetId)
+      const done = isComplete(r.id, sheetId)
       byStudent.set(r.student_id, (byStudent.get(r.student_id) ?? false) || done)
     }
     let assignedCount = 0
@@ -195,7 +168,7 @@ export default async function StudySheetsPage() {
       completedCount,
       pendingCount: assignedCount - completedCount,
       latestAssignedAt: latest,
-      activityCount: (activitiesBySheet.get(sheetId) ?? []).length,
+      activityCount: (activityIdsBySheet.get(sheetId) ?? []).length,
     }
   }
 
