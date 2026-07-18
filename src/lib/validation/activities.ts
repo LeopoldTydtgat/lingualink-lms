@@ -160,6 +160,20 @@ export const GradeSubmissionSchema = z.object({
   assignment_id: z.string().uuid('Must be a valid ID').optional(),
 })
 
+// ─── Writing task submission ──────────────────────────────────────────────────
+// Request body for POST /api/student/activities/[id]/submit-writing. A writing
+// task is not auto-graded — the student sends free text that a teacher later
+// reviews. `.max` caps the raw input; the `.refine` rejects whitespace-only
+// text (which trims to nothing), mirroring nonBlankString.
+
+export const WritingTaskSubmissionSchema = z.object({
+  response_text: z
+    .string()
+    .max(10000, 'Your response is too long (10000 characters max).')
+    .refine(s => s.trim().length > 0, 'A response is required.'),
+  assignment_id: z.string().uuid('Must be a valid ID').optional(),
+})
+
 export type McqQuestion = z.infer<typeof McqQuestionSchema>
 export type McqContent = z.infer<typeof McqContentSchema>
 export type McqAnswerKeyEntry = z.infer<typeof McqAnswerKeyEntrySchema>
@@ -168,3 +182,4 @@ export type McqActivityAuthorInput = z.infer<typeof McqActivityAuthorSchema>
 export type WritingTaskContent = z.infer<typeof WritingTaskContentSchema>
 export type WritingTaskActivityAuthorInput = z.infer<typeof WritingTaskActivityAuthorSchema>
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionSchema>
+export type WritingTaskSubmissionInput = z.infer<typeof WritingTaskSubmissionSchema>
