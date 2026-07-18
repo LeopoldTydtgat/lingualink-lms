@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight, Maximize2, Minimize2, RotateCcw } from 'lucide-react'
-import PdfViewer from '@/components/pdf/PdfViewer'
+import { ArrowLeft, Volume2, CheckCircle, XCircle, ChevronRight, RotateCcw } from 'lucide-react'
+import MaterialFileViewer from '@/components/study/MaterialFileViewer'
+import DifficultyBars from '@/components/study/DifficultyBars'
+import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,123 +47,6 @@ interface Props {
   exercises: Exercise[]
   assignmentId: string | null
   alreadyCompleted: boolean
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function DifficultyBars({ count }: { count: number }) {
-  return (
-    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
-      {[1, 2, 3].map(n => (
-        <span key={n} style={{
-          display: 'inline-block',
-          width: '5px',
-          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
-          borderRadius: '2px',
-          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
-        }} />
-      ))}
-    </span>
-  )
-}
-
-function categoryBadgeStyle(category: string | null): React.CSSProperties {
-  if (category === 'Vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
-  if (category === 'Grammar') return { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-  return { backgroundColor: '#e0f2fe', color: '#0369a1' }
-}
-
-// ── Material file viewer ──────────────────────────────────────────────────────
-
-function MaterialFileViewer({ attachments, sheetId }: { attachments: Attachment[]; sheetId: string }) {
-  const containerRefs = useRef<(HTMLDivElement | null)[]>([])
-  const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
-
-  useEffect(() => {
-    function onFullscreenChange() {
-      if (!document.fullscreenElement) {
-        setFullscreenIdx(null)
-        return
-      }
-      const idx = containerRefs.current.findIndex(el => el === document.fullscreenElement)
-      setFullscreenIdx(idx === -1 ? null : idx)
-    }
-    document.addEventListener('fullscreenchange', onFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
-  }, [])
-
-  function handleFullscreen(idx: number) {
-    if (fullscreenIdx === idx) {
-      if (typeof document.exitFullscreen === 'function') {
-        document.exitFullscreen().catch(() => {})
-      }
-    } else {
-      const el = containerRefs.current[idx]
-      if (el && typeof el.requestFullscreen === 'function') {
-        el.requestFullscreen().catch(() => {})
-      }
-    }
-  }
-
-  if (attachments.length === 0) {
-    return (
-      <div className="mb-6 p-6 border border-gray-200 rounded-xl text-center text-sm text-gray-400">
-        No files attached to this sheet yet.
-      </div>
-    )
-  }
-
-  return (
-    <div className="mb-6 space-y-4">
-      {attachments.map((att, idx) => {
-        const isPdf = att.type === 'application/pdf'
-        const isImage = att.type.startsWith('image/')
-        // Same-origin proxy URL, served by the auth-gated /api/library-file route.
-        const fileUrl = `/api/library-file/${sheetId}/${idx}`
-        const isThisFullscreen = fullscreenIdx === idx
-
-        return (
-          <div
-            key={idx}
-            ref={el => { containerRefs.current[idx] = el }}
-            className="border border-gray-200 rounded-xl overflow-hidden bg-white"
-          >
-            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
-              <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
-              {isImage && (
-                <button
-                  type="button"
-                  onClick={() => handleFullscreen(idx)}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
-                  style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
-                  title={isThisFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
-                >
-                  {isThisFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-                  {isThisFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                </button>
-              )}
-            </div>
-            {isPdf ? (
-              // PdfViewer replaces the native <iframe>: it renders the PDF through
-              // the same proxy with its own toolbar and carries NO download/print.
-              // No #toolbar=0 needed - PdfViewer has no native toolbar to suppress.
-              <PdfViewer fileUrl={fileUrl} />
-            ) : isImage ? (
-              <img
-                src={fileUrl}
-                alt={att.name}
-                style={{ maxWidth: '100%', display: 'block' }}
-              />
-            ) : (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">
-                Preview is not available for this file type.
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
@@ -327,7 +212,7 @@ export default function StudySheetClient({
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           {sheet.category && (
             <span
-              className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
+              className="px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize"
               style={categoryBadgeStyle(sheet.category)}
             >
               {sheet.category}
@@ -341,7 +226,14 @@ export default function StudySheetClient({
 
       {/* File viewer — shown whenever the sheet has attachments, before the tabs */}
       {(sheet.attachments?.length ?? 0) > 0 && (
-        <MaterialFileViewer attachments={sheet.attachments ?? []} sheetId={sheet.id} />
+        <MaterialFileViewer
+          attachments={sheet.attachments ?? []}
+          sheetId={sheet.id}
+          mode="plain"
+          wrapperClassName="mb-6 space-y-4"
+          cardClassName="border border-gray-200 rounded-xl overflow-hidden bg-white"
+          cardStyle={{}}
+        />
       )}
 
       {/* Tab toggle */}
