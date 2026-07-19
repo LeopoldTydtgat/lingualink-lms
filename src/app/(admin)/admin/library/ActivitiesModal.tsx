@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ClipboardList } from 'lucide-react'
 import ActivityFormModal from './ActivityFormModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -161,15 +162,17 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
             )}
 
             {loading ? (
-              <p className="text-sm text-gray-400">Loading activities…</p>
+              <p className="py-6 text-center text-sm text-gray-400">Loading activities…</p>
             ) : loadError ? (
               <p className="text-sm" style={{ color: '#FD5602' }}>
                 Couldn&apos;t load this sheet&apos;s activities. Close and reopen to try again.
               </p>
             ) : activities.length === 0 ? (
-              <p className="text-sm text-gray-400">
-                No activities yet. Click Add Activity to create the first one.
-              </p>
+              <div className="py-6 text-center">
+                <ClipboardList className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">No activities yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Click Add Activity to create the first one.</p>
+              </div>
             ) : (
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 {/* Column headers */}
