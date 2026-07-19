@@ -103,7 +103,7 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
                 This assigns the sheet directly, without linking it to a lesson. It will appear in the student's Study tab under "Assigned by Your Teacher".
               </p>
 
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm" style={{ color: '#FD5602' }}>{error}</p>}
             </>
           )}
         </div>
@@ -112,7 +112,10 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 text-sm rounded-md"
+            style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+            onMouseLeave={e => { e.currentTarget.style.backgroundColor = '' }}
           >
             {success ? 'Close' : 'Cancel'}
           </button>
@@ -120,8 +123,14 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
             <button
               onClick={handleAssign}
               disabled={!selectedStudentId || saving}
-              className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-40"
-              style={{ backgroundColor: '#FF8303' }}
+              className="px-5 py-2 text-sm rounded-md text-white font-medium"
+              style={
+                !selectedStudentId || saving
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: '#FF8303' }
+              }
+              onMouseEnter={e => { if (!(!selectedStudentId || saving)) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!(!selectedStudentId || saving)) e.currentTarget.style.backgroundColor = '#FF8303' }}
             >
               {saving ? 'Assigning…' : 'Assign Sheet'}
             </button>
