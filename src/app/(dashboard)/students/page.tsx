@@ -100,7 +100,7 @@ export default async function StudentsPage() {
     }
   }
 
-  // Supabase returns nested joins as arrays â€" flatten students and profiles to single objects
+  // Supabase returns nested joins as arrays — flatten students and profiles to single objects
   const flatTrainings = (trainings ?? []).map(t => ({
     ...t,
     students: Array.isArray(t.students) ? t.students[0] : t.students,

@@ -21,7 +21,7 @@ type MessageRow = {
 }
 
 interface PageProps {
-  // Next.js 15 â€” searchParams is a Promise, must be awaited
+  // Next.js 15 — searchParams is a Promise, must be awaited
   searchParams: Promise<{ openAdmin?: string; adminId?: string; studentId?: string }>
 }
 

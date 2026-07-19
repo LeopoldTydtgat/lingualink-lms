@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { magicMatchesMime } from '@/lib/file-magic'
 
 const BUCKET = 'library-files'
@@ -18,24 +18,6 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 function sanitizeFilename(name: string): string {
   // Replace path separators and other unsafe characters, preserve extension
   return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/\.{2,}/g, '_')
-}
-
-async function requireAdmin() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
-
-  return isAdmin ? user : null
 }
 
 // POST /api/admin/library/upload — upload a file to storage
@@ -106,13 +88,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: uploadError.message }, { status: 500 })
   }
 
-  const { data: urlData } = adminClient.storage
-    .from(BUCKET)
-    .getPublicUrl(storagePath)
-
   return NextResponse.json({
     name: filename,
-    url: urlData.publicUrl,
     type: file.type,
   })
 }

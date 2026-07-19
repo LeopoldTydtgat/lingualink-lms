@@ -4,9 +4,9 @@ import type { User } from '@supabase/supabase-js'
 /**
  * Resolves the caller and returns them only if they are an admin.
  *
- * Mirrors the inline gate used across /api/admin routes (and the local copy in
- * library/upload/route.ts): `role = 'admin'` OR `account_types` containing
- * 'school_admin'. Returns null for anonymous callers AND for non-admins, so the
+ * Mirrors the inline gate used across /api/admin routes: `role = 'admin'` OR
+ * `account_types` containing 'school_admin'. Returns null for anonymous callers
+ * AND for non-admins, so the
  * caller cannot accidentally treat "logged in" as "authorised".
  *
  * Fail-closed: a failed profiles read yields no profile, which is not an admin.

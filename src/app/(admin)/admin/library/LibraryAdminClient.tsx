@@ -26,7 +26,7 @@ export type SheetContent = {
 
 export type Attachment = {
   name: string
-  url: string
+  url?: string
   type: string
 }
 

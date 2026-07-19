@@ -324,7 +324,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   const handleFileRemove = async (attachment: Attachment) => {
     // Optimistically remove from UI
-    setAttachments(prev => prev.filter(a => a.url !== attachment.url))
+    setAttachments(prev => prev.filter(a => a.name !== attachment.name))
 
     // Fire-and-forget storage deletion
     fetch('/api/admin/library/upload', {
