@@ -1,10 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 import DifficultyBars from '@/components/study/DifficultyBars'
-import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search } from 'lucide-react'
+import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal } from 'lucide-react'
 import SheetFormModal from './SheetFormModal'
 import AssignSheetModal from './AssignSheetModal'
 import ActivitiesModal from './ActivitiesModal'
@@ -57,7 +56,7 @@ type StudentOption = {
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 // Shared by the table header and its rows — they must never drift apart.
-const GRID_COLUMNS = '3% 28% 10% 7% 9% 14% 5% 24%'
+const GRID_COLUMNS = '3% 40% 10% 7% 9% 14% 5% 12%'
 
 function rolesToLabel(roles: string[]): string {
   if (!roles || roles.length === 0) return 'All Teachers'
@@ -141,6 +140,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
+  // -- Row action menu (kebab) --
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
   // -- Modals --
   const [showForm, setShowForm] = useState(false)
   const [editingSheet, setEditingSheet] = useState<StudySheet | null>(null)
@@ -193,6 +196,18 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     loadStudents()
   }, [loadSheets, loadStudents])
 
+  // Close the row action menu on any outside click.
+  useEffect(() => {
+    if (!openMenuId) return
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [openMenuId])
+
   // -- Filtered list --
   const filtered = sheets.filter(s => {
     if (search && !s.title.toLowerCase().includes(search.toLowerCase())) return false
@@ -215,14 +230,6 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
-  }
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === filtered.length) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(filtered.map(s => s.id)))
-    }
   }
 
   // -- Bulk change access --
@@ -514,13 +521,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {/* Column headers */}
           <div className="grid gap-3 px-5 py-3 text-xs font-medium uppercase tracking-wide"
             style={{ gridTemplateColumns: GRID_COLUMNS, backgroundColor: '#f9fafb', borderBottom: '1px solid #f3f4f6', color: '#9ca3af' }}>
-            <input
-              type="checkbox"
-              checked={filtered.length > 0 && selectedIds.size === filtered.length}
-              onChange={toggleSelectAll}
-              className="rounded"
-              style={{ accentColor: '#FF8303' }}
-            />
+            <span />
             <span>Title</span>
             <span>Category</span>
             <span>Level</span>
@@ -555,18 +556,26 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     style={{ accentColor: '#FF8303' }}
                   />
 
-                  {/* Title + intro */}
-                  <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
-                    {sheet.intro_text && (
-                      <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
-                    )}
+                  {/* Icon tile + title + intro */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className="flex items-center justify-center rounded-lg flex-shrink-0"
+                      style={{ width: '40px', height: '40px', backgroundColor: '#FFF3E0' }}
+                    >
+                      <BookOpen className="w-5 h-5" style={{ color: '#FF8303' }} />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
+                      {sheet.intro_text && (
+                        <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
+                      )}
+                    </div>
                   </div>
 
                   {/* Category */}
                   <div>
                     {sheet.category ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={categoryBadgeStyle(sheet.category)}>{sheet.category}</span>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{sheet.category}</span>
                     ) : (
                       <span className="text-xs text-gray-300">-</span>
                     )}
@@ -574,12 +583,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
                   {/* Level */}
                   <div>
-                    {sheet.level ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
+                    {sheet.level && (
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
                         {sheet.level}
                       </span>
-                    ) : (
-                      <span style={{ color: '#d1d5db' }}>-</span>
                     )}
                   </div>
 
@@ -589,7 +596,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   {/* Access */}
                   <div>
                     <span
-                      className="text-xs font-medium px-2 py-0.5 rounded-full inline-block"
+                      className="text-xs font-medium px-2.5 py-0.5 rounded-full inline-block"
                       style={rolesPillStyle(sheet.allowed_roles)}
                     >
                       {rolesToLabel(sheet.allowed_roles)}
@@ -605,7 +612,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   </span>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-4 flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
                       disabled={empty}
@@ -621,31 +628,51 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     >
                       Assign
                     </button>
-                    <button
-                      onClick={() => setActivitiesSheet(sheet)}
-                      className="text-xs"
-                      style={{ color: '#6b7280' }}
-                      onMouseEnter={e => { e.currentTarget.style.color = '#374151' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = '#6b7280' }}
-                    >
-                      Activities
-                    </button>
-                    <button
-                      onClick={() => { setEditingSheet(sheet); setShowForm(true) }}
-                      className="text-xs font-medium"
-                      style={{ color: '#FF8303' }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => { setDeleteError(null); setConfirmDeleteId(sheet.id) }}
-                      className="text-xs ml-4"
-                      style={{ color: '#FD5602' }}
-                      onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
-                      onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
-                    >
-                      Delete
-                    </button>
+
+                    <div className="relative" ref={openMenuId === sheet.id ? menuRef : null}>
+                      <button
+                        onClick={() => setOpenMenuId(prev => (prev === sheet.id ? null : sheet.id))}
+                        className="p-1 rounded text-gray-400 hover:text-gray-600"
+                        title="More actions"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+
+                      {openMenuId === sheet.id && (
+                        <div
+                          className="absolute right-0 z-20 bg-white rounded-lg shadow-lg"
+                          style={{ top: 'calc(100% + 4px)', border: '1px solid #e5e7eb', minWidth: '150px' }}
+                        >
+                          <button
+                            onClick={() => { setActivitiesSheet(sheet); setOpenMenuId(null) }}
+                            className="block w-full text-left px-4 py-2 text-sm"
+                            style={{ color: '#4b5563' }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                          >
+                            Activities
+                          </button>
+                          <button
+                            onClick={() => { setEditingSheet(sheet); setShowForm(true); setOpenMenuId(null) }}
+                            className="block w-full text-left px-4 py-2 text-sm"
+                            style={{ color: '#4b5563' }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => { setDeleteError(null); setConfirmDeleteId(sheet.id); setOpenMenuId(null) }}
+                            className="block w-full text-left px-4 py-2 text-sm"
+                            style={{ color: '#FD5602' }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#FFF5F2' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )
