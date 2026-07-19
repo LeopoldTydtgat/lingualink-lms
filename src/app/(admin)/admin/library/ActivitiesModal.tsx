@@ -1,9 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ClipboardList } from 'lucide-react'
 import ActivityFormModal from './ActivityFormModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+type ActivityType = 'mcq' | 'writing_task'
 
 type Props = {
   sheetId: string
@@ -30,6 +33,14 @@ function questionCount(activity: ActivityRow): number {
   return Array.isArray(questions) ? questions.length : 0
 }
 
+// Human label for the row's stored type. Writing tasks have no auto-graded
+// questions, so their "Questions" cell shows a dash rather than 0.
+function typeLabel(type: string): string {
+  if (type === 'writing_task') return 'Writing task'
+  if (type === 'mcq') return 'MCQ'
+  return type
+}
+
 // Date only, built from the Date object's local getters. Deliberately avoids
 // toLocaleDateString/toLocaleTimeString (banned in components that can render on
 // both server and client) and toISOString (never used for local dates here).
@@ -49,6 +60,11 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
 
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // Only meaningful when opening the form in create mode (editingId === null):
+  // the activity type chosen in the add-activity flow.
+  const [createType, setCreateType] = useState<ActivityType>('mcq')
+  // Toggles the inline type picker under the list.
+  const [showTypeMenu, setShowTypeMenu] = useState(false)
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -87,6 +103,13 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
   }, [sheetId])
 
   useEffect(() => { load() }, [load])
+
+  const openCreate = (type: ActivityType) => {
+    setCreateType(type)
+    setEditingId(null)
+    setShowTypeMenu(false)
+    setShowForm(true)
+  }
 
   const handleDelete = async (id: string) => {
     setDeletingId(id)
@@ -135,19 +158,21 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
           {/* Body */}
           <div className="overflow-y-auto flex-1 px-6 py-5 thin-scroll">
             {deleteError && (
-              <p className="text-sm text-red-600 mb-4">{deleteError}</p>
+              <p className="text-sm mb-4" style={{ color: '#FD5602' }}>{deleteError}</p>
             )}
 
             {loading ? (
-              <p className="text-sm text-gray-400">Loading activities…</p>
+              <p className="py-6 text-center text-sm text-gray-400">Loading activities…</p>
             ) : loadError ? (
-              <p className="text-sm text-red-600">
+              <p className="text-sm" style={{ color: '#FD5602' }}>
                 Couldn&apos;t load this sheet&apos;s activities. Close and reopen to try again.
               </p>
             ) : activities.length === 0 ? (
-              <p className="text-sm text-gray-400">
-                No activities yet. Click Add Activity to create the first one.
-              </p>
+              <div className="py-6 text-center">
+                <ClipboardList className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-gray-400">No activities yet.</p>
+                <p className="text-xs text-gray-400 mt-1">Click Add Activity to create the first one.</p>
+              </div>
             ) : (
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 {/* Column headers */}
@@ -172,24 +197,29 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
                         <p className="font-medium text-gray-900 truncate">
                           {activity.title || 'Untitled activity'}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5 uppercase">{activity.type}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{typeLabel(activity.type)}</p>
                       </div>
 
-                      <span className="text-center text-gray-600">{questionCount(activity)}</span>
+                      <span className="text-center text-gray-600">
+                        {activity.type === 'mcq' ? questionCount(activity) : '—'}
+                      </span>
 
                       <span className="text-gray-500 text-xs">{formatUpdated(activity.updated_at)}</span>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-4">
                         <button
                           onClick={() => { setEditingId(activity.id); setShowForm(true) }}
-                          className="text-xs underline"
+                          className="text-xs"
                           style={{ color: ORANGE }}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => { setDeleteError(null); setConfirmDeleteId(activity.id) }}
-                          className="text-xs underline text-red-400 hover:text-red-600"
+                          className="text-xs"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         >
                           Delete
                         </button>
@@ -202,13 +232,48 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
 
             {/* Add — hidden while the list is unknown, so nothing is authored blind */}
             {!loading && !loadError && (
-              <button
-                type="button"
-                onClick={() => { setEditingId(null); setShowForm(true) }}
-                className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
-              >
-                + Add Activity
-              </button>
+              showTypeMenu ? (
+                <div className="mt-4 rounded-lg border-2 border-dashed border-gray-300 p-3 space-y-2">
+                  <p className="text-xs font-medium text-gray-400 uppercase px-1">Choose activity type</p>
+                  <button
+                    type="button"
+                    onClick={() => openCreate('mcq')}
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                  >
+                    <span className="block text-sm font-medium text-gray-900">Multiple choice</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">Auto-graded questions, each with a set of options.</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openCreate('writing_task')}
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb' }}
+                  >
+                    <span className="block text-sm font-medium text-gray-900">Writing task</span>
+                    <span className="block text-xs text-gray-400 mt-0.5">A free-text prompt the student writes a response to. Not auto-graded.</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowTypeMenu(false)}
+                    className="text-xs text-gray-400 hover:text-gray-600 px-1 pt-0.5"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowTypeMenu(true)}
+                  className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
+                >
+                  + Add Activity
+                </button>
+              )
             )}
           </div>
 
@@ -217,7 +282,10 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
             >
               Close
             </button>
@@ -240,15 +308,22 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
               <button
                 onClick={() => setConfirmDeleteId(null)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm rounded-md disabled:opacity-50"
+                style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
               >
                 Go Back
               </button>
               <button
                 onClick={() => handleDelete(confirmDeleteId)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg text-white font-semibold disabled:opacity-50"
-                style={{ backgroundColor: '#DC2626' }}
+                className="px-4 py-2 text-sm rounded-md text-white font-semibold"
+                style={
+                  deletingId === confirmDeleteId
+                    ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                    : { backgroundColor: '#FD5602' }
+                }
               >
                 {deletingId === confirmDeleteId ? 'Deleting…' : 'Yes, Delete Activity'}
               </button>
@@ -262,6 +337,7 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
         <ActivityFormModal
           sheetId={sheetId}
           activityId={editingId}
+          createType={createType}
           onClose={() => { setShowForm(false); setEditingId(null) }}
           onSaved={async () => { setShowForm(false); setEditingId(null); await load() }}
         />

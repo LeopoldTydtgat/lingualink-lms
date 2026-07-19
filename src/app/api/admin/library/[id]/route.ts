@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { buildExerciseRows } from '../exercises'
 
 const BUCKET = 'library-files'
 
@@ -86,18 +85,15 @@ export async function PATCH(
     }
   }
 
-  // Exercises live in the exercises table, never in study_sheets.content. When the
-  // caller submits content (a full editor save), capture its exercises for the
-  // table and blank content.exercises (words preserved). When content is absent
-  // (e.g. the create flow's attachments-only PATCH), leave exercises untouched.
+  // Exercises/MCQs now live in the activities table, never in study_sheets.content.
+  // Content stores words only (vocabulary sheets); exercises is kept as an empty
+  // array purely for the backward-compatible content shape the readers expect.
   const hasContent = 'content' in body
-  let incomingExercises: unknown = undefined
   if (hasContent) {
     const contentObj: Record<string, unknown> =
       body.content && typeof body.content === 'object' && !Array.isArray(body.content)
         ? (body.content as Record<string, unknown>)
         : {}
-    incomingExercises = contentObj.exercises
     update.content = {
       words: Array.isArray(contentObj.words) ? contentObj.words : [],
       exercises: [],
@@ -114,40 +110,6 @@ export async function PATCH(
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  // Replace this sheet's exercise rows so what was on screen becomes the saved
-  // truth — but only when content was actually submitted. An attachments-only
-  // PATCH (no content key) must NOT wipe the rows. Admin client: writes bypass
-  // RLS, consistent with the create route.
-  if (hasContent) {
-    const adminClient = createAdminClient()
-
-    const { error: deleteError } = await adminClient
-      .from('exercises')
-      .delete()
-      .eq('study_sheet_id', id)
-
-    if (deleteError) {
-      return NextResponse.json(
-        { error: `Sheet saved, but clearing its old exercises failed: ${deleteError.message}` },
-        { status: 500 }
-      )
-    }
-
-    const exerciseRows = buildExerciseRows(id, incomingExercises)
-    if (exerciseRows.length > 0) {
-      const { error: insertError } = await adminClient
-        .from('exercises')
-        .insert(exerciseRows)
-
-      if (insertError) {
-        return NextResponse.json(
-          { error: `Sheet saved, but its exercises failed to save: ${insertError.message}` },
-          { status: 500 }
-        )
-      }
-    }
-  }
 
   return NextResponse.json(data)
 }
@@ -261,8 +223,8 @@ export async function DELETE(
     )
   }
 
-  // The bytes are gone — the row can go. activities, sheet_tags, exercises, and
-  // exercise_completions all cascade from this delete
+  // The bytes are gone — the row can go. activities and sheet_tags cascade from
+  // this delete (activity_attempts cascade via activities)
   // (20260715120000_new345_library_owner_tags_activities.sql; baseline_schema.sql).
   const { error } = await adminClient
     .from('study_sheets')

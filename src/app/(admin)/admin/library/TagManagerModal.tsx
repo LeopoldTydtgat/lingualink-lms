@@ -1,8 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { Check, Tag as TagIcon } from 'lucide-react'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// -- Types --
 
 export type Tag = {
   id: string
@@ -22,16 +23,18 @@ const ORANGE = '#FF8303'
 
 // tags.kind is CHECK-constrained to exactly these two values
 // (20260715120000_new345_library_owner_tags_activities.sql).
-const KINDS: { value: TagKind; label: string; description: string; color: string }[] = [
-  { value: 'topic', label: 'Topic', description: 'What the material is about — Travel, Business, Food.', color: '#2563eb' },
-  { value: 'skill', label: 'Skill', description: 'What it practises — Listening, Grammar, Writing.', color: '#7c3aed' },
+const KINDS: { value: TagKind; label: string; description: string }[] = [
+  { value: 'topic', label: 'Topic', description: 'What the material is about - Travel, Business, Food.' },
+  { value: 'skill', label: 'Skill', description: 'What it practises - Listening, Grammar, Writing.' },
 ]
 
-export function kindColor(kind: string): string {
-  return KINDS.find(k => k.value === kind)?.color ?? '#6b7280'
+export function kindPillStyle(kind: string): { backgroundColor: string; color: string } {
+  if (kind === 'topic') return { backgroundColor: '#FFF3E0', color: '#FF8303' }
+  if (kind === 'skill') return { backgroundColor: '#f3f4f6', color: '#4b5563' }
+  return { backgroundColor: '#f3f4f6', color: '#4b5563' }
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// -- Component --
 
 export default function TagManagerModal({ onClose, onSaved }: Props) {
   const [tags, setTags] = useState<Tag[]>([])
@@ -46,7 +49,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
-  // tags is service_role write only — every mutation goes through /api/admin/tags.
+  // tags is service_role write only - every mutation goes through /api/admin/tags.
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(false)
@@ -147,14 +150,17 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
     <div>
       <p className="text-xs font-medium text-gray-400 uppercase mb-2">{label} ({group.length})</p>
       {group.length === 0 ? (
-        <p className="text-sm text-gray-400 italic">None yet.</p>
+        <div className="py-6 text-center">
+          <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+          <p className="text-sm text-gray-400">None yet.</p>
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {group.map(tag => (
             <span
               key={tag.id}
-              className="inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full text-white"
-              style={{ backgroundColor: kindColor(tag.kind) }}
+              className="inline-flex items-center gap-2 text-xs font-medium px-2.5 py-1 rounded-full"
+              style={kindPillStyle(tag.kind)}
             >
               {tag.name}
               <button
@@ -162,10 +168,10 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 onClick={() => { setError(null); setConfirmDeleteId(tag.id) }}
                 disabled={deletingId === tag.id}
                 className="leading-none disabled:opacity-40"
-                style={{ color: 'rgba(255,255,255,0.85)' }}
+                style={{ opacity: 0.7 }}
                 title="Delete tag"
               >
-                ✕
+                ×
               </button>
             </span>
           ))}
@@ -187,7 +193,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
             <h2 className="text-lg font-bold text-gray-900">Manage Tags</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
           </div>
 
           {/* Body */}
@@ -211,10 +217,10 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 {KINDS.map(opt => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors"
+                    className="relative flex items-start gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors"
                     style={{
-                      borderColor: kind === opt.value ? opt.color : '#e5e7eb',
-                      backgroundColor: kind === opt.value ? `${opt.color}08` : 'white',
+                      borderColor: kind === opt.value ? '#FF8303' : '#e5e7eb',
+                      backgroundColor: kind === opt.value ? '#FF830308' : 'white',
                     }}
                   >
                     <input
@@ -223,9 +229,16 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                       value={opt.value}
                       checked={kind === opt.value}
                       onChange={() => setKind(opt.value)}
-                      className="mt-0.5"
-                      style={{ accentColor: opt.color }}
+                      className="sr-only"
                     />
+                    {kind === opt.value && (
+                      <span
+                        className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                        style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                      >
+                        <Check className="w-3 h-3 text-white" />
+                      </span>
+                    )}
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
@@ -238,22 +251,26 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 type="button"
                 onClick={handleCreate}
                 disabled={creating || !name.trim()}
-                className="px-4 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-40"
-                style={{ backgroundColor: ORANGE }}
+                className="px-4 py-2 text-sm rounded-md font-medium"
+                style={creating || !name.trim()
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: ORANGE, color: 'white' }}
+                onMouseEnter={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#e67300' }}
+                onMouseLeave={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#FF8303' }}
               >
-                {creating ? 'Creating…' : 'Create Tag'}
+                {creating ? 'Creating...' : 'Create Tag'}
               </button>
 
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm" style={{ color: '#FD5602' }}>{error}</p>}
             </div>
 
             <div className="border-t border-gray-100" />
 
             {/* Existing */}
             {loading ? (
-              <p className="text-sm text-gray-400">Loading tags…</p>
+              <p className="py-6 text-center text-sm text-gray-400">Loading tags...</p>
             ) : loadError ? (
-              <p className="text-sm text-red-600">Couldn&apos;t load tags. Close and reopen to try again.</p>
+              <p className="text-sm" style={{ color: '#FD5602' }}>Couldn&apos;t load tags. Close and reopen to try again.</p>
             ) : (
               <div className="space-y-5">
                 {renderGroup('Topics', topics)}
@@ -267,7 +284,10 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium rounded-md border"
+              style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'white' }}
             >
               Close
             </button>
@@ -291,17 +311,20 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
               <button
                 onClick={() => setConfirmDeleteId(null)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm rounded-md border disabled:opacity-50"
+                style={{ borderColor: '#D1D5DB', color: '#374151' }}
               >
                 Go Back
               </button>
               <button
                 onClick={() => handleDelete(confirmDeleteId)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg text-white font-semibold disabled:opacity-50"
-                style={{ backgroundColor: '#DC2626' }}
+                className="px-4 py-2 text-sm rounded-md font-semibold"
+                style={deletingId === confirmDeleteId
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: '#FD5602', color: 'white' }}
               >
-                {deletingId === confirmDeleteId ? 'Deleting…' : 'Yes, Delete Tag'}
+                {deletingId === confirmDeleteId ? 'Deleting...' : 'Yes, Delete Tag'}
               </button>
             </div>
           </div>

@@ -130,6 +130,28 @@ export const McqActivityAuthorSchema = z
     })
   })
 
+// ─── Writing task authored content ────────────────────────────────────────────
+// activities.content for a writing_task. A single free-text prompt shown to the
+// student. There is no answer key: a writing task is not auto-graded, so
+// activities.answer_key stays null and is never written for this type.
+
+export const WritingTaskContentSchema = z.object({
+  prompt: nonBlankString('Prompt is required'),
+})
+
+// ─── Writing task authoring (admin builder) ───────────────────────────────────
+// Request body for the admin create/edit routes. Unlike MCQ there is no
+// answer_key half — a writing task carries no answers to store or cross-check.
+// This schema shares no shape with McqActivityAuthorSchema: its content requires
+// `prompt` and forbids nothing else, while the MCQ schema requires
+// `content.questions` and `answer_key`. A body valid for one is invalid for the
+// other, which is what lets the routes discriminate types safely.
+
+export const WritingTaskActivityAuthorSchema = z.object({
+  title: nonBlankString('Title is required'),
+  content: WritingTaskContentSchema,
+})
+
 // ─── Grade submission ─────────────────────────────────────────────────────────
 // Request body for POST /api/student/activities/[id]/grade.
 
@@ -138,9 +160,39 @@ export const GradeSubmissionSchema = z.object({
   assignment_id: z.string().uuid('Must be a valid ID').optional(),
 })
 
+// ─── Writing task submission ──────────────────────────────────────────────────
+// Request body for POST /api/student/activities/[id]/submit-writing. A writing
+// task is not auto-graded — the student sends free text that a teacher later
+// reviews. `.max` caps the raw input; the `.refine` rejects whitespace-only
+// text (which trims to nothing), mirroring nonBlankString.
+
+export const WritingTaskSubmissionSchema = z.object({
+  response_text: z
+    .string()
+    .max(10000, 'Your response is too long (10000 characters max).')
+    .refine(s => s.trim().length > 0, 'A response is required.'),
+  assignment_id: z.string().uuid('Must be a valid ID').optional(),
+})
+
+// ─── Teacher review ───────────────────────────────────────────────────────────
+// Request body for POST /api/teacher/attempts/[attemptId]/review. Written to
+// activity_attempts.teacher_feedback after trimming; the `.refine` rejects
+// whitespace-only text (which trims to nothing), mirroring nonBlankString.
+
+export const TeacherReviewSchema = z.object({
+  feedback: z
+    .string()
+    .max(5000, 'Feedback is too long (5000 characters max).')
+    .refine(s => s.trim().length > 0, 'Feedback is required.'),
+})
+
 export type McqQuestion = z.infer<typeof McqQuestionSchema>
 export type McqContent = z.infer<typeof McqContentSchema>
 export type McqAnswerKeyEntry = z.infer<typeof McqAnswerKeyEntrySchema>
 export type McqAnswerKey = z.infer<typeof McqAnswerKeySchema>
 export type McqActivityAuthorInput = z.infer<typeof McqActivityAuthorSchema>
+export type WritingTaskContent = z.infer<typeof WritingTaskContentSchema>
+export type WritingTaskActivityAuthorInput = z.infer<typeof WritingTaskActivityAuthorSchema>
 export type GradeSubmissionInput = z.infer<typeof GradeSubmissionSchema>
+export type WritingTaskSubmissionInput = z.infer<typeof WritingTaskSubmissionSchema>
+export type TeacherReviewInput = z.infer<typeof TeacherReviewSchema>

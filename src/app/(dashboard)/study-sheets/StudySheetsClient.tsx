@@ -47,12 +47,12 @@ type AssignableStudent = { id: string; full_name: string; email: string }
 
 type Props = {
   studySheets: StudySheet[]
-  isAdmin: boolean
   currentUserId: string
   progressBySheet: Record<string, SheetProgress>
   assignedThisWeek: number
   newSubmissions: number
   assignableStudents: AssignableStudent[]
+  pendingReviewCount: number
 }
 
 type TabKey = 'teaching' | 'student'
@@ -420,7 +420,7 @@ function WorksheetCard({
         </div>
       )}
 
-      <div className="flex items-center gap-2 mt-auto pt-1">
+      <div className="flex items-center gap-2 mt-auto pt-1 flex-wrap">
         <button
           type="button"
           onClick={() => setShowAssign(true)}
@@ -430,6 +430,16 @@ function WorksheetCard({
           onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
         >
           Assign to Students
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push(`/study-sheets/${sheet.id}/responses`)}
+          className="text-sm px-3 py-1.5 rounded-md border"
+          style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
+          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+        >
+          View Responses
         </button>
         <button
           type="button"
@@ -522,12 +532,12 @@ function SheetTable({
 
 export default function StudySheetsClient({
   studySheets,
-  isAdmin,
   currentUserId,
   progressBySheet,
   assignedThisWeek,
   newSubmissions,
   assignableStudents,
+  pendingReviewCount,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabKey>('teaching')
@@ -578,12 +588,32 @@ export default function StudySheetsClient({
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Study Library</h1>
+            <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Lesson Library</h1>
             <p className="text-sm mt-1" style={{ color: '#4b5563' }}>
               All your resources for planning and teaching
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Review-queue entry point (NEW345 step 5): tinted-outline secondary,
+                count computed server-side for this teacher's Condition-B scope. */}
+            <button
+              type="button"
+              onClick={() => router.push('/study-sheets/reviews')}
+              className="inline-flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-md"
+              style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#FFE4C4')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFF0E0')}
+            >
+              Review queue
+              {pendingReviewCount > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded-full text-xs font-semibold"
+                  style={{ backgroundColor: '#FF8303', color: 'white' }}
+                >
+                  {pendingReviewCount}
+                </span>
+              )}
+            </button>
             {/* Every teacher can author private staff material - not admin-gated. */}
             {activeTab === 'teaching' && (
               <Button
@@ -594,23 +624,12 @@ export default function StudySheetsClient({
                 Add Resource
               </Button>
             )}
-            {isAdmin && (
-              <Button
-                onClick={() => router.push('/study-sheets/new')}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
-                style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Study Sheet
-              </Button>
-            )}
           </div>
         </div>
 
         {/* Stat cards */}
         <div className="flex flex-wrap gap-4">
-          <StatCard icon={GraduationCap} label="Teaching Resources" value={teachingCount} caption="Private to you" />
+          <StatCard icon={GraduationCap} label="My Resources" value={teachingCount} caption="Private to you" />
           <StatCard icon={Users} label="Student Worksheets" value={worksheetCount} caption="Available to assign" />
           <StatCard icon={CalendarDays} label="Assigned This Week" value={assignedThisWeek} caption="Across your students" />
           <StatCard icon={ClipboardCheck} label="New Submissions" value={newSubmissions} caption="In the last 7 days" />

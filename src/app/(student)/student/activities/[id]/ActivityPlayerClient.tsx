@@ -15,6 +15,7 @@ interface QuestionResult {
 
 interface Props {
   activityId: string
+  assignmentId: string | null
   title: string | null
   questions: McqQuestion[]
   previousScore: number | null
@@ -28,6 +29,7 @@ type Phase = 'answering' | 'review' | 'score'
 
 export default function ActivityPlayerClient({
   activityId,
+  assignmentId,
   title,
   questions,
   previousScore,
@@ -83,7 +85,7 @@ export default function ActivityPlayerClient({
       const res = await fetch(`/api/student/activities/${activityId}/grade`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answers }),
+        body: JSON.stringify({ answers, assignment_id: assignmentId ?? undefined }),
       })
 
       const data = await res.json().catch(() => ({}))

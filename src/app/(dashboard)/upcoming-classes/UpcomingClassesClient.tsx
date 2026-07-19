@@ -318,7 +318,12 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500" style={{ display: 'flex', alignItems: 'center' }}>
+            {isNext && mounted && (
+              <span style={{ fontSize: '12px', fontWeight: '600', padding: '3px 10px', backgroundColor: '#FFF3E0', color: '#FF8303', borderRadius: '6px', marginRight: '8px' }}>
+                {new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: teacherTimezone }).format(new Date(cls.starts_at))}
+              </span>
+            )}
             {mounted
               ? isCancelled
                 ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`

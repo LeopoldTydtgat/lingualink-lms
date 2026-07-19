@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle, Clock, Search } from 'lucide-react'
+import { CalendarDays, CheckCircle, Clock, Search } from 'lucide-react'
 import { EmptyStudy } from '@/components/EmptyStudy'
+import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
+import DifficultyBars from '@/components/study/DifficultyBars'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,6 +15,7 @@ interface StudySheet {
   category: string | null
   level: string | null
   difficulty: number
+  is_active: boolean
 }
 
 interface Assignment {
@@ -22,93 +25,137 @@ interface Assignment {
   study_sheet: StudySheet | null
 }
 
-interface Completion {
-  id: string
-  sheet_id: string
-  assignment_id: string | null
-  completed_at: string
-  score: number | null
-}
-
 interface Props {
   studentId: string
   assignments: Assignment[]
-  completions: Completion[]
+  completedAssignmentIds: string[]
+  practicedSheetIds: string[]
   library: StudySheet[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Returns true if any completion row references this assignment */
-function isAssignmentCompleted(assignmentId: string, completions: Completion[]) {
-  return completions.some((c) => c.assignment_id === assignmentId)
-}
-
-/** Returns true if the student has done self-directed practice on this sheet */
-function isPracticed(sheetId: string, completions: Completion[]) {
-  return completions.some((c) => c.sheet_id === sheetId && c.assignment_id === null)
-}
-
-/** Renders difficulty bar icons */
-function DifficultyBars({ count }: { count: number }) {
-  return (
-    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
-      {[1, 2, 3].map(n => (
-        <span key={n} style={{
-          display: 'inline-block',
-          width: '5px',
-          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
-          borderRadius: '2px',
-          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
-        }} />
-      ))}
-    </span>
-  )
-}
-
+/** Category pill, shared styling keyed on canonical lowercase casing */
 function CategoryBadge({ category }: { category: string | null }) {
   if (!category) return null
-  const style =
-    category === 'Vocabulary'
-      ? { backgroundColor: '#fff7ed', color: '#c2410c' }
-      : category === 'Grammar'
-      ? { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-      : { backgroundColor: '#e0f2fe', color: '#0369a1' }
-
   return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={categoryBadgeStyle(category)}>
       {category}
     </span>
   )
 }
 
-/** Formats a date string to a readable short date */
+/** Formats a date string to a readable short date, e.g. "17 Jul 2026" */
 function formatDate(iso: string) {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(iso))
+}
+
+// ── Reusable buttons (hover via handlers — Tailwind v4 dynamic-class rule) ─────
+
+/** Solid orange primary action */
+function StartButton({ label, onClick, size = 'md' }: { label: string; onClick: () => void; size?: 'sm' | 'md' }) {
+  const [hovered, setHovered] = useState(false)
+  const pad = size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`${pad} rounded-lg font-semibold transition-colors`}
+      style={{ backgroundColor: hovered ? '#E67502' : '#FF8303', color: '#ffffff' }}
+    >
+      {label}
+    </button>
+  )
+}
+
+/** Tinted-outline secondary action (Review) */
+function ReviewButton({ label, onClick, size = 'md' }: { label: string; onClick: () => void; size?: 'sm' | 'md' }) {
+  const [hovered, setHovered] = useState(false)
+  const pad = size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`${pad} rounded-lg font-semibold transition-colors`}
+      style={{
+        backgroundColor: hovered ? '#FFE4C4' : '#FFF0E0',
+        color: '#FF8303',
+        border: '1px solid #FFD9A8',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+// ── Stat card ─────────────────────────────────────────────────────────────────
+
+function StatCard({
+  icon,
+  chipBg,
+  label,
+  count,
+  caption,
+}: {
+  icon: React.ReactNode
+  chipBg: string
+  label: string
+  count: number
+  caption: string
+}) {
+  return (
+    <div className="rounded-xl bg-white shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
+      <div className="flex items-center gap-2">
+        <span
+          className="flex items-center justify-center rounded-lg flex-shrink-0"
+          style={{ width: '36px', height: '36px', backgroundColor: chipBg }}
+        >
+          {icon}
+        </span>
+        <span className="text-sm text-gray-500">{label}</span>
+      </div>
+      <p className="text-3xl font-bold text-gray-900 mt-3">{count}</p>
+      <p className="text-xs text-gray-400 mt-1">{caption}</p>
+    </div>
+  )
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completions, library }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
 
-  // Count pending (incomplete) assignments
-  const pendingCount = assignments.filter(
-    (a) => a.study_sheet && !isAssignmentCompleted(a.id, completions)
-  ).length
+  const completedAssignmentIdSet = new Set(completedAssignmentIds)
+  const practicedSheetIdSet = new Set(practicedSheetIds)
 
-  // Separate pending vs completed assignments
+  // Separate pending vs completed assignments.
+  // Pending on a deactivated sheet is hidden entirely; completed on a
+  // deactivated sheet stays visible (rendered non-clickable below).
   const pendingAssignments = assignments.filter(
-    (a) => a.study_sheet && !isAssignmentCompleted(a.id, completions)
+    (a) => a.study_sheet && a.study_sheet.is_active && !completedAssignmentIdSet.has(a.id)
   )
   const completedAssignments = assignments.filter(
-    (a) => a.study_sheet && isAssignmentCompleted(a.id, completions)
+    (a) => a.study_sheet && completedAssignmentIdSet.has(a.id)
   )
+
+  // "This Week" — assignments (any status) on an active sheet assigned in the last 7 days
+  const weekAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000
+  const thisWeekCount = assignments.filter(
+    (a) => a.study_sheet && a.study_sheet.is_active && new Date(a.assigned_at).getTime() >= weekAgoMs
+  ).length
+
+  // Badge counts only pending, active-sheet assignments
+  const pendingCount = pendingAssignments.length
 
   // Filter the library based on search and dropdowns
   const filteredLibrary = library.filter((sheet) => {
@@ -127,17 +174,42 @@ export default function StudyClient({ studentId, assignments, completions, libra
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6 space-y-6">
       {/* Page title */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
+      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Study</h1>
         <p className="text-sm text-gray-500 mt-1">
           Complete your assigned homework or practice independently.
         </p>
       </div>
 
+      {/* Stat row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          icon={<Clock size={18} style={{ color: '#FF8303' }} />}
+          chipBg="#FFF0E0"
+          label="To Do"
+          count={pendingAssignments.length}
+          caption="Assignments waiting"
+        />
+        <StatCard
+          icon={<CheckCircle size={18} style={{ color: '#16A34A' }} />}
+          chipBg="#DCFCE7"
+          label="Completed"
+          count={completedAssignments.length}
+          caption="Assignments finished"
+        />
+        <StatCard
+          icon={<CalendarDays size={18} style={{ color: '#FF8303' }} />}
+          chipBg="#FFF0E0"
+          label="This Week"
+          count={thisWeekCount}
+          caption="Assigned in the last 7 days"
+        />
+      </div>
+
       {/* Section toggle (manual tabs — shadcn Tabs broken with Tailwind v4) */}
-      <div className="flex gap-2 mb-6 border-b border-gray-200">
+      <div className="flex gap-2 border-b border-gray-200">
         <button
           onClick={() => setActiveSection('assigned')}
           className="relative flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
@@ -174,7 +246,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
       {/* ── ASSIGNED SECTION ──────────────────────────────────────────────── */}
       {activeSection === 'assigned' && (
         <div>
-          {assignments.length === 0 ? (
+          {pendingAssignments.length === 0 && completedAssignments.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <EmptyStudy />
               <p className="text-sm">No assignments yet. Your teacher will assign study sheets after your classes.</p>
@@ -185,7 +257,13 @@ export default function StudyClient({ studentId, assignments, completions, libra
               {pendingAssignments.length > 0 && (
                 <div className="mb-8">
                   <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-                    Pending ({pendingAssignments.length})
+                    Pending
+                    <span
+                      className="ml-2 rounded-full text-xs px-2 py-0.5 font-medium"
+                      style={{ backgroundColor: '#FFF0E0', color: '#FF8303' }}
+                    >
+                      {pendingAssignments.length}
+                    </span>
                   </h2>
                   <div className="flex flex-col gap-3">
                     {pendingAssignments.map((a) => (
@@ -204,7 +282,13 @@ export default function StudyClient({ studentId, assignments, completions, libra
               {completedAssignments.length > 0 && (
                 <div>
                   <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-                    Completed ({completedAssignments.length})
+                    Completed
+                    <span
+                      className="ml-2 rounded-full text-xs px-2 py-0.5 font-medium"
+                      style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+                    >
+                      {completedAssignments.length}
+                    </span>
                   </h2>
                   <div className="flex flex-col gap-3">
                     {completedAssignments.map((a) => (
@@ -212,6 +296,7 @@ export default function StudyClient({ studentId, assignments, completions, libra
                         key={a.id}
                         assignment={a}
                         status="completed"
+                        deactivated={!a.study_sheet!.is_active}
                         onStart={() => openSheet(a.study_sheet!.id, a.id)}
                       />
                     ))}
@@ -257,64 +342,54 @@ export default function StudyClient({ studentId, assignments, completions, libra
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
             >
               <option value="">All Categories</option>
-              <option value="Vocabulary">Vocabulary</option>
-              <option value="Grammar">Grammar</option>
+              <option value="vocabulary">Vocabulary</option>
+              <option value="grammar">Grammar</option>
             </select>
           </div>
 
-          {/* Library table */}
+          {/* Library card grid */}
           {filteredLibrary.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-sm">No study sheets match your filters.</p>
             </div>
           ) : (
-            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Title</th>
-                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Category</th>
-                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Level</th>
-                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Difficulty</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLibrary.map((sheet, idx) => {
-                    const practiced = isPracticed(sheet.id, completions)
-                    return (
-                      <tr
-                        key={sheet.id}
-                        className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
-                        style={{ borderBottom: '1px solid #f3f4f6' }}
-                      >
-                        <td className="px-4 py-3 font-medium text-gray-900">
-                          {sheet.title}
-                          {practiced && (
-                            <span className="ml-2 text-xs text-green-600 font-normal">✓ Done</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <CategoryBadge category={sheet.category} />
-                        </td>
-                        <td className="px-4 py-3 text-gray-700">{sheet.level}</td>
-                        <td className="px-4 py-3">
-                          <DifficultyBars count={sheet.difficulty ?? 1} />
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() => openSheet(sheet.id)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
-                            style={{ backgroundColor: '#FF8303' }}
-                          >
-                            {practiced ? 'Review' : 'Start'}
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filteredLibrary.map((sheet) => {
+                const practiced = practicedSheetIdSet.has(sheet.id)
+                return (
+                  <div
+                    key={sheet.id}
+                    className="flex flex-col rounded-xl bg-white shadow-sm p-4"
+                    style={{ border: '1px solid #f3f4f6' }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
+                      {practiced && (
+                        <span
+                          className="rounded-full text-xs px-2 py-0.5 font-medium flex-shrink-0"
+                          style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+                        >
+                          Done
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-2">
+                      <CategoryBadge category={sheet.category} />
+                      <span className="text-xs text-gray-500">{sheet.level}</span>
+                      <DifficultyBars count={sheet.difficulty ?? 1} />
+                    </div>
+
+                    <div className="mt-auto pt-3">
+                      {practiced ? (
+                        <ReviewButton label="Review" size="sm" onClick={() => openSheet(sheet.id)} />
+                      ) : (
+                        <StartButton label="Start" size="sm" onClick={() => openSheet(sheet.id)} />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -329,37 +404,56 @@ function AssignmentCard({
   assignment,
   status,
   onStart,
+  deactivated = false,
 }: {
   assignment: Assignment
   status: 'pending' | 'completed'
   onStart: () => void
+  deactivated?: boolean
 }) {
   const sheet = assignment.study_sheet!
 
+  const spineColor = deactivated
+    ? '#e5e7eb'
+    : status === 'pending'
+    ? '#FF8303'
+    : '#16A34A'
+
   return (
     <div
-      className="flex items-center justify-between px-4 py-4 rounded-xl border bg-white"
+      className="flex items-center justify-between px-4 py-4 rounded-xl bg-white shadow-sm"
       style={{
-        borderColor: status === 'pending' ? '#fed7aa' : '#d1fae5',
-        backgroundColor: status === 'pending' ? '#fffbf5' : '#f0fdf4',
+        border: '1px solid #f3f4f6',
+        borderLeft: `3px solid ${spineColor}`,
+        backgroundColor: deactivated ? '#f9fafb' : '#ffffff',
       }}
     >
       <div className="flex items-start gap-3">
         <div
           className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
           style={{
-            backgroundColor: status === 'pending' ? '#fff7ed' : '#dcfce7',
+            backgroundColor: deactivated ? '#f3f4f6' : status === 'pending' ? '#fff7ed' : '#dcfce7',
           }}
         >
           {status === 'pending' ? (
             <Clock size={15} style={{ color: '#FF8303' }} />
           ) : (
-            <CheckCircle size={15} className="text-green-600" />
+            <CheckCircle size={15} style={{ color: deactivated ? '#9ca3af' : '#16a34a' }} />
           )}
         </div>
 
         <div>
-          <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
+          <div className="flex items-center gap-2">
+            <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
+            {status === 'completed' && (
+              <span
+                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+              >
+                Completed
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3 mt-1">
             <CategoryBadge category={sheet.category} />
             <span className="text-xs text-gray-500">{sheet.level}</span>
@@ -371,17 +465,19 @@ function AssignmentCard({
         </div>
       </div>
 
-      <button
-        onClick={onStart}
-        className="ml-4 px-4 py-2 rounded-lg text-sm font-semibold transition-opacity hover:opacity-90"
-        style={
-          status === 'pending'
-            ? { backgroundColor: '#FF8303', color: '#ffffff' }
-            : { backgroundColor: '#f3f4f6', color: '#374151' }
-        }
-      >
-        {status === 'pending' ? 'Start' : 'Review'}
-      </button>
+      {deactivated ? (
+        <span className="ml-4 text-xs font-medium" style={{ color: '#9ca3af' }}>
+          No longer available
+        </span>
+      ) : (
+        <div className="ml-4">
+          {status === 'pending' ? (
+            <StartButton label="Start" onClick={onStart} />
+          ) : (
+            <ReviewButton label="Review" onClick={onStart} />
+          )}
+        </div>
+      )}
     </div>
   )
 }

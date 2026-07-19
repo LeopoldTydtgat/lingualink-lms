@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
@@ -25,6 +26,7 @@ interface StudentRightPanelProps {
   trainingEndDate: string | null
   assignedExercises: number
   completedExercises: number
+  streakWeeks: number
 }
 
 function formatCountdown(secondsUntil: number): string {
@@ -80,6 +82,7 @@ export default function StudentRightPanel({
   trainingEndDate,
   assignedExercises,
   completedExercises,
+  streakWeeks,
 }: StudentRightPanelProps) {
   const [now, setNow] = useState(0)
   const [mounted, setMounted] = useState(false)
@@ -129,11 +132,11 @@ export default function StudentRightPanel({
       onWheel={handleWheel}
       className="thin-scroll"
       style={{
-        width: '240px',
-        minWidth: '240px',
-        backgroundColor: '#FFFCF8',
-        borderLeft: '1px solid #E0DFDC',
-        padding: '16px 12px',
+        width: '288px',
+        minWidth: '288px',
+        backgroundColor: '#F7F8FA',
+        borderLeft: '1px solid #E5E7EB',
+        padding: '16px',
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
@@ -143,10 +146,10 @@ export default function StudentRightPanel({
     >
 
       {/* ── Next Class ── */}
-      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Next Class</p>
+      <div className="shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '10px' }}>
+          <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Next Class</p>
         </div>
 
         {nextLesson ? (
@@ -187,54 +190,65 @@ export default function StudentRightPanel({
 
             <div style={{ marginTop: '10px' }}>
               {nextLesson.teams_join_url ? (
-                <a
-                  href={mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                    ? nextLesson.teams_join_url
-                    : undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onMouseEnter={() => setJoinHovered(true)}
-                  onMouseLeave={() => setJoinHovered(false)}
-                  onClick={() => {
-                    // Fire-and-forget student join-click logging. Guarded to the
-                    // joinable state only, and never awaited / never throws —
-                    // logging must not block or break opening Teams.
-                    if (!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) || !nextLesson.teams_join_url) return
-                    fetch('/api/join-click', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ lesson_id: nextLesson.id }),
-                      keepalive: true,
-                    }).catch(() => {})
-                  }}
-                  style={{
-                    display: 'block',
-                    padding: '7px 12px',
-                    backgroundColor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? (joinHovered ? '#FF8303' : '#ffffff')
-                      : '#E0DFDC',
-                    color: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? (joinHovered ? '#ffffff' : '#FF8303')
-                      : '#9ca3af',
-                    border: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? '1.5px solid #FF8303'
-                      : 'none',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    textAlign: 'center',
-                    textDecoration: 'none',
-                    cursor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? 'pointer'
-                      : 'default',
-                    pointerEvents: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? 'auto'
-                      : 'none',
-                    transition: 'background-color 0.18s ease, color 0.18s ease',
-                  }}
-                >
-                  Join Class
-                </a>
+                <>
+                  <a
+                    href={mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      ? nextLesson.teams_join_url
+                      : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onMouseEnter={() => setJoinHovered(true)}
+                    onMouseLeave={() => setJoinHovered(false)}
+                    onClick={() => {
+                      // Fire-and-forget student join-click logging. Guarded to the
+                      // joinable state only, and never awaited / never throws —
+                      // logging must not block or break opening Teams.
+                      if (!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) || !nextLesson.teams_join_url) return
+                      fetch('/api/join-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lesson_id: nextLesson.id }),
+                        keepalive: true,
+                      }).catch(() => {})
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      width: '100%',
+                      gap: '8px',
+                      padding: '7px 12px',
+                      backgroundColor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                        ? (joinHovered ? '#FF8303' : '#ffffff')
+                        : '#E0DFDC',
+                      color: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                        ? (joinHovered ? '#ffffff' : '#FF8303')
+                        : '#9ca3af',
+                      border: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                        ? '1.5px solid #FF8303'
+                        : 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      textAlign: 'center',
+                      textDecoration: 'none',
+                      cursor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                        ? 'pointer'
+                        : 'default',
+                      pointerEvents: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                        ? 'auto'
+                        : 'none',
+                      transition: 'background-color 0.18s ease, color 0.18s ease',
+                    }}
+                  >
+                    <Video size={14} />
+                    Join Class
+                  </a>
+                  {!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) && !classEnded && (
+                    <p style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center', marginTop: '6px' }}>
+                      Opens 10 min before class
+                    </p>
+                  )}
+                </>
               ) : (
                 <span style={{ fontSize: '12px', color: '#9ca3af' }}>
                   Link not yet available
@@ -252,11 +266,11 @@ export default function StudentRightPanel({
         )}
       </div>
 
-      {/* ── Hours Remaining ── */}
-      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Hours Remaining</p>
+      {/* ── My Training ── */}
+      <div className="shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '10px' }}>
+          <Hourglass size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>My Training</p>
         </div>
 
         <p style={{
@@ -266,6 +280,7 @@ export default function StudentRightPanel({
           marginBottom: '2px',
         }}>
           {formatHours(hoursRemaining)}
+          <span style={{ fontSize: '12px', fontWeight: '400', color: '#9ca3af' }}> remaining</span>
         </p>
 
         <div style={{
@@ -299,24 +314,30 @@ export default function StudentRightPanel({
             No hours remaining. Contact admin to continue.
           </p>
         )}
+
+        {trainingEndDate && (
+          <div style={{
+            borderTop: '1px solid #f3f4f6',
+            marginTop: '10px',
+            paddingTop: '10px',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            <Flag size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: '12px', color: '#6b7280' }}>
+              Training ends {formatEndDate(trainingEndDate)}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* ── Training End Date ── */}
-      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Training Ends</p>
-        </div>
-        <p style={{ fontSize: '13px', color: '#6b7280' }}>
-          {trainingEndDate ? formatEndDate(trainingEndDate) : '--'}
-        </p>
-      </div>
-
-      {/* ── Exercises Progress ── */}
-      <div style={{ backgroundColor: '#ffffff', border: '0.5px solid #E0DFDC', borderRadius: '10px', padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '12px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>My Exercises</p>
+      {/* ── My Exercises ── */}
+      <div className="shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '14px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '10px' }}>
+          <Pencil size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>My Exercises</p>
         </div>
 
         <div style={{
@@ -343,23 +364,44 @@ export default function StudentRightPanel({
           onMouseEnter={() => setExercisesHovered(true)}
           onMouseLeave={() => setExercisesHovered(false)}
           style={{
-            display: 'block',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
             marginTop: '10px',
-            padding: '7px 12px',
-            backgroundColor: exercisesHovered ? '#FF8303' : '#ffffff',
-            color: exercisesHovered ? '#ffffff' : '#FF8303',
-            border: '1.5px solid #FF8303',
-            borderRadius: '6px',
-            fontSize: '13px',
+            padding: '8px 12px',
+            backgroundColor: exercisesHovered ? '#FFE4CC' : '#FFF0E0',
+            color: '#FF8303',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '14px',
             fontWeight: '600',
-            textAlign: 'center',
             textDecoration: 'none',
-            transition: 'background-color 0.18s ease, color 0.18s ease',
+            transition: 'background-color 0.18s ease',
           }}
         >
+          <BookOpen size={14} />
           Do My Exercises
         </Link>
       </div>
+
+      {/* ── Streak ── */}
+      {streakWeeks >= 2 && (
+        <div className="shadow-sm" style={{
+          borderRadius: '12px',
+          padding: '12px 14px',
+          background: 'linear-gradient(135deg, #FFB942, #FF8303)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+        }}>
+          <Trophy size={18} color="#ffffff" style={{ flexShrink: 0 }} />
+          <div>
+            <p style={{ fontSize: '13px', fontWeight: '700', color: '#ffffff', margin: 0 }}>Keep it up!</p>
+            <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.9)', margin: 0 }}>{streakWeeks}-week streak</p>
+          </div>
+        </div>
+      )}
 
     </aside>
   )

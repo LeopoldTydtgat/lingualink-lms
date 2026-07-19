@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { StudySheet, WordRow, ExerciseRow, SheetContent, Attachment } from './LibraryAdminClient'
-import { Tag, kindColor } from './TagManagerModal'
+import { StudySheet, WordRow, Attachment } from './LibraryAdminClient'
+import { Tag, kindPillStyle } from './TagManagerModal'
+import { Check, Tag as TagIcon, FileText } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,7 +13,7 @@ type Props = {
   onSaved: () => Promise<void>
 }
 
-type FormTab = 'metadata' | 'vocabulary' | 'exercises' | 'files' | 'tags' | 'access'
+type FormTab = 'metadata' | 'vocabulary' | 'files' | 'tags' | 'access'
 
 type SheetType = 'teaching_material' | 'study_sheet'
 
@@ -34,37 +34,6 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 
 function newWordRow(): WordRow {
   return { id: crypto.randomUUID(), word: '', pos: '', definition: '', example: '', audio_url: '' }
-}
-
-function newExerciseRow(): ExerciseRow {
-  return {
-    id: crypto.randomUUID(),
-    question: '',
-    options: ['', '', '', ''],
-    correct_index: 0,
-    explanation: '',
-  }
-}
-
-// Inverse of the server's buildExerciseRows: map an exercises-table row back into
-// the modal's editing shape. correct_index is recovered by locating correct_answer
-// in options; options is padded to the four-slot tuple the editor expects.
-function rowToExerciseRow(row: {
-  id: string
-  question_text: string | null
-  options: unknown
-  correct_answer: string | null
-  explanation: string | null
-}): ExerciseRow {
-  const opts = Array.isArray(row.options) ? row.options.map(o => String(o ?? '')) : []
-  const correctIdx = row.correct_answer != null ? opts.indexOf(row.correct_answer) : -1
-  return {
-    id: row.id,
-    question: row.question_text ?? '',
-    options: [opts[0] ?? '', opts[1] ?? '', opts[2] ?? '', opts[3] ?? ''] as [string, string, string, string],
-    correct_index: correctIdx >= 0 ? correctIdx : 0,
-    explanation: row.explanation ?? '',
-  }
 }
 
 function rolesToPreset(roles: string[]): string {
@@ -146,9 +115,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   )
   const selectType = (next: SheetType) => {
     setType(next)
-    // Teaching Material hides vocabulary/exercises/access — if one of those is the
-    // active tab when switching, fall back to Metadata so no orphaned tab shows.
-    if (next === 'teaching_material' && (activeTab === 'vocabulary' || activeTab === 'exercises' || activeTab === 'access')) {
+    // Teaching Material hides vocabulary/access — if one of those is the active tab
+    // when switching, fall back to Metadata so no orphaned tab shows.
+    if (next === 'teaching_material' && (activeTab === 'vocabulary' || activeTab === 'access')) {
       setActiveTab('metadata')
     }
   }
@@ -170,50 +139,6 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     return existing && existing.length > 0 ? existing : [newWordRow()]
   })
 
-  // ── Exercise rows ─────────────────────────────────────────────────────────
-  // Exercises live in the exercises table now (not content). Start empty and, in
-  // edit mode, load this sheet's rows from the table (see the effect below).
-  const [exercises, setExercises] = useState<ExerciseRow[]>([])
-  const [exercisesLoading, setExercisesLoading] = useState(isEdit)
-  // Set when the edit-mode load FAILS to read the table. Distinct from "genuinely
-  // empty": saving must be blocked, because a save would delete-then-reinsert an
-  // empty set and wipe rows we simply failed to read.
-  const [exercisesLoadError, setExercisesLoadError] = useState(false)
-
-  // Edit mode: load existing exercises from the exercises table. Mount-only — the
-  // modal remounts per edit, so this runs once and won't clobber in-progress edits.
-  useEffect(() => {
-    if (!isEdit) return
-    let cancelled = false
-    ;(async () => {
-      const supabase = createClient()
-      const { data, error } = await supabase
-        .from('exercises')
-        .select('id, question_text, options, correct_answer, explanation')
-        .eq('study_sheet_id', sheetId)
-        .order('created_at', { ascending: true })
-      if (cancelled) return
-      if (error) {
-        // Couldn't read the authoritative rows. Show any legacy content for
-        // context, but flag the failure so saving is blocked — a save here would
-        // delete-then-reinsert and could wipe real exercises we failed to load.
-        const legacy = sheet?.content?.exercises
-        setExercises(Array.isArray(legacy) ? legacy : [])
-        setExercisesLoadError(true)
-      } else if (data && data.length > 0) {
-        setExercises(data.map(rowToExerciseRow))
-      } else {
-        // No table rows: genuinely empty, or a pre-migration sheet whose exercises
-        // still live in content.exercises — fall back so editing doesn't drop them
-        // (the next save migrates them into the table).
-        const legacy = sheet?.content?.exercises
-        setExercises(Array.isArray(legacy) && legacy.length > 0 ? legacy : [])
-      }
-      setExercisesLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [])
-
   // ── Tags ──────────────────────────────────────────────────────────────────
   // tags and sheet_tags are service_role writes only, and the browser client is
   // never used for them here — the vocabulary, this sheet's set, and the eventual
@@ -225,8 +150,8 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // full replace, so a set we never read must never be written back.
   const [tagsLoadError, setTagsLoadError] = useState(false)
 
-  // Mount-only, mirroring the exercises effect above: the modal remounts per open,
-  // so this runs once and won't clobber an in-progress selection.
+  // Mount-only: the modal remounts per open, so this runs once and won't clobber
+  // an in-progress selection.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -347,34 +272,6 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     })
   }
 
-  // ── Exercise helpers ──────────────────────────────────────────────────────
-  const updateExercise = (id: string, field: keyof Omit<ExerciseRow, 'options'>, value: string | number) => {
-    setExercises(prev => prev.map(ex => ex.id === id ? { ...ex, [field]: value } : ex))
-  }
-
-  const updateOption = (exId: string, optIndex: number, value: string) => {
-    setExercises(prev => prev.map(ex => {
-      if (ex.id !== exId) return ex
-      const opts: [string, string, string, string] = [...ex.options] as [string, string, string, string]
-      opts[optIndex] = value
-      return { ...ex, options: opts }
-    }))
-  }
-
-  const addExercise = () => setExercises(prev => [...prev, newExerciseRow()])
-
-  const removeExercise = (id: string) => setExercises(prev => prev.filter(ex => ex.id !== id))
-
-  const moveExercise = (index: number, direction: 'up' | 'down') => {
-    setExercises(prev => {
-      const next = [...prev]
-      const target = direction === 'up' ? index - 1 : index + 1
-      if (target < 0 || target >= next.length) return prev
-      ;[next[index], next[target]] = [next[target], next[index]]
-      return next
-    })
-  }
-
   // ── File upload helpers ───────────────────────────────────────────────────
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -428,7 +325,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
   const handleFileRemove = async (attachment: Attachment) => {
     // Optimistically remove from UI
-    setAttachments(prev => prev.filter(a => a.url !== attachment.url))
+    setAttachments(prev => prev.filter(a => a.name !== attachment.name))
 
     // Fire-and-forget storage deletion
     fetch('/api/admin/library/upload', {
@@ -447,28 +344,20 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const handleSave = async () => {
     // The row already exists and its id is fixed — a second POST would collide.
     if (createdIncomplete) return
-    // Don't save until edit-mode exercises have loaded — a premature save would
-    // delete-then-reinsert with an empty set and wipe the sheet's exercises.
-    if (exercisesLoading) return
-    // Same hazard for tags: the PUT replaces the whole set, so saving before the
-    // sheet's saved tags arrive would send the still-empty initial selection and
-    // clear every tag on the sheet.
+    // Tags: the PUT replaces the whole set, so saving before the sheet's saved tags
+    // arrive would send the still-empty initial selection and clear every tag on
+    // the sheet.
     if (tagsLoading) return
-    // Same hazard if the exercises load FAILED: block the save so we don't persist
-    // an empty or partial exercise set over rows we couldn't read.
-    if (exercisesLoadError) {
-      setActiveTab('exercises')
-      setError("Couldn't load this sheet's exercises. Close and reopen before saving — saving now could erase them.")
-      return
-    }
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
 
     setSaving(true)
     setError(null)
 
-    const content: SheetContent = {
+    const content = {
       words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
-      exercises: exercises.filter(ex => ex.question.trim()),
+      // Exercises/MCQs now live in the activities table; content keeps an empty
+      // array purely for the backward-compatible shape the routes expect.
+      exercises: [],
     }
 
     const payload: Record<string, unknown> = {
@@ -607,14 +496,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     <div>
       <p className="text-xs font-medium text-gray-400 uppercase mb-2">{label}</p>
       {group.length === 0 ? (
-        <p className="text-sm text-gray-400 italic">
-          No {label.toLowerCase()} yet. Create them with Manage Tags on the library page.
-        </p>
+        <div className="py-6 text-center">
+          <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+          <p className="text-sm text-gray-400">No {label.toLowerCase()} yet.</p>
+          <p className="text-xs text-gray-400 mt-1">Create them with Manage Tags on the library page.</p>
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {group.map(tag => {
             const selected = selectedTagIds.has(tag.id)
-            const color = kindColor(tag.kind)
+            const pill = kindPillStyle(tag.kind)
             return (
               <button
                 key={tag.id}
@@ -622,9 +513,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 onClick={() => toggleTag(tag.id)}
                 className="text-xs font-medium px-3 py-1.5 rounded-full border-2 transition-colors"
                 style={{
-                  borderColor: selected ? color : '#e5e7eb',
-                  backgroundColor: selected ? color : 'white',
-                  color: selected ? 'white' : '#6b7280',
+                  borderColor: selected ? '#FF8303' : '#e5e7eb',
+                  backgroundColor: selected ? '#FF8303' : pill.backgroundColor,
+                  color: selected ? 'white' : pill.color,
                 }}
               >
                 {tag.name}
@@ -637,17 +528,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   )
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
-  const allTabs: { key: FormTab; label: string }[] = [
+  const allTabs: { key: FormTab; label: string; count?: number | null }[] = [
     { key: 'metadata', label: 'Metadata' },
-    { key: 'vocabulary', label: `Vocabulary (${words.length})` },
-    { key: 'exercises', label: `Exercises (${exercisesLoading ? '…' : exercises.length})` },
-    { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
-    { key: 'tags', label: `Tags (${tagsLoading ? '…' : selectedTagIds.size})` },
+    { key: 'vocabulary', label: 'Vocabulary', count: words.length },
+    { key: 'files', label: 'Files', count: isEdit ? attachments.length : pendingFiles.length },
+    { key: 'tags', label: 'Tags', count: tagsLoading ? null : selectedTagIds.size },
     { key: 'access', label: 'Access' },
   ]
   // Teaching Material is a staff-only resource: Title + Files only (plus Tags,
   // which classify library material of either kind).
-  // Study Sheet keeps the full editor (metadata, vocabulary, exercises, files, access).
+  // Study Sheet keeps the full editor (metadata, vocabulary, files, access).
   const tabs = type === 'study_sheet'
     ? allTabs
     : allTabs.filter(t => t.key === 'metadata' || t.key === 'files' || t.key === 'tags')
@@ -670,19 +560,32 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
         {/* Tab bar */}
         <div className="flex gap-1 px-6 pt-4 border-b border-gray-200 flex-shrink-0">
-          {tabs.map(tab => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors"
-              style={activeTab === tab.key
-                ? { backgroundColor: '#FF8303', color: 'white' }
-                : { color: '#4b5563' }}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map(tab => {
+            const active = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors"
+                style={active
+                  ? { backgroundColor: '#FF8303', color: 'white' }
+                  : { color: '#4b5563' }}
+              >
+                {tab.label}
+                {typeof tab.count === 'number' && tab.count > 0 && (
+                  <span
+                    className="inline-flex ml-1.5 px-1.5 rounded-full text-xs"
+                    style={active
+                      ? { backgroundColor: 'rgba(255,255,255,0.25)', color: 'white' }
+                      : { backgroundColor: '#f3f4f6', color: '#6b7280' }}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {/* Tab content — scrollable */}
@@ -710,7 +613,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   ].map(opt => (
                     <label
                       key={opt.value}
-                      className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                      className="relative flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
                       style={{
                         borderColor: type === opt.value ? '#FF8303' : '#e5e7eb',
                         backgroundColor: type === opt.value ? '#FF830308' : 'white',
@@ -722,8 +625,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         value={opt.value}
                         checked={type === opt.value}
                         onChange={() => selectType(opt.value)}
-                        className="mt-0.5"
+                        className="sr-only"
                       />
+                      {type === opt.value && (
+                        <span
+                          className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                          style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                        >
+                          <Check className="w-3 h-3 text-white" />
+                        </span>
+                      )}
                       <div>
                         <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
@@ -876,7 +787,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         type="button"
                         onClick={() => removeWord(w.id)}
                         disabled={words.length === 1}
-                        className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm pt-1.5"
+                        className="disabled:opacity-20 text-sm pt-1.5"
+                        style={{ color: '#FD5602' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         title="Remove row"
                       >✕</button>
                     </div>
@@ -885,114 +799,14 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   <button
                     type="button"
                     onClick={addWord}
-                    className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                    className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
                   >
                     + Add word
                   </button>
                 </>
               )}
-            </div>
-          )}
-
-          {/* ── EXERCISES TAB ── */}
-          {activeTab === 'exercises' && type === 'study_sheet' && (
-            <div className="space-y-6">
-              {exercisesLoading && (
-                <p className="text-sm text-gray-400">Loading exercises…</p>
-              )}
-              {exercisesLoadError && (
-                <p className="text-sm text-red-600">
-                  Couldn&apos;t load this sheet&apos;s exercises. Close and reopen before saving — saving now could erase them.
-                </p>
-              )}
-              {!exercisesLoading && !exercisesLoadError && exercises.length === 0 && (
-                <p className="text-sm text-gray-400">
-                  No exercises yet. Click Add Question to create the first one.
-                </p>
-              )}
-
-              {exercises.map((ex, i) => (
-                <div key={ex.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
-
-                  {/* Exercise header */}
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-400 uppercase">Question {i + 1}</span>
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => moveExercise(i, 'up')} disabled={i === 0}
-                        className="text-gray-400 hover:text-gray-600 disabled:opacity-20 text-sm">↑</button>
-                      <button type="button" onClick={() => moveExercise(i, 'down')} disabled={i === exercises.length - 1}
-                        className="text-gray-400 hover:text-gray-600 disabled:opacity-20 text-sm">↓</button>
-                      <button type="button" onClick={() => removeExercise(ex.id)}
-                        className="text-red-400 hover:text-red-600 text-sm">✕ Remove</button>
-                    </div>
-                  </div>
-
-                  {/* Question text */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Question</label>
-                    <input
-                      type="text"
-                      value={ex.question}
-                      onChange={e => updateExercise(ex.id, 'question', e.target.value)}
-                      placeholder="e.g. What does 'delegate' mean?"
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-900"
-                    />
-                  </div>
-
-                  {/* Answer options */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      Options — click ✓ to mark the correct answer
-                    </label>
-                    <div className="space-y-2">
-                      {ex.options.map((opt, optIdx) => (
-                        <div key={optIdx} className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => updateExercise(ex.id, 'correct_index', optIdx)}
-                            className="w-7 h-7 rounded-full border-2 text-xs font-bold flex items-center justify-center flex-shrink-0 transition-colors"
-                            style={ex.correct_index === optIdx
-                              ? { backgroundColor: '#16a34a', borderColor: '#16a34a', color: 'white' }
-                              : { borderColor: '#d1d5db', color: '#9ca3af' }}
-                            title="Mark as correct"
-                          >
-                            {ex.correct_index === optIdx ? '✓' : String.fromCharCode(65 + optIdx)}
-                          </button>
-                          <input
-                            type="text"
-                            value={opt}
-                            onChange={e => updateOption(ex.id, optIdx, e.target.value)}
-                            placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
-                            className="flex-1 border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Explanation */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      Explanation (shown after student answers)
-                    </label>
-                    <textarea
-                      value={ex.explanation}
-                      onChange={e => updateExercise(ex.id, 'explanation', e.target.value)}
-                      placeholder="Why is this the correct answer?"
-                      rows={2}
-                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm text-gray-900 resize-none"
-                    />
-                  </div>
-                </div>
-              ))}
-
-              <button
-                type="button"
-                onClick={addExercise}
-                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
-              >
-                + Add question
-              </button>
             </div>
           )}
 
@@ -1017,7 +831,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center disabled:opacity-50"
+                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center disabled:opacity-50"
+                  onMouseEnter={e => { if (!uploading) { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' } }}
+                  onMouseLeave={e => { if (!uploading) { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' } }}
                 >
                   {uploading ? (
                     <>
@@ -1037,7 +853,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   )}
                 </button>
                 {uploadError && (
-                  <p className="text-xs text-red-500 mt-2">{uploadError}</p>
+                  <p className="text-xs mt-2" style={{ color: '#FD5602' }}>{uploadError}</p>
                 )}
               </div>
 
@@ -1045,7 +861,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               {isEdit ? (
                 /* Edit mode: attachments live on the server — View link + storage-backed remove. */
                 attachments.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                  <div className="py-6 text-center">
+                    <FileText className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No files attached yet.</p>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {attachments.map((att, idx) => (
@@ -1067,7 +886,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                           href={`/api/library-file/${sheetId}/${idx}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs underline flex-shrink-0"
+                          className="text-xs flex-shrink-0"
                           style={{ color: '#FF8303' }}
                         >
                           View
@@ -1077,7 +896,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         <button
                           type="button"
                           onClick={() => handleFileRemove(att)}
-                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          className="text-sm flex-shrink-0"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                           title="Remove file"
                         >
                           ✕
@@ -1090,7 +912,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 /* Create mode: files are staged locally and uploaded on Save. No View
                    link (nothing is on the server yet); remove just drops the staged File. */
                 pendingFiles.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                  <div className="py-6 text-center">
+                    <FileText className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No files attached yet.</p>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {pendingFiles.map((file, idx) => (
@@ -1113,7 +938,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         <button
                           type="button"
                           onClick={() => removePendingFile(idx)}
-                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          className="text-sm flex-shrink-0"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                           title="Remove file"
                         >
                           ✕
@@ -1135,16 +963,18 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               </p>
 
               {tagsLoading ? (
-                <p className="text-sm text-gray-400">Loading tags…</p>
+                <p className="py-6 text-center text-sm text-gray-400">Loading tags…</p>
               ) : tagsLoadError ? (
-                <p className="text-sm text-red-600">
+                <p className="text-sm" style={{ color: '#FD5602' }}>
                   Couldn&apos;t load tags. This sheet&apos;s existing tags are left untouched when you save —
                   close and reopen to change them.
                 </p>
               ) : allTags.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No tags exist yet. Create them with Manage Tags on the library page.
-                </p>
+                <div className="py-6 text-center">
+                  <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">No tags exist yet.</p>
+                  <p className="text-xs text-gray-400 mt-1">Create them with Manage Tags on the library page.</p>
+                </div>
               ) : (
                 <div className="space-y-5">
                   {renderTagGroup('Topics', topicTags)}
@@ -1167,27 +997,24 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                     value: 'all',
                     label: 'All Teachers',
                     description: 'Any teacher with an active account can see and assign this sheet.',
-                    color: '#16a34a',
                   },
                   {
                     value: 'exam',
                     label: 'Teacher+Exam Only',
                     description: 'Only teachers with the Teacher+Exam role can access this sheet. Useful for exam prep content.',
-                    color: '#2563eb',
                   },
                   {
                     value: 'admin',
                     label: 'Admin Only',
                     description: 'Not visible to any teacher. Admin can still assign it directly to students.',
-                    color: '#6b7280',
                   },
                 ].map(opt => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                    className="relative flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
                     style={{
-                      borderColor: rolesPreset === opt.value ? opt.color : '#e5e7eb',
-                      backgroundColor: rolesPreset === opt.value ? `${opt.color}08` : 'white',
+                      borderColor: rolesPreset === opt.value ? '#FF8303' : '#e5e7eb',
+                      backgroundColor: rolesPreset === opt.value ? '#FF830308' : 'white',
                     }}
                   >
                     <input
@@ -1196,8 +1023,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                       value={opt.value}
                       checked={rolesPreset === opt.value}
                       onChange={() => setRolesPreset(opt.value)}
-                      className="mt-0.5"
+                      className="sr-only"
                     />
+                    {rolesPreset === opt.value && (
+                      <span
+                        className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                        style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                      >
+                        <Check className="w-3 h-3 text-white" />
+                      </span>
+                    )}
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
@@ -1211,7 +1046,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
         {/* Modal footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0">
-          {error && <p className="text-sm text-red-500 pr-4">{error}</p>}
+          {error && <p className="text-sm pr-4" style={{ color: '#FD5602' }}>{error}</p>}
           {!error && <span />}
           <div className="flex items-center gap-3 flex-shrink-0">
             <button
@@ -1219,16 +1054,25 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               // Once the row exists, dismissing must refresh the list — the sheet
               // is real and has to appear, error or not.
               onClick={createdIncomplete ? () => { void onSaved() } : onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '' }}
             >
               {createdIncomplete ? 'Close' : 'Cancel'}
             </button>
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || exercisesLoading || exercisesLoadError || tagsLoading || createdIncomplete}
-              className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
-              style={{ backgroundColor: '#FF8303' }}
+              disabled={saving || tagsLoading || createdIncomplete}
+              className="px-5 py-2 text-sm rounded-md text-white font-medium"
+              style={
+                saving || tagsLoading || createdIncomplete
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: '#FF8303' }
+              }
+              onMouseEnter={e => { if (!(saving || tagsLoading || createdIncomplete)) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!(saving || tagsLoading || createdIncomplete)) e.currentTarget.style.backgroundColor = '#FF8303' }}
             >
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Sheet'}
             </button>

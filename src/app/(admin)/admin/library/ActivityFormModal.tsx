@@ -4,9 +4,12 @@ import { useEffect, useState } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type ActivityType = 'mcq' | 'writing_task'
+
 type Props = {
   sheetId: string
   activityId: string | null   // null = create mode
+  createType?: ActivityType   // create mode only; ignored on edit (type comes from the row)
   onClose: () => void
   onSaved: () => Promise<void>
 }
@@ -23,6 +26,7 @@ type QuestionDraft = {
 }
 
 type LoadedActivity = {
+  type: string
   title: string | null
   content: unknown
   answer_key: unknown
@@ -122,6 +126,15 @@ function toDrafts(content: unknown, answerKey: unknown): DraftLoad {
   return { drafts, unresolved }
 }
 
+// Recover the writing-task prompt from stored content. Unlike MCQ there is no
+// answer key to reconcile, so a malformed/blank prompt is simply loaded empty:
+// there is nothing here that a re-save could destroy, so editing is never blocked.
+function toPrompt(content: unknown): string {
+  return content && typeof content === 'object' && typeof (content as { prompt?: unknown }).prompt === 'string'
+    ? (content as { prompt: string }).prompt
+    : ''
+}
+
 // Client-side mirror of McqActivityAuthorSchema. The server is the authority —
 // this only spares the admin a round trip on the obvious mistakes.
 function validate(title: string, questions: QuestionDraft[]): string | null {
@@ -155,11 +168,17 @@ function validate(title: string, questions: QuestionDraft[]): string | null {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ActivityFormModal({ sheetId, activityId, onClose, onSaved }: Props) {
+export default function ActivityFormModal({ sheetId, activityId, createType, onClose, onSaved }: Props) {
   const isEdit = activityId !== null
+
+  // Create mode fixes the type up front (chosen in the add-activity flow). Edit
+  // mode's initial value is a placeholder: the load effect overwrites it from the
+  // stored row before anything but the "Loading…" state is shown.
+  const [type, setType] = useState<ActivityType>(isEdit ? 'mcq' : (createType ?? 'mcq'))
 
   const [title, setTitle] = useState('')
   const [questions, setQuestions] = useState<QuestionDraft[]>(() => isEdit ? [] : [newQuestion()])
+  const [prompt, setPrompt] = useState('')
 
   const [loading, setLoading] = useState(isEdit)
   // Holds the reason the edit-mode load could not produce a safe editing state.
@@ -196,18 +215,26 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
           return
         }
 
-        const { drafts, unresolved } = toDrafts(data.content, data.answer_key)
+        const loadedType: ActivityType = data.type === 'writing_task' ? 'writing_task' : 'mcq'
+        setType(loadedType)
 
-        // A stored activity always has at least one question (schema min(1)), so
-        // an empty set means the content is malformed — the same hazard as an
-        // unreadable answer key, and the same answer: refuse to edit it.
-        if (unresolved || drafts.length === 0) {
-          setLoadError(UNRESOLVED_KEY_MESSAGE)
-          return
+        if (loadedType === 'writing_task') {
+          setTitle(data.title ?? '')
+          setPrompt(toPrompt(data.content))
+        } else {
+          const { drafts, unresolved } = toDrafts(data.content, data.answer_key)
+
+          // A stored MCQ always has at least one question (schema min(1)), so an
+          // empty set means the content is malformed — the same hazard as an
+          // unreadable answer key, and the same answer: refuse to edit it.
+          if (unresolved || drafts.length === 0) {
+            setLoadError(UNRESOLVED_KEY_MESSAGE)
+            return
+          }
+
+          setTitle(data.title ?? '')
+          setQuestions(drafts)
         }
-
-        setTitle(data.title ?? '')
-        setQuestions(drafts)
       } catch {
         // A rejected fetch must still resolve the loading state, or the modal
         // hangs with Save disabled and no reason shown.
@@ -278,44 +305,65 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
   const handleSave = async () => {
     if (loading || loadError) return
 
-    const validationError = validate(title, questions)
-    if (validationError) {
-      setError(validationError)
-      return
+    let payload: unknown
+
+    if (type === 'writing_task') {
+      // Mirror of WritingTaskActivityAuthorSchema; the server remains authority.
+      if (!title.trim()) {
+        setError('Title is required.')
+        return
+      }
+      if (!prompt.trim()) {
+        setError('A prompt is required.')
+        return
+      }
+      // `type` tells the create route which schema to apply. The edit route
+      // ignores it (it trusts the stored type), so sending it is harmless there.
+      payload = {
+        type: 'writing_task',
+        title: title.trim(),
+        content: { prompt: prompt.trim() },
+      }
+    } else {
+      const validationError = validate(title, questions)
+      if (validationError) {
+        setError(validationError)
+        return
+      }
+
+      // Options are stored trimmed and correct_answer is taken from the same
+      // trimmed array, so the stored key always matches an option exactly — the
+      // cross-check the server runs, and the comparison the grade route makes.
+      const content = {
+        questions: questions.map(q => ({
+          id: q.id,
+          question_text: q.question_text.trim(),
+          options: q.options.map(opt => opt.trim()),
+        })),
+      }
+
+      const answer_key = {
+        questions: Object.fromEntries(
+          questions.map(q => {
+            const explanation = q.explanation.trim()
+            return [
+              q.id,
+              {
+                correct_answer: q.options[q.correct_index].trim(),
+                // Omitted rather than sent empty: explanation is optional, and ''
+                // would render as an empty "why" block after grading.
+                ...(explanation ? { explanation } : {}),
+              },
+            ]
+          })
+        ),
+      }
+
+      payload = { title: title.trim(), content, answer_key }
     }
 
     setSaving(true)
     setError(null)
-
-    // Options are stored trimmed and correct_answer is taken from the same
-    // trimmed array, so the stored key always matches an option exactly — the
-    // cross-check the server runs, and the comparison the grade route makes.
-    const content = {
-      questions: questions.map(q => ({
-        id: q.id,
-        question_text: q.question_text.trim(),
-        options: q.options.map(opt => opt.trim()),
-      })),
-    }
-
-    const answer_key = {
-      questions: Object.fromEntries(
-        questions.map(q => {
-          const explanation = q.explanation.trim()
-          return [
-            q.id,
-            {
-              correct_answer: q.options[q.correct_index].trim(),
-              // Omitted rather than sent empty: explanation is optional, and ''
-              // would render as an empty "why" block after grading.
-              ...(explanation ? { explanation } : {}),
-            },
-          ]
-        })
-      ),
-    }
-
-    const payload = { title: title.trim(), content, answer_key }
 
     let res: Response
     try {
@@ -370,7 +418,37 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
           {loading ? (
             <p className="text-sm text-gray-400">Loading activity…</p>
           ) : loadError ? (
-            <p className="text-sm text-red-600">{loadError}</p>
+            <p className="text-sm" style={{ color: '#FD5602' }}>{loadError}</p>
+          ) : type === 'writing_task' ? (
+            <div className="space-y-6">
+
+              {/* Title */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="e.g. Describe Your Morning Routine"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Writing task. The student sees the prompt and submits a written response; it is not auto-graded.
+                </p>
+              </div>
+
+              {/* Prompt */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prompt *</label>
+                <textarea
+                  value={prompt}
+                  onChange={e => setPrompt(e.target.value)}
+                  placeholder="e.g. Describe your typical morning routine in 5–6 sentences, using the present simple."
+                  rows={6}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 resize-none"
+                />
+              </div>
+            </div>
           ) : (
             <div className="space-y-6">
 
@@ -414,7 +492,10 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
                         type="button"
                         onClick={() => removeQuestion(q.id)}
                         disabled={questions.length === 1}
-                        className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm"
+                        className="disabled:opacity-20 text-sm"
+                        style={{ color: '#FD5602' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         title={questions.length === 1 ? 'An activity needs at least one question' : 'Remove question'}
                       >✕ Remove</button>
                     </div>
@@ -469,7 +550,10 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
                               type="button"
                               onClick={() => removeOption(q.id, optIdx)}
                               disabled={q.options.length <= MIN_OPTIONS}
-                              className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm flex-shrink-0 w-5"
+                              className="disabled:opacity-20 text-sm flex-shrink-0 w-5"
+                              style={{ color: '#FD5602' }}
+                              onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                              onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                               title={q.options.length <= MIN_OPTIONS ? `A question needs at least ${MIN_OPTIONS} options` : 'Remove option'}
                             >✕</button>
                           </div>
@@ -481,7 +565,7 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
                       <button
                         type="button"
                         onClick={() => addOption(q.id)}
-                        className="mt-2 text-xs underline"
+                        className="mt-2 text-xs"
                         style={{ color: ORANGE }}
                       >
                         + Add option
@@ -508,7 +592,9 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
               <button
                 type="button"
                 onClick={addQuestion}
-                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
               >
                 + Add question
               </button>
@@ -518,12 +604,15 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0">
-          {error ? <p className="text-sm text-red-500 pr-4">{error}</p> : <span />}
+          {error ? <p className="text-sm pr-4" style={{ color: '#FD5602' }}>{error}</p> : <span />}
           <div className="flex items-center gap-3 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '' }}
             >
               Cancel
             </button>
@@ -531,8 +620,14 @@ export default function ActivityFormModal({ sheetId, activityId, onClose, onSave
               type="button"
               onClick={handleSave}
               disabled={saving || loading || loadError !== null}
-              className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
-              style={{ backgroundColor: ORANGE }}
+              className="px-5 py-2 text-sm rounded-md text-white font-medium"
+              style={
+                saving || loading || loadError !== null
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: ORANGE }
+              }
+              onMouseEnter={e => { if (!(saving || loading || loadError !== null)) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!(saving || loading || loadError !== null)) e.currentTarget.style.backgroundColor = ORANGE }}
             >
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Activity'}
             </button>

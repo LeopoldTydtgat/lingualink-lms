@@ -1,15 +1,29 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect, notFound } from 'next/navigation'
-import StudySheetClient from './StudySheetClient'
+import { z } from 'zod'
+import StudySheetClient, { type ActivitySummary } from './StudySheetClient'
 
 interface Props {
   params: Promise<{ id: string }>
   searchParams: Promise<{ assignment?: string }>
 }
 
+interface AttemptRow {
+  activity_id: string
+  assignment_id: string | null
+  score: number | null
+  needs_review: boolean
+  created_at: string
+}
+
 export default async function StudySheetPage({ params, searchParams }: Props) {
   const { id } = await params
-  const { assignment: assignmentId } = await searchParams
+  const { assignment } = await searchParams
+
+  // A malformed assignment param must not kill access to a valid sheet -
+  // treat anything that is not a uuid as absent, same as the activity player.
+  let assignmentId =
+    assignment && z.string().uuid().safeParse(assignment).success ? assignment : null
 
   const supabase = await createClient()
 
@@ -37,34 +51,78 @@ export default async function StudySheetPage({ params, searchParams }: Props) {
 
   if (!sheet) notFound()
 
-  // Fetch exercises for this sheet
-  const { data: exercisesRaw } = await supabase
-    .from('exercises')
-    .select('id, question_text, options, correct_answer, explanation, duration_minutes')
-    .eq('study_sheet_id', id)
-    .order('id', { ascending: true })
+  // Resolve the assignment context. Students have a SELECT policy on their own
+  // assignments rows; a miss (stale or foreign link) must not break the page -
+  // fall back to practice context instead.
+  let assignmentMarkedDone = false
+  if (assignmentId) {
+    const { data: assignmentRow } = await supabase
+      .from('assignments')
+      .select('id, marked_done_at')
+      .eq('id', assignmentId)
+      .eq('student_id', student.id)
+      .eq('study_sheet_id', sheet.id)
+      .maybeSingle()
 
-  const exercises = exercisesRaw ?? []
+    if (assignmentRow) {
+      assignmentMarkedDone = assignmentRow.marked_done_at !== null
+    } else {
+      assignmentId = null
+    }
+  }
 
-  // Fetch any completions this student already has for this sheet under this assignment
-  // (so we know if they've already done it and can show results)
-  const { data: existingCompletions } = await supabase
-    .from('exercise_completions')
-    .select('id, assignment_id, completed_at, score')
-    .eq('student_id', student.id)
+  // Activities for this sheet. RLS scopes visibility; the authenticated column
+  // grant on activities excludes answer_key - never select it (or content) here.
+  const { data: activitiesRaw } = await supabase
+    .from('activities')
+    .select('id, position, type, title')
     .eq('sheet_id', id)
+    .order('position', { ascending: true })
 
-  const alreadyCompleted = (existingCompletions ?? []).some(
-    (c) => (assignmentId ? c.assignment_id === assignmentId : c.assignment_id === null)
-  )
+  const activityRows = activitiesRaw ?? []
+
+  // This student's attempts across the sheet's activities. Ordered ascending so
+  // the last write into the map below is the newest attempt per activity.
+  let attemptRows: AttemptRow[] = []
+  if (activityRows.length > 0) {
+    const { data: attemptsRaw } = await supabase
+      .from('activity_attempts')
+      .select('activity_id, assignment_id, score, needs_review, created_at')
+      .eq('student_id', student.id)
+      .in('activity_id', activityRows.map((a) => a.id))
+      .order('created_at', { ascending: true })
+
+    attemptRows = attemptsRaw ?? []
+  }
+
+  // Context scoping mirrors the old alreadyCompleted rule: an assignment
+  // context counts only attempts made under that assignment; practice context
+  // counts only attempts with no assignment.
+  const latestByActivity = new Map<string, AttemptRow>()
+  for (const row of attemptRows) {
+    const inContext = assignmentId
+      ? row.assignment_id === assignmentId
+      : row.assignment_id === null
+    if (inContext) latestByActivity.set(row.activity_id, row)
+  }
+
+  const activities: ActivitySummary[] = activityRows.map((a) => {
+    const latest = latestByActivity.get(a.id)
+    return {
+      id: a.id,
+      type: a.type,
+      title: a.title,
+      status: !latest ? 'not_started' : latest.needs_review ? 'pending_review' : 'done',
+      score: latest?.score ?? null,
+    }
+  })
 
   return (
     <StudySheetClient
-      studentId={student.id}
       sheet={sheet}
-      exercises={exercises}
-      assignmentId={assignmentId ?? null}
-      alreadyCompleted={alreadyCompleted}
+      activities={activities}
+      assignmentId={assignmentId}
+      assignmentMarkedDone={assignmentMarkedDone}
     />
   )
 }

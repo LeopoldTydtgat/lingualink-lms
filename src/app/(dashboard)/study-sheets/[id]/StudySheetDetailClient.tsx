@@ -1,26 +1,19 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronDown, ChevronUp, Maximize2, Minimize2, ExternalLink } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { type Annotation } from '@/components/pdf/PdfViewer'
-import AnnotatablePdf from '@/components/pdf/AnnotatablePdf'
+import { ArrowLeft, ExternalLink, Upload, CheckCircle } from 'lucide-react'
+import type { Annotation } from '@/components/pdf/PdfViewer'
+import MaterialFileViewer from '@/components/study/MaterialFileViewer'
+import DifficultyBars from '@/components/study/DifficultyBars'
+import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
+import type { PreppedActivity } from '@/lib/study/prepActivities'
 
 type Word = {
   word: string
   part_of_speech: string
   definition: string
   example: string
-}
-
-type Exercise = {
-  id: string
-  question_text: string
-  options: string[]
-  correct_answer: string
-  explanation: string
-  duration_minutes: number
 }
 
 type Attachment = {
@@ -35,215 +28,166 @@ type StudySheet = {
   category: string | null
   level: string | null
   difficulty: number
-  content: { words: Word[] }
+  content: { words?: Word[] } | null
   attachments: Attachment[] | null
 }
 
 type Props = {
   sheet: StudySheet
-  exercises: Exercise[]
+  activities: PreppedActivity[]
   isAdmin: boolean
+  isOwned: boolean
   annotationsByName: Record<string, Annotation[]>
   live?: boolean
 }
 
-function DifficultyBars({ count }: { count: number }) {
-  return (
-    <span style={{ display: 'inline-flex', gap: '2px', alignItems: 'flex-end', height: '16px' }}>
-      {[1, 2, 3].map(n => (
-        <span key={n} style={{
-          display: 'inline-block',
-          width: '5px',
-          height: n === 1 ? '6px' : n === 2 ? '10px' : '14px',
-          borderRadius: '2px',
-          backgroundColor: n <= count ? '#FF8303' : '#e5e7eb',
-        }} />
-      ))}
-    </span>
-  )
+const TYPE_LABELS: Record<string, string> = {
+  mcq: 'Multiple choice',
+  gap_fill: 'Gap fill',
+  matching: 'Matching',
+  reorder: 'Reorder',
+  flashcards: 'Flashcards',
+  listening: 'Listening',
+  writing_task: 'Writing task',
+  speaking_task: 'Speaking task',
+  scenario: 'Scenario',
 }
 
-function categoryBadgeStyle(category: string | null): React.CSSProperties {
-  if (category === 'Vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
-  if (category === 'Grammar') return { backgroundColor: '#eff6ff', color: '#1d4ed8' }
-  return { backgroundColor: '#e0f2fe', color: '#0369a1' }
+function typeLabel(type: string): string {
+  return TYPE_LABELS[type] ?? type.replace(/_/g, ' ')
 }
 
-function ExerciseCard({ exercise }: { exercise: Exercise }) {
-  const [selected, setSelected] = useState<string | null>(null)
-  const [showExplanation, setShowExplanation] = useState(false)
-
-  const answered = selected !== null
-
+// Static teacher-facing prep card: the resolved activity with its correct
+// answer marked. In the (live) window the correctAnswer/explanation are null
+// (never resolved), so nothing here reveals the key.
+function ActivityCard({ activity }: { activity: PreppedActivity }) {
   return (
     <div className="rounded-xl p-5 bg-white shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
-      <p className="font-medium text-gray-900 mb-4">{exercise.question_text}</p>
-
-      <div className="space-y-2 mb-4">
-        {exercise.options.map((option) => {
-          const isCorrect = option === exercise.correct_answer
-          const isSelected = option === selected
-
-          let bgColor = 'white'
-          let borderColor = '#e5e7eb'
-          let textColor = '#374151'
-
-          if (answered) {
-            if (isCorrect) {
-              bgColor = '#f0fdf4'
-              borderColor = '#22c55e'
-              textColor = '#15803d'
-            } else if (isSelected && !isCorrect) {
-              bgColor = '#fef2f2'
-              borderColor = '#ef4444'
-              textColor = '#b91c1c'
-            }
-          } else if (isSelected) {
-            borderColor = '#FF8303'
-          }
-
-          return (
-            <button
-              key={option}
-              onClick={() => {
-                if (!answered) {
-                  setSelected(option)
-                  setShowExplanation(true)
-                }
-              }}
-              className="w-full text-left px-4 py-3 rounded-lg border text-sm transition-colors"
-              style={{ backgroundColor: bgColor, borderColor, color: textColor }}
-            >
-              {option}
-            </button>
-          )
-        })}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {activity.title && <h3 className="font-medium text-gray-900">{activity.title}</h3>}
+        <span
+          className="px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+        >
+          {typeLabel(activity.type)}
+        </span>
       </div>
 
-      {/* Explanation box — amber, shown after answering */}
-      {answered && (
-        <div
-          className="rounded-lg p-4 text-sm"
-          style={{ backgroundColor: '#FFFBEB', borderLeft: '4px solid #FFB942' }}
-        >
-          <button
-            onClick={() => setShowExplanation(!showExplanation)}
-            className="flex items-center justify-between w-full font-medium text-amber-800"
-          >
-            <span>Explanation</span>
-            {showExplanation ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-          {showExplanation && (
-            <p className="mt-2 text-amber-700">{exercise.explanation}</p>
-          )}
+      {!activity.gradable ? (
+        <p className="text-sm text-gray-400">Not an auto-graded activity — no preview available.</p>
+      ) : (
+        <div className="space-y-5">
+          {activity.questions.map((q, qi) => (
+            <div key={q.id}>
+              <p className="font-medium text-gray-900 mb-3 text-sm">
+                {qi + 1}. {q.text}
+              </p>
+              <div className="space-y-2">
+                {q.options.map((opt) => {
+                  const isCorrect =
+                    q.correctAnswer !== null && opt.trim() === q.correctAnswer.trim()
+                  return (
+                    <div
+                      key={opt}
+                      className="px-4 py-2.5 rounded-lg border text-sm flex items-center gap-2"
+                      style={
+                        isCorrect
+                          ? { backgroundColor: '#DCFCE7', borderColor: '#15803D', color: '#15803D' }
+                          : { backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: '#374151' }
+                      }
+                    >
+                      {isCorrect && <CheckCircle size={14} className="flex-shrink-0" />}
+                      {opt}
+                    </div>
+                  )
+                })}
+              </div>
+              {q.explanation && (
+                <div
+                  className="rounded-lg p-3 text-sm mt-3"
+                  style={{ backgroundColor: '#FFFBEB', borderLeft: '4px solid #FFB942', color: '#92400e' }}
+                >
+                  {q.explanation}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function MaterialFileViewer({
-  attachments,
-  sheetId,
+export default function StudySheetDetailClient({
+  sheet,
+  activities,
+  isOwned,
   annotationsByName,
-}: {
-  attachments: Attachment[]
-  sheetId: string
-  annotationsByName: Record<string, Annotation[]>
-}) {
-  const containerRefs = useRef<(HTMLDivElement | null)[]>([])
-  const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
-
-  useEffect(() => {
-    function onFullscreenChange() {
-      if (!document.fullscreenElement) {
-        setFullscreenIdx(null)
-        return
-      }
-      const idx = containerRefs.current.findIndex(el => el === document.fullscreenElement)
-      setFullscreenIdx(idx === -1 ? null : idx)
-    }
-    document.addEventListener('fullscreenchange', onFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange)
-  }, [])
-
-  function handleFullscreen(idx: number) {
-    if (fullscreenIdx === idx) {
-      if (typeof document.exitFullscreen === 'function') {
-        document.exitFullscreen().catch(() => {})
-      }
-    } else {
-      const el = containerRefs.current[idx]
-      if (el && typeof el.requestFullscreen === 'function') {
-        el.requestFullscreen().catch(() => {})
-      }
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {attachments.map((att, idx) => {
-        const isPdf = att.type === 'application/pdf'
-        const isImage = att.type.startsWith('image/')
-        // Same-origin proxy URL, served by the auth-gated /api/library-file route.
-        const fileUrl = `/api/library-file/${sheetId}/${idx}`
-        const isThisFullscreen = fullscreenIdx === idx
-
-        return (
-          <div
-            key={idx}
-            ref={el => { containerRefs.current[idx] = el }}
-            className="rounded-xl overflow-hidden bg-white shadow-sm"
-            style={{ border: '1px solid #f3f4f6' }}
-          >
-            <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-3">
-              <span className="text-xs font-semibold text-gray-500 truncate">{att.name}</span>
-              {isImage && (
-                <button
-                  type="button"
-                  onClick={() => handleFullscreen(idx)}
-                  className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
-                  style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
-                  title={isThisFullscreen ? 'Exit fullscreen' : 'View fullscreen'}
-                >
-                  {isThisFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-                  {isThisFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                </button>
-              )}
-            </div>
-            {isPdf ? (
-              // AnnotatablePdf wraps PdfViewer with live-lesson autosave: it renders
-              // the PDF through the same proxy (its own toolbar, NO download/print)
-              // and, during a live class, silently persists the teacher's marks.
-              <AnnotatablePdf
-                fileUrl={fileUrl}
-                studySheetId={sheetId}
-                attachmentIndex={idx}
-                attachmentName={att.name}
-                initialAnnotations={annotationsByName[att.name]}
-              />
-            ) : isImage ? (
-              <img
-                src={fileUrl}
-                alt={att.name}
-                style={{ maxWidth: '100%', display: 'block' }}
-              />
-            ) : (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">
-                Preview is not available for this file type.
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-export default function StudySheetDetailClient({ sheet, exercises, isAdmin, annotationsByName, live = false }: Props) {
+  live = false,
+}: Props) {
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
   const attachments = sheet.attachments ?? []
+
+  // File management is owner-only and hidden inside the chrome-free live window
+  // (a mid-class upload/delete makes no sense there and keeps the shared,
+  // screen-visible surface read-only).
+  const canManageFiles = isOwned && !live
+
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const [removingName, setRemovingName] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadError('')
+    setRemoveError('')
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('sheet_id', sheet.id)
+      const res = await fetch('/api/teacher/library/upload', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Upload failed')
+      }
+      router.refresh()
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  async function handleRemove(idx: number) {
+    const att = attachments[idx]
+    if (!att) return
+    if (!window.confirm(`Remove "${att.name}"? This cannot be undone.`)) return
+    setRemovingName(att.name)
+    setRemoveError('')
+    setUploadError('')
+    try {
+      const res = await fetch('/api/teacher/library/upload', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_id: sheet.id, filename: att.name }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Remove failed')
+      }
+      router.refresh()
+    } catch (err) {
+      setRemoveError(err instanceof Error ? err.message : 'Remove failed')
+    } finally {
+      setRemovingName(null)
+    }
+  }
 
   return (
     <div className={live ? 'space-y-6 p-6 max-w-5xl mx-auto' : 'space-y-6'}>
@@ -268,7 +212,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
             <div className="flex items-center gap-3">
               {sheet.category && (
                 <span
-                  className="px-2 py-0.5 rounded-full text-xs font-medium"
+                  className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
                   style={categoryBadgeStyle(sheet.category)}
                 >
                   {sheet.category}
@@ -277,7 +221,7 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
               {sheet.level && (
                 <span
                   className="px-2 py-0.5 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: '#EFF6FF', color: '#3B82F6' }}
+                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
                 >
                   {sheet.level}
                 </span>
@@ -303,14 +247,56 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
         </div>
       </div>
 
-      {/* Material file viewer — view-only, no download */}
-      {attachments.length > 0 && (
-        <MaterialFileViewer
-          attachments={attachments}
-          sheetId={sheet.id}
-          annotationsByName={annotationsByName}
-        />
-      )}
+      {/* Files — its own titled card, above the vocabulary list */}
+      <div className="bg-white rounded-xl shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold text-gray-900">Files</h2>
+            <p className="text-sm text-gray-500 mt-0.5">Attached materials</p>
+          </div>
+          {canManageFiles && (
+            <label
+              className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
+              style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+              title="Upload a PDF, DOC, DOCX, PPT or PPTX"
+            >
+              <Upload className="w-4 h-4" />
+              {uploading ? 'Uploading…' : 'Add file'}
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.doc,.docx,.ppt,.pptx"
+                disabled={uploading}
+                onChange={handleUpload}
+              />
+            </label>
+          )}
+        </div>
+        <div className="p-6">
+          {attachments.length === 0 ? (
+            <p className="text-center text-sm text-gray-400 py-6">
+              No files attached{canManageFiles ? '. Use “Add file” to upload one.' : '.'}
+            </p>
+          ) : (
+            <MaterialFileViewer
+              attachments={attachments}
+              sheetId={sheet.id}
+              mode="annotatable"
+              annotationsByName={annotationsByName}
+              cardClassName="rounded-lg overflow-hidden bg-white"
+              cardStyle={{ border: '1px solid #E0DFDC' }}
+              onRemove={canManageFiles ? handleRemove : undefined}
+              removingName={removingName}
+            />
+          )}
+          {(uploadError || removeError) && (
+            <p className="text-sm mt-3" style={{ color: '#FD5602' }}>
+              {uploadError || removeError}
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* Vocabulary table */}
       {words.length > 0 && (
@@ -342,21 +328,21 @@ export default function StudySheetDetailClient({ sheet, exercises, isAdmin, anno
         </div>
       )}
 
-      {/* Exercises section */}
+      {/* Activities section (canonical activities table; replaces legacy exercises) */}
       <div>
         <h2 className="font-semibold text-gray-900 mb-4">
-          Exercises
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold align-middle" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{exercises.length}</span>
+          Activities
+          <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold align-middle" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{activities.length}</span>
         </h2>
 
-        {exercises.length === 0 ? (
+        {activities.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm px-6 py-12 text-center text-gray-400 text-sm" style={{ border: '1px solid #f3f4f6' }}>
-            No exercises added yet for this study sheet.
+            No activities yet
           </div>
         ) : (
           <div className="space-y-4">
-            {exercises.map((ex) => (
-              <ExerciseCard key={ex.id} exercise={ex} />
+            {activities.map((activity) => (
+              <ActivityCard key={activity.id} activity={activity} />
             ))}
           </div>
         )}

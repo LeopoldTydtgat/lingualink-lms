@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireTz } from '@/lib/time/requireTz'
+import { computeStreakWeeks } from '@/lib/lessons/streak'
+import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -97,16 +99,67 @@ export default async function StudentDashboardLayout({
     .limit(1)
     .maybeSingle()
 
-  const { count: assignedCount } = await supabase
+  const { data: completedLessonRows } = await supabase
+    .from('lessons')
+    .select('scheduled_at')
+    .eq('student_id', student.id)
+    .eq('status', 'completed')
+
+  const streakWeeks = computeStreakWeeks(
+    (completedLessonRows ?? []).map((l) => l.scheduled_at),
+    studentTimezone
+  )
+
+  const { data: assignmentRows } = await supabase
     .from('assignments')
-    .select('*', { count: 'exact', head: true })
+    .select('id, study_sheet_id, marked_done_at, study_sheets ( is_active )')
     .eq('student_id', student.id)
 
-  const { count: completedCount } = await supabase
-    .from('exercise_completions')
-    .select('*', { count: 'exact', head: true })
+  // NEW345 bimodal completion (single-sourced): marked_done_at set, OR sheet has
+  // >= 1 activity and every activity has an attempt under that assignment.
+  const assignmentSheetIds = [
+    ...new Set((assignmentRows ?? []).map((a) => a.study_sheet_id as string)),
+  ]
+
+  let activityRows: { id: string; sheet_id: string }[] = []
+  if (assignmentSheetIds.length > 0) {
+    const { data } = await supabase
+      .from('activities')
+      .select('id, sheet_id')
+      .in('sheet_id', assignmentSheetIds)
+    activityRows = (data ?? []) as { id: string; sheet_id: string }[]
+  }
+
+  const { data: attemptsRaw } = await supabase
+    .from('activity_attempts')
+    .select('activity_id, assignment_id')
     .eq('student_id', student.id)
-    .not('assignment_id', 'is', null)
+  const attemptRows = (attemptsRaw ?? []) as {
+    activity_id: string
+    assignment_id: string | null
+  }[]
+
+  const markedDoneAssignmentIds = new Set(
+    (assignmentRows ?? []).filter((a) => a.marked_done_at).map((a) => a.id as string)
+  )
+  const { isComplete } = buildAssignmentCompletion(
+    activityRows,
+    markedDoneAssignmentIds,
+    attemptRows,
+  )
+
+  // Pending assignments on deactivated sheets are excluded from the counts;
+  // completed assignments on deactivated sheets stay counted (they remain visible).
+  const visibleAssignments = (assignmentRows ?? []).filter((a) => {
+    const sheet = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets
+    const completed = isComplete(a.id as string, a.study_sheet_id as string)
+    return (sheet?.is_active ?? false) || completed
+  })
+
+  const assignedCount = visibleAssignments.length
+  const completedCount = visibleAssignments.filter((a) =>
+    isComplete(a.id as string, a.study_sheet_id as string)
+  ).length
 
   const { count: unreadMessageCount } = await supabase
     .from('messages')
@@ -142,38 +195,45 @@ export default async function StudentDashboardLayout({
   })
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      {/* Sidebar runs full height - logo lives here */}
-      <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* Full-width gradient accent line — sits above nav + header (matches the teacher layout) */}
+      <div style={{ height: '6px', background: 'linear-gradient(90deg, #FFB942, #FF8303, #FD5602)', flexShrink: 0 }} />
 
-      {/* Right side: header on top, then content row below */}
-      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        <StudentTopHeader
-          studentName={student.full_name}
-          photoUrl={student.photo_url ?? null}
-        />
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
-            <AnnouncementBanner
-              announcements={announcements}
-              userType="student"
-              userId={student.id}
-            />
-            <div style={{ padding: '32px' }}>
-              {children}
-            </div>
-          </main>
-          <StudentRightPanel
-            studentId={student.id}
-            studentTimezone={studentTimezone}
-            nextLesson={nextLesson ?? null}
-            teacherName={nextLessonTeacherName}
-            hoursRemaining={hoursRemaining}
-            totalHours={training?.total_hours ?? 0}
-            trainingEndDate={training?.end_date ?? null}
-            assignedExercises={assignedCount ?? 0}
-            completedExercises={completedCount ?? 0}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        {/* Sidebar runs full height - logo lives here */}
+        <StudentLeftNav unreadMessageCount={unreadMessageCount ?? 0} userId={student.id} />
+
+        {/* Right side: header on top, then content row below */}
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+          <StudentTopHeader
+            studentName={student.full_name}
+            photoUrl={student.photo_url ?? null}
+            unreadMessageCount={unreadMessageCount ?? 0}
           />
+          <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+            <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
+              <AnnouncementBanner
+                announcements={announcements}
+                userType="student"
+                userId={student.id}
+              />
+              <div style={{ padding: '32px' }}>
+                {children}
+              </div>
+            </main>
+            <StudentRightPanel
+              studentId={student.id}
+              studentTimezone={studentTimezone}
+              nextLesson={nextLesson ?? null}
+              teacherName={nextLessonTeacherName}
+              hoursRemaining={hoursRemaining}
+              totalHours={training?.total_hours ?? 0}
+              trainingEndDate={training?.end_date ?? null}
+              assignedExercises={assignedCount}
+              completedExercises={completedCount}
+              streakWeeks={streakWeeks}
+            />
+          </div>
         </div>
       </div>
 

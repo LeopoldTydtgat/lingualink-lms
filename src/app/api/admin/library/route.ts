@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { buildExerciseRows } from './exercises'
 
 // GET /api/admin/library — returns all study sheets
 export async function GET() {
@@ -59,14 +58,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
   }
 
-  // Exercises live in the exercises table, never in study_sheets.content. Capture
-  // the authored exercises for the table, then store content with words preserved
-  // (vocabulary sheets) and an empty exercises array.
+  // Exercises/MCQs now live in the activities table, never in study_sheets.content.
+  // Content stores words only (vocabulary sheets); exercises is kept as an empty
+  // array purely for the backward-compatible content shape the readers expect.
   const contentObj: Record<string, unknown> =
     content && typeof content === 'object' && !Array.isArray(content)
       ? (content as Record<string, unknown>)
       : {}
-  const incomingExercises = contentObj.exercises
   const storedContent = {
     words: Array.isArray(contentObj.words) ? contentObj.words : [],
     exercises: [],
@@ -104,24 +102,8 @@ export async function POST(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  // data is the freshly inserted row; guard the no-row case before its exercises.
+  // data is the freshly inserted row; guard the no-row case.
   if (!data) return NextResponse.json({ error: 'Sheet was not created.' }, { status: 500 })
-
-  // Persist authored exercises into the exercises table (the source the student
-  // and teacher readers query). Shared translation keeps create/edit in lockstep.
-  const exerciseRows = buildExerciseRows(data.id, incomingExercises)
-  if (exerciseRows.length > 0) {
-    const { error: exError } = await adminClient
-      .from('exercises')
-      .insert(exerciseRows)
-
-    if (exError) {
-      return NextResponse.json(
-        { error: `Sheet created, but its exercises failed to save: ${exError.message}` },
-        { status: 500 }
-      )
-    }
-  }
 
   return NextResponse.json(data, { status: 201 })
 }

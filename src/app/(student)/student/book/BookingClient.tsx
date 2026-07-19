@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, Check, CheckCircle2, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, Check, Star, X, Clock, Sun, Sunset, Moon, Calendar, Wallet, ChartNoAxesColumn, Info, type LucideIcon } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 import { isBookableStart } from '@/lib/bookingGrid'
 
@@ -133,7 +133,7 @@ function StepIndicator({
   ]
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '32px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '22px' }}>
       {labels.map((label, i) => {
         const stepNum = i + 1
         const isComplete = stepNum < currentStep
@@ -144,23 +144,23 @@ function StepIndicator({
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
               <div
                 style={{
-                  width: '32px',
-                  height: '32px',
+                  width: '26px',
+                  height: '26px',
                   borderRadius: '50%',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '13px',
+                  fontSize: '11px',
                   fontWeight: '700',
                   backgroundColor: isComplete ? '#FF8303' : isActive ? '#FF8303' : '#E0DFDC',
                   color: isComplete || isActive ? '#ffffff' : '#9ca3af',
                 }}
               >
-                {isComplete ? <Check size={14} /> : stepNum}
+                {isComplete ? <Check size={12} /> : stepNum}
               </div>
               <span
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: isActive ? '600' : '400',
                   color: isActive ? '#111827' : '#9ca3af',
                   whiteSpace: 'nowrap',
@@ -176,7 +176,7 @@ function StepIndicator({
                   height: '2px',
                   backgroundColor: isComplete ? '#FF8303' : '#E0DFDC',
                   margin: '0 8px',
-                  marginBottom: '20px',
+                  marginBottom: '18px',
                 }}
               />
             )}
@@ -1109,10 +1109,6 @@ function StepDateTime({
     }
   }
 
-  const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
-  const selectedEnd =
-    selectedStart !== null ? new Date(selectedStart.getTime() + durationMinutes * 60000) : null
-
   const goBack = () => {
     cancelPendingAdvance() // browsing weeks is navigation, never a confirm
     const prev = addDaysToDateKey(weekStartKey, -7)
@@ -1138,7 +1134,7 @@ function StepDateTime({
 
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '5px' }}>
         Choose date and time
       </h2>
 
@@ -1151,11 +1147,11 @@ function StepDateTime({
           alignItems: 'center',
           gap: '14px',
           flexWrap: 'wrap',
-          padding: '12px 16px',
+          padding: '8px 16px',
           backgroundColor: '#ffffff',
           border: '1px solid #E0DFDC',
           borderRadius: '10px',
-          marginBottom: '20px',
+          marginBottom: '14px',
         }}
       >
         {teacher.photo_url ? (
@@ -1228,7 +1224,7 @@ function StepDateTime({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginBottom: '16px',
+          marginBottom: '12px',
         }}
       >
         <button
@@ -1343,7 +1339,7 @@ function StepDateTime({
                   }}
                   style={{
                     borderRadius: '10px',
-                    padding: '9px 2px',
+                    padding: '7px 2px',
                     textAlign: 'center',
                     border: '1px solid',
                     borderColor: isActive ? '#FF8303' : selectable ? '#E0DFDC' : 'transparent',
@@ -1389,10 +1385,10 @@ function StepDateTime({
           </div>
 
           {/* Times for the active day */}
-          <div style={{ marginTop: '24px' }}>
+          <div style={{ marginTop: '16px' }}>
             {activeDayKey !== null && activeDay ? (
               <>
-                <p style={{ fontSize: '15px', fontWeight: '500', color: '#111827', marginBottom: '16px' }}>
+                <p style={{ fontSize: '15px', fontWeight: '500', color: '#111827', marginBottom: '11px' }}>
                   {longDayFormatter.format(activeDay)}
                 </p>
 
@@ -1405,7 +1401,7 @@ function StepDateTime({
                           display: 'flex',
                           alignItems: 'center',
                           gap: '6px',
-                          marginBottom: '8px',
+                          marginBottom: '4px',
                         }}
                       >
                         <part.Icon size={14} color="#FF8303" style={{ flexShrink: 0 }} />
@@ -1426,7 +1422,7 @@ function StepDateTime({
                           display: 'grid',
                           gridTemplateColumns: 'repeat(auto-fit, minmax(68px, 1fr))',
                           gap: '8px',
-                          marginBottom: '18px',
+                          marginBottom: '9px',
                         }}
                       >
                         {part.starts.map((slot) => {
@@ -1452,16 +1448,21 @@ function StepDateTime({
                                 setHoveredSlotIso((cur) => (cur === slot.startIso ? null : cur))
                               }
                               onClick={() => {
+                                // Ignore repeat clicks while an advance is already
+                                // queued — a double-click during the pause must not
+                                // re-fire onAdvance; the first pick wins.
+                                if (advanceTimerRef.current !== null) return
                                 onSelect(slot.startIso)
-                                // Debounced Calendly-style auto-advance — the latest slot click wins.
-                                cancelPendingAdvance()
+                                // Brief pause so the orange-outline selection (with its
+                                // expanded time-range label) paints before the wizard
+                                // moves to the Confirm step.
                                 advanceTimerRef.current = setTimeout(() => {
                                   advanceTimerRef.current = null
                                   onAdvance()
-                                }, 250)
+                                }, 400)
                               }}
                               style={{
-                                padding: '10px 2px',
+                                padding: '6px 2px',
                                 borderRadius: '8px',
                                 border: 'none',
                                 fontSize: '12px',
@@ -1492,32 +1493,6 @@ function StepDateTime({
                       </div>
                     </div>
                   ))}
-
-                {selectedStart !== null &&
-                  selectedEnd !== null &&
-                  getLocalDateKey(selectedStart, studentTimezone) === activeDayKey && (
-                    <div
-                      style={{
-                        marginTop: '20px',
-                        backgroundColor: '#FFF7ED',
-                        border: '1px solid #FFE0C0',
-                        borderRadius: '10px',
-                        padding: '12px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                      }}
-                    >
-                      <CheckCircle2 size={18} color="#FF8303" style={{ flexShrink: 0 }} />
-                      <p style={{ fontSize: '13px', color: '#5C1F0A' }}>
-                        <span style={{ fontWeight: '500' }}>
-                          {longDayFormatter.format(selectedStart)} · {timeFormatter.format(selectedStart)} – {timeFormatter.format(selectedEnd)}
-                        </span>
-                        {' · '}
-                        {durationMinutes} minutes
-                      </p>
-                    </div>
-                  )}
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '32px 16px' }}>
@@ -1576,46 +1551,71 @@ function StepConfirm({
     timeZone: studentTimezone,
   })
 
+  // Hover state for the outlined Confirm button — Tailwind v4 can't drive :hover
+  // on inline styles, so the state-dependent colours are toggled here.
+  const [confirmHover, setConfirmHover] = useState(false)
+
+  // Shared icon+label+value cell used by every summary row.
+  const renderCell = (Icon: LucideIcon, label: string, value: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+      <div
+        style={{
+          width: '36px',
+          height: '36px',
+          borderRadius: '8px',
+          backgroundColor: '#FFF0DC',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <Icon size={18} color="#FF8303" />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
+        <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{value}</p>
+      </div>
+    </div>
+  )
+
   return (
     <div>
-      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '8px' }}>
+      <h2 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '16px' }}>
         Confirm your booking
       </h2>
-      <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '24px' }}>
-        Please review your class details before confirming.
-      </p>
 
-      {/* Teacher context strip — mirrors the Step 3 strip: white card,
-          #E0DFDC border, 40px avatar, name + RatingLine. No duration chip
-          or timezone line here. */}
+      {/* Teacher context strip — slim row: white card, #E0DFDC border, 36px
+          avatar, name + RatingLine on one line. No duration chip or timezone
+          line here. */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '14px',
+          gap: '12px',
           flexWrap: 'wrap',
-          padding: '12px 16px',
+          padding: '8px 16px',
           backgroundColor: '#ffffff',
           border: '1px solid #E0DFDC',
           borderRadius: '10px',
-          marginBottom: '20px',
+          marginBottom: '14px',
         }}
       >
         {teacher.photo_url ? (
-          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+          <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
             <Image
               src={teacher.photo_url}
               alt={teacher.full_name}
-              width={40}
-              height={40}
+              width={36}
+              height={36}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
           </div>
         ) : (
           <div
             style={{
-              width: '40px',
-              height: '40px',
+              width: '36px',
+              height: '36px',
               borderRadius: '50%',
               backgroundColor: '#f3f4f6',
               display: 'flex',
@@ -1624,87 +1624,86 @@ function StepConfirm({
               flexShrink: 0,
             }}
           >
-            <User size={20} color="#9ca3af" />
+            <User size={18} color="#9ca3af" />
           </div>
         )}
 
-        <div style={{ flex: 1, minWidth: '120px' }}>
+        <div style={{ flex: 1, minWidth: '120px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
             {teacher.full_name}
           </p>
           {teacher.reviewCount > 0 && (
-            <div style={{ marginTop: '2px' }}>
-              <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
-            </div>
+            <RatingLine avgRating={teacher.avgRating} reviewCount={teacher.reviewCount} starSize={12} />
           )}
         </div>
       </div>
 
-      {/* Details card — no orange header. Four icon rows + a cancellation
-          footnote. Icons: Calendar / Clock / Wallet / ChartNoAxesColumn. */}
+      {/* Details card — no orange header. Date & time row, a Duration +
+          Hours-deducted two-column row, a Remaining-after-booking row with its
+          pill, then a cancellation footnote. Icons: Calendar / Clock / Wallet /
+          ChartNoAxesColumn. */}
       <div
         style={{
           backgroundColor: '#ffffff',
           border: '1px solid #E0DFDC',
           borderRadius: '12px',
           overflow: 'hidden',
-          marginBottom: '24px',
+          marginBottom: '10px',
         }}
       >
-        {[
-          { Icon: Calendar, label: 'Date & time', value: `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}` },
-          { Icon: Clock, label: 'Duration', value: formatHours(durationMinutes / 60) },
-          { Icon: Wallet, label: 'Hours deducted', value: formatHours(isReschedule ? 0 : hoursUsed) },
-          { Icon: ChartNoAxesColumn, label: 'Remaining after booking', value: formatHours(hoursAfter) },
-        ].map(({ Icon, label, value }, idx) => (
-          <div
-            key={label}
+        {/* Date & time — full-width row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '9px 20px' }}>
+          {renderCell(
+            Calendar,
+            'Date & time',
+            `${dateFormatter.format(start)} · ${timeFormatter.format(start)} – ${timeFormatter.format(end)}`
+          )}
+        </div>
+
+        {/* Duration + Hours deducted — two columns in one row */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '9px 20px',
+            borderTop: '1px solid #f3f4f6',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renderCell(Clock, 'Duration', formatHours(durationMinutes / 60))}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renderCell(Wallet, 'Hours deducted', formatHours(isReschedule ? 0 : hoursUsed))}
+          </div>
+        </div>
+
+        {/* Remaining after booking — full-width row with the pill */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '9px 20px',
+            borderTop: '1px solid #f3f4f6',
+          }}
+        >
+          {renderCell(ChartNoAxesColumn, 'Remaining after booking', formatHours(hoursAfter))}
+          <span
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '14px 20px',
-              borderTop: idx === 0 ? 'none' : '1px solid #f3f4f6',
+              flexShrink: 0,
+              backgroundColor: '#FFF0DC',
+              borderRadius: '999px',
+              padding: '4px 12px',
+              fontSize: '13px',
+              fontWeight: '600',
+              color: '#FF8303',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-              <div
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '8px',
-                  backgroundColor: '#FFF0DC',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <Icon size={18} color="#FF8303" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
-                <p style={{ fontSize: '15px', fontWeight: '700', color: '#111827' }}>{value}</p>
-              </div>
-            </div>
-            {idx === 3 && (
-              <span
-                style={{
-                  flexShrink: 0,
-                  backgroundColor: '#FFF0DC',
-                  borderRadius: '999px',
-                  padding: '4px 12px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: '#FF8303',
-                }}
-              >
-                {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
-              </span>
-            )}
-          </div>
-        ))}
+            {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
+          </span>
+        </div>
 
         {/* Cancellation footnote */}
         <div
@@ -1712,7 +1711,7 @@ function StepConfirm({
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
-            padding: '12px 20px',
+            padding: '9px 20px',
             backgroundColor: '#f9fafb',
             borderTop: '1px solid #f3f4f6',
           }}
@@ -1733,30 +1732,34 @@ function StepConfirm({
             borderRadius: '8px',
             fontSize: '13px',
             color: '#92400e',
-            marginBottom: '20px',
+            marginBottom: '10px',
           }}
         >
           After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
         </div>
       )}
 
-      <button
-        onClick={onConfirm}
-        disabled={isSubmitting}
-        style={{
-          width: '100%',
-          padding: '14px',
-          backgroundColor: isSubmitting ? '#9ca3af' : '#FF8303',
-          color: '#ffffff',
-          border: 'none',
-          borderRadius: '8px',
-          fontSize: '15px',
-          fontWeight: '700',
-          cursor: isSubmitting ? 'not-allowed' : 'pointer',
-        }}
-      >
-        {isSubmitting ? 'Booking...' : 'Confirm Booking'}
-      </button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          onClick={onConfirm}
+          disabled={isSubmitting}
+          onMouseEnter={() => setConfirmHover(true)}
+          onMouseLeave={() => setConfirmHover(false)}
+          style={{
+            padding: '12px 32px',
+            backgroundColor: isSubmitting ? '#FFF3E0' : confirmHover ? '#FF8303' : '#FFF3E0',
+            color: isSubmitting ? '#FF8303' : confirmHover ? '#ffffff' : '#FF8303',
+            border: '1px solid #FF8303',
+            borderRadius: '10px',
+            fontSize: '15px',
+            fontWeight: '600',
+            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+            opacity: isSubmitting ? 0.7 : 1,
+          }}
+        >
+          {isSubmitting ? 'Booking...' : 'Confirm Booking'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1876,7 +1879,7 @@ export default function BookingClient({
     <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
       {/* Page header */}
       <div style={{ marginBottom: '8px' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: '700', color: '#111827' }}>
           {rescheduleLesson ? 'Reschedule Class' : 'Book a Class'}
         </h1>
       </div>
@@ -1895,8 +1898,8 @@ export default function BookingClient({
           backgroundColor: '#ffffff',
           border: '1px solid #E0DFDC',
           borderRadius: '12px',
-          padding: '28px',
-          marginBottom: '20px',
+          padding: '18px 28px 12px',
+          marginBottom: '12px',
         }}
       >
         {logicalStep === 'teacher' && (

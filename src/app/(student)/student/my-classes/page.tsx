@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
+import { computeStreakWeeks } from '@/lib/lessons/streak'
 
 export default async function MyClassesPage() {
   const supabase = await createClient()
@@ -23,6 +24,8 @@ export default async function MyClassesPage() {
   if (student.profile_completed !== true) {
     redirect('/student/account?confirm_tz=1')
   }
+
+  const tz = requireTz(student.timezone, 'my-classes:student')
 
   // Fetch upcoming lessons (scheduled + cancelled) with teacher info
   const { data: rawLessons } = await supabase
@@ -78,6 +81,27 @@ export default async function MyClassesPage() {
     : null
   const trainingEndDate = training?.end_date ?? null
 
+  // Completed lessons power the stat cards. hoursCompleted is REAL learning time
+  // (sum of durations) — deliberately NOT trainings.hours_consumed, which also folds
+  // in booking-time deductions.
+  const { data: completedLessons } = await supabase
+    .from('lessons')
+    .select('scheduled_at, duration_minutes')
+    .eq('student_id', student.id)
+    .eq('status', 'completed')
+
+  const completedRows = completedLessons ?? []
+  const completedCount = completedRows.length
+  const hoursCompleted =
+    completedRows.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0) / 60
+
+  // Streak: consecutive weeks (Mon–Sun) with >=1 completed lesson, in the student's tz.
+  // Shared with the right-panel streak banner via computeStreakWeeks.
+  const streakWeeks = computeStreakWeeks(
+    completedRows.map((l) => l.scheduled_at),
+    tz
+  )
+
   // Find the most recent completed lesson to pull its feedback
   // This becomes the "About This Class" recap on the next class card
   const { data: lastLesson } = await supabase
@@ -104,11 +128,14 @@ export default async function MyClassesPage() {
     <MyClassesClient
       lessons={lessons}
       lastFeedback={lastFeedback}
-      studentTimezone={requireTz(student.timezone, 'my-classes:student')}
+      studentTimezone={tz}
       profileCompleted={student.profile_completed ?? false}
       bannerDismissed={student.profile_banner_dismissed ?? false}
       hoursRemaining={hoursRemaining}
       trainingEndDate={trainingEndDate}
+      completedCount={completedCount}
+      hoursCompleted={hoursCompleted}
+      streakWeeks={streakWeeks}
     />
   )
 }
