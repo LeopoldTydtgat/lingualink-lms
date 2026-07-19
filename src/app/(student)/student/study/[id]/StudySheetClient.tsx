@@ -165,8 +165,8 @@ export default function StudySheetClient({
           className="flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeTab === 'vocab'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '160px' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '160px' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '190px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '190px' }
           }
         >
           Vocabulary List
@@ -180,8 +180,8 @@ export default function StudySheetClient({
           className="flex items-center justify-center pb-3 px-1 text-sm font-medium transition-colors"
           style={
             activeTab === 'activities'
-              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '160px' }
-              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '160px' }
+              ? { color: '#FF8303', borderBottom: '2px solid #FF8303', minWidth: '190px' }
+              : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '190px' }
           }
         >
           Activities
@@ -256,7 +256,7 @@ export default function StudySheetClient({
               style={
                 allActivitiesDone
                   ? { border: '1px solid #f3f4f6', backgroundColor: '#f9fafb' }
-                  : { border: '1px solid #ffedd5', backgroundColor: '#fff7ed' }
+                  : { border: '1px solid #FFD9A8', backgroundColor: '#FFF0E0' }
               }
             >
               <p className="text-sm text-gray-700">
@@ -318,7 +318,7 @@ export default function StudySheetClient({
                     {a.status === 'pending_review' && (
                       <span
                         className="px-2.5 py-0.5 rounded-full text-xs font-semibold"
-                        style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}
+                        style={{ backgroundColor: '#FFF1D6', color: '#8a5a00' }}
                       >
                         Pending review
                       </span>
@@ -365,7 +365,7 @@ export default function StudySheetClient({
               {markingDone ? 'Saving...' : 'Mark as done'}
             </button>
             {markError && (
-              <p className="text-sm text-red-600 mt-2">{markError}</p>
+              <p className="text-sm mt-2" style={{ color: '#FD5602' }}>{markError}</p>
             )}
           </div>
         )
