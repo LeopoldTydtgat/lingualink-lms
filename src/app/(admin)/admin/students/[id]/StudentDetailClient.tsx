@@ -576,10 +576,10 @@ export default function StudentDetailClient({
           <div className="flex items-center gap-4">
             {photoUrl ? (
               <img src={photoUrl} alt={fullName}
-                className="w-16 h-16 rounded-full object-cover" />
+                className="w-[72px] h-[72px] rounded-full object-cover" />
             ) : (
               <div
-                className="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold"
+                className="w-[72px] h-[72px] rounded-full flex items-center justify-center text-white text-xl font-bold"
                 style={{ backgroundColor: '#FF8303' }}
               >
                 {fullName.charAt(0).toUpperCase()}

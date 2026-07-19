@@ -249,10 +249,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               <img
                 src={student.photo_url}
                 alt={student.full_name}
-                className="w-14 h-14 rounded-full object-cover"
+                className="w-16 h-16 rounded-full object-cover"
               />
             ) : (
-              <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-xl">
+              <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 font-bold text-xl">
                 {student?.full_name?.charAt(0) ?? '?'}
               </div>
             )}

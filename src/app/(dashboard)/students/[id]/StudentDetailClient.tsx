@@ -625,11 +625,11 @@ export default function StudentDetailClient({
           <img
             src={student.photo_url}
             alt={student.full_name}
-            className="w-16 h-16 rounded-full object-cover flex-shrink-0"
+            className="w-[72px] h-[72px] rounded-full object-cover flex-shrink-0"
           />
         ) : (
           <div
-            className="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0"
+            className="w-[72px] h-[72px] rounded-full flex items-center justify-center text-white text-xl font-bold flex-shrink-0"
             style={{ backgroundColor: '#FF8303' }}
           >
             {student ? getInitials(student.full_name) : '?'}
