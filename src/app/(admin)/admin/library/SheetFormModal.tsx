@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { StudySheet, WordRow, Attachment } from './LibraryAdminClient'
-import { Tag, kindColor } from './TagManagerModal'
+import { Tag, kindPillStyle } from './TagManagerModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -502,7 +502,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         <div className="flex flex-wrap gap-2">
           {group.map(tag => {
             const selected = selectedTagIds.has(tag.id)
-            const color = kindColor(tag.kind)
+            const pill = kindPillStyle(tag.kind)
             return (
               <button
                 key={tag.id}
@@ -510,9 +510,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 onClick={() => toggleTag(tag.id)}
                 className="text-xs font-medium px-3 py-1.5 rounded-full border-2 transition-colors"
                 style={{
-                  borderColor: selected ? color : '#e5e7eb',
-                  backgroundColor: selected ? color : 'white',
-                  color: selected ? 'white' : '#6b7280',
+                  borderColor: selected ? '#FF8303' : '#e5e7eb',
+                  backgroundColor: selected ? '#FF8303' : pill.backgroundColor,
+                  color: selected ? 'white' : pill.color,
                 }}
               >
                 {tag.name}
