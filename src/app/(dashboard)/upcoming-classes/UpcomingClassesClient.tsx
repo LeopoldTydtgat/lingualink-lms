@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus, History } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
+import { formatCompoundCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -108,21 +109,8 @@ function Countdown({ startsAt }: { startsAt: string }) {
 
   useEffect(() => {
     function update() {
-      const diff = new Date(startsAt).getTime() - Date.now()
-      if (diff <= 0) {
-        setTimeLeft('Starting now')
-        return
-      }
-      const totalSeconds = Math.floor(diff / 1000)
-      const days = Math.floor(totalSeconds / 86400)
-      const hours = Math.floor((totalSeconds % 86400) / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const seconds = totalSeconds % 60
-      if (days > 0) {
-        setTimeLeft(days + 'd ' + hours + 'h ' + String(minutes).padStart(2, '0') + 'm')
-      } else {
-        setTimeLeft(hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's')
-      }
+      const totalSeconds = Math.floor((new Date(startsAt).getTime() - Date.now()) / 1000)
+      setTimeLeft(formatCompoundCountdown(totalSeconds))
     }
     update()
     const interval = setInterval(update, 1000)
