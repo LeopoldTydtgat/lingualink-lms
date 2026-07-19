@@ -4,12 +4,13 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 import DifficultyBars from '@/components/study/DifficultyBars'
+import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search } from 'lucide-react'
 import SheetFormModal from './SheetFormModal'
 import AssignSheetModal from './AssignSheetModal'
 import ActivitiesModal from './ActivitiesModal'
 import TagManagerModal from './TagManagerModal'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// -- Types --
 
 export type WordRow = {
   id: string
@@ -51,7 +52,7 @@ type StudentOption = {
   email: string
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// -- Helpers --
 
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
@@ -84,33 +85,63 @@ function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolea
   return !(sheet.content?.words?.length) && (counts[sheet.id] ?? 0) === 0
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// Teacher-portal StatCard anatomy: 32px tinted icon square + label, big value,
+// muted caption. Palette locked to inline styles (Tailwind v4 dynamic-class rule).
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  caption,
+}: {
+  icon: typeof BookOpen
+  label: string
+  value: number
+  caption: string
+}) {
+  return (
+    <div className="flex-1 min-w-[200px] rounded-xl p-5 shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="flex items-center justify-center rounded-lg"
+          style={{ width: '32px', height: '32px', backgroundColor: '#FFF3E0' }}
+        >
+          <Icon className="w-4 h-4" style={{ color: '#FF8303' }} />
+        </span>
+        <span className="text-sm font-medium" style={{ color: '#4b5563' }}>{label}</span>
+      </div>
+      <p className="text-3xl font-semibold" style={{ color: '#111827' }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
+    </div>
+  )
+}
+
+// -- Component --
 
 export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const supabase = createClient()
 
-  // ── Data ──────────────────────────────────────────────────────────────────
+  // -- Data --
   const [sheets, setSheets] = useState<StudySheet[]>([])
   // Per-sheet activity counts sourced from the activities table (not content).
   const [actCounts, setActCounts] = useState<Record<string, number>>({})
   const [students, setStudents] = useState<StudentOption[]>([])
   const [loading, setLoading] = useState(true)
 
-  // ── Filters ───────────────────────────────────────────────────────────────
+  // -- Filters --
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterDifficulty, setFilterDifficulty] = useState('')
   const [filterRoles, setFilterRoles] = useState('')
 
-  // ── Selection (bulk actions) ──────────────────────────────────────────────
+  // -- Selection (bulk actions) --
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkRoles, setBulkRoles] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
-  // ── Modals ────────────────────────────────────────────────────────────────
+  // -- Modals --
   const [showForm, setShowForm] = useState(false)
   const [editingSheet, setEditingSheet] = useState<StudySheet | null>(null)
   const [showAssign, setShowAssign] = useState(false)
@@ -118,7 +149,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const [activitiesSheet, setActivitiesSheet] = useState<StudySheet | null>(null)
   const [showTagManager, setShowTagManager] = useState(false)
 
-  // ── Delete single ─────────────────────────────────────────────────────────
+  // -- Delete single --
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   // The delete route can now fail loudly (NEW364: a sheet whose files cannot be
@@ -126,7 +157,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   // show the sheet still sitting there with no explanation.
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  // ── Load sheets ───────────────────────────────────────────────────────────
+  // -- Load sheets --
   const loadSheets = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase
@@ -148,7 +179,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     setLoading(false)
   }, [])
 
-  // ── Load students (for assign modal) ─────────────────────────────────────
+  // -- Load students (for assign modal) --
   const loadStudents = useCallback(async () => {
     const { data } = await supabase
       .from('students')
@@ -162,7 +193,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     loadStudents()
   }, [loadSheets, loadStudents])
 
-  // ── Filtered list ─────────────────────────────────────────────────────────
+  // -- Filtered list --
   const filtered = sheets.filter(s => {
     if (search && !s.title.toLowerCase().includes(search.toLowerCase())) return false
     if (filterCategory && s.category !== filterCategory) return false
@@ -177,7 +208,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     return true
   })
 
-  // ── Selection helpers ─────────────────────────────────────────────────────
+  // -- Selection helpers --
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -194,7 +225,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     }
   }
 
-  // ── Bulk change access ────────────────────────────────────────────────────
+  // -- Bulk change access --
   const handleBulkChangeAccess = async () => {
     if (!bulkRoles || selectedIds.size === 0) return
     setBulkSaving(true)
@@ -217,7 +248,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     await loadSheets()
   }
 
-  // ── Bulk delete ───────────────────────────────────────────────────────────
+  // -- Bulk delete --
   const handleBulkDelete = async () => {
     setBulkDeleting(true)
     setDeleteError(null)
@@ -248,7 +279,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     await loadSheets()
   }
 
-  // ── Single delete ─────────────────────────────────────────────────────────
+  // -- Single delete --
   const handleDelete = async (id: string) => {
     setDeletingId(id)
     setDeleteError(null)
@@ -265,52 +296,68 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     await loadSheets()
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const selectStyle = { backgroundColor: 'white', borderColor: '#e5e7eb', color: '#4b5563' }
+
+  // -- Render --
   return (
     <div className="p-6 space-y-6">
 
       {/* Page header */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Lesson Library</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage the shared library of lesson materials</p>
+          <h1 className="text-2xl font-semibold" style={{ color: '#111827' }}>Lesson Library</h1>
+          <p className="text-sm mt-1" style={{ color: '#4b5563' }}>Manage the shared library of lesson materials</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowTagManager(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg font-medium border border-gray-300 text-gray-700 hover:bg-gray-50"
+            className="inline-flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-md"
+            style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#FFE4C4')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFF0E0')}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
-            </svg>
+            <Tag className="w-4 h-4" />
             Manage Tags
           </button>
           <button
             onClick={() => { setEditingSheet(null); setShowForm(true) }}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg text-white font-medium"
+            className="inline-flex items-center gap-2 text-sm font-medium px-3 py-2 rounded-md text-white"
             style={{ backgroundColor: '#FF8303' }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+            <Plus className="w-4 h-4" />
             Add Sheet
           </button>
         </div>
       </div>
 
+      {/* Stat cards */}
+      <div className="flex flex-wrap gap-4">
+        <StatCard icon={BookOpen} label="Total Sheets" value={sheets.length} caption="In the shared library" />
+        <StatCard icon={ClipboardCheck} label="Assignable" value={sheets.filter(s => !isSheetEmpty(s, actCounts)).length} caption="Have content or activities" />
+        <StatCard icon={Lock} label="Admin Only" value={sheets.filter(s => s.allowed_roles?.length === 1 && s.allowed_roles.includes('admin')).length} caption="Hidden from teachers" />
+        <StatCard icon={Layers} label="Total Activities" value={Object.values(actCounts).reduce((a, b) => a + b, 0)} caption="Across all sheets" />
+      </div>
+
       {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 mb-5">
-        <input
-          type="text"
-          placeholder="Search by title…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700 w-56"
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-56">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: '#9ca3af' }} />
+          <input
+            type="text"
+            placeholder="Search by title..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="border rounded-md pl-9 pr-3 py-2 text-sm w-full"
+            style={selectStyle}
+          />
+        </div>
         <select
           value={filterCategory}
           onChange={e => setFilterCategory(e.target.value)}
-          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="px-3 py-2 rounded-md text-sm border"
+          style={selectStyle}
         >
           <option value="">All Categories</option>
           <option value="vocabulary">Vocabulary</option>
@@ -319,7 +366,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <select
           value={filterLevel}
           onChange={e => setFilterLevel(e.target.value)}
-          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="px-3 py-2 rounded-md text-sm border"
+          style={selectStyle}
         >
           <option value="">All Levels</option>
           {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
@@ -327,7 +375,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <select
           value={filterDifficulty}
           onChange={e => setFilterDifficulty(e.target.value)}
-          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="px-3 py-2 rounded-md text-sm border"
+          style={selectStyle}
         >
           <option value="">All Difficulties</option>
           <option value="1">Easy</option>
@@ -337,7 +386,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <select
           value={filterRoles}
           onChange={e => setFilterRoles(e.target.value)}
-          className="border border-gray-200 bg-white rounded-lg px-3 py-2 text-sm text-gray-700"
+          className="px-3 py-2 rounded-md text-sm border"
+          style={selectStyle}
         >
           <option value="">All Access</option>
           <option value="all">All Teachers</option>
@@ -389,7 +439,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <select
             value={bulkRoles}
             onChange={e => setBulkRoles(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700"
+            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm text-gray-700"
           >
             <option value="">Change access to…</option>
             <option value="all">All Teachers</option>
@@ -399,7 +449,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <button
             onClick={handleBulkChangeAccess}
             disabled={!bulkRoles || bulkSaving}
-            className="px-3 py-1.5 text-sm rounded-lg text-white disabled:opacity-40"
+            className="px-3 py-1.5 text-sm font-medium rounded-md text-white disabled:opacity-40"
             style={{ backgroundColor: '#FF8303' }}
           >
             {bulkSaving ? 'Saving…' : 'Apply'}
@@ -411,7 +461,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           {!confirmBulkDelete ? (
             <button
               onClick={() => setConfirmBulkDelete(true)}
-              className="px-3 py-1.5 text-sm rounded-lg text-white"
+              className="px-3 py-1.5 text-sm font-medium rounded-md text-white"
               style={{ backgroundColor: '#FD5602' }}
             >
               Delete selected
@@ -424,14 +474,14 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               <button
                 onClick={handleBulkDelete}
                 disabled={bulkDeleting}
-                className="px-3 py-1.5 text-sm rounded-lg text-white disabled:opacity-40"
+                className="px-3 py-1.5 text-sm font-medium rounded-md text-white disabled:opacity-40"
                 style={{ backgroundColor: '#FD5602' }}
               >
                 {bulkDeleting ? 'Deleting…' : 'Confirm Delete'}
               </button>
               <button
                 onClick={() => setConfirmBulkDelete(false)}
-                className="text-sm"
+                className="text-sm font-medium"
                 style={{ color: '#6b7280' }}
               >
                 Cancel
@@ -441,7 +491,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
           <button
             onClick={() => { setSelectedIds(new Set()); setConfirmBulkDelete(false) }}
-            className="ml-auto text-sm"
+            className="ml-auto text-sm font-medium"
             style={{ color: '#6b7280' }}
           >
             Clear selection
@@ -451,17 +501,19 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
       {/* Table */}
       {loading ? (
-        <p className="text-sm text-gray-400">Loading library…</p>
+        <div className="rounded-xl px-6 py-12 text-center text-sm shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}>
+          Loading library…
+        </div>
       ) : filtered.length === 0 ? (
-        <p className="text-sm text-gray-400">
+        <div className="rounded-xl px-6 py-12 text-center text-sm shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}>
           {sheets.length === 0 ? 'No sheets yet. Click Add Sheet to create the first one.' : 'No sheets match the current filters.'}
-        </p>
+        </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
 
           {/* Column headers */}
-          <div className="grid gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100 bg-gray-50"
-            style={{ gridTemplateColumns: GRID_COLUMNS }}>
+          <div className="grid gap-3 px-5 py-3 text-xs font-medium uppercase tracking-wide"
+            style={{ gridTemplateColumns: GRID_COLUMNS, backgroundColor: '#f9fafb', borderBottom: '1px solid #f3f4f6', color: '#9ca3af' }}>
             <input
               type="checkbox"
               checked={filtered.length > 0 && selectedIds.size === filtered.length}
@@ -478,7 +530,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           </div>
 
           {/* Rows */}
-          <div className="divide-y divide-gray-50">
+          <div>
             {filtered.map(sheet => {
               const empty = isSheetEmpty(sheet, actCounts)
               return (
@@ -487,8 +539,11 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   className="grid gap-3 px-5 py-3.5 items-center text-sm"
                   style={{
                     gridTemplateColumns: GRID_COLUMNS,
+                    borderBottom: '1px solid #f3f4f6',
                     backgroundColor: selectedIds.has(sheet.id) ? '#fff9f5' : undefined,
                   }}
+                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = selectedIds.has(sheet.id) ? '#fff9f5' : 'transparent')}
                 >
                   {/* Checkbox */}
                   <input
@@ -514,7 +569,13 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   )}
 
                   {/* Level */}
-                  <span className="font-mono text-gray-700">{sheet.level}</span>
+                  {sheet.level ? (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
+                      {sheet.level}
+                    </span>
+                  ) : (
+                    <span style={{ color: '#d1d5db' }}>-</span>
+                  )}
 
                   {/* Difficulty */}
                   <DifficultyBars count={sheet.difficulty} />
@@ -531,7 +592,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                   <span className="text-center text-gray-600">{activityCount(sheet, actCounts)}</span>
 
                   {/* Actions */}
-                  <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="flex items-center gap-4 flex-shrink-0">
                     <button
                       onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
                       disabled={empty}
