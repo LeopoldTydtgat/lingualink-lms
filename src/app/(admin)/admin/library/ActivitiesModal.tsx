@@ -157,13 +157,13 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
           {/* Body */}
           <div className="overflow-y-auto flex-1 px-6 py-5 thin-scroll">
             {deleteError && (
-              <p className="text-sm text-red-600 mb-4">{deleteError}</p>
+              <p className="text-sm mb-4" style={{ color: '#FD5602' }}>{deleteError}</p>
             )}
 
             {loading ? (
               <p className="text-sm text-gray-400">Loading activities…</p>
             ) : loadError ? (
-              <p className="text-sm text-red-600">
+              <p className="text-sm" style={{ color: '#FD5602' }}>
                 Couldn&apos;t load this sheet&apos;s activities. Close and reopen to try again.
               </p>
             ) : activities.length === 0 ? (
@@ -203,17 +203,20 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
 
                       <span className="text-gray-500 text-xs">{formatUpdated(activity.updated_at)}</span>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-4">
                         <button
                           onClick={() => { setEditingId(activity.id); setShowForm(true) }}
-                          className="text-xs underline"
+                          className="text-xs"
                           style={{ color: ORANGE }}
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => { setDeleteError(null); setConfirmDeleteId(activity.id) }}
-                          className="text-xs underline text-red-400 hover:text-red-600"
+                          className="text-xs"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         >
                           Delete
                         </button>
@@ -232,7 +235,9 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
                   <button
                     type="button"
                     onClick={() => openCreate('mcq')}
-                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5 hover:border-orange-300"
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb' }}
                   >
                     <span className="block text-sm font-medium text-gray-900">Multiple choice</span>
                     <span className="block text-xs text-gray-400 mt-0.5">Auto-graded questions, each with a set of options.</span>
@@ -240,7 +245,9 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
                   <button
                     type="button"
                     onClick={() => openCreate('writing_task')}
-                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5 hover:border-orange-300"
+                    className="w-full text-left rounded-lg border border-gray-200 px-4 py-2.5"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e7eb' }}
                   >
                     <span className="block text-sm font-medium text-gray-900">Writing task</span>
                     <span className="block text-xs text-gray-400 mt-0.5">A free-text prompt the student writes a response to. Not auto-graded.</span>
@@ -257,7 +264,9 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
                 <button
                   type="button"
                   onClick={() => setShowTypeMenu(true)}
-                  className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                  className="mt-4 flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
                 >
                   + Add Activity
                 </button>
@@ -270,7 +279,10 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
             >
               Close
             </button>
@@ -293,15 +305,22 @@ export default function ActivitiesModal({ sheetId, sheetTitle, onClose }: Props)
               <button
                 onClick={() => setConfirmDeleteId(null)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm rounded-md disabled:opacity-50"
+                style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
               >
                 Go Back
               </button>
               <button
                 onClick={() => handleDelete(confirmDeleteId)}
                 disabled={deletingId === confirmDeleteId}
-                className="px-4 py-2 text-sm rounded-lg text-white font-semibold disabled:opacity-50"
-                style={{ backgroundColor: '#DC2626' }}
+                className="px-4 py-2 text-sm rounded-md text-white font-semibold"
+                style={
+                  deletingId === confirmDeleteId
+                    ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                    : { backgroundColor: '#FD5602' }
+                }
               >
                 {deletingId === confirmDeleteId ? 'Deleting…' : 'Yes, Delete Activity'}
               </button>
