@@ -67,10 +67,10 @@ function rolesToLabel(roles: string[]): string {
 }
 
 function rolesPillStyle(roles: string[]): { backgroundColor: string; color: string } {
-  if (!roles || roles.length === 0) return { backgroundColor: '#DCFCE7', color: '#15803D' }
-  if (roles.includes('admin') && roles.length === 1) return { backgroundColor: '#f3f4f6', color: '#4b5563' }
-  if (roles.includes('teacher_exam') && !roles.includes('teacher')) return { backgroundColor: '#FFF8E8', color: '#B45309' }
-  return { backgroundColor: '#DCFCE7', color: '#15803D' }
+  if (!roles || roles.length === 0) return { backgroundColor: '#f3f4f6', color: '#4b5563' }
+  if (roles.includes('admin') && roles.length === 1) return { backgroundColor: '#FFF3E0', color: '#FF8303' }
+  if (roles.includes('teacher_exam') && !roles.includes('teacher')) return { backgroundColor: '#FFF3E0', color: '#FF8303' }
+  return { backgroundColor: '#f3f4f6', color: '#4b5563' }
 }
 
 function activityCount(sheet: StudySheet, counts: Record<string, number>): number {
@@ -639,7 +639,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     </button>
                     <button
                       onClick={() => { setDeleteError(null); setConfirmDeleteId(sheet.id) }}
-                      className="text-xs"
+                      className="text-xs ml-4"
                       style={{ color: '#FD5602' }}
                       onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
                       onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
