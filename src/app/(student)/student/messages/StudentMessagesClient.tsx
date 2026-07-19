@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -113,26 +114,41 @@ function Avatar({ name, photoUrl, size = 10 }: {
 }
 
 // ─── Read ticks ───────────────────────────────────────────────────────────────
-// Single grey tick = sent. Double orange tick = read.
+// Single tick = sent (grey). Double tick = read (orange).
 // Only shown on messages sent by the current user.
-function ReadTicks({ readAt }: { readAt: string | null }) {
+function ReadTicks({
+  readAt,
+  variant = 'default',
+  className = 'ml-1',
+}: {
+  readAt: string | null
+  // 'bubble' = on-bubble placement (WhatsApp-style, inside an own message bubble):
+  // lighter tick colours that read against the dark bubble fill. 'default' keeps the
+  // metadata-row colours (grey sent, orange read).
+  variant?: 'default' | 'bubble'
+  className?: string
+}) {
+  const single = variant === 'bubble' ? 'rgba(255,255,255,0.7)' : '#9ca3af'
+  const double = '#FF8303'
   if (readAt) {
+    // Double tick — message has been read
     return (
-      <span className="inline-flex items-center gap-0.5 ml-1" aria-label="Read">
+      <span className={`inline-flex items-center gap-0.5 ${className}`} aria-label="Read">
         <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
         <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </span>
     )
   }
+  // Single tick — sent, not yet read
   return (
-    <span className="inline-flex items-center ml-1" aria-label="Sent">
+    <span className={`inline-flex items-center ${className}`} aria-label="Sent">
       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-        <path d="M1 4L3.5 6.5L9 1" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M1 4L3.5 6.5L9 1" stroke={single} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
       </svg>
     </span>
   )
@@ -146,6 +162,7 @@ export default function StudentMessagesClient({
   assignedTeachers,
 }: Props) {
   const supabase = useMemo(() => createClient(), [])
+  const router = useRouter()
 
   const [contacts, setContacts] = useState<Contact[]>(initialContacts)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
@@ -219,7 +236,8 @@ export default function StudentMessagesClient({
     setLoadingMessages(false)
     await markMessagesAsRead(contact.id)
     setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, unreadCount: 0 } : c))
-  }, [supabase, currentStudent.id])
+    router.refresh()
+  }, [supabase, currentStudent.id, router])
 
   const handleSelectContact = useCallback(async (contact: Contact) => {
     setSelectedContact(contact)
@@ -649,6 +667,9 @@ export default function StudentMessagesClient({
                 messages.map((msg, index) => {
                   const isFromMe = msg.sender_id === currentStudent.id
                   const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
+                  // Own, non-emoji, non-empty messages render read ticks inside the
+                  // bubble (WhatsApp pattern) instead of in the metadata row below.
+                  const isBubbleTicked = isFromMe && hasContent && !isEmojiOnly(msg.content)
                   const showDate =
                     index === 0 ||
                     new Date(msg.created_at).toDateString() !==
@@ -704,6 +725,15 @@ export default function StudentMessagesClient({
                           {/* NEW302: hide the bubble entirely for an attachment-only
                               (empty-content) message so it doesn't render a blank box. */}
                           {hasContent && (
+                          isBubbleTicked ? (
+                            <div
+                              className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed inline-flex items-end"
+                              style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
+                            >
+                              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                              <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
+                            </div>
+                          ) : (
                           <div
                             className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
@@ -714,6 +744,7 @@ export default function StudentMessagesClient({
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                          )
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
@@ -754,7 +785,7 @@ export default function StudentMessagesClient({
                             <span className="text-xs text-gray-400">
                               {formatTime(msg.created_at)}
                             </span>
-                            {isFromMe && <ReadTicks readAt={msg.read_at} />}
+                            {isFromMe && !isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
                         </div>
                       </div>

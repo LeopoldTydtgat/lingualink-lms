@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import Link, { useLinkStatus } from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -100,14 +100,20 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
-  const [liveUnreadCount, setLiveUnreadCount] = useState(unreadMessageCount)
-
-  useEffect(() => {
-    setLiveUnreadCount(unreadMessageCount)
-  }, [unreadMessageCount])
+  // Debounce ref: coalesce bursts of message events into a single layout
+  // re-count. The badge value is the server prop; realtime only triggers the
+  // refresh that re-runs the layout query feeding BOTH nav badges.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!userId) return
+
+    const scheduleRefresh = () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      refreshTimer.current = setTimeout(() => {
+        router.refresh()
+      }, 500)
+    }
 
     const channel = supabase
       .channel(`student-nav-unread-${userId}`)
@@ -116,23 +122,20 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${userId}`,
-      }, () => {
-        setLiveUnreadCount(prev => prev + 1)
-      })
+      }, scheduleRefresh)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${userId}`,
-      }, (payload) => {
-        if (payload.new.read_at && !payload.old.read_at) {
-          setLiveUnreadCount(prev => Math.max(0, prev - 1))
-        }
-      })
+      }, scheduleRefresh)
       .subscribe()
 
-    return () => { supabase.removeChannel(channel) }
-  }, [userId, supabase])
+    return () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current)
+      supabase.removeChannel(channel)
+    }
+  }, [userId, supabase, router])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -216,7 +219,7 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
                 Icon={Icon}
                 label={item.label}
                 active={isActive}
-                unreadCount={liveUnreadCount}
+                unreadCount={unreadMessageCount}
               />
             </Link>
           )
