@@ -57,7 +57,7 @@ type StudentOption = {
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 // Shared by the table header and its rows — they must never drift apart.
-const GRID_COLUMNS = '3% 22% 10% 6% 8% 13% 7% 31%'
+const GRID_COLUMNS = '3% 28% 10% 7% 9% 14% 5% 24%'
 
 function rolesToLabel(roles: string[]): string {
   if (!roles || roles.length === 0) return 'All Teachers'
@@ -519,6 +519,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               checked={filtered.length > 0 && selectedIds.size === filtered.length}
               onChange={toggleSelectAll}
               className="rounded"
+              style={{ accentColor: '#FF8303' }}
             />
             <span>Title</span>
             <span>Category</span>
@@ -536,7 +537,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               return (
                 <div
                   key={sheet.id}
-                  className="grid gap-3 px-5 py-3.5 items-center text-sm"
+                  className="grid gap-3 px-5 py-4 items-center text-sm"
                   style={{
                     gridTemplateColumns: GRID_COLUMNS,
                     borderBottom: '1px solid #f3f4f6',
@@ -551,45 +552,57 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     checked={selectedIds.has(sheet.id)}
                     onChange={() => toggleSelect(sheet.id)}
                     className="rounded"
+                    style={{ accentColor: '#FF8303' }}
                   />
 
                   {/* Title + intro */}
                   <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate">{sheet.title}</p>
+                    <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
                     {sheet.intro_text && (
-                      <p className="text-xs text-gray-400 truncate mt-0.5">{sheet.intro_text}</p>
+                      <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
                     )}
                   </div>
 
                   {/* Category */}
-                  {sheet.category ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={categoryBadgeStyle(sheet.category)}>{sheet.category}</span>
-                  ) : (
-                    <span className="text-xs text-gray-300">-</span>
-                  )}
+                  <div>
+                    {sheet.category ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={categoryBadgeStyle(sheet.category)}>{sheet.category}</span>
+                    ) : (
+                      <span className="text-xs text-gray-300">-</span>
+                    )}
+                  </div>
 
                   {/* Level */}
-                  {sheet.level ? (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
-                      {sheet.level}
-                    </span>
-                  ) : (
-                    <span style={{ color: '#d1d5db' }}>-</span>
-                  )}
+                  <div>
+                    {sheet.level ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
+                        {sheet.level}
+                      </span>
+                    ) : (
+                      <span style={{ color: '#d1d5db' }}>-</span>
+                    )}
+                  </div>
 
                   {/* Difficulty */}
                   <DifficultyBars count={sheet.difficulty} />
 
                   {/* Access */}
-                  <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full inline-block"
-                    style={rolesPillStyle(sheet.allowed_roles)}
-                  >
-                    {rolesToLabel(sheet.allowed_roles)}
-                  </span>
+                  <div>
+                    <span
+                      className="text-xs font-medium px-2 py-0.5 rounded-full inline-block"
+                      style={rolesPillStyle(sheet.allowed_roles)}
+                    >
+                      {rolesToLabel(sheet.allowed_roles)}
+                    </span>
+                  </div>
 
                   {/* Activity count */}
-                  <span className="text-center text-gray-600">{activityCount(sheet, actCounts)}</span>
+                  <span
+                    className={activityCount(sheet, actCounts) === 0 ? 'text-center' : 'text-center text-gray-600'}
+                    style={activityCount(sheet, actCounts) === 0 ? { color: '#d1d5db' } : undefined}
+                  >
+                    {activityCount(sheet, actCounts)}
+                  </span>
 
                   {/* Actions */}
                   <div className="flex items-center gap-4 flex-shrink-0">
@@ -597,11 +610,14 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
                       disabled={empty}
                       title={empty ? 'No content yet' : undefined}
-                      className="text-xs font-medium"
-                      style={{
-                        color: empty ? '#d1d5db' : '#FF8303',
-                        cursor: empty ? 'not-allowed' : 'pointer',
-                      }}
+                      className="text-xs font-medium px-2.5 py-1 rounded-md"
+                      style={
+                        empty
+                          ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
+                          : { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }
+                      }
+                      onMouseEnter={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFE4C4' }}
+                      onMouseLeave={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFF0E0' }}
                     >
                       Assign
                     </button>
