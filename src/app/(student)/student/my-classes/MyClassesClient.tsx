@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -211,6 +211,48 @@ function CancelWarning({ onConfirm, onDismiss }: { onConfirm: () => void; onDism
   )
 }
 
+// ── Shared outline secondary button — hover feedback like Book a Class ──
+function SecondaryButton({
+  onClick,
+  disabled,
+  title,
+  children,
+  padding,
+  fontSize,
+}: {
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+  children: ReactNode
+  padding: string
+  fontSize: string
+}) {
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding,
+        backgroundColor: disabled ? 'transparent' : hovered ? '#f3f4f6' : 'transparent',
+        border: disabled ? '1px solid #E5E7EB' : '1px solid #E0DFDC',
+        borderRadius: '6px',
+        fontSize,
+        fontWeight: '500',
+        color: disabled ? '#9CA3AF' : hovered ? '#111827' : '#4b5563',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'background-color 0.18s ease, color 0.18s ease',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
 // ── Shared lesson row — used by upcoming day groups and the cancelled section ──
 function LessonRow({
   lesson,
@@ -329,39 +371,23 @@ function LessonRow({
           {/* Reschedule / Cancel buttons */}
           {!isCancelled && (
             <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-              <button
+              <SecondaryButton
                 onClick={() => onReschedule(lesson.id)}
                 disabled={!!within24}
                 title={within24 ? 'Reschedule not available within 24 hours of class' : ''}
-                style={{
-                  padding: '5px 10px',
-                  backgroundColor: 'transparent',
-                  border: within24 ? '1px solid #E5E7EB' : '1px solid #E0DFDC',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  color: within24 ? '#9CA3AF' : '#4b5563',
-                  cursor: within24 ? 'not-allowed' : 'pointer',
-                }}
+                padding="5px 10px"
+                fontSize="12px"
               >
                 Reschedule
-              </button>
-              <button
+              </SecondaryButton>
+              <SecondaryButton
                 onClick={() => onCancel(lesson.id, !!within24)}
                 disabled={isCancelling}
-                style={{
-                  padding: '5px 10px',
-                  backgroundColor: 'transparent',
-                  border: isCancelling ? '1px solid #E5E7EB' : '1px solid #E0DFDC',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  color: isCancelling ? '#9CA3AF' : '#4b5563',
-                  cursor: isCancelling ? 'not-allowed' : 'pointer',
-                }}
+                padding="5px 10px"
+                fontSize="12px"
               >
                 {isCancelling ? '...' : 'Cancel'}
-              </button>
+              </SecondaryButton>
             </div>
           )}
         </div>
@@ -800,39 +826,23 @@ export default function MyClassesClient({
                 Join Class
               </span>
             )}
-            <button
+            <SecondaryButton
               onClick={() => handleReschedule(nextLesson.id)}
               disabled={nextWithin24}
               title={nextWithin24 ? 'Reschedule not available within 24 hours of class' : ''}
-              style={{
-                padding: '8px 14px',
-                backgroundColor: 'transparent',
-                border: nextWithin24 ? '1px solid #E5E7EB' : '1px solid #E0DFDC',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: '500',
-                color: nextWithin24 ? '#9CA3AF' : '#4b5563',
-                cursor: nextWithin24 ? 'not-allowed' : 'pointer',
-              }}
+              padding="8px 14px"
+              fontSize="13px"
             >
               Reschedule
-            </button>
-            <button
+            </SecondaryButton>
+            <SecondaryButton
               onClick={() => handleCancel(nextLesson.id, nextWithin24)}
               disabled={nextCancelling}
-              style={{
-                padding: '8px 14px',
-                backgroundColor: 'transparent',
-                border: nextCancelling ? '1px solid #E5E7EB' : '1px solid #E0DFDC',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: '500',
-                color: nextCancelling ? '#9CA3AF' : '#4b5563',
-                cursor: nextCancelling ? 'not-allowed' : 'pointer',
-              }}
+              padding="8px 14px"
+              fontSize="13px"
             >
               {nextCancelling ? '...' : 'Cancel'}
-            </button>
+            </SecondaryButton>
           </div>
 
           {/* 24-hour cancel warning for the hero */}
