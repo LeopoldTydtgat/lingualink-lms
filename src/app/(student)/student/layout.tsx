@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireTz } from '@/lib/time/requireTz'
+import { computeStreakWeeks } from '@/lib/lessons/streak'
 import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
@@ -97,6 +98,17 @@ export default async function StudentDashboardLayout({
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+
+  const { data: completedLessonRows } = await supabase
+    .from('lessons')
+    .select('scheduled_at')
+    .eq('student_id', student.id)
+    .eq('status', 'completed')
+
+  const streakWeeks = computeStreakWeeks(
+    (completedLessonRows ?? []).map((l) => l.scheduled_at),
+    studentTimezone
+  )
 
   const { data: assignmentRows } = await supabase
     .from('assignments')
@@ -219,6 +231,7 @@ export default async function StudentDashboardLayout({
               trainingEndDate={training?.end_date ?? null}
               assignedExercises={assignedCount}
               completedExercises={completedCount}
+              streakWeeks={streakWeeks}
             />
           </div>
         </div>

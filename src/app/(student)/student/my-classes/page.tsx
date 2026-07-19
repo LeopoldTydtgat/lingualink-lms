@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
+import { computeStreakWeeks } from '@/lib/lessons/streak'
 
 export default async function MyClassesPage() {
   const supabase = await createClient()
@@ -95,42 +96,11 @@ export default async function MyClassesPage() {
     completedRows.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0) / 60
 
   // Streak: consecutive weeks (Mon–Sun) with >=1 completed lesson, in the student's tz.
-  // en-CA gives YYYY-MM-DD in tz; Date.UTC is used purely for calendar-day arithmetic
-  // on an already-localised date — no timezone drift, no toISOString for local dates.
-  const localDateKey = (date: Date) =>
-    new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      timeZone: tz,
-    }).format(date)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const mondayKey = (dateKey: string) => {
-    const [y, m, d] = dateKey.split('-').map(Number)
-    const dt = new Date(Date.UTC(y, m - 1, d))
-    const dow = dt.getUTCDay() // 0=Sun..6=Sat
-    dt.setUTCDate(dt.getUTCDate() - (dow === 0 ? 6 : dow - 1))
-    return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
-  }
-  const shiftWeeks = (mKey: string, weeks: number) => {
-    const [y, m, d] = mKey.split('-').map(Number)
-    const dt = new Date(Date.UTC(y, m - 1, d))
-    dt.setUTCDate(dt.getUTCDate() + weeks * 7)
-    return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`
-  }
-
-  const weekSet = new Set(
-    completedRows.map((l) => mondayKey(localDateKey(new Date(l.scheduled_at))))
+  // Shared with the right-panel streak banner via computeStreakWeeks.
+  const streakWeeks = computeStreakWeeks(
+    completedRows.map((l) => l.scheduled_at),
+    tz
   )
-  const currentMonday = mondayKey(localDateKey(new Date()))
-  let streakWeeks = 0
-  let cursor: string | null = null
-  if (weekSet.has(currentMonday)) cursor = currentMonday
-  else if (weekSet.has(shiftWeeks(currentMonday, -1))) cursor = shiftWeeks(currentMonday, -1)
-  while (cursor && weekSet.has(cursor)) {
-    streakWeeks++
-    cursor = shiftWeeks(cursor, -1)
-  }
 
   // Find the most recent completed lesson to pull its feedback
   // This becomes the "About This Class" recap on the next class card
