@@ -418,7 +418,7 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
           {loading ? (
             <p className="text-sm text-gray-400">Loading activity…</p>
           ) : loadError ? (
-            <p className="text-sm text-red-600">{loadError}</p>
+            <p className="text-sm" style={{ color: '#FD5602' }}>{loadError}</p>
           ) : type === 'writing_task' ? (
             <div className="space-y-6">
 
@@ -492,7 +492,10 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
                         type="button"
                         onClick={() => removeQuestion(q.id)}
                         disabled={questions.length === 1}
-                        className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm"
+                        className="disabled:opacity-20 text-sm"
+                        style={{ color: '#FD5602' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         title={questions.length === 1 ? 'An activity needs at least one question' : 'Remove question'}
                       >✕ Remove</button>
                     </div>
@@ -547,7 +550,10 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
                               type="button"
                               onClick={() => removeOption(q.id, optIdx)}
                               disabled={q.options.length <= MIN_OPTIONS}
-                              className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm flex-shrink-0 w-5"
+                              className="disabled:opacity-20 text-sm flex-shrink-0 w-5"
+                              style={{ color: '#FD5602' }}
+                              onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                              onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                               title={q.options.length <= MIN_OPTIONS ? `A question needs at least ${MIN_OPTIONS} options` : 'Remove option'}
                             >✕</button>
                           </div>
@@ -559,7 +565,7 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
                       <button
                         type="button"
                         onClick={() => addOption(q.id)}
-                        className="mt-2 text-xs underline"
+                        className="mt-2 text-xs"
                         style={{ color: ORANGE }}
                       >
                         + Add option
@@ -586,7 +592,9 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
               <button
                 type="button"
                 onClick={addQuestion}
-                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
               >
                 + Add question
               </button>
@@ -596,12 +604,15 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0">
-          {error ? <p className="text-sm text-red-500 pr-4">{error}</p> : <span />}
+          {error ? <p className="text-sm pr-4" style={{ color: '#FD5602' }}>{error}</p> : <span />}
           <div className="flex items-center gap-3 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '' }}
             >
               Cancel
             </button>
@@ -609,8 +620,14 @@ export default function ActivityFormModal({ sheetId, activityId, createType, onC
               type="button"
               onClick={handleSave}
               disabled={saving || loading || loadError !== null}
-              className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
-              style={{ backgroundColor: ORANGE }}
+              className="px-5 py-2 text-sm rounded-md text-white font-medium"
+              style={
+                saving || loading || loadError !== null
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: ORANGE }
+              }
+              onMouseEnter={e => { if (!(saving || loading || loadError !== null)) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!(saving || loading || loadError !== null)) e.currentTarget.style.backgroundColor = ORANGE }}
             >
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Activity'}
             </button>
