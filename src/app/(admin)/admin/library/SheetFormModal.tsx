@@ -763,7 +763,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         type="button"
                         onClick={() => removeWord(w.id)}
                         disabled={words.length === 1}
-                        className="text-red-400 hover:text-red-600 disabled:opacity-20 text-sm pt-1.5"
+                        className="disabled:opacity-20 text-sm pt-1.5"
+                        style={{ color: '#FD5602' }}
+                        onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                        onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                         title="Remove row"
                       >✕</button>
                     </div>
@@ -772,7 +775,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   <button
                     type="button"
                     onClick={addWord}
-                    className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center"
+                    className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
                   >
                     + Add word
                   </button>
@@ -802,7 +807,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 hover:border-orange-300 w-full justify-center disabled:opacity-50"
+                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center disabled:opacity-50"
+                  onMouseEnter={e => { if (!uploading) { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' } }}
+                  onMouseLeave={e => { if (!uploading) { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' } }}
                 >
                   {uploading ? (
                     <>
@@ -822,7 +829,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   )}
                 </button>
                 {uploadError && (
-                  <p className="text-xs text-red-500 mt-2">{uploadError}</p>
+                  <p className="text-xs mt-2" style={{ color: '#FD5602' }}>{uploadError}</p>
                 )}
               </div>
 
@@ -852,7 +859,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                           href={`/api/library-file/${sheetId}/${idx}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs underline flex-shrink-0"
+                          className="text-xs flex-shrink-0"
                           style={{ color: '#FF8303' }}
                         >
                           View
@@ -862,7 +869,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         <button
                           type="button"
                           onClick={() => handleFileRemove(att)}
-                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          className="text-sm flex-shrink-0"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                           title="Remove file"
                         >
                           ✕
@@ -898,7 +908,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         <button
                           type="button"
                           onClick={() => removePendingFile(idx)}
-                          className="text-red-400 hover:text-red-600 text-sm flex-shrink-0"
+                          className="text-sm flex-shrink-0"
+                          style={{ color: '#FD5602' }}
+                          onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                          onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                           title="Remove file"
                         >
                           ✕
@@ -922,7 +935,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               {tagsLoading ? (
                 <p className="text-sm text-gray-400">Loading tags…</p>
               ) : tagsLoadError ? (
-                <p className="text-sm text-red-600">
+                <p className="text-sm" style={{ color: '#FD5602' }}>
                   Couldn&apos;t load tags. This sheet&apos;s existing tags are left untouched when you save —
                   close and reopen to change them.
                 </p>
@@ -952,27 +965,24 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                     value: 'all',
                     label: 'All Teachers',
                     description: 'Any teacher with an active account can see and assign this sheet.',
-                    color: '#16a34a',
                   },
                   {
                     value: 'exam',
                     label: 'Teacher+Exam Only',
                     description: 'Only teachers with the Teacher+Exam role can access this sheet. Useful for exam prep content.',
-                    color: '#2563eb',
                   },
                   {
                     value: 'admin',
                     label: 'Admin Only',
                     description: 'Not visible to any teacher. Admin can still assign it directly to students.',
-                    color: '#6b7280',
                   },
                 ].map(opt => (
                   <label
                     key={opt.value}
                     className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
                     style={{
-                      borderColor: rolesPreset === opt.value ? opt.color : '#e5e7eb',
-                      backgroundColor: rolesPreset === opt.value ? `${opt.color}08` : 'white',
+                      borderColor: rolesPreset === opt.value ? '#FF8303' : '#e5e7eb',
+                      backgroundColor: rolesPreset === opt.value ? '#FF830308' : 'white',
                     }}
                   >
                     <input
@@ -996,7 +1006,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
         {/* Modal footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 flex-shrink-0">
-          {error && <p className="text-sm text-red-500 pr-4">{error}</p>}
+          {error && <p className="text-sm pr-4" style={{ color: '#FD5602' }}>{error}</p>}
           {!error && <span />}
           <div className="flex items-center gap-3 flex-shrink-0">
             <button
@@ -1004,7 +1014,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               // Once the row exists, dismissing must refresh the list — the sheet
               // is real and has to appear, error or not.
               onClick={createdIncomplete ? () => { void onSaved() } : onClose}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 text-sm rounded-md"
+              style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '' }}
             >
               {createdIncomplete ? 'Close' : 'Cancel'}
             </button>
@@ -1012,8 +1025,14 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               type="button"
               onClick={handleSave}
               disabled={saving || tagsLoading || createdIncomplete}
-              className="px-5 py-2 text-sm rounded-lg text-white font-medium disabled:opacity-50"
-              style={{ backgroundColor: '#FF8303' }}
+              className="px-5 py-2 text-sm rounded-md text-white font-medium"
+              style={
+                saving || tagsLoading || createdIncomplete
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: '#FF8303' }
+              }
+              onMouseEnter={e => { if (!(saving || tagsLoading || createdIncomplete)) e.currentTarget.style.backgroundColor = '#e67300' }}
+              onMouseLeave={e => { if (!(saving || tagsLoading || createdIncomplete)) e.currentTarget.style.backgroundColor = '#FF8303' }}
             >
               {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Sheet'}
             </button>
