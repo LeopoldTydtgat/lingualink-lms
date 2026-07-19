@@ -11,7 +11,16 @@ import {
   PolarAngleAxis,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  MessageSquareText,
+  BookOpen,
+  PenLine,
+  Activity,
+  Star,
+} from 'lucide-react';
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
+import PastClassStatusTag from '@/components/student/PastClassStatusTag';
+import StarRating from '@/components/student/StarRating';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -94,6 +103,31 @@ const SKILLS = [
   { key: 'overall_written', label: 'Written' },
 ];
 
+// ─── Design system ────────────────────────────────────────────────────────────
+
+const CARD_STYLE: React.CSSProperties = {
+  backgroundColor: '#ffffff',
+  border: '1px solid #f3f4f6',
+  borderRadius: '12px',
+};
+
+function CardHeader({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ComponentType<{ size?: number; color?: string }>;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center" style={{ gap: '7px' }}>
+      <Icon size={14} color="#FF8303" />
+      <span style={{ fontSize: '12px', fontWeight: 600, color: '#9ca3af', letterSpacing: '0.05em' }}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDateTime(isoString: string, timezone: string) {
@@ -112,76 +146,6 @@ function formatDateTime(isoString: string, timezone: string) {
     hour12: false,
   }).format(date);
   return { dateStr, timeStr };
-}
-
-function StatusTag({ status }: { status: string }) {
-  if (status === 'completed') {
-    return (
-      <span
-        style={{ backgroundColor: '#dcfce7', color: '#166534' }}
-        className="text-xs font-medium px-2 py-0.5 rounded-full"
-      >
-        Completed
-      </span>
-    );
-  }
-  if (status === 'student_no_show') {
-    return (
-      <span
-        style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}
-        className="text-xs font-medium px-2 py-0.5 rounded-full"
-      >
-        You were absent
-      </span>
-    );
-  }
-  if (status === 'teacher_no_show') {
-    return (
-      <span
-        style={{ backgroundColor: '#fef2f2', color: '#991b1b' }}
-        className="text-xs font-medium px-2 py-0.5 rounded-full"
-      >
-        Teacher was absent
-      </span>
-    );
-  }
-  return null;
-}
-
-// ─── Star rating component ────────────────────────────────────────────────────
-
-function StarRating({
-  value,
-  onChange,
-  readonly = false,
-}: {
-  value: number;
-  onChange?: (v: number) => void;
-  readonly?: boolean;
-}) {
-  const [hovered, setHovered] = useState(0);
-
-  return (
-    <div className="flex gap-1">
-      {[1, 2, 3, 4, 5].map((star) => {
-        const filled = readonly ? star <= value : star <= (hovered || value);
-        return (
-          <button
-            key={star}
-            type="button"
-            disabled={readonly}
-            onClick={() => !readonly && onChange?.(star)}
-            onMouseEnter={() => !readonly && setHovered(star)}
-            onMouseLeave={() => !readonly && setHovered(0)}
-            className="text-2xl leading-none focus:outline-none"
-            style={{ color: filled ? '#FF8303' : '#d1d5db', cursor: readonly ? 'default' : 'pointer' }}
-          >
-            ★
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -214,6 +178,8 @@ export default function PastClassDetailClient({
   const hasLevelData =
     lesson.report?.level_data &&
     Object.values(lesson.report.level_data).some((v) => v);
+
+  const hasSheets = assignments.some((a) => a.study_sheet);
 
   // Submit review
   async function handleSubmitReview() {
@@ -252,7 +218,7 @@ export default function PastClassDetailClient({
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 max-w-4xl mx-auto">
       {/* Back link */}
       <Link
         href="/student/past-classes"
@@ -263,7 +229,7 @@ export default function PastClassDetailClient({
       </Link>
 
       {/* ── Teacher + class header ── */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
+      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
         <div className="flex items-center gap-4">
           <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', backgroundColor: '#f3f4f6', flexShrink: 0 }}>
             {lesson.teacher?.photo_url ? (
@@ -290,39 +256,44 @@ export default function PastClassDetailClient({
               {dateStr} · {timeStr} · {lesson.duration_minutes} min
             </p>
             <div className="mt-1.5">
-              <StatusTag status={lesson.status} />
+              <PastClassStatusTag status={lesson.status} />
             </div>
           </div>
         </div>
       </div>
 
       {/* ── Teacher feedback ── */}
-      {lesson.report?.feedback_text && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 mb-2 text-sm">
-            Teacher Feedback
-          </h2>
+      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+        <div className="mb-3">
+          <CardHeader icon={MessageSquareText} label="TEACHER FEEDBACK" />
+        </div>
+        {lesson.report?.feedback_text ? (
           <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">
             {lesson.report.feedback_text}
           </p>
-        </div>
-      )}
+        ) : (
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            Your teacher didn&apos;t leave written feedback for this class.
+          </p>
+        )}
+      </div>
 
       {/* ── Assigned study sheets ── */}
-      {assignments.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 mb-3 text-sm">
-            Study Sheets Assigned
-          </h2>
+      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+        <div className="mb-3">
+          <CardHeader icon={BookOpen} label="STUDY SHEETS ASSIGNED" />
+        </div>
+        {hasSheets ? (
           <div className="space-y-2">
             {assignments.map((a) =>
               a.study_sheet ? (
                 <div
                   key={a.id}
-                  className="flex items-center justify-between text-sm border border-gray-100 rounded-lg px-3 py-2"
+                  className="flex items-center justify-between text-sm rounded-lg px-3 py-2"
+                  style={{ border: '1px solid #f3f4f6' }}
                 >
                   <span className="text-gray-800">{a.study_sheet.title}</span>
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <div className="flex items-center gap-2 text-xs" style={{ color: '#9ca3af' }}>
                     {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
                     {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
                     {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
@@ -331,15 +302,19 @@ export default function PastClassDetailClient({
               ) : null
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            No study sheets were assigned after this class.
+          </p>
+        )}
+      </div>
 
       {/* ── Teacher's marked-up material ── */}
       {annotatedPdfs.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 mb-1 text-sm">
-            Material Your Teacher Marked Up
-          </h2>
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
+          </div>
           <p className="text-xs text-gray-500 mb-3">
             The notes your teacher made on screen during this class. View only.
           </p>
@@ -347,7 +322,8 @@ export default function PastClassDetailClient({
             {annotatedPdfs.map((pdf) => (
               <div
                 key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
-                className="border border-gray-200 rounded-xl overflow-hidden bg-white"
+                className="overflow-hidden bg-white"
+                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
               >
                 <PdfViewer
                   fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
@@ -362,10 +338,10 @@ export default function PastClassDetailClient({
 
       {/* ── Level radar chart ── */}
       {hasLevelData && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 mb-4 text-sm">
-            Your Level at This Class
-          </h2>
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-4">
+            <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
+          </div>
           <div className="w-full" style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart data={radarData}>
@@ -400,8 +376,11 @@ export default function PastClassDetailClient({
 
       {/* ── Review section ── */}
       {lesson.status === 'completed' && (
-        <div className="bg-white border border-gray-200 rounded-xl p-5 mb-4">
-          <h2 className="font-semibold text-gray-900 mb-1 text-sm">
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={Star} label={submitted ? 'YOUR REVIEW' : 'LEAVE A REVIEW'} />
+          </div>
+          <h2 className="font-semibold text-gray-900 mb-2 text-sm">
             {submitted ? 'Your Review' : `How was your class with ${lesson.teacher?.full_name ?? 'your teacher'}?`}
           </h2>
 
@@ -409,14 +388,14 @@ export default function PastClassDetailClient({
             <div>
               <StarRating value={rating} readonly />
               {reviewText && (
-                <p className="mt-2 text-sm text-gray-600 italic">"{reviewText}"</p>
+                <p className="mt-2 text-sm text-gray-600 italic">&quot;{reviewText}&quot;</p>
               )}
               <p className="mt-2 text-xs text-gray-400">Thank you for your feedback.</p>
             </div>
           ) : (
             <div>
               <p className="text-xs text-gray-500 mb-3">
-                Your review is shared with the admin and displayed on your teacher's profile.
+                Your review is shared with the admin and displayed on your teacher&apos;s profile.
               </p>
 
               <StarRating value={rating} onChange={setRating} />
@@ -438,14 +417,19 @@ export default function PastClassDetailClient({
                 <button
                   onClick={handleSubmitReview}
                   disabled={submitting}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity"
-                  style={{ backgroundColor: '#FF8303', opacity: submitting ? 0.6 : 1 }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={
+                    submitting
+                      ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                      : { backgroundColor: '#FF8303', color: '#ffffff' }
+                  }
                 >
                   {submitting ? 'Submitting...' : 'Submit Review'}
                 </button>
                 <button
                   onClick={() => router.push('/student/past-classes')}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
+                  className="px-4 py-2 rounded-lg text-sm font-medium"
+                  style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
                 >
                   Skip for now
                 </button>
