@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { StudySheet, WordRow, Attachment } from './LibraryAdminClient'
 import { Tag, kindPillStyle } from './TagManagerModal'
+import { Check, Tag as TagIcon, FileText } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -495,9 +496,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     <div>
       <p className="text-xs font-medium text-gray-400 uppercase mb-2">{label}</p>
       {group.length === 0 ? (
-        <p className="text-sm text-gray-400 italic">
-          No {label.toLowerCase()} yet. Create them with Manage Tags on the library page.
-        </p>
+        <div className="py-6 text-center">
+          <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+          <p className="text-sm text-gray-400">No {label.toLowerCase()} yet.</p>
+          <p className="text-xs text-gray-400 mt-1">Create them with Manage Tags on the library page.</p>
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {group.map(tag => {
@@ -525,11 +528,11 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   )
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
-  const allTabs: { key: FormTab; label: string }[] = [
+  const allTabs: { key: FormTab; label: string; count?: number | null }[] = [
     { key: 'metadata', label: 'Metadata' },
-    { key: 'vocabulary', label: `Vocabulary (${words.length})` },
-    { key: 'files', label: `Files (${isEdit ? attachments.length : pendingFiles.length})` },
-    { key: 'tags', label: `Tags (${tagsLoading ? '…' : selectedTagIds.size})` },
+    { key: 'vocabulary', label: 'Vocabulary', count: words.length },
+    { key: 'files', label: 'Files', count: isEdit ? attachments.length : pendingFiles.length },
+    { key: 'tags', label: 'Tags', count: tagsLoading ? null : selectedTagIds.size },
     { key: 'access', label: 'Access' },
   ]
   // Teaching Material is a staff-only resource: Title + Files only (plus Tags,
@@ -557,19 +560,32 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
         {/* Tab bar */}
         <div className="flex gap-1 px-6 pt-4 border-b border-gray-200 flex-shrink-0">
-          {tabs.map(tab => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors"
-              style={activeTab === tab.key
-                ? { backgroundColor: '#FF8303', color: 'white' }
-                : { color: '#4b5563' }}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {tabs.map(tab => {
+            const active = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className="px-4 py-2 text-sm font-medium rounded-t-lg transition-colors"
+                style={active
+                  ? { backgroundColor: '#FF8303', color: 'white' }
+                  : { color: '#4b5563' }}
+              >
+                {tab.label}
+                {typeof tab.count === 'number' && tab.count > 0 && (
+                  <span
+                    className="inline-flex ml-1.5 px-1.5 rounded-full text-xs"
+                    style={active
+                      ? { backgroundColor: 'rgba(255,255,255,0.25)', color: 'white' }
+                      : { backgroundColor: '#f3f4f6', color: '#6b7280' }}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
         {/* Tab content — scrollable */}
@@ -597,7 +613,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   ].map(opt => (
                     <label
                       key={opt.value}
-                      className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                      className="relative flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
                       style={{
                         borderColor: type === opt.value ? '#FF8303' : '#e5e7eb',
                         backgroundColor: type === opt.value ? '#FF830308' : 'white',
@@ -609,8 +625,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         value={opt.value}
                         checked={type === opt.value}
                         onChange={() => selectType(opt.value)}
-                        className="mt-0.5"
+                        className="sr-only"
                       />
+                      {type === opt.value && (
+                        <span
+                          className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                          style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                        >
+                          <Check className="w-3 h-3 text-white" />
+                        </span>
+                      )}
                       <div>
                         <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
@@ -837,7 +861,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               {isEdit ? (
                 /* Edit mode: attachments live on the server — View link + storage-backed remove. */
                 attachments.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                  <div className="py-6 text-center">
+                    <FileText className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No files attached yet.</p>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {attachments.map((att, idx) => (
@@ -885,7 +912,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 /* Create mode: files are staged locally and uploaded on Save. No View
                    link (nothing is on the server yet); remove just drops the staged File. */
                 pendingFiles.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-6">No files attached yet.</p>
+                  <div className="py-6 text-center">
+                    <FileText className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                    <p className="text-sm text-gray-400">No files attached yet.</p>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {pendingFiles.map((file, idx) => (
@@ -933,16 +963,18 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
               </p>
 
               {tagsLoading ? (
-                <p className="text-sm text-gray-400">Loading tags…</p>
+                <p className="py-6 text-center text-sm text-gray-400">Loading tags…</p>
               ) : tagsLoadError ? (
                 <p className="text-sm" style={{ color: '#FD5602' }}>
                   Couldn&apos;t load tags. This sheet&apos;s existing tags are left untouched when you save —
                   close and reopen to change them.
                 </p>
               ) : allTags.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No tags exist yet. Create them with Manage Tags on the library page.
-                </p>
+                <div className="py-6 text-center">
+                  <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">No tags exist yet.</p>
+                  <p className="text-xs text-gray-400 mt-1">Create them with Manage Tags on the library page.</p>
+                </div>
               ) : (
                 <div className="space-y-5">
                   {renderTagGroup('Topics', topicTags)}
@@ -979,7 +1011,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                 ].map(opt => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
+                    className="relative flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-colors"
                     style={{
                       borderColor: rolesPreset === opt.value ? '#FF8303' : '#e5e7eb',
                       backgroundColor: rolesPreset === opt.value ? '#FF830308' : 'white',
@@ -991,8 +1023,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                       value={opt.value}
                       checked={rolesPreset === opt.value}
                       onChange={() => setRolesPreset(opt.value)}
-                      className="mt-0.5"
+                      className="sr-only"
                     />
+                    {rolesPreset === opt.value && (
+                      <span
+                        className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                        style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                      >
+                        <Check className="w-3 h-3 text-white" />
+                      </span>
+                    )}
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
