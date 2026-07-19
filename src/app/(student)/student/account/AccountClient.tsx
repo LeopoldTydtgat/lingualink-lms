@@ -306,7 +306,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+    <div className="p-6">
 
       {/* Timezone confirmation banner — shown when redirected from booking with ?confirm_tz=1 */}
       {mustConfirmTz && (
@@ -384,7 +384,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             <Button
               onClick={() => fileInputRef.current?.click()}
               disabled={photoUploading}
-              style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}
+              style={{ backgroundColor: '#FFF3E0', borderColor: '#FFD9A8', color: '#FF8303' }}
             >
               {photoUploading ? 'Uploading…' : 'Upload Photo'}
             </Button>
@@ -636,7 +636,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             </div>
           )}
 
-          <Button asChild style={{ backgroundColor: '#FF8303', borderColor: '#FF8303', color: 'white' }}>
+          <Button asChild style={{ backgroundColor: '#FFF3E0', borderColor: '#FFD9A8', color: '#FF8303' }}>
             <a href="mailto:support@lingualinkonline.com">
               Need more hours? Contact us →
             </a>
@@ -705,7 +705,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Change Password</h2>
         </div>
 
-        <div style={{ maxWidth: '400px' }}>
+        <div style={{ maxWidth: '480px' }}>
           <div style={{ marginBottom: '14px' }}>
             <label style={labelStyle}>Current Password</label>
             <div style={{ position: 'relative' }}>
