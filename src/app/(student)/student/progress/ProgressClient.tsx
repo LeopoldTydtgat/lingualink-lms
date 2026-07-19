@@ -1,5 +1,6 @@
 'use client'
 
+import type { ReactNode } from 'react'
 import {
   Radar,
   RadarChart,
@@ -8,6 +9,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
+import { Gauge, Activity, History, Pencil, type LucideIcon } from 'lucide-react'
 import { requireTz } from '@/lib/time/requireTz'
 
 // ----- Types -----
@@ -40,7 +42,7 @@ interface LevelData {
 }
 
 interface Props {
-  student: { id: string; full_name: string; timezone: string }
+  student: { id: string; full_name: string; timezone: string; self_assessed_level: string | null }
   training: Training | null
   completedLessons: Lesson[]
   latestLevelData: LevelData | null
@@ -73,13 +75,12 @@ const SKILL_LABELS: Record<keyof LevelData, string> = {
 // ----- Helpers -----
 
 function formatDate(iso: string, timezone: string) {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-GB', {
+  return new Intl.DateTimeFormat('en-GB', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     timeZone: timezone,
-  })
+  }).format(new Date(iso))
 }
 
 function hoursFromMinutes(minutes: number) {
@@ -88,6 +89,11 @@ function hoursFromMinutes(minutes: number) {
   if (h === 0) return `${m}min`
   if (m === 0) return `${h}h`
   return `${h}h ${m}min`
+}
+
+// Decimal hours -> "Xh Ymin" (no bare "54.5h" anywhere)
+function hoursToHm(hours: number) {
+  return hoursFromMinutes(Math.round(hours * 60))
 }
 
 function avgClassesPerWeek(lessons: Lesson[]): string {
@@ -99,28 +105,90 @@ function avgClassesPerWeek(lessons: Lesson[]): string {
   return (lessons.length / diffWeeks).toFixed(1)
 }
 
-// ----- Progress bar component -----
+// ----- Design-system primitives -----
 
-function ProgressBar({ value, max, colour = '#FF8303' }: { value: number; max: number; colour?: string }) {
-  const pct = max === 0 ? 0 : Math.min(100, Math.round((value / max) * 100))
+function Card({ children }: { children: ReactNode }) {
   return (
-    <div className="w-full bg-gray-100 rounded-full h-2.5">
-      <div
-        className="h-2.5 rounded-full transition-all duration-500"
-        style={{ width: `${pct}%`, backgroundColor: colour }}
-      />
+    <div
+      className="shadow-sm"
+      style={{ background: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '20px' }}
+    >
+      {children}
     </div>
   )
 }
 
-// ----- Stat card component -----
-
-function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function CardHeader({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-5 flex flex-col gap-1 shadow-sm">
-      <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">{label}</span>
-      <span className="text-2xl font-bold text-gray-900">{value}</span>
-      {sub && <span className="text-xs text-gray-400">{sub}</span>}
+    <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '16px' }}>
+      <Icon size={14} color="#FF8303" />
+      <span
+        style={{
+          fontSize: '12px',
+          fontWeight: 600,
+          color: '#9ca3af',
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  )
+}
+
+// Inner stat block (no shadow, thin border) — repurposed from the old StatCard
+function StatBlock({
+  label,
+  value,
+  valueColor = '#111827',
+  sub,
+  subColor = '#9ca3af',
+}: {
+  label: string
+  value: string
+  valueColor?: string
+  sub?: string
+  subColor?: string
+}) {
+  return (
+    <div style={{ border: '1px solid #f3f4f6', borderRadius: '8px', padding: '12px' }}>
+      <div
+        style={{
+          fontSize: '12px',
+          color: '#9ca3af',
+          textTransform: 'uppercase',
+          letterSpacing: '0.05em',
+          fontWeight: 500,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: '20px', fontWeight: 700, color: valueColor, marginTop: '4px' }}>{value}</div>
+      {sub && <div style={{ fontSize: '12px', color: subColor, marginTop: '2px' }}>{sub}</div>}
+    </div>
+  )
+}
+
+function Pill({ children }: { children: ReactNode }) {
+  return (
+    <span
+      className="rounded-full text-xs font-medium px-2 py-0.5"
+      style={{ background: '#f3f4f6', color: '#4b5563' }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function ProgressBar({ value, max, colour = '#FF8303' }: { value: number; max: number; colour?: string }) {
+  const pct = max === 0 ? 0 : Math.min(100, Math.round((value / max) * 100))
+  return (
+    <div className="w-full rounded-full" style={{ backgroundColor: '#E0DFDC', height: '8px' }}>
+      <div
+        className="rounded-full transition-all duration-500"
+        style={{ width: `${pct}%`, backgroundColor: colour, height: '8px' }}
+      />
     </div>
   )
 }
@@ -142,7 +210,8 @@ export default function ProgressClient({
   const totalHours = training?.total_hours ?? 0
   const hoursUsed = training ? parseFloat(training.hours_consumed.toString()) : 0
   const hoursRemaining = Math.max(0, totalHours - hoursUsed)
-  const endDate = training?.end_date ? formatDate(training.end_date, timezone) : '\u2014'
+  const endDate = training?.end_date ? formatDate(training.end_date, timezone) : '—'
+  const hoursPct = totalHours > 0 ? Math.round((hoursUsed / totalHours) * 100) : 0
 
   // ----- Lesson history -----
   const totalLessonsCount = completedLessons.length
@@ -165,7 +234,7 @@ export default function ProgressClient({
   const exercisePct = totalAssigned === 0 ? 0 : Math.round((totalCompleted / totalAssigned) * 100)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="p-6">
 
       {/* Page title */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
@@ -173,181 +242,177 @@ export default function ProgressClient({
         <p className="text-sm text-gray-500 mt-1">Track your learning journey and skill development</p>
       </div>
 
-      {/* ----- Training Overview ----- */}
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Training Overview</h2>
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
-        {training ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <StatCard label="Total Hours" value={`${totalHours}h`} />
-              <StatCard label="Hours Used" value={`${hoursUsed}h`} />
-              <StatCard
-                label="Hours Remaining"
-                value={`${hoursRemaining}h`}
-                sub={hoursRemaining < 2 ? '\u26A0\uFE0F Running low' : undefined}
-              />
-              <StatCard
-                label="Training Ends"
-                value={endDate}
-                sub={training.package_type ?? undefined}
-              />
-            </div>
+        {/* ----- LEFT column ----- */}
+        <div className="flex flex-col" style={{ gap: '16px' }}>
 
-            <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm space-y-2">
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>Hours used</span>
-                <span className="font-medium">
-                  {hoursUsed}h of {totalHours}h ({totalHours > 0 ? Math.round((hoursUsed / totalHours) * 100) : 0}%)
-                </span>
-              </div>
-              <ProgressBar value={hoursUsed} max={totalHours} />
-            </div>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 text-center text-gray-400 text-sm shadow-sm">
-            No active training found. Contact your admin if you believe this is an error.
-          </div>
-        )}
-      </section>
-
-      {/* ----- Level Tracker ----- */}
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Level Tracker</h2>
-        </div>
-        {latestLevelDate && (
-          <p className="text-xs text-gray-400 mb-4">
-            Based on your teacher&apos;s assessment from {formatDate(latestLevelDate, timezone)}
-          </p>
-        )}
-
-        {radarData.length > 0 ? (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 shadow-sm">
-            <ResponsiveContainer width="100%" height={320}>
-              <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
-                <PolarGrid stroke="#e5e7eb" />
-                <PolarAngleAxis
-                  dataKey="skill"
-                  tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
-                />
-                <Radar
-                  name="Level"
-                  dataKey="value"
-                  stroke="#FF8303"
-                  fill="#FF8303"
-                  fillOpacity={0.25}
-                  strokeWidth={2}
-                />
-                {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
-                <Tooltip
-                  formatter={(value: unknown, _name: unknown, item: { payload?: { label?: string } }) => [
-                    item.payload?.label ?? String((value as number) ?? 0),
-                    'Level',
-                  ]}
-                  contentStyle={{
-                    fontSize: 12,
-                    fontFamily: 'Inter, sans-serif',
-                    borderRadius: 8,
-                    border: '1px solid #e5e7eb',
-                  }}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
-
-            {/* Legend row */}
-            <div className="mt-4 flex flex-wrap gap-3 justify-center">
-              {radarData.map(d => (
-                <div key={d.skill} className="flex items-center gap-1.5 text-xs text-gray-600">
-                  <span
-                    className="inline-block w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: '#FF8303' }}
+          {/* Training Overview */}
+          <Card>
+            <CardHeader icon={Gauge} label="Training Overview" />
+            {training ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <StatBlock label="Total Hours" value={hoursToHm(totalHours)} />
+                  <StatBlock label="Hours Used" value={hoursToHm(hoursUsed)} />
+                  <StatBlock
+                    label="Hours Remaining"
+                    value={hoursToHm(hoursRemaining)}
+                    sub={hoursRemaining < 2 ? 'Running low' : undefined}
+                    subColor="#FD5602"
                   />
-                  <span>{d.skill}:</span>
-                  <span className="font-semibold text-gray-900">{d.label}</span>
+                  <StatBlock
+                    label="Training Ends"
+                    value={endDate}
+                    sub={training.package_type ?? undefined}
+                  />
                 </div>
-              ))}
+
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm text-gray-600">
+                    <span>Hours used</span>
+                    <span className="font-medium">
+                      {hoursToHm(hoursUsed)} of {hoursToHm(totalHours)} ({hoursPct}%)
+                    </span>
+                  </div>
+                  <ProgressBar value={hoursUsed} max={totalHours} />
+                </div>
+              </div>
+            ) : (
+              <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
+                No active training found. Contact your admin if you believe this is an error.
+              </p>
+            )}
+          </Card>
+
+          {/* Class History */}
+          <Card>
+            <CardHeader icon={History} label="Class History" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <StatBlock label="Classes Completed" value={String(totalLessonsCount)} sub="all time" />
+              <StatBlock
+                label="Total Learning Time"
+                value={hoursFromMinutes(totalMinutesLearned)}
+                sub="hours in class"
+              />
+              <StatBlock label="Avg Classes / Week" value={avgPerWeek} sub="based on your history" />
             </div>
+          </Card>
 
-            {/* CEFR scale hint */}
-            <p className="text-xs text-gray-400 text-center mt-4">
-              Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
-            </p>
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-gray-100 p-6 text-center text-gray-400 text-sm shadow-sm">
-            Your level chart will appear here after your teacher submits your first assessment.
-          </div>
-        )}
-      </section>
+          {/* Exercises */}
+          <Card>
+            <CardHeader icon={Pencil} label="Exercises" />
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <p className="text-2xl font-bold text-gray-900">{totalAssigned}</p>
+                  <p className="text-xs text-gray-500 mt-1">Assigned</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold" style={{ color: '#FF8303' }}>{totalCompleted}</p>
+                  <p className="text-xs text-gray-500 mt-1">Completed</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold" style={{ color: '#9ca3af' }}>{pending}</p>
+                  <p className="text-xs text-gray-500 mt-1">Pending</p>
+                </div>
+              </div>
 
-      {/* ----- Class History Summary ----- */}
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Class History</h2>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>Overall completion</span>
+                  <span className="font-medium">{exercisePct}%</span>
+                </div>
+                <ProgressBar value={totalCompleted} max={totalAssigned} />
+              </div>
+
+              {totalAssigned === 0 && (
+                <p className="text-xs text-center pt-1" style={{ color: '#9ca3af' }}>
+                  Exercises assigned by your teacher will appear here.
+                </p>
+              )}
+            </div>
+          </Card>
+
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard
-            label="Classes Completed"
-            value={String(totalLessonsCount)}
-            sub="all time"
-          />
-          <StatCard
-            label="Total Learning Time"
-            value={hoursFromMinutes(totalMinutesLearned)}
-            sub="hours in class"
-          />
-          <StatCard
-            label="Avg Classes / Week"
-            value={avgPerWeek}
-            sub="based on your history"
-          />
+
+        {/* ----- RIGHT column ----- */}
+        <div className="flex flex-col" style={{ gap: '16px' }}>
+
+          {/* Level Tracker (visual hero) */}
+          <Card>
+            <CardHeader icon={Activity} label="Level Tracker" />
+            {latestLevelDate && (
+              <p className="text-xs mb-4" style={{ color: '#9ca3af' }}>
+                Based on your teacher&apos;s assessment from {formatDate(latestLevelDate, timezone)}
+              </p>
+            )}
+
+            {radarData.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={360}>
+                  <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
+                    <PolarGrid stroke="#e5e7eb" />
+                    <PolarAngleAxis
+                      dataKey="skill"
+                      tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
+                    />
+                    <Radar
+                      name="Level"
+                      dataKey="value"
+                      stroke="#FF8303"
+                      fill="#FF8303"
+                      fillOpacity={0.25}
+                      strokeWidth={2}
+                    />
+                    {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
+                    <Tooltip
+                      formatter={(value: unknown, _name: unknown, item: { payload?: { label?: string } }) => [
+                        item.payload?.label ?? String((value as number) ?? 0),
+                        'Level',
+                      ]}
+                      contentStyle={{
+                        fontSize: 12,
+                        fontFamily: 'Inter, sans-serif',
+                        borderRadius: 8,
+                        border: '1px solid #e5e7eb',
+                      }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
+
+                {/* Skill/level pairs as neutral pills */}
+                <div className="mt-4 flex flex-wrap gap-2 justify-center">
+                  {radarData.map(d => (
+                    <Pill key={d.skill}>{d.skill}: {d.label}</Pill>
+                  ))}
+                </div>
+
+                {/* CEFR scale hint */}
+                <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
+                  Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
+                </p>
+              </>
+            ) : (
+              <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
+                Your level chart will appear here after your teacher submits your first assessment.
+              </p>
+            )}
+
+            {student.self_assessed_level && (
+              <div
+                className="flex items-center gap-2 mt-4 pt-4"
+                style={{ borderTop: '1px solid #f3f4f6' }}
+              >
+                <span className="text-xs" style={{ color: '#9ca3af' }}>Your self-assessed level:</span>
+                <Pill>{student.self_assessed_level}</Pill>
+              </div>
+            )}
+          </Card>
+
         </div>
-      </section>
 
-      {/* ----- Exercises Progress ----- */}
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-          <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-          <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Exercises Progress</h2>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm space-y-4">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-2xl font-bold text-gray-900">{totalAssigned}</p>
-              <p className="text-xs text-gray-500 mt-1">Assigned</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold" style={{ color: '#FF8303' }}>{totalCompleted}</p>
-              <p className="text-xs text-gray-500 mt-1">Completed</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-gray-400">{pending}</p>
-              <p className="text-xs text-gray-500 mt-1">Pending</p>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <div className="flex justify-between text-xs text-gray-500">
-              <span>Overall completion</span>
-              <span className="font-medium">{exercisePct}%</span>
-            </div>
-            <ProgressBar value={totalCompleted} max={totalAssigned} />
-          </div>
-
-          {totalAssigned === 0 && (
-            <p className="text-xs text-gray-400 text-center pt-1">
-              Exercises assigned by your teacher will appear here.
-            </p>
-          )}
-        </div>
-      </section>
-
+      </div>
     </div>
   )
 }

@@ -13,7 +13,7 @@ export default async function ProgressPage() {
   // Get student record
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, timezone, profile_completed')
+    .select('id, full_name, timezone, profile_completed, self_assessed_level')
     .eq('auth_user_id', user.id)
     .maybeSingle()
 
