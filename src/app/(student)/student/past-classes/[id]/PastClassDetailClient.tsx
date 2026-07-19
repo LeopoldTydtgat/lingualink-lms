@@ -218,7 +218,7 @@ export default function PastClassDetailClient({
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6">
       {/* Back link */}
       <Link
         href="/student/past-classes"
@@ -262,6 +262,9 @@ export default function PastClassDetailClient({
         </div>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* ── LEFT COLUMN ── */}
+      <div className="lg:col-span-2">
       {/* ── Teacher feedback ── */}
       <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
         <div className="mb-3">
@@ -336,6 +339,9 @@ export default function PastClassDetailClient({
         </div>
       )}
 
+      </div>
+      {/* ── RIGHT COLUMN ── */}
+      <div className="lg:col-span-1">
       {/* ── Level radar chart ── */}
       {hasLevelData && (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
@@ -380,9 +386,11 @@ export default function PastClassDetailClient({
           <div className="mb-1">
             <CardHeader icon={Star} label={submitted ? 'YOUR REVIEW' : 'LEAVE A REVIEW'} />
           </div>
-          <h2 className="font-semibold text-gray-900 mb-2 text-sm">
-            {submitted ? 'Your Review' : `How was your class with ${lesson.teacher?.full_name ?? 'your teacher'}?`}
-          </h2>
+          {!submitted && (
+            <p className="mb-2" style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>
+              How was your class with {lesson.teacher?.full_name ?? 'your teacher'}?
+            </p>
+          )}
 
           {submitted ? (
             <div>
@@ -438,6 +446,8 @@ export default function PastClassDetailClient({
           )}
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
 }

@@ -32,7 +32,7 @@ export default function StarRating({
             <Star
               size={24}
               fill={filled ? '#FF8303' : 'none'}
-              stroke={filled ? '#FF8303' : '#d1d5db'}
+              stroke={filled ? '#FF8303' : '#9ca3af'}
             />
           </button>
         );

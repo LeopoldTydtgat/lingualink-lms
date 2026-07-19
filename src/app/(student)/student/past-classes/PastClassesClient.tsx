@@ -288,7 +288,7 @@ export default function PastClassesClient({
   });
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="p-6">
       {/* Page header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Past Classes</h1>
@@ -369,7 +369,7 @@ export default function PastClassesClient({
                         className="text-xs font-medium px-2 py-0.5 rounded-full"
                         style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
                       >
-                        ⭐ Leave a review
+                        Leave a review
                       </span>
                     )}
                     {hasReview && (
