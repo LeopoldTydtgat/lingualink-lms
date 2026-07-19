@@ -141,7 +141,7 @@ SENTRY_DSN
 - **Before editing any file, OUTPUT the grep'd list of downstream consumers and, for each, state why it is unaffected. Do not merely assert consumers were considered — show the list.**
 - **Never trust a tool's on-screen rendering of file contents — verify against the file on disk.** Edit-tool diffs and terminal echoes can drop, scramble, or merge characters (and can render clean UTF-8 as mojibake). After any edit, and before any commit, read the real bytes from disk (PowerShell `Get-Content -Raw`, or a byte/char-code dump for line-ending-sensitive files) and confirm the actual content. A passing `tsc`/test plus a clean-looking diff is not enough — confirm the file itself.
 - **NEVER run any git command** — no add, commit, push, log, status, nothing. Git is run exclusively by Leopold in PowerShell. Never add `Co-Authored-By` trailers to anything.
-- **NEVER read or write `C:\Projects\lingualink-lms-meta\BUG_LOG.md`** — it is outside this repo and maintained via PowerShell only.
+- **BUG_LOG.md is retired (archive only) — never read or write it.** The live task list is `C:\Projects\lingualink-lms-meta\TODO.md`: Claude Code MAY edit it when the driving prompt instructs (add or delete single lines only). Nothing else under `lingualink-lms-meta` may be touched.
 - **`DROP FUNCTION` + `CREATE` resets Postgres EXECUTE grants** — any drafted RPC SQL must explicitly re-REVOKE from `anon`/`authenticated` where the old function had revokes.
 - **Join Class button activates 10 minutes before class start** — not 15. The briefs say 15; 10 is authoritative.
 
