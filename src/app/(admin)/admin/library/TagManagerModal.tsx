@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { Check, Tag as TagIcon } from 'lucide-react'
 
 // -- Types --
 
@@ -149,7 +150,10 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
     <div>
       <p className="text-xs font-medium text-gray-400 uppercase mb-2">{label} ({group.length})</p>
       {group.length === 0 ? (
-        <p className="text-sm italic" style={{ color: '#9ca3af' }}>None yet.</p>
+        <div className="py-6 text-center">
+          <TagIcon className="w-5 h-5 text-gray-300 mx-auto mb-2" />
+          <p className="text-sm text-gray-400">None yet.</p>
+        </div>
       ) : (
         <div className="flex flex-wrap gap-2">
           {group.map(tag => (
@@ -213,10 +217,10 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 {KINDS.map(opt => (
                   <label
                     key={opt.value}
-                    className="flex items-start gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors"
+                    className="relative flex items-start gap-3 p-3 border-2 rounded-lg cursor-pointer transition-colors"
                     style={{
                       borderColor: kind === opt.value ? '#FF8303' : '#e5e7eb',
-                      backgroundColor: kind === opt.value ? '#FFF8F1' : 'white',
+                      backgroundColor: kind === opt.value ? '#FF830308' : 'white',
                     }}
                   >
                     <input
@@ -225,9 +229,16 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                       value={opt.value}
                       checked={kind === opt.value}
                       onChange={() => setKind(opt.value)}
-                      className="mt-0.5"
-                      style={{ accentColor: '#FF8303' }}
+                      className="sr-only"
                     />
+                    {kind === opt.value && (
+                      <span
+                        className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full"
+                        style={{ width: '18px', height: '18px', backgroundColor: '#FF8303' }}
+                      >
+                        <Check className="w-3 h-3 text-white" />
+                      </span>
+                    )}
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{opt.label}</p>
                       <p className="text-xs text-gray-500 mt-0.5">{opt.description}</p>
@@ -240,10 +251,12 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 type="button"
                 onClick={handleCreate}
                 disabled={creating || !name.trim()}
-                className="px-4 py-2 text-sm rounded-md text-white font-medium disabled:opacity-40"
-                style={{ backgroundColor: ORANGE }}
-                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#e67300' }}
-                onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#FF8303' }}
+                className="px-4 py-2 text-sm rounded-md font-medium"
+                style={creating || !name.trim()
+                  ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
+                  : { backgroundColor: ORANGE, color: 'white' }}
+                onMouseEnter={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#e67300' }}
+                onMouseLeave={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#FF8303' }}
               >
                 {creating ? 'Creating...' : 'Create Tag'}
               </button>
@@ -255,7 +268,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
 
             {/* Existing */}
             {loading ? (
-              <p className="text-sm" style={{ color: '#9ca3af' }}>Loading tags...</p>
+              <p className="py-6 text-center text-sm text-gray-400">Loading tags...</p>
             ) : loadError ? (
               <p className="text-sm" style={{ color: '#FD5602' }}>Couldn&apos;t load tags. Close and reopen to try again.</p>
             ) : (
