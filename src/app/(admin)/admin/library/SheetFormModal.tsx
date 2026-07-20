@@ -890,22 +890,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   onMouseEnter={e => { if (!uploading) { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' } }}
                   onMouseLeave={e => { if (!uploading) { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' } }}
                 >
-                  {uploading ? (
-                    <>
-                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                      </svg>
-                      Uploading…
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Upload files
-                    </>
-                  )}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                  {uploading ? 'Uploading…' : 'Upload files'}
                 </button>
                 {uploadError && (
                   <p className="text-xs mt-2" style={{ color: '#FD5602' }}>{uploadError}</p>

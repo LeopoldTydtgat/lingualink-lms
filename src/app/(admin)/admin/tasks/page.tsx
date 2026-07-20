@@ -380,7 +380,7 @@ export default function AdminTasksPage() {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {completing === task.id ? '…' : '✓ Complete'}
+                        {completing === task.id ? 'Completing…' : '✓ Complete'}
                       </button>
                     ) : (
                       <button
@@ -399,7 +399,7 @@ export default function AdminTasksPage() {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {reopening === task.id ? '…' : 'Reopen'}
+                        {reopening === task.id ? 'Reopening…' : 'Reopen'}
                       </button>
                     )}
                     <button
@@ -432,7 +432,7 @@ export default function AdminTasksPage() {
                         opacity: deleting === task.id ? 0.6 : 1,
                       }}
                     >
-                      Delete
+                      {deleting === task.id ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 </div>

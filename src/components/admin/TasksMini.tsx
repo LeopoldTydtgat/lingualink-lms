@@ -267,7 +267,7 @@ export default function TasksMini({
                       flexShrink: 0,
                     }}
                   >
-                    {completing === task.id ? '…' : '✓ Done'}
+                    {completing === task.id ? 'Completing…' : '✓ Done'}
                   </button>
                 </div>
               </div>

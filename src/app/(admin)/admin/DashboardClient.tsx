@@ -200,8 +200,8 @@ export default function DashboardClient({
           disabled={isPending}
           className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
         >
-          <RefreshCw size={14} className={isPending ? 'animate-spin' : ''} />
-          {isPending ? 'Refreshing...' : 'Refresh now'}
+          <RefreshCw size={14} />
+          {isPending ? 'Refreshing…' : 'Refresh now'}
         </button>
       </div>
 

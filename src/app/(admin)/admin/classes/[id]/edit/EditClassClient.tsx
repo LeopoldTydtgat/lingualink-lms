@@ -420,7 +420,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
                 fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
               }}
             >
-              Proceed anyway
+              {saving ? 'Saving…' : 'Proceed anyway'}
             </button>
             <button
               onClick={() => setAvailabilityWarning(false)}
@@ -457,7 +457,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
               cursor: saving || checkingAvailability ? 'not-allowed' : 'pointer',
             }}
           >
-            {checkingAvailability ? 'Checking...' : saving ? 'Saving...' : 'Save Changes'}
+            {checkingAvailability ? 'Checking…' : saving ? 'Saving…' : 'Save Changes'}
           </button>
         )}
       </div>
