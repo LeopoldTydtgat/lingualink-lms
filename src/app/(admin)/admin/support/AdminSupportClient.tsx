@@ -6,7 +6,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { createClient } from '@/lib/supabase/client'
-import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X, Paperclip } from 'lucide-react'
+import { MessageSquare, HelpCircle, Send, Plus, Trash2, Edit2, Check, X, Paperclip, Loader2 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { sanitizeHtml } from '@/lib/sanitize'
@@ -108,6 +108,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null)
   const [editQuestion, setEditQuestion] = useState('')
   const [editAnswer, setEditAnswer] = useState('')
+  // Only one FAQ editor is open at a time (editingFaqId is a single id), so a plain
+  // boolean is enough here. The toggle/delete flags below MUST be keyed per FAQ id
+  // because every FAQ row renders its own toggle and delete button at once.
+  const [savingFaqEdit, setSavingFaqEdit] = useState(false)
+  const [togglingFaqIds, setTogglingFaqIds] = useState<Set<string>>(new Set())
+  const [deletingFaqIds, setDeletingFaqIds] = useState<Set<string>>(new Set())
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
   const [, forceUpdate] = useState(0)
@@ -516,37 +522,85 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     setSavingEdit(false)
   }
 
+  // Per-id pending helpers for the FAQ rows. Set-valued so several rows can be
+  // in flight at once without one clobbering another's flag.
+  const addPendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+    setter(prev => { const next = new Set(prev); next.add(id); return next })
+  const removePendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+    setter(prev => { const next = new Set(prev); next.delete(id); return next })
+
   const handleAddFaq = async () => {
     if (!newQuestion.trim() || !newAnswer.trim()) return
     setSavingFaq(true)
-    const { data, error } = await supabase
-      .from('faqs')
-      .insert({ question: newQuestion.trim(), answer: newAnswer.trim(), target_audience: newAudience, display_order: faqs.length })
-      .select('id, question, answer, target_audience, display_order, is_active')
-      .single()
-    if (!error && data) {
+    try {
+      const { data, error } = await supabase
+        .from('faqs')
+        .insert({ question: newQuestion.trim(), answer: newAnswer.trim(), target_audience: newAudience, display_order: faqs.length })
+        .select('id, question, answer, target_audience, display_order, is_active')
+        .single()
+      if (error || !data) {
+        // Leave the form open and populated so the typed question/answer isn't lost.
+        toast.error('FAQ failed to save. Please try again.', { duration: 6000 })
+        return
+      }
       setFaqs(prev => [...prev, data as Faq])
       setNewQuestion('')
       setNewAnswer('')
       setAddingFaq(false)
+    } finally {
+      setSavingFaq(false)
     }
-    setSavingFaq(false)
   }
 
   const handleDeleteFaq = async (id: string) => {
-    await supabase.from('faqs').delete().eq('id', id)
-    setFaqs(prev => prev.filter(f => f.id !== id))
+    if (deletingFaqIds.has(id)) return
+    addPendingId(setDeletingFaqIds, id)
+    try {
+      const { error } = await supabase.from('faqs').delete().eq('id', id)
+      if (error) {
+        // Keep the row on screen — it still exists in the database.
+        toast.error('FAQ failed to delete. Please try again.', { duration: 6000 })
+        return
+      }
+      setFaqs(prev => prev.filter(f => f.id !== id))
+    } finally {
+      removePendingId(setDeletingFaqIds, id)
+    }
   }
 
   const handleToggleFaq = async (faq: Faq) => {
-    await supabase.from('faqs').update({ is_active: !faq.is_active }).eq('id', faq.id)
-    setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, is_active: !f.is_active } : f))
+    if (togglingFaqIds.has(faq.id)) return
+    const nextActive = !faq.is_active
+    addPendingId(setTogglingFaqIds, faq.id)
+    // Optimistic flip, reverted below if the write doesn't land, so the badge
+    // never claims a state the database doesn't have.
+    setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, is_active: nextActive } : f))
+    try {
+      const { error } = await supabase.from('faqs').update({ is_active: nextActive }).eq('id', faq.id)
+      if (error) {
+        setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, is_active: !nextActive } : f))
+        toast.error('FAQ status failed to update. Please try again.', { duration: 6000 })
+      }
+    } finally {
+      removePendingId(setTogglingFaqIds, faq.id)
+    }
   }
 
   const handleSaveEdit = async (faq: Faq) => {
-    await supabase.from('faqs').update({ question: editQuestion, answer: editAnswer }).eq('id', faq.id)
-    setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, question: editQuestion, answer: editAnswer } : f))
-    setEditingFaqId(null)
+    if (savingFaqEdit) return
+    setSavingFaqEdit(true)
+    try {
+      const { error } = await supabase.from('faqs').update({ question: editQuestion, answer: editAnswer }).eq('id', faq.id)
+      if (error) {
+        // Editor stays open with editQuestion/editAnswer intact so the edit isn't lost.
+        toast.error('FAQ failed to save. Please try again.', { duration: 6000 })
+        return
+      }
+      setFaqs(prev => prev.map(f => f.id === faq.id ? { ...f, question: editQuestion, answer: editAnswer } : f))
+      setEditingFaqId(null)
+    } finally {
+      setSavingFaqEdit(false)
+    }
   }
 
   const handleEmojiButtonClick = () => {
@@ -912,7 +966,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40"
                   style={{ backgroundColor: '#FF8303' }}
                 >
-                  Save
+                  {savingFaq ? 'Saving...' : 'Save'}
                 </button>
                 <button
                   onClick={() => { setAddingFaq(false); setNewQuestion(''); setNewAnswer('') }}
@@ -946,9 +1000,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                       />
                       <div className="flex gap-2">
                         <button onClick={() => handleSaveEdit(faq)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+                          disabled={savingFaqEdit}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white disabled:opacity-40"
                           style={{ backgroundColor: '#FF8303' }}>
-                          <Check size={13} /> Save
+                          <Check size={13} /> {savingFaqEdit ? 'Saving...' : 'Save'}
                         </button>
                         <button onClick={() => setEditingFaqId(null)}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-gray-100">
@@ -970,12 +1025,13 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                           </span>
                           <button
                             onClick={() => handleToggleFaq(faq)}
-                            className="text-xs px-2 py-0.5 rounded-full font-medium"
+                            disabled={togglingFaqIds.has(faq.id)}
+                            className="text-xs px-2 py-0.5 rounded-full font-medium disabled:opacity-50"
                             style={faq.is_active
                               ? { backgroundColor: '#dcfce7', color: '#16a34a' }
                               : { backgroundColor: '#f3f4f6', color: '#9ca3af' }
                             }>
-                            {faq.is_active ? 'Active' : 'Inactive'}
+                            {togglingFaqIds.has(faq.id) ? 'Saving...' : (faq.is_active ? 'Active' : 'Inactive')}
                           </button>
                           <button
                             onClick={() => { setEditingFaqId(faq.id); setEditQuestion(faq.question); setEditAnswer(faq.answer) }}
@@ -984,8 +1040,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                           </button>
                           <button
                             onClick={() => handleDeleteFaq(faq.id)}
-                            className="text-gray-400 hover:text-red-500 transition-colors">
-                            <Trash2 size={15} />
+                            disabled={deletingFaqIds.has(faq.id)}
+                            aria-label="Delete FAQ"
+                            className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50">
+                            {deletingFaqIds.has(faq.id)
+                              ? <Loader2 size={15} className="animate-spin" />
+                              : <Trash2 size={15} />}
                           </button>
                         </div>
                       </div>
