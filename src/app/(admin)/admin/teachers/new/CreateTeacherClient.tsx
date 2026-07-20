@@ -75,7 +75,8 @@ type FormData = {
   city: string
   preferred_payment_type: string
   paypal_email: string
-  banking_details: string
+  iban: string
+  bic: string
   vat_required: boolean
   tax_number: string
   hourly_rate: string
@@ -97,7 +98,7 @@ const EMPTY_FORM: FormData = {
   status: 'current', contract_start: '', orientation_date: '',
   observed_lesson_date: '', title: '', date_of_birth: '', gender: '',
   nationality: '', phone: '', street_address: '', area_code: '', city: '',
-  preferred_payment_type: 'bank', paypal_email: '', banking_details: '', vat_required: false, tax_number: '',
+  preferred_payment_type: 'bank', paypal_email: '', iban: '', bic: '', vat_required: false, tax_number: '',
   hourly_rate: '', currency: 'EUR', native_languages: [], teaching_languages: [],
   qualifications: '', specialties: '', bio: '', quote: '',
   admin_notes: '', follow_up_date: '', follow_up_reason: '',
@@ -372,15 +373,16 @@ export default function CreateTeacherClient() {
                 <input type="email" className={inputClass} value={form.paypal_email}
                   onChange={(e) => set('paypal_email', e.target.value)} />
               </Field>
-              <Field label="Banking Details">
-                <textarea
-                  rows={4}
-                  className={inputClass}
-                  value={form.banking_details}
-                  onChange={(e) => set('banking_details', e.target.value)}
-                  placeholder="e.g. IBAN, account number, sort code, routing number, or any other relevant banking information"
-                />
-              </Field>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="IBAN">
+                  <input className={inputClass} value={form.iban}
+                    onChange={(e) => set('iban', e.target.value)} />
+                </Field>
+                <Field label="SWIFT / BIC">
+                  <input className={inputClass} value={form.bic}
+                    onChange={(e) => set('bic', e.target.value)} />
+                </Field>
+              </div>
               <Field label="Tax Number">
                 <input className={inputClass} value={form.tax_number}
                   onChange={(e) => set('tax_number', e.target.value)} />
