@@ -18,7 +18,11 @@ import type {
   PendingReportItem,
   AlertLesson,
 } from './page'
-import { isCancelledStatus } from '@/lib/billing/billability'
+import {
+  isCancelledStatus,
+  NO_SHOW_STATUSES,
+  SETTLED_LESSON_STATUSES,
+} from '@/lib/billing/billability'
 
 interface Props {
   stats: DashboardStats
@@ -67,7 +71,7 @@ function fmtDate(isoStr: string, timezone: string): string {
 function getEffectiveStatus(lesson: LiveLesson): string {
   if (isCancelledStatus(lesson.status)) return 'Cancelled'
   if (lesson.status === 'completed') return 'Completed'
-  if (lesson.status === 'student_no_show' || lesson.status === 'teacher_no_show') return 'No-Show'
+  if ((NO_SHOW_STATUSES as readonly string[]).includes(lesson.status)) return 'No-Show'
   const start = new Date(lesson.scheduled_at).getTime()
   const end = start + lesson.duration_minutes * 60 * 1000
   const now = Date.now()
@@ -80,13 +84,26 @@ function getEffectiveStatus(lesson: LiveLesson): string {
   return 'Upcoming'
 }
 
+// A settled lesson has a terminal outcome (completed / missed / no-show / cancelled) —
+// nothing left to act on today, so it sorts below the rows that still need attention.
+// Everything NOT in this set is DB status 'scheduled', which is exactly the group that
+// renders as Upcoming / In Progress / Awaiting report. Derived from the canonical status
+// set in billability.ts so a future terminal status de-emphasises itself automatically.
+function isSettledLesson(lesson: LiveLesson): boolean {
+  return (SETTLED_LESSON_STATUSES as readonly string[]).includes(lesson.status)
+}
+
 const STATUS_STYLES: Record<string, { bg: string; color: string }> = {
   Upcoming:     { bg: '#dbeafe', color: '#1e40af' },
   'In Progress':{ bg: '#dcfce7', color: '#166534' },
   Completed:    { bg: '#f3f4f6', color: '#374151' },
   'Awaiting report': { bg: '#ffedd5', color: '#9a3412' },
+  // No-Show keeps its yellow: it is informational (someone did not turn up and pay may
+  // be affected), not a resolved-and-closed row.
   'No-Show':    { bg: '#fef3c7', color: '#92400e' },
-  Cancelled:    { bg: '#fee2e2', color: '#991b1b' },
+  // Cancelled is grey, not red: a cancellation is a settled outcome needing no action, so
+  // it must not compete for attention with the flagged-report red used elsewhere.
+  Cancelled:    { bg: '#F1EFEC', color: '#4b5563' },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -159,10 +176,21 @@ export default function DashboardClient({
   const alertCount =
     missingTeamsLessons.length + (zeroBalanceWithClassesCount > 0 ? 1 : 0)
 
+  // Rows that still need attention sort above settled ones; within each group the
+  // server's scheduled_at ascending order is preserved (compared explicitly rather than
+  // relying on sort stability). The prop array is copied — never sorted in place.
+  const sortedLessons = [...todayLessons].sort((a, b) => {
+    const groupDiff = Number(isSettledLesson(a)) - Number(isSettledLesson(b))
+    if (groupDiff !== 0) return groupDiff
+    return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+  })
+  const activeLessonCount = todayLessons.filter((l) => !isSettledLesson(l)).length
+
   // ── stat card definitions ─────────────────────────────────────────────────
   const statCards = [
     {
       label: 'Classes Today',
+      subLabel: 'Scheduled',
       value: stats.classesTodayCount,
       icon: CalendarDays,
       // Null = timezone unset: point them to set it, not to the (un-bucketable) class list.
@@ -171,6 +199,7 @@ export default function DashboardClient({
     },
     {
       label: 'Pending Reports',
+      subLabel: 'To review',
       value: stats.pendingCount,
       icon: FileText,
       href: '/admin/reports?filter=pending',
@@ -178,6 +207,7 @@ export default function DashboardClient({
     },
     {
       label: 'Flagged Reports',
+      subLabel: 'Needs attention',
       value: stats.flaggedCount,
       icon: AlertTriangle,
       href: '/admin/reports?filter=flagged',
@@ -185,6 +215,7 @@ export default function DashboardClient({
     },
     {
       label: 'Low Hours Students',
+      subLabel: 'Below 2 hours',
       value: stats.lowHoursCount,
       icon: Users,
       href: '/admin/students?filter=low_hours',
@@ -192,6 +223,7 @@ export default function DashboardClient({
     },
     {
       label: 'Invoices to Review',
+      subLabel: 'This month',
       value: stats.invoicesToReviewCount,
       icon: CreditCard,
       href: '/admin/billing',
@@ -199,6 +231,7 @@ export default function DashboardClient({
     },
     {
       label: 'Active Announcements',
+      subLabel: 'Live now',
       value: stats.activeAnnouncementsCount,
       icon: Megaphone,
       href: '/admin/announcements',
@@ -265,20 +298,30 @@ export default function DashboardClient({
               const isZero = card.value === 0
               const emphasised = card.alert && !isZero && !isNull
               const muted = isZero || isNull
+
+              const chipBg = muted ? '#f3f4f6' : emphasised ? '#FEE2E2' : '#FFF0E0'
+              const chipColor = muted ? '#9ca3af' : emphasised ? '#FD5602' : '#FF8303'
+              const numberColor = muted ? '#9ca3af' : emphasised ? '#FD5602' : '#111827'
+
               return (
                 <Link key={card.label} href={card.href} prefetch={false}>
                   <div
-                    className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow"
-                    style={emphasised ? { borderColor: '#dc2626' } : {}}
+                    className="bg-white rounded-xl border border-gray-200 p-4"
+                    style={{
+                      boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)',
+                      ...(emphasised ? { borderColor: '#FD5602' } : {}),
+                    }}
                   >
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs leading-snug" style={{ color: muted ? '#9ca3af' : '#6b7280' }}>{card.label}</p>
-                      <Icon size={14} style={{ color: emphasised ? '#dc2626' : '#d1d5db' }} />
+                    <div className="flex items-center gap-2 mb-3">
+                      <div
+                        className="flex items-center justify-center shrink-0 rounded-lg"
+                        style={{ width: '32px', height: '32px', backgroundColor: chipBg }}
+                      >
+                        <Icon size={16} style={{ color: chipColor }} />
+                      </div>
+                      <p className="text-xs leading-snug" style={{ color: '#6b7280' }}>{card.label}</p>
                     </div>
-                    <p
-                      className="text-3xl font-bold"
-                      style={{ color: emphasised ? '#dc2626' : muted ? '#9ca3af' : '#111827' }}
-                    >
+                    <p className="text-3xl font-bold" style={{ color: numberColor }}>
                       {card.value === null ? (
                         <span className="text-base font-medium" style={{ color: '#9ca3af' }}>
                           Set timezone
@@ -287,6 +330,9 @@ export default function DashboardClient({
                         card.value
                       )}
                     </p>
+                    {card.value !== null && (
+                      <p className="text-xs mt-0.5" style={{ color: '#9ca3af' }}>{card.subLabel}</p>
+                    )}
                   </div>
                 </Link>
               )
@@ -297,7 +343,7 @@ export default function DashboardClient({
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
             {/* Left: live classes feed */}
-            <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col">
+            <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -320,48 +366,70 @@ export default function DashboardClient({
                 <div className="flex-1 flex items-center justify-center py-12 px-6 text-sm text-gray-400 text-center">
                   Set your timezone in your profile to see today&apos;s classes in your local time.
                 </div>
-              ) : todayLessons.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center py-12 text-sm text-gray-400">
-                  No classes scheduled today.
+              ) : sortedLessons.length === 0 ? (
+                <div
+                  className="flex-1 flex items-center justify-center py-12 text-sm text-center"
+                  style={{ color: '#9ca3af' }}
+                >
+                  No classes today
                 </div>
               ) : (
-                <div className="divide-y divide-gray-50">
-                  {todayLessons.map((lesson) => {
-                    const status = getEffectiveStatus(lesson)
-                    return (
-                      <div
-                        key={lesson.id}
-                        className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
-                        onClick={() => router.push(`/admin/classes/${lesson.id}`)}
-                      >
-                        {/* Time */}
-                        <span className="text-xs text-gray-500 w-10 shrink-0 font-mono tabular-nums">
-                          {fmtTime(lesson.scheduled_at, adminTimezone)}
-                        </span>
+                <div>
+                  {/* Every row today is settled (cancelled / no-show / completed / missed).
+                      Say so above the group, so the list does not read as "classes still
+                      coming up" at a glance. */}
+                  {activeLessonCount === 0 && (
+                    <p className="px-5 pt-3 pb-1 text-xs" style={{ color: '#9ca3af' }}>
+                      No remaining classes today
+                    </p>
+                  )}
+                  <div className="divide-y divide-gray-50">
+                    {sortedLessons.map((lesson) => {
+                      const status = getEffectiveStatus(lesson)
+                      // Only cancellations get muted body text. A no-show still carries a
+                      // pay consequence, so it stays legible at full contrast.
+                      const dimmed = isCancelledStatus(lesson.status)
+                      return (
+                        <div
+                          key={lesson.id}
+                          className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => router.push(`/admin/classes/${lesson.id}`)}
+                        >
+                          {/* Time */}
+                          <span
+                            className="text-xs w-10 shrink-0 font-mono tabular-nums"
+                            style={{ color: dimmed ? '#9ca3af' : '#6b7280' }}
+                          >
+                            {fmtTime(lesson.scheduled_at, adminTimezone)}
+                          </span>
 
-                        {/* Names + duration */}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">
-                            {lesson.teacher_name}
-                            <span className="text-gray-400 font-normal">
-                              {' · '}{lesson.student_name}
-                            </span>
-                          </p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {lesson.duration_minutes} min
-                          </p>
+                          {/* Names + duration */}
+                          <div className="flex-1 min-w-0">
+                            <p
+                              className="text-sm font-medium truncate"
+                              style={{ color: dimmed ? '#9ca3af' : '#1f2937' }}
+                            >
+                              {lesson.teacher_name}
+                              <span className="font-normal" style={{ color: '#9ca3af' }}>
+                                {' · '}{lesson.student_name}
+                              </span>
+                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: '#9ca3af' }}>
+                              {lesson.duration_minutes} min
+                            </p>
+                          </div>
+
+                          <StatusBadge status={status} />
                         </div>
-
-                        <StatusBadge status={status} />
-                      </div>
-                    )
-                  })}
+                      )
+                    })}
+                  </div>
                 </div>
               )}
             </div>
 
             {/* Right: pending + flagged reports */}
-            <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 flex flex-col">
+            <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 flex flex-col" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -445,7 +513,7 @@ export default function DashboardClient({
 
           {/* ── alerts panel ───────────────────────────────────────────── */}
           {alertCount > 0 ? (
-            <div className="bg-white rounded-xl border border-orange-200">
+            <div className="bg-white rounded-xl border border-orange-200" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
               <div className="flex items-center gap-2 px-5 py-4 border-b border-orange-100">
                 <AlertTriangle size={15} style={{ color: '#FF8303' }} />
                 <h2 className="font-semibold text-gray-800 text-sm">
@@ -524,7 +592,7 @@ export default function DashboardClient({
             </div>
           ) : (
             /* No alerts */
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3">
+            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
               <div
                 className="w-2 h-2 rounded-full"
                 style={{ backgroundColor: '#22c55e' }}
