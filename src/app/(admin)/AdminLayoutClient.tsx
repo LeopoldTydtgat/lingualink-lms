@@ -443,14 +443,14 @@ export default function AdminLayoutClient({
   return (
     <div className="flex flex-col h-screen overflow-hidden">
 
-      {/* Full-width header across the top — teacher-portal chrome: white,
-          72px, single #E0DFDC hairline. zIndex 40 matches TopHeader so the
-          header paints above page-content stickies (which stay <= 20). */}
+      {/* Full-width header across the top — admin chrome: orange, 72px, no
+          bottom border. zIndex 40 matches TopHeader so the header paints
+          above page-content stickies (which stay <= 20). */}
       <header
         className="flex items-center justify-between px-6 flex-shrink-0 w-full"
         style={{
-          backgroundColor: '#ffffff',
-          borderBottom: '1px solid #E0DFDC',
+          background: 'linear-gradient(90deg, #ffffff 0%, #ffffff 140px, #FF8303 420px, #FF8303 100%)',
+          borderBottom: 'none',
           height: '72px',
           zIndex: 40,
         }}
@@ -463,10 +463,10 @@ export default function AdminLayoutClient({
           />
         </Link>
         <div className="flex items-center gap-3">
-          <button className="lg:hidden mr-2" style={{ color: '#4b5563' }} onClick={() => setSidebarOpen(true)}>
+          <button className="lg:hidden mr-2" style={{ color: '#ffffff' }} onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="text-sm font-semibold hidden sm:block" style={{ color: '#111827' }}>
+          <span className="text-sm font-semibold hidden sm:block" style={{ color: '#ffffff' }}>
             Hello {profile.full_name?.split(' ')[0]}!
           </span>
           <Link href="/admin/settings" prefetch={false}>
@@ -475,12 +475,12 @@ export default function AdminLayoutClient({
                 src={profile.photo_url}
                 alt={profile.full_name}
                 className="w-9 h-9 rounded-full object-cover"
-                style={{ border: '2px solid #E0DFDC' }}
+                style={{ border: '2px solid #ffffff' }}
               />
             ) : (
               <div
                 className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2"
-                style={{ backgroundColor: '#f3f4f6', borderColor: '#E0DFDC', color: '#9ca3af' }}
+                style={{ backgroundColor: '#ffffff', borderColor: '#ffffff', color: '#FF8303' }}
               >
                 {profile.full_name?.charAt(0).toUpperCase()}
               </div>
@@ -495,7 +495,7 @@ export default function AdminLayoutClient({
         {/* Desktop sidebar */}
         <aside
           className="hidden lg:flex flex-col w-56 flex-shrink-0"
-          style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
+          style={{ backgroundColor: '#F1EFEC', borderRight: '1px solid #E0DFDC' }}
         >
           {sidebarInner}
         </aside>
@@ -506,7 +506,7 @@ export default function AdminLayoutClient({
             <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
             <aside
               className="relative flex flex-col w-56 z-50"
-              style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
+              style={{ backgroundColor: '#F1EFEC', borderRight: '1px solid #E0DFDC' }}
             >
               {sidebarInner}
             </aside>
