@@ -24,6 +24,7 @@ import {
   Menu,
   Loader2,
   Activity,
+  ChevronDown,
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
@@ -223,12 +224,14 @@ export default function AdminLayoutClient({
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
   const [loggingOut, setLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<string | null>(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
 
   const supabaseRef = useRef(createClient())
   const messagesRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const messagesRefetchInFlightRef = useRef(false)
 
   const adminPanelRef = useRef<HTMLElement>(null)
+  const profileMenuRef = useRef<HTMLDivElement>(null)
 
   const handleAdminPanelWheel = (e: React.WheelEvent<HTMLElement>) => {
     const panel = adminPanelRef.current
@@ -311,6 +314,26 @@ export default function AdminLayoutClient({
     }
   }, [])
 
+  useEffect(() => {
+    if (!profileMenuOpen) return
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setProfileMenuOpen(false)
+      }
+    }
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProfileMenuOpen(false)
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [profileMenuOpen])
+
   // A failed sign-out must never look like a successful one. Previously a rejected
   // signOut() left the handler as an unhandled rejection: no navigation, no message,
   // and an admin who believes they are logged out while the session is still live —
@@ -355,27 +378,6 @@ export default function AdminLayoutClient({
   // component type per render.
   const sidebarInner = (
     <>
-      {/* Portal marker — the only thing distinguishing this shell from the
-          teacher portal now that the chrome is identical. */}
-      <div className="px-3 pt-4">
-        <p
-          style={{
-            fontSize: '10px',
-            fontWeight: 700,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            textAlign: 'center',
-            color: '#FF8303',
-            backgroundColor: 'rgba(255, 131, 3, 0.10)',
-            border: '1px solid rgba(255, 131, 3, 0.35)',
-            borderRadius: '6px',
-            padding: '5px 8px',
-            margin: 0,
-          }}
-        >
-          Admin Portal
-        </p>
-      </div>
       <nav className="flex-1 px-3 pt-4 overflow-y-auto thin-scroll">
         {navGroups.map((group, groupIndex) => (
           <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : '18px' }}>
@@ -449,7 +451,7 @@ export default function AdminLayoutClient({
       <header
         className="flex items-center justify-between px-6 flex-shrink-0 w-full"
         style={{
-          background: 'linear-gradient(90deg, #ffffff 0%, #ffffff 140px, #FF8303 420px, #FF8303 100%)',
+          background: 'linear-gradient(90deg, #ffffff 0%, #ffffff 160px, #FFF0E0 45%, #FFB942 75%, #FF8303 100%)',
           borderBottom: 'none',
           height: '72px',
           zIndex: 40,
@@ -466,26 +468,77 @@ export default function AdminLayoutClient({
           <button className="lg:hidden mr-2" style={{ color: '#ffffff' }} onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="text-sm font-semibold hidden sm:block" style={{ color: '#ffffff' }}>
-            Hello {profile.full_name?.split(' ')[0]}!
-          </span>
-          <Link href="/admin/settings" prefetch={false}>
-            {profile.photo_url ? (
-              <img
-                src={profile.photo_url}
-                alt={profile.full_name}
-                className="w-9 h-9 rounded-full object-cover"
-                style={{ border: '2px solid #ffffff' }}
-              />
-            ) : (
+          <div className="relative" ref={profileMenuRef}>
+            <button
+              type="button"
+              onClick={() => setProfileMenuOpen((open) => !open)}
+              className="flex items-center gap-2"
+              aria-haspopup="menu"
+              aria-expanded={profileMenuOpen}
+            >
+              {profile.photo_url ? (
+                <img
+                  src={profile.photo_url}
+                  alt={profile.full_name}
+                  className="w-9 h-9 rounded-full object-cover"
+                  style={{ border: '2px solid #ffffff' }}
+                />
+              ) : (
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2"
+                  style={{ backgroundColor: '#ffffff', borderColor: '#ffffff', color: '#FF8303' }}
+                >
+                  {profile.full_name?.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="hidden sm:flex flex-col items-start leading-tight">
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#ffffff' }}>
+                  {profile.full_name?.split(' ')[0]}
+                </span>
+                <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)' }}>
+                  Administrator
+                </span>
+              </span>
+              <ChevronDown size={16} style={{ color: '#ffffff' }} />
+            </button>
+
+            {profileMenuOpen && (
               <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2"
-                style={{ backgroundColor: '#ffffff', borderColor: '#ffffff', color: '#FF8303' }}
+                className="absolute right-0 mt-2"
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #E0DFDC',
+                  borderRadius: '10px',
+                  boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)',
+                  zIndex: 50,
+                  minWidth: '160px',
+                  overflow: 'hidden',
+                }}
               >
-                {profile.full_name?.charAt(0).toUpperCase()}
+                <Link
+                  href="/admin/settings"
+                  prefetch={false}
+                  onClick={() => setProfileMenuOpen(false)}
+                  className="block px-4 py-2.5 hover:bg-gray-50"
+                  style={{ fontSize: '14px', color: '#4b5563' }}
+                >
+                  Settings
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileMenuOpen(false)
+                    handleLogout()
+                  }}
+                  disabled={loggingOut}
+                  className="w-full text-left px-4 py-2.5 hover:bg-gray-50"
+                  style={{ fontSize: '14px', color: '#4b5563', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
+                >
+                  {loggingOut ? 'Logging out…' : 'Log Out'}
+                </button>
               </div>
             )}
-          </Link>
+          </div>
         </div>
       </header>
 
