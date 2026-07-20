@@ -246,9 +246,6 @@ export default function DashboardClient({
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Refreshes every 30 seconds
-          </p>
         </div>
         <button
           onClick={() => startTransition(() => router.refresh())}
@@ -306,7 +303,7 @@ export default function DashboardClient({
               return (
                 <Link key={card.label} href={card.href} prefetch={false}>
                   <div
-                    className="bg-white rounded-xl border border-gray-200 p-4"
+                    className="stat-card-hover cursor-pointer bg-white rounded-xl border border-gray-200 p-4"
                     style={{
                       boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)',
                     }}
@@ -486,8 +483,15 @@ export default function DashboardClient({
                                   <Link
                                     href={`/admin/reports?reopen=${report.id}`}
                                     prefetch={false}
-                                    className="text-xs hover:underline"
-                                    style={{ color: '#FF8303' }}
+                                    className="inline-block"
+                                    style={{
+                                      backgroundColor: '#ffffff',
+                                      border: '1px solid #FF8303',
+                                      color: '#FF8303',
+                                      borderRadius: '6px',
+                                      padding: '3px 10px',
+                                      fontSize: '12px',
+                                    }}
                                   >
                                     Reopen
                                   </Link>
@@ -591,12 +595,12 @@ export default function DashboardClient({
             </div>
           ) : (
             /* No alerts */
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-3" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
+            <div className="flex items-center gap-2">
               <div
-                className="w-2 h-2 rounded-full"
+                className="w-2 h-2 rounded-full shrink-0"
                 style={{ backgroundColor: '#22c55e' }}
               />
-              <p className="text-sm text-gray-600">No alerts — everything looks good.</p>
+              <p style={{ fontSize: '13px', color: '#9ca3af' }}>No alerts</p>
             </div>
           )}
         </>

@@ -242,20 +242,13 @@
   transition: background-color 0.18s ease;
 }
 
-/* Admin sidebar nav scrollbar - styled to match brand */
-.admin-sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: #E0DFDC #111827;
+/* Admin dashboard stat card hover lift — overrides the inline resting box-shadow */
+.stat-card-hover {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
-.admin-sidebar-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-.admin-sidebar-scroll::-webkit-scrollbar-track {
-  background: #111827;
-}
-.admin-sidebar-scroll::-webkit-scrollbar-thumb {
-  background-color: #E0DFDC;
-  border-radius: 2px;
+.stat-card-hover:hover {
+  box-shadow: 0 4px 8px 0 rgba(17, 24, 39, 0.10) !important;
+  transform: translateY(-1px);
 }
 
 /* Thin scrollbar - applies thickness only, lets browser default colours through */
