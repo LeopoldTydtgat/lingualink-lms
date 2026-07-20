@@ -359,7 +359,7 @@ export default function AdminLayoutClient({
                 fontWeight: 600,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                color: '#6b7280',
+                color: '#9ca3af',
                 padding: '0 12px',
                 marginBottom: '4px',
               }}
@@ -420,7 +420,8 @@ export default function AdminLayoutClient({
       <header
         className="flex items-center justify-between px-6 flex-shrink-0 w-full"
         style={{
-          backgroundColor: '#FF8303',
+          backgroundColor: '#111827',
+          position: 'relative',
           height: '72px',
           zIndex: 10,
         }}
@@ -436,7 +437,7 @@ export default function AdminLayoutClient({
           <button className="lg:hidden text-white mr-2" onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="text-white text-sm font-medium hidden sm:block">
+          <span className="text-sm font-medium hidden sm:block" style={{ color: '#d1d5db' }}>
             Hello {profile.full_name?.split(' ')[0]}!
           </span>
           <Link href="/admin/settings" prefetch={false}>
@@ -453,6 +454,12 @@ export default function AdminLayoutClient({
             )}
           </Link>
         </div>
+
+        <div
+          aria-hidden="true"
+          className="absolute bottom-0 right-0 left-0 lg:left-56"
+          style={{ height: '3px', backgroundColor: '#FF8303' }}
+        />
       </header>
 
       {/* Below header: sidebar + content */}
