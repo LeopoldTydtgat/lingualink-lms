@@ -3,15 +3,8 @@ export default function Loading() {
     <div className="p-6 space-y-6" style={{ backgroundColor: '#f9fafb' }}>
       {/* header row */}
       <div
-        style={{
-          borderBottom: '1px solid #E0DFDC',
-          paddingBottom: '16px',
-          marginBottom: '8px',
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
+        className="flex items-center justify-between pb-4"
+        style={{ borderBottom: '1px solid #E0DFDC' }}
       >
         <div className="space-y-2">
           <div className="h-7 w-40 rounded bg-gray-200 animate-pulse" />
