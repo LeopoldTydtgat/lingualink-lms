@@ -516,12 +516,13 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         }}>
           <p style={{ margin: 0, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>
             Complete your profile to get the most out of your portal.{' '}
-            <a
+            <Link
               href="/account"
+              prefetch={false}
               style={{ color: '#FF8303', fontWeight: 600, textDecoration: 'none' }}
             >
               Complete now →
-            </a>
+            </Link>
           </p>
           <button
             onClick={handleDismissBanner}
