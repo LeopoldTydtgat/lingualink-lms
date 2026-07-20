@@ -41,6 +41,8 @@ interface Props {
   initialReports: Report[];
   teachers:       { id: string; full_name: string }[];
   students:       { id: string; full_name: string }[];
+  // Seeded from ?filter= by the server page; '' means "All Statuses".
+  initialStatusFilter?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,7 +114,7 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers }: { initialReports: Report[]; teachers: { id: string; full_name: string }[] }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   const [listError,     setListError]     = useState('');
@@ -120,7 +122,9 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
   const [reopenLoading, setReopenLoading] = useState(false);
   const [reopenError,   setReopenError]   = useState('');
 
-  const [statusFilter,      setStatusFilter]      = useState('');
+  // Seeded from the ?filter= deep link; the mount-time fetchReports effect below
+  // then loads the list through the same query path as a manual dropdown pick.
+  const [statusFilter,      setStatusFilter]      = useState(initialStatusFilter);
   const [teacherFilter,     setTeacherFilter]     = useState('');
   const [classStatusFilter, setClassStatusFilter] = useState('');
   const [dateFrom,          setDateFrom]          = useState('');
@@ -418,7 +422,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '' }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
@@ -587,7 +591,7 @@ export default function ReportsClient({ initialReports, teachers, students }: Pr
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 p-5">
-        {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} />}
+        {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} />}
         {activeTab === 'trace' && <LiveTrace />}
       </div>
 
