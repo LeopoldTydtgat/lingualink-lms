@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { isAdminProfile } from '@/lib/auth/requireAdmin'
 import AdminLayoutClient from './AdminLayoutClient'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { getDayRangeInTz } from '@/lib/billing/monthRange'
@@ -33,12 +34,12 @@ export default async function AdminLayout({
 
   const { data: profile } = await adminDb
     .from('profiles')
-    .select('id, full_name, role, photo_url, timezone')
+    .select('id, full_name, role, account_types, photo_url, timezone')
     .eq('id', user.id)
     .single()
 
   if (!profile) redirect('/login?error=profile_error')
-  if (profile.role !== 'admin') redirect('/dashboard')
+  if (!isAdminProfile(profile)) redirect('/dashboard')
 
   // The viewing admin's own timezone, used for all "today" bucketing; null/empty means unset.
   const adminTimezone = profile.timezone ?? 'UTC'

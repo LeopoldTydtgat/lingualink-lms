@@ -1,40 +1,8 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { UpdateTeacherSchema } from '@/lib/validation/schemas'
-
-// ─── Auth helper ──────────────────────────────────────────────────────────────
-
-async function verifyAdmin() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return null
-
-  const { data: adminProfile } = await supabase
-    .from('profiles')
-    .select('account_types, role')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    adminProfile?.role === 'admin' ||
-    (adminProfile?.account_types ?? []).includes('school_admin')
-
-  return isAdmin ? user : null
-}
 
 // ─── PATCH — update teacher profile ──────────────────────────────────────────
 
@@ -54,35 +22,9 @@ export async function PATCH(
       )
     }
 
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-          setAll() {},
-        },
-      }
-    )
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const { data: adminProfile } = await supabase
-      .from('profiles')
-      .select('account_types, role')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin =
-      adminProfile?.role === 'admin' ||
-      (adminProfile?.account_types ?? []).includes('school_admin')
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const adminClient = createAdminClient()
@@ -261,7 +203,7 @@ export async function DELETE(
   try {
     const { id } = await params
 
-    const user = await verifyAdmin()
+    const user = await requireAdmin()
     if (!user) return NextResponse.json({ error: 'Unauthorised or Forbidden' }, { status: 401 })
 
     const adminClient = createAdminClient()

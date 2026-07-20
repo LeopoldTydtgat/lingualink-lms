@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate } from '@/lib/email/templates'
@@ -13,22 +14,10 @@ function formatMonthName(dateStr: string): string {
 export async function PATCH(req: NextRequest) {
   const supabase = await createClient()
 
-  // Auth check
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-
-  // Admin role check
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Auth + admin check via the shared canonical rule; `supabase` stays for the
+  // RLS-bound invoice update below.
+  const user = await requireAdmin()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { invoiceId } = await req.json()
   if (!invoiceId) return NextResponse.json({ error: 'invoiceId required' }, { status: 400 })

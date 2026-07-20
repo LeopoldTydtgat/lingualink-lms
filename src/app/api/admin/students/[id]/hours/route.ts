@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { cookies } from 'next/headers'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { HoursAdjustmentSchema } from '@/lib/validation/schemas'
@@ -38,39 +37,9 @@ export async function POST(
     }
 
     // ── 3. Verify admin ───────────────────────────────────────────────────────
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-          setAll() {},
-        },
-      }
-    )
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const { data: adminProfile } = await supabase
-      .from('profiles')
-      .select('account_types, role, id')
-      .eq('id', user.id)
-      .single()
-
-    if (!adminProfile) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const isAdmin =
-      adminProfile.role === 'admin' ||
-      (adminProfile.account_types ?? []).includes('school_admin')
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Per-admin mutation limit — 50/hour. Caps the blast radius of a
@@ -111,7 +80,7 @@ export async function POST(
       p_action: data.action,
       p_amount: data.amount,
       p_log_type: data.action === 'add' ? 'add' : 'deduct',
-      p_created_by: adminProfile.id,
+      p_created_by: user.id,
       p_invoice_reference: data.invoice_reference ?? null,
       p_notes: data.notes ?? null,
     })

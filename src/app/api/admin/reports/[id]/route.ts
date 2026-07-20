@@ -1,6 +1,7 @@
 // src/app/api/admin/reports/[id]/route.ts
 
 import { createClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth/requireAdmin';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(
@@ -10,20 +11,8 @@ export async function GET(
   const supabase = await createClient();
   const { id } = await params;
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, account_types')
-    .eq('id', user.id)
-    .single();
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'));
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { data: report, error } = await supabase
     .from('reports')
@@ -139,20 +128,8 @@ export async function PATCH(
   const supabase = await createClient();
   const { id } = await params;
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, account_types')
-    .eq('id', user.id)
-    .single();
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'));
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await request.json();
   if (body.action !== 'reopen') {

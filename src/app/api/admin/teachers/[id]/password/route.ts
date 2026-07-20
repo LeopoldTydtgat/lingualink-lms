@@ -1,43 +1,13 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-
-async function verifyAdmin() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) return null
-
-  const { data: adminProfile } = await supabase
-    .from('profiles')
-    .select('account_types, role')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    adminProfile?.role === 'admin' ||
-    (adminProfile?.account_types ?? []).includes('school_admin')
-
-  return isAdmin ? user : null
-}
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const admin = await verifyAdmin()
+    const admin = await requireAdmin()
     if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await params
