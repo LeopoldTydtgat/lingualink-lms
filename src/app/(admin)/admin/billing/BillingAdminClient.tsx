@@ -176,9 +176,18 @@ async function fetchBillingEntities(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ teacherIds, studentIds, lessonIds }),
   })
+  // THROWS on failure — it must never resolve to empty arrays. Doing so hydrated
+  // every row with full_name 'Unknown' and hourly_rate 0, so a failed lookup
+  // rendered as a perfectly legitimate-looking €0.00 total. The callers below
+  // catch this and surface it, showing NO figures rather than wrong ones.
   if (!res.ok) {
     console.error('fetchBillingEntities failed:', res.status)
-    return { teachers: [], students: [], lessonRates: [] }
+    const body = await res.json().catch(() => ({}))
+    throw new Error(
+      body.message ??
+      body.error ??
+      `Could not load teacher rates and student policies (${res.status}). Amounts cannot be calculated, so no figures are shown.`
+    )
   }
   return res.json()
 }
@@ -193,6 +202,17 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   // ── CSV export state (shared across all three tabs' Export buttons) ─────────
   const [downloadingType, setDownloadingType] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
+
+  // ── Data-load failure state (shared across all three tabs) ─────────────────
+  // Every tab's data load funnels into this one banner, rendered with the same
+  // markup as exportError below it. Without it a failed query rendered as an
+  // empty table — on a billing screen that is indistinguishable from "this
+  // teacher billed nothing this month", which is a lie about money.
+  // dataError      = the load FAILED and no rows (or partial rows) are shown.
+  // rateFallbackNote = rows ARE shown, but at least one used the teacher's live
+  //                    hourly_rate because its booking-time snapshot is missing.
+  const [dataError, setDataError] = useState<string | null>(null)
+  const [rateFallbackNote, setRateFallbackNote] = useState<string | null>(null)
 
   // ── Shared reference data ──────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<TeacherProfile[]>([])
@@ -210,6 +230,9 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
   const [invoiceLessons, setInvoiceLessons] = useState<Record<string, LessonRow[]>>({})
+  // Keyed exactly like invoiceLessons, so a detail panel whose load failed says so
+  // instead of falling through to "No classes found for this period."
+  const [invoiceLessonErrors, setInvoiceLessonErrors] = useState<Record<string, string>>({})
   const [loadingLessons, setLoadingLessons] = useState<string | null>(null)
   const [viewingInvoiceId, setViewingInvoiceId] = useState<string | null>(null)
 
@@ -234,7 +257,12 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   // Teachers and companies are fetched without sensitive fields — hourly_rate
   // is fetched on-demand in hydrateLessons via the entities API route.
   const loadBaseData = useCallback(async () => {
-    const [{ data: teacherData }, { data: companyData }, { data: invoiceData }, { data: settingsData }] =
+    const [
+      { data: teacherData, error: teacherError },
+      { data: companyData, error: companyError },
+      { data: invoiceData, error: invoiceError },
+      { data: settingsData, error: settingsError },
+    ] =
       await Promise.all([
         supabase
           .from('profiles')
@@ -248,6 +276,24 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
           .order('billing_month', { ascending: false }),
         supabase.from('settings').select('value').eq('key', 'invoice_template_path').maybeSingle(),
       ])
+
+    // An errored query resolves to null data, which used to render as an empty
+    // invoice list — indistinguishable from "no invoices exist". Name what failed
+    // so the admin knows the screen is incomplete rather than settled.
+    const failed = [
+      teacherError && 'teachers',
+      companyError && 'companies',
+      invoiceError && 'invoices',
+      settingsError && 'the invoice template setting',
+    ].filter(Boolean) as string[]
+
+    if (failed.length > 0) {
+      setDataError(
+        `Could not load ${failed.join(', ')}. What is shown below is incomplete — reload the page before acting on it.`
+      )
+    } else {
+      setDataError(null)
+    }
 
     setTeachers(teacherData || [])
     setCompanies(companyData || [])
@@ -314,7 +360,11 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     const studentMap: Record<string, { full_name: string; company_id: string | null; cancellation_policy: string | null }> = {}
     for (const s of sRows) studentMap[s.id] = { full_name: s.full_name, company_id: s.company_id, cancellation_policy: s.cancellation_policy }
 
-    return rawLessons.map(l => {
+    // Counts lessons that had to fall back to the teacher's live rate, so the
+    // fallback can be surfaced below instead of only reaching the console.
+    let missingSnapshots = 0
+
+    const rows = rawLessons.map(l => {
       const t = teacherMap[l.teacher_id] || { full_name: 'Unknown', hourly_rate: 0, currency: 'EUR' }
       const s = studentMap[l.student_id] || { full_name: 'Unknown', company_id: null, cancellation_policy: null }
       const companyId = s.company_id
@@ -325,6 +375,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       // /api/admin/billing/entities; here we only compose the fallback + log the miss.
       const snapRate = snapMap[l.id]
       if (snapRate == null) {
+        missingSnapshots++
         console.error('[billing] no rate snapshot for lesson; falling back to live profiles.hourly_rate', { lesson_id: l.id })
       }
       const hourlyRate = snapRate != null ? snapRate : t.hourly_rate
@@ -342,6 +393,17 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
         companyName,
       }
     })
+
+    // The fallback is deliberate, but it can change what a teacher is paid, so it
+    // must never be invisible. Surfaced as a persistent note rather than a throw:
+    // the figures are still shown, flagged as possibly not the booking-time rate.
+    if (missingSnapshots > 0) {
+      setRateFallbackNote(
+        `${missingSnapshots} ${missingSnapshots === 1 ? 'class has' : 'classes have'} no booking-time rate snapshot, so the teacher's current hourly rate was used instead. Those amounts may not match the rate agreed when the class was booked — check before paying.`
+      )
+    }
+
+    return rows
   }, [])
 
   // ── Load lessons for an expanded invoice (teacher + month) ────────────────
@@ -350,6 +412,12 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     if (invoiceLessons[key]) return // already loaded
 
     setLoadingLessons(key)
+    setRateFallbackNote(null)
+    setInvoiceLessonErrors(prev => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
 
     // Bucket the invoice's lessons by the TEACHER's local month — the same basis
     // as invoices.amount_eur (recomputeAmounts.ts buckets via getMonthKeyInTz in
@@ -363,31 +431,74 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     const tz = teachers.find(t => t.id === teacherId)?.timezone || 'UTC'
     const { startUtc, endUtc } = getMonthRangeInTz(new Date(billingMonth + 'T12:00:00Z'), tz)
 
-    const { data: raw } = await supabase
-      .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
-      .eq('teacher_id', teacherId)
-      .gte('scheduled_at', startUtc)
-      .lt('scheduled_at', endUtc)
-      .order('scheduled_at', { ascending: true })
+    try {
+      const { data: raw, error } = await supabase
+        .from('lessons')
+        .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
+        .eq('teacher_id', teacherId)
+        .gte('scheduled_at', startUtc)
+        .lt('scheduled_at', endUtc)
+        .order('scheduled_at', { ascending: true })
 
-    const hydrated = await hydrateLessons(raw || [])
-    setInvoiceLessons(prev => ({ ...prev, [key]: hydrated }))
-    setLoadingLessons(null)
+      // A failed query must NOT fall through to the panel's "No classes found for
+      // this period." — that reads as a settled, empty invoice.
+      if (error) {
+        setInvoiceLessonErrors(prev => ({
+          ...prev,
+          [key]: `Could not load this invoice's classes (${error.message}). This is a failed load, not an empty invoice — collapse and reopen Detail to try again.`,
+        }))
+        return
+      }
+
+      const hydrated = await hydrateLessons(raw || [])
+      setInvoiceLessons(prev => ({ ...prev, [key]: hydrated }))
+    } catch (err: unknown) {
+      // hydrateLessons throws when the rates/policies lookup fails.
+      setInvoiceLessonErrors(prev => ({
+        ...prev,
+        [key]: err instanceof Error
+          ? err.message
+          : "Could not load this invoice's classes. This is a failed load, not an empty invoice.",
+      }))
+    } finally {
+      setLoadingLessons(null)
+    }
   }, [invoiceLessons, hydrateLessons, teachers])
 
   // ── Mark invoice as paid ───────────────────────────────────────────────────
+  // Success is claimed ONLY after the route confirms it. The previous version
+  // awaited the fetch, never checked res.ok, and toasted "marked as paid"
+  // unconditionally — a rejected or failed money mutation reported success.
   const handleMarkPaid = async (invoiceId: string) => {
     setSavingPaid(true)
-    await fetch('/api/admin/billing/mark-paid', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceId }),
-    })
-    setSavingPaid(false)
-    setMarkingPaidId(null)
-    await loadBaseData()
-    toast.success('Invoice marked as paid!')
+    try {
+      const res = await fetch('/api/admin/billing/mark-paid', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId }),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        // Leave the confirm row open so the admin can retry without hunting for it.
+        toast.error(
+          body.message ?? body.error ?? `Could not mark the invoice as paid (${res.status}). It is still unpaid.`,
+          { duration: 6000 }
+        )
+        return
+      }
+
+      setMarkingPaidId(null)
+      await loadBaseData()
+      toast.success('Invoice marked as paid!')
+    } catch {
+      toast.error(
+        'Could not mark the invoice as paid — the server could not be reached. It is still unpaid.',
+        { duration: 6000 }
+      )
+    } finally {
+      setSavingPaid(false)
+    }
   }
 
   // ── View invoice PDF (signed URL) ──────────────────────────────────────────
@@ -452,69 +563,126 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   const loadStudentBilling = useCallback(async () => {
     setSbLoading(true)
     setSbLoaded(false)
+    setRateFallbackNote(null)
 
-    // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
-    const { gteIso, ltIso } = resolveDayBounds(sbFilterDateFrom, sbFilterDateTo, exportTz)
+    try {
+      // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
+      const { gteIso, ltIso } = resolveDayBounds(sbFilterDateFrom, sbFilterDateTo, exportTz)
 
-    let query = supabase
-      .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
-      .in('status', SETTLED_LESSON_STATUSES)
-      .order('scheduled_at', { ascending: false })
+      let query = supabase
+        .from('lessons')
+        .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
+        .in('status', SETTLED_LESSON_STATUSES)
+        .order('scheduled_at', { ascending: false })
 
-    if (sbFilterStudent) query = query.eq('student_id', sbFilterStudent)
-    if (gteIso) query = query.gte('scheduled_at', gteIso)
-    if (ltIso) query = query.lt('scheduled_at', ltIso)
+      if (sbFilterStudent) query = query.eq('student_id', sbFilterStudent)
+      if (gteIso) query = query.gte('scheduled_at', gteIso)
+      if (ltIso) query = query.lt('scheduled_at', ltIso)
 
-    const { data: raw } = await query
-    const hydrated = await hydrateLessons(raw || [])
-    setSbLessons(hydrated)
-    setSbLoading(false)
-    setSbLoaded(true)
+      const { data: raw, error } = await query
+
+      // sbLoaded stays false on failure, so the "No lessons found for the selected
+      // filters." line never stands in for a load that never completed.
+      if (error) {
+        setSbLessons([])
+        setDataError(
+          `Could not load student billing (${error.message}). No rows are shown — this is a failed load, not an empty result.`
+        )
+        return
+      }
+
+      const hydrated = await hydrateLessons(raw || [])
+      setSbLessons(hydrated)
+      setSbLoaded(true)
+      setDataError(null)
+    } catch (err: unknown) {
+      // hydrateLessons throws when the rates/policies lookup fails.
+      setSbLessons([])
+      setDataError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load student billing. No rows are shown — this is a failed load, not an empty result.'
+      )
+    } finally {
+      setSbLoading(false)
+    }
   }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, exportTz, hydrateLessons])
 
   // ── Load Company Billing lessons ───────────────────────────────────────────
   const loadCompanyBilling = useCallback(async () => {
     setCbLoading(true)
     setCbLoaded(false)
+    setRateFallbackNote(null)
 
-    let studentsQuery = supabase
-      .from('students')
-      .select('id')
-      .not('company_id', 'is', null)
+    try {
+      let studentsQuery = supabase
+        .from('students')
+        .select('id')
+        .not('company_id', 'is', null)
 
-    if (cbFilterCompany) studentsQuery = studentsQuery.eq('company_id', cbFilterCompany)
+      if (cbFilterCompany) studentsQuery = studentsQuery.eq('company_id', cbFilterCompany)
 
-    const { data: companyStudents } = await studentsQuery
-    const studentIds = (companyStudents || []).map(s => s.id)
+      const { data: companyStudents, error: studentsError } = await studentsQuery
 
-    if (!studentIds.length) {
-      setCbLessons([])
-      setCbLoading(false)
+      // A failed students lookup used to yield studentIds = [] and take the
+      // "no students" exit below, reporting a broken query as an empty company.
+      if (studentsError) {
+        setCbLessons([])
+        setDataError(
+          `Could not load this company's students (${studentsError.message}). No rows are shown — this is a failed load, not an empty result.`
+        )
+        return
+      }
+
+      const studentIds = (companyStudents || []).map(s => s.id)
+
+      if (!studentIds.length) {
+        setCbLessons([])
+        setCbLoaded(true)
+        setDataError(null)
+        return
+      }
+
+      // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
+      // Must match the bounds /api/admin/billing/export computes from the same two
+      // filter values, so this table and its Export CSV never disagree at a boundary day.
+      const { gteIso, ltIso } = resolveDayBounds(cbFilterDateFrom, cbFilterDateTo, exportTz)
+
+      let lessonsQuery = supabase
+        .from('lessons')
+        .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
+        .in('student_id', studentIds)
+        .in('status', SETTLED_LESSON_STATUSES)
+        .order('scheduled_at', { ascending: false })
+
+      if (gteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', gteIso)
+      if (ltIso) lessonsQuery = lessonsQuery.lt('scheduled_at', ltIso)
+
+      const { data: raw, error: lessonsError } = await lessonsQuery
+
+      if (lessonsError) {
+        setCbLessons([])
+        setDataError(
+          `Could not load company billing (${lessonsError.message}). No rows are shown — this is a failed load, not an empty result.`
+        )
+        return
+      }
+
+      const hydrated = await hydrateLessons(raw || [])
+      setCbLessons(hydrated)
       setCbLoaded(true)
-      return
+      setDataError(null)
+    } catch (err: unknown) {
+      // hydrateLessons throws when the rates/policies lookup fails.
+      setCbLessons([])
+      setDataError(
+        err instanceof Error
+          ? err.message
+          : 'Could not load company billing. No rows are shown — this is a failed load, not an empty result.'
+      )
+    } finally {
+      setCbLoading(false)
     }
-
-    // Half-open [gte, lt) instant bounds resolved in exportTz — see resolveDayBounds.
-    // Must match the bounds /api/admin/billing/export computes from the same two
-    // filter values, so this table and its Export CSV never disagree at a boundary day.
-    const { gteIso, ltIso } = resolveDayBounds(cbFilterDateFrom, cbFilterDateTo, exportTz)
-
-    let lessonsQuery = supabase
-      .from('lessons')
-      .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
-      .in('student_id', studentIds)
-      .in('status', SETTLED_LESSON_STATUSES)
-      .order('scheduled_at', { ascending: false })
-
-    if (gteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', gteIso)
-    if (ltIso) lessonsQuery = lessonsQuery.lt('scheduled_at', ltIso)
-
-    const { data: raw } = await lessonsQuery
-    const hydrated = await hydrateLessons(raw || [])
-    setCbLessons(hydrated)
-    setCbLoading(false)
-    setCbLoaded(true)
   }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, exportTz, hydrateLessons])
 
   // ── CSV export helper ──────────────────────────────────────────────────────
@@ -685,6 +853,46 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
         ))}
       </div>
 
+      {/* Shared data-load error - same banner treatment as exportError below, and
+          rendered in the same place, so a failed load can never be mistaken for a
+          legitimately empty billing table. */}
+      {dataError && (
+        <div
+          className="mb-6 flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+        >
+          <span>{dataError}</span>
+          <button
+            onClick={() => setDataError(null)}
+            aria-label="Dismiss"
+            className="leading-none"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', fontSize: '16px', padding: '0 0 1px 0' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Rate-snapshot fallback - the figures below ARE shown, but at least one
+          used the teacher's live rate. Amber rather than red: a caveat on real
+          numbers, not a failure. */}
+      {rateFallbackNote && (
+        <div
+          className="mb-6 flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm"
+          style={{ backgroundColor: '#fff9f5', color: '#FF8303' }}
+        >
+          <span>{rateFallbackNote}</span>
+          <button
+            onClick={() => setRateFallbackNote(null)}
+            aria-label="Dismiss"
+            className="leading-none"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#FF8303', fontSize: '16px', padding: '0 0 1px 0' }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Shared export error - rendered outside the tab sections so it stays
           visible on whichever tab the admin triggered the export from. */}
       {exportError && (
@@ -794,6 +1002,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                   const lessonKey = `${inv.teacher_id}_${inv.billing_month}`
                   const lessonData = invoiceLessons[lessonKey] || []
                   const isLoadingThis = loadingLessons === lessonKey
+                  const lessonLoadError = invoiceLessonErrors[lessonKey]
                   const currSym = currencySymbol(lessonData[0]?.teacherCurrency)
 
                   return (
@@ -888,6 +1097,8 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                         <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
                           {isLoadingThis ? (
                             <p className="text-sm text-gray-400">Loading classes…</p>
+                          ) : lessonLoadError ? (
+                            <p className="text-sm" style={{ color: '#991b1b' }}>{lessonLoadError}</p>
                           ) : lessonData.length === 0 ? (
                             <p className="text-sm text-gray-400">No classes found for this period.</p>
                           ) : (
