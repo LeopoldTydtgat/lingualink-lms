@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { isTeacherProfile } from '@/lib/auth/isTeacherProfile'
 import { UpdateTeacherSchema } from '@/lib/validation/schemas'
 
 // ─── PATCH — update teacher profile ──────────────────────────────────────────
@@ -39,20 +40,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
-    // Only profiles the Teachers section manages may be modified here. The
-    // list page (admin/teachers/page.tsx) includes role 'teacher' and 'admin';
-    // the password route additionally recognises the 'teacher'/'teacher_exam'
-    // account types. Anything else (no role/type match) is off-limits — this
-    // route must not be usable against arbitrary profile rows.
-    const targetAccountTypes = Array.isArray(current.account_types)
-      ? (current.account_types as string[])
-      : []
-    const isTeacherProfile =
-      current.role === 'teacher' ||
-      current.role === 'admin' ||
-      targetAccountTypes.includes('teacher') ||
-      targetAccountTypes.includes('teacher_exam')
-    if (!isTeacherProfile) {
+    // Only profiles the Teachers section manages may be modified here, under
+    // THE canonical teacher rule (src/lib/auth/isTeacherProfile.ts) that the
+    // list page and the teachers list API now apply too: account_types overlaps
+    // ['teacher','teacher_exam'] OR role 'admin'. school_admin accounts are
+    // created with role 'admin', so they stay editable. Anything else is
+    // off-limits - this route must not be usable against arbitrary profile rows.
+    if (!isTeacherProfile(current)) {
       return NextResponse.json({ error: 'Target user is not a teacher.' }, { status: 403 })
     }
 

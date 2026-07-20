@@ -66,15 +66,28 @@ export default function TeachersListClient({ teachers }: Props) {
   const [statusFilter, setStatusFilter] = useState('All')
   const [showArchived, setShowArchived] = useState(false)
 
+  // Picking the 'former' status is an explicit request FOR archived rows, so it
+  // overrides the Show Archived toggle. ANDing the two (the previous behaviour)
+  // made status='former' with the toggle off return nothing at all - a dead
+  // empty state reachable straight from the filter controls.
+  const includeArchived = showArchived || statusFilter === 'former'
+
   const filtered = teachers.filter((t) => {
     const matchesSearch =
       (t.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       t.email.toLowerCase().includes(search.toLowerCase())
     const matchesStatus =
       statusFilter === 'All' || t.status === statusFilter
-    const matchesArchived = showArchived || t.status !== 'former'
+    const matchesArchived = includeArchived || t.status !== 'former'
     return matchesSearch && matchesStatus && matchesArchived
   })
+
+  // The header count reports the VISIBLE rows, not the unfiltered fetch, and
+  // names the archived share only when archived rows are actually on screen.
+  const archivedVisible = filtered.filter((t) => t.status === 'former').length
+  const countLabel =
+    `${filtered.length} teacher${filtered.length !== 1 ? 's' : ''}` +
+    (archivedVisible > 0 ? ` \u00B7 ${archivedVisible} archived` : '')
 
   return (
     <div className="p-6">
@@ -83,7 +96,7 @@ export default function TeachersListClient({ teachers }: Props) {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Teachers</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {teachers.length} teacher{teachers.length !== 1 ? 's' : ''} total
+            {countLabel}
           </p>
         </div>
         <button
@@ -118,8 +131,13 @@ export default function TeachersListClient({ teachers }: Props) {
         <button
           onClick={() => setShowArchived(!showArchived)}
           className="px-3 py-2 rounded-lg text-sm font-medium border"
+          aria-pressed={includeArchived}
+          // Reflects whether archived rows are actually being shown, so the
+          // status='former' override above does not leave the toggle reading
+          // "off" while archived rows are on screen. Tailwind v4 cannot build
+          // colour classes dynamically - state colours stay inline styles.
           style={
-            showArchived
+            includeArchived
               ? { backgroundColor: '#FF8303', color: '#ffffff', borderColor: '#FF8303' }
               : { backgroundColor: '#ffffff', color: '#6b7280', borderColor: '#e5e7eb' }
           }

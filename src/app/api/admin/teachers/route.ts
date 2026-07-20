@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { TEACHER_PROFILE_FILTER } from '@/lib/auth/isTeacherProfile'
 import { NextRequest, NextResponse } from 'next/server'
 import { CreateTeacherSchema } from '@/lib/validation/schemas'
 import { generateThrowawayPassword, sendAccountInviteEmail } from '@/lib/auth/inviteEmail'
@@ -22,11 +23,14 @@ export async function GET(req: NextRequest) {
   let query = adminClient
     .from('profiles')
     .select(minimal ? 'id, full_name' : 'id, full_name, email, status, account_types, hourly_rate, photo_url')
-    .not('account_types', 'is', null)
+    // THE canonical teacher rule - src/lib/auth/isTeacherProfile.ts. Replaces
+    // the old `.not(account_types,is,null)` + `.contains(['teacher'])` pair,
+    // which silently dropped teacher_exam-only and role-admin profiles and so
+    // disagreed with the Teachers list page. The null guard goes with it: the
+    // filter itself already excludes null account_types except via role.eq.admin,
+    // where the rule says the profile IS managed as a teacher.
+    .or(TEACHER_PROFILE_FILTER)
     .order('full_name')
-
-  // Only return actual teachers (not pure admin/HR accounts)
-  query = query.contains('account_types', ['teacher'])
 
   if (search) {
     query = query.ilike('full_name', `%${search}%`)
