@@ -13,6 +13,7 @@ import {
   GraduationCap,
   Clock,
   Flame,
+  Loader2,
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
 import { formatCompoundCountdown } from '@/lib/lessons/countdown'
@@ -368,7 +369,7 @@ function LessonRow({
                 padding="5px 10px"
                 fontSize="12px"
               >
-                {isCancelling ? '...' : 'Cancel'}
+                {isCancelling ? 'Cancelling...' : 'Cancel'}
               </SecondaryButton>
             </div>
           )}
@@ -407,6 +408,7 @@ export default function MyClassesClient({
   const router = useRouter()
 
   const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted && !bannerDismissed)
+  const [isDismissingBanner, setIsDismissingBanner] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
@@ -519,6 +521,7 @@ export default function MyClassesClient({
   const scheduledCount = scheduledLessons.length
 
   async function handleDismissBanner() {
+    setIsDismissingBanner(true)
     try {
       const res = await fetch('/api/student/profile/dismiss-banner', { method: 'POST' })
       if (!res.ok) {
@@ -527,6 +530,8 @@ export default function MyClassesClient({
       }
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
+    } finally {
+      setIsDismissingBanner(false)
     }
     setShowProfileBanner(false)
   }
@@ -567,19 +572,21 @@ export default function MyClassesClient({
           </p>
           <button
             onClick={handleDismissBanner}
+            disabled={isDismissingBanner}
             aria-label="Dismiss"
             style={{
               background: 'none',
               border: 'none',
-              cursor: 'pointer',
+              cursor: isDismissingBanner ? 'wait' : 'pointer',
               fontSize: '18px',
               color: '#9ca3af',
               lineHeight: 1,
               padding: '0 4px',
               flexShrink: 0,
+              opacity: isDismissingBanner ? 0.5 : 1,
             }}
           >
-            ×
+            {isDismissingBanner ? <Loader2 size={16} className="animate-spin" /> : '×'}
           </button>
         </div>
       )}
@@ -812,7 +819,7 @@ export default function MyClassesClient({
               padding="8px 14px"
               fontSize="13px"
             >
-              {nextCancelling ? '...' : 'Cancel'}
+              {nextCancelling ? 'Cancelling...' : 'Cancel'}
             </SecondaryButton>
           </div>
 

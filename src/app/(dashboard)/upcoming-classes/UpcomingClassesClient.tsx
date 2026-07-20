@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
-import { CalendarDays, Plus, History } from 'lucide-react'
+import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { formatCompoundCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
@@ -528,7 +528,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             style={{ background: 'none', border: 'none', cursor: isDismissing ? 'wait' : 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0, opacity: isDismissing ? 0.5 : 1 }}
             aria-label="Dismiss"
           >
-            ×
+            {isDismissing ? <Loader2 size={16} className="animate-spin" /> : '×'}
           </button>
         </div>
       )}
