@@ -23,6 +23,7 @@ import {
   LogOut,
   Menu,
   Loader2,
+  Activity,
 } from 'lucide-react'
 import type { RightPanelStats } from './layout'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
@@ -49,21 +50,58 @@ interface AdminLayoutClientProps {
   children: React.ReactNode
 }
 
-const navItems = [
-  { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { href: '/admin/teachers', label: 'Teachers', icon: Users },
-  { href: '/admin/students', label: 'Students', icon: GraduationCap },
-  { href: '/admin/companies', label: 'Companies', icon: Building2 },
-  { href: '/admin/classes', label: 'Classes', icon: CalendarDays },
-  { href: '/admin/reports', label: 'Reports', icon: FileText },
-  { href: '/admin/messages', label: 'Messages', icon: MessageSquare },
-  { href: '/admin/support', label: 'Support', icon: Headphones },
-  { href: '/admin/billing', label: 'Billing', icon: CreditCard },
-  { href: '/admin/library', label: 'Library', icon: BookOpen },
-  { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
-  { href: '/admin/tasks', label: 'Tasks', icon: CheckSquare },
-  { href: '/admin/exports', label: 'Exports', icon: Download },
-  { href: '/admin/settings', label: 'Settings', icon: Settings },
+interface NavItem {
+  href: string
+  label: string
+  icon: React.ElementType
+  exact?: boolean
+}
+
+interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+const navGroups: NavGroup[] = [
+  {
+    label: 'Overview',
+    items: [
+      { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+    ],
+  },
+  {
+    label: 'People',
+    items: [
+      { href: '/admin/teachers', label: 'Teachers', icon: Users },
+      { href: '/admin/students', label: 'Students', icon: GraduationCap },
+      { href: '/admin/companies', label: 'Companies', icon: Building2 },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { href: '/admin/classes', label: 'Classes', icon: CalendarDays },
+      { href: '/admin/reports', label: 'Reports', icon: FileText },
+      { href: '/admin/messages', label: 'Messages', icon: MessageSquare },
+      { href: '/admin/support', label: 'Support', icon: Headphones },
+      { href: '/admin/billing', label: 'Billing', icon: CreditCard },
+    ],
+  },
+  {
+    label: 'Content',
+    items: [
+      { href: '/admin/library', label: 'Library', icon: BookOpen },
+      { href: '/admin/announcements', label: 'Announcements', icon: Megaphone },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/admin/tasks', label: 'Tasks', icon: CheckSquare },
+      { href: '/admin/exports', label: 'Exports', icon: Download },
+      { href: '/admin/settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ]
 
 // Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
@@ -116,6 +154,53 @@ function AdminNavContent({
         </span>
       )}
     </span>
+  )
+}
+
+// Module scope, not the component body: a component declared inside AdminLayoutClient
+// is a new type on every render, so every Realtime unread-count change would unmount
+// and remount the whole nav — resetting scroll and killing in-flight link spinners.
+// Everything it used to close over now arrives as a prop.
+function NavLink({
+  item,
+  active,
+  unreadMessages,
+  unreadSupport,
+  onNavigate,
+}: {
+  item: NavItem
+  active: boolean
+  unreadMessages: number
+  unreadSupport: number
+  onNavigate: () => void
+}) {
+  const Icon = item.icon
+  const showBadge =
+        (item.href === '/admin/messages' && unreadMessages > 0) ||
+        (item.href === '/admin/support' && unreadSupport > 0)
+
+      const badgeCount =
+        item.href === '/admin/messages' ? unreadMessages : unreadSupport
+  return (
+    <Link
+      href={item.href}
+      prefetch={false}
+      onClick={onNavigate}
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-white/10'}`}
+      style={
+        active
+          ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
+          : { color: '#9ca3af' }
+      }
+    >
+      <AdminNavContent
+        Icon={Icon}
+        label={item.label}
+        active={active}
+        showBadge={showBadge}
+        badgeCount={badgeCount}
+      />
+    </Link>
   )
 }
 
@@ -242,9 +327,9 @@ export default function AdminLayoutClient({
     }
   }
 
-  // One element reused by all three sidebar footers below (desktop, mobile, and the
-  // Sidebar component). React elements are immutable descriptors, so sharing one
-  // across trees is safe even when two of them are mounted at once.
+  // One element reused by both sidebar footers below (desktop and mobile). React
+  // elements are immutable descriptors, so sharing one across trees is safe even
+  // when both are mounted at once.
   const logoutErrorCard = logoutError && (
     <div
       className="mb-2 rounded-lg px-3 py-2"
@@ -259,65 +344,43 @@ export default function AdminLayoutClient({
     return pathname.startsWith(href)
   }
 
-  const NavLink = ({ item }: { item: (typeof navItems)[0] }) => {
-    const active = isActive(item.href, item.exact)
-    const Icon = item.icon
-    const showBadge =
-          (item.href === '/admin/messages' && liveUnreadMessages > 0) ||
-          (item.href === '/admin/support' && liveUnreadSupport > 0)
-
-        const badgeCount =
-          item.href === '/admin/messages' ? liveUnreadMessages : liveUnreadSupport
-    return (
-      <Link
-        href={item.href}
-        prefetch={false}
-        onClick={() => setSidebarOpen(false)}
-        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-white/10'}`}
-        style={
-          active
-            ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
-            : { color: '#9ca3af' }
-        }
-      >
-        <AdminNavContent
-          Icon={Icon}
-          label={item.label}
-          active={active}
-          showBadge={showBadge}
-          badgeCount={badgeCount}
-        />
-      </Link>
-    )
-  }
-
-  const Sidebar = () => (
-    <div className="flex flex-col h-full">
-      <div
-        style={{
-          height: '72px',
-          background: 'linear-gradient(to right, #ffffff, #fff3e8)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          borderBottom: '1px solid rgba(255,131,3,0.15)',
-        }}
-      >
-        <Link href="/admin" prefetch={false}>
-          <img
-            src="/lingualink-logo-clean.svg"
-            alt="Lingualink Online"
-            style={{ height: '56px', width: 'auto' }}
-          />
-        </Link>
-      </div>
-      <nav className="flex-1 px-3 pt-6 space-y-1 overflow-y-auto thin-scroll">
-        {navItems.map((item) => (
-          <NavLink key={item.href} item={item} />
+  // Single source for both sidebars (desktop column + mobile overlay): grouped nav
+  // plus the footer. A plain JSX element, like logoutErrorCard above — sharing one
+  // immutable descriptor across both trees keeps them in lockstep without a new
+  // component type per render.
+  const sidebarInner = (
+    <>
+      <nav className="flex-1 px-3 pt-4 overflow-y-auto admin-sidebar-scroll">
+        {navGroups.map((group, groupIndex) => (
+          <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : '18px' }}>
+            <p
+              style={{
+                fontSize: '10px',
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: '#6b7280',
+                padding: '0 12px',
+                marginBottom: '4px',
+              }}
+            >
+              {group.label}
+            </p>
+            <div className="space-y-1">
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.href}
+                  item={item}
+                  active={isActive(item.href, item.exact)}
+                  unreadMessages={liveUnreadMessages}
+                  unreadSupport={liveUnreadSupport}
+                  onNavigate={() => setSidebarOpen(false)}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
-
       <div className="px-3 py-4 border-t border-gray-700 space-y-1">
         {logoutErrorCard}
         <Link
@@ -339,7 +402,7 @@ export default function AdminLayoutClient({
           {loggingOut ? 'Logging out…' : 'Log Out'}
         </button>
       </div>
-    </div>
+    </>
   )
 
   const panelWidgets = [
@@ -357,14 +420,14 @@ export default function AdminLayoutClient({
       <header
         className="flex items-center justify-between px-6 flex-shrink-0 w-full"
         style={{
-          background: 'linear-gradient(to right, #ffffff 0%, #fff3e8 18%, #FF8303 32%)',
+          backgroundColor: '#FF8303',
           height: '72px',
           zIndex: 10,
         }}
       >
         <Link href="/admin" prefetch={false}>
           <img
-            src="/lingualink-logo-clean.svg"
+            src="/lingualink-logo-white.svg"
             alt="Lingualink Online"
             style={{ height: '56px', width: 'auto' }}
           />
@@ -397,32 +460,7 @@ export default function AdminLayoutClient({
 
         {/* Desktop sidebar */}
         <aside className="hidden lg:flex flex-col w-56 flex-shrink-0 bg-gray-900">
-          <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto admin-sidebar-scroll">
-            {navItems.map((item) => (
-              <NavLink key={item.href} item={item} />
-            ))}
-          </nav>
-          <div className="px-3 py-4 border-t border-gray-700 space-y-1">
-            {logoutErrorCard}
-            <Link
-              href="/dashboard"
-              prefetch={false}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ color: '#9ca3af' }}
-            >
-              <ArrowLeft size={18} style={{ color: '#9ca3af' }} />
-              Back to Teacher Portal
-            </Link>
-            <button
-              onClick={handleLogout}
-              disabled={loggingOut}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
-            >
-              <LogOut size={18} style={{ color: '#9ca3af' }} />
-              {loggingOut ? 'Logging out…' : 'Log Out'}
-            </button>
-          </div>
+          {sidebarInner}
         </aside>
 
         {/* Mobile sidebar overlay */}
@@ -430,32 +468,7 @@ export default function AdminLayoutClient({
           <div className="lg:hidden fixed inset-0 z-40 flex">
             <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
             <aside className="relative flex flex-col w-56 bg-gray-900 z-50">
-              <nav className="flex-1 px-3 pt-4 space-y-1 overflow-y-auto admin-sidebar-scroll">
-                {navItems.map((item) => (
-                  <NavLink key={item.href} item={item} />
-                ))}
-              </nav>
-              <div className="px-3 py-4 border-t border-gray-700 space-y-1">
-                {logoutErrorCard}
-                <Link
-                  href="/dashboard"
-                  prefetch={false}
-                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
-                  style={{ color: '#9ca3af' }}
-                >
-                  <ArrowLeft size={18} style={{ color: '#9ca3af' }} />
-                  Back to Teacher Portal
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  disabled={loggingOut}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
-                  style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
-                >
-                  <LogOut size={18} style={{ color: '#9ca3af' }} />
-                  {loggingOut ? 'Logging out…' : 'Log Out'}
-                </button>
-              </div>
+              {sidebarInner}
             </aside>
           </div>
         )}
@@ -467,42 +480,45 @@ export default function AdminLayoutClient({
           </div>
         </main>
 
-        {/* Right panel */}
-        <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 border-l border-gray-200 p-4 overflow-y-auto thin-scroll" style={{ backgroundColor: '#FFFCF8' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-            <div style={{ width: '3px', height: '14px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-            <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>At a Glance</p>
-          </div>
-          <div className="space-y-3">
-            {panelWidgets.map((w) => (
-              <Link key={w.label} href={w.href} prefetch={false}>
-                <div className="rounded-lg p-3 bg-gray-50 border border-gray-200 hover:border-orange-200 transition-colors">
-                  <p className="text-xs text-gray-500">{w.label}</p>
-                  <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827' }}>
-                    {w.value === null ? (
-                      <span className="text-sm font-medium" style={{ color: '#9ca3af' }}>Set timezone</span>
-                    ) : (
-                      w.value
-                    )}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-          {rightPanelStats.activeAnnouncementText && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                Announcement
-              </p>
-              <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">
-                {rightPanelStats.activeAnnouncementText}
-              </p>
-              <Link href="/admin/announcements" prefetch={false} className="text-xs mt-1 inline-block hover:underline" style={{ color: '#FF8303' }}>
-                Manage
-              </Link>
+        {/* Right panel — the dashboard renders these same five stats as full-width
+            cards, so the rail would be pure duplication there. */}
+        {pathname !== '/admin' && (
+          <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 border-l border-gray-200 p-4 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">At a Glance</p>
             </div>
-          )}
-        </aside>
+            <div className="space-y-3">
+              {panelWidgets.map((w) => (
+                <Link key={w.label} href={w.href} prefetch={false}>
+                  <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 hover:shadow-md hover:border-orange-200 transition-all">
+                    <p className="text-xs text-gray-500">{w.label}</p>
+                    <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827', fontVariantNumeric: 'tabular-nums' }}>
+                      {w.value === null ? (
+                        <span className="text-sm font-medium" style={{ color: '#9ca3af' }}>Set timezone</span>
+                      ) : (
+                        w.value
+                      )}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+            {rightPanelStats.activeAnnouncementText && (
+              <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 mt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Announcement
+                </p>
+                <p className="text-xs text-gray-600 leading-relaxed line-clamp-4">
+                  {rightPanelStats.activeAnnouncementText}
+                </p>
+                <Link href="/admin/announcements" prefetch={false} className="text-xs mt-1 inline-block hover:underline" style={{ color: '#FF8303' }}>
+                  Manage
+                </Link>
+              </div>
+            )}
+          </aside>
+        )}
       </div>
 
       <IdleTimeoutWatcher
