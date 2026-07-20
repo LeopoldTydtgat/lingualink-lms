@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { StudySheet, WordRow, Attachment } from './LibraryAdminClient'
 import { Tag, kindPillStyle } from './TagManagerModal'
-import { Check, Tag as TagIcon, FileText } from 'lucide-react'
+import { Check, Tag as TagIcon, FileText, Loader2 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -232,6 +232,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Keyed per attachment name: several rows can be removed at once, and a shared
+  // boolean would spin and disable all of them.
+  const [removingFiles, setRemovingFiles] = useState<Set<string>>(new Set())
 
   // Create mode only: files chosen but not yet uploaded. The study_sheets row
   // doesn't exist until Save and the upload route rejects uploads for missing
@@ -279,60 +282,88 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
 
     setUploadError(null)
 
-    for (const file of files) {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        setUploadError(`"${file.name}" is not a supported file type. Please upload PDF, DOC, DOCX, PPT, or PPTX files.`)
-        continue
-      }
-      if (file.size > MAX_FILE_SIZE) {
-        setUploadError(`"${file.name}" exceeds the 10 MB limit.`)
-        continue
-      }
+    try {
+      for (const file of files) {
+        if (!ACCEPTED_TYPES.includes(file.type)) {
+          setUploadError(`"${file.name}" is not a supported file type. Please upload PDF, DOC, DOCX, PPT, or PPTX files.`)
+          continue
+        }
+        if (file.size > MAX_FILE_SIZE) {
+          setUploadError(`"${file.name}" exceeds the 10 MB limit.`)
+          continue
+        }
 
-      // Create mode: the study_sheets row doesn't exist yet and the upload route
-      // rejects uploads for missing rows. Defer — stage the File and upload on Save.
-      if (!isEdit) {
-        setPendingFiles(prev => [...prev, file])
-        continue
+        // Create mode: the study_sheets row doesn't exist yet and the upload route
+        // rejects uploads for missing rows. Defer — stage the File and upload on Save.
+        if (!isEdit) {
+          setPendingFiles(prev => [...prev, file])
+          continue
+        }
+
+        // Edit mode: the row exists, so upload immediately (unchanged behaviour).
+        setUploading(true)
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('sheet_id', sheetId)
+
+        const res = await fetch('/api/admin/library/upload', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          setUploadError(body.error ?? `Failed to upload "${file.name}". Please try again.`)
+          break
+        }
+
+        const data: Attachment = await res.json()
+        setAttachments(prev => [...prev, data])
       }
+    } catch {
+      // Without this the button sits at "Uploading…", disabled, with no reason.
+      setUploadError('Could not reach the server, so the upload did not finish. Check your connection and try again.')
+    } finally {
+      setUploading(false)
+      // Reset file input so the same file can be re-selected if needed
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
 
-      // Edit mode: the row exists, so upload immediately (unchanged behaviour).
-      setUploading(true)
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('sheet_id', sheetId)
+  const handleFileRemove = async (attachment: Attachment) => {
+    setUploadError(null)
+    setRemovingFiles(prev => {
+      const next = new Set(prev)
+      next.add(attachment.name)
+      return next
+    })
 
+    try {
       const res = await fetch('/api/admin/library/upload', {
-        method: 'POST',
-        body: formData,
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheet_id: sheetId, filename: attachment.name }),
       })
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
-        setUploadError(body.error ?? `Failed to upload "${file.name}". Please try again.`)
-        setUploading(false)
-        break
+        setUploadError(body.error || `"${attachment.name}" could not be removed and is still attached to this sheet.`)
+        return
       }
 
-      const data: Attachment = await res.json()
-      setAttachments(prev => [...prev, data])
-      setUploading(false)
+      // Only drop the row once the file is really gone. Removing it first and
+      // saving would strip the reference from the sheet while the file stayed in
+      // the bucket — orphaned, and unreachable from the UI ever again.
+      setAttachments(prev => prev.filter(a => a.name !== attachment.name))
+    } catch {
+      setUploadError(`Could not reach the server, so "${attachment.name}" was not removed. Check your connection and try again.`)
+    } finally {
+      setRemovingFiles(prev => {
+        const next = new Set(prev)
+        next.delete(attachment.name)
+        return next
+      })
     }
-
-    // Reset file input so the same file can be re-selected if needed
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const handleFileRemove = async (attachment: Attachment) => {
-    // Optimistically remove from UI
-    setAttachments(prev => prev.filter(a => a.name !== attachment.name))
-
-    // Fire-and-forget storage deletion
-    fetch('/api/admin/library/upload', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheet_id: sheetId, filename: attachment.name }),
-    }).catch(() => {/* ignore */})
   }
 
   // Create mode: drop a staged file. Nothing is on the server yet, so no fetch.
@@ -353,139 +384,163 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     setSaving(true)
     setError(null)
 
-    const content = {
-      words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
-      // Exercises/MCQs now live in the activities table; content keeps an empty
-      // array purely for the backward-compatible shape the routes expect.
-      exercises: [],
-    }
+    // Create mode: flipped once the POST lands. A throw after that point must not
+    // be reported as "nothing was saved" — the row is real from then on.
+    let rowCreated = false
 
-    const payload: Record<string, unknown> = {
-      title: title.trim(),
-      category,
-      level,
-      difficulty: difficulty ?? 1,
-      intro_text: introText.trim() || null,
-      content,
-      allowed_roles: presetToRoles(rolesPreset),
-      // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
-      // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
-      audience: type === 'study_sheet' ? 'student' : 'staff',
-      is_active: true,
-      // Edit mode persists the already-uploaded attachments; create mode uploads
-      // after the row exists (see below), so it sends none here.
-      attachments: isEdit ? attachments : [],
-    }
+    try {
+      const content = {
+        words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
+        // Exercises/MCQs now live in the activities table; content keeps an empty
+        // array purely for the backward-compatible shape the routes expect.
+        exercises: [],
+      }
 
-    // Edit mode: single PATCH; files were uploaded inline on selection.
-    if (isEdit) {
-      const res = await fetch(`/api/admin/library/${sheet!.id}`, {
-        method: 'PATCH',
+      const payload: Record<string, unknown> = {
+        title: title.trim(),
+        category,
+        level,
+        difficulty: difficulty ?? 1,
+        intro_text: introText.trim() || null,
+        content,
+        allowed_roles: presetToRoles(rolesPreset),
+        // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
+        // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
+        audience: type === 'study_sheet' ? 'student' : 'staff',
+        is_active: true,
+        // Edit mode persists the already-uploaded attachments; create mode uploads
+        // after the row exists (see below), so it sends none here.
+        attachments: isEdit ? attachments : [],
+      }
+
+      // Edit mode: single PATCH; files were uploaded inline on selection.
+      if (isEdit) {
+        const res = await fetch(`/api/admin/library/${sheet!.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          setError(body.error || 'Something went wrong. Please try again.')
+          return
+        }
+
+        // Tags are a separate table, so a separate write. The sheet is already
+        // saved: on failure hold the modal open with the reason rather than
+        // closing over it — saving again simply re-runs both writes.
+        const tagsError = await saveTags(sheet!.id)
+        if (tagsError) {
+          setActiveTab('tags')
+          setError(tagsError)
+          return
+        }
+
+        await onSaved()
+        return
+      }
+
+      // Create mode: save first, then upload (the upload route rejects files for
+      // rows that don't exist yet). Order: (a) create the row, (b) upload staged
+      // files, (c) PATCH the resulting attachments onto the row, (d) write tags,
+      // (e) finish.
+      payload.id = sheetId
+
+      // (a) Create the row with no attachments. On failure nothing else ran, so the
+      // staged files and form state stay intact for a retry.
+      const createRes = await fetch('/api/admin/library', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
+      if (!createRes.ok) {
+        const body = await createRes.json().catch(() => ({}))
         setError(body.error || 'Something went wrong. Please try again.')
-        setSaving(false)
         return
       }
 
-      // Tags are a separate table, so a separate write. The sheet is already
-      // saved: on failure hold the modal open with the reason rather than
-      // closing over it — saving again simply re-runs both writes.
-      const tagsError = await saveTags(sheet!.id)
-      setSaving(false)
-      if (tagsError) {
-        setActiveTab('tags')
-        setError(tagsError)
+      rowCreated = true
+
+      // (b) The row exists now — upload each staged file. Keep going on a failure so
+      // one bad file doesn't drop the rest; remember that something failed.
+      const uploaded: Attachment[] = []
+      let anyFailed = false
+      for (const file of pendingFiles) {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('sheet_id', sheetId)
+
+        const upRes = await fetch('/api/admin/library/upload', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!upRes.ok) {
+          anyFailed = true
+          continue
+        }
+
+        const data: Attachment = await upRes.json()
+        uploaded.push(data)
+      }
+
+      // (c) Attach whatever uploaded successfully onto the new row. The files are
+      // already sitting in the storage bucket, so a failure here is not silent
+      // housekeeping: it strands them there with nothing pointing at them.
+      let attachFailed = false
+      if (uploaded.length > 0) {
+        const attachRes = await fetch(`/api/admin/library/${sheetId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachments: uploaded }),
+        })
+
+        if (!attachRes.ok) attachFailed = true
+      }
+
+      // (d) The row exists, so its tags can be written.
+      let tagsError: string | null = null
+      if (selectedTagIds.size > 0) {
+        tagsError = await saveTags(sheetId)
+      }
+
+      // (e) The row exists either way. If a file, the attachment record, or the
+      // tags failed, the modal must STAY OPEN to say so: setError followed by
+      // onSaved() would unmount this component in the same render, and the message
+      // would never paint — the admin would see a clean close and believe
+      // everything saved. Close (below) is what refreshes the list from here.
+      if (anyFailed || attachFailed || tagsError) {
+        const parts: string[] = []
+        if (anyFailed) parts.push("some files didn't upload")
+        if (attachFailed) parts.push('the files that did upload were not saved onto the sheet')
+        if (tagsError) parts.push("its tags didn't save")
+
+        const detail =
+          parts.length === 1 ? parts[0] :
+          parts.length === 2 ? `${parts[0]} and ${parts[1]}` :
+          `${parts[0]}, ${parts[1]} and ${parts[2]}`
+
+        setCreatedIncomplete(true)
+        setError(`Sheet created, but ${detail}. Close, then open the sheet to add them again.`)
         return
       }
 
       await onSaved()
-      return
-    }
-
-    // Create mode: save first, then upload (the upload route rejects files for
-    // rows that don't exist yet). Order: (a) create the row, (b) upload staged
-    // files, (c) PATCH the resulting attachments onto the row, (d) write tags,
-    // (e) finish.
-    payload.id = sheetId
-
-    // (a) Create the row with no attachments. On failure nothing else ran, so the
-    // staged files and form state stay intact for a retry.
-    const createRes = await fetch('/api/admin/library', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-
-    if (!createRes.ok) {
-      const body = await createRes.json().catch(() => ({}))
-      setError(body.error || 'Something went wrong. Please try again.')
-      setSaving(false)
-      return
-    }
-
-    // (b) The row exists now — upload each staged file. Keep going on a failure so
-    // one bad file doesn't drop the rest; remember that something failed.
-    const uploaded: Attachment[] = []
-    let anyFailed = false
-    for (const file of pendingFiles) {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('sheet_id', sheetId)
-
-      const upRes = await fetch('/api/admin/library/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!upRes.ok) {
-        anyFailed = true
-        continue
+    } catch {
+      if (rowCreated) {
+        // The row is on the server. Offering Save again would POST the same id and
+        // collide, so the modal switches to the same hold-and-explain state the
+        // partial-failure path uses.
+        setCreatedIncomplete(true)
+        setError("Sheet created, but the server couldn't be reached to finish saving its files and tags. Close, then open the sheet to add them again.")
+      } else {
+        setError('Could not reach the server, so nothing was saved. Check your connection and try again.')
       }
-
-      const data: Attachment = await upRes.json()
-      uploaded.push(data)
+    } finally {
+      setSaving(false)
     }
-
-    // (c) Attach whatever uploaded successfully onto the new row.
-    if (uploaded.length > 0) {
-      await fetch(`/api/admin/library/${sheetId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attachments: uploaded }),
-      })
-    }
-
-    // (d) The row exists, so its tags can be written.
-    let tagsError: string | null = null
-    if (selectedTagIds.size > 0) {
-      tagsError = await saveTags(sheetId)
-    }
-
-    setSaving(false)
-
-    // (e) The row exists either way. If a file or the tags failed, the modal must
-    // STAY OPEN to say so: setError followed by onSaved() would unmount this
-    // component in the same render, and the message would never paint — the admin
-    // would see a clean close and believe everything saved. Close (below) is what
-    // refreshes the list from here.
-    if (anyFailed || tagsError) {
-      setCreatedIncomplete(true)
-      setError(
-        anyFailed && tagsError
-          ? "Sheet created, but some files and its tags didn't save. Close, then open the sheet to add them again."
-          : anyFailed
-            ? "Sheet created, but some files didn't upload. Close, then open the sheet to add them again."
-            : "Sheet created, but its tags didn't save. Close, then open the sheet to set them again."
-      )
-      return
-    }
-
-    await onSaved()
   }
 
   // ── Tag picker ────────────────────────────────────────────────────────────
@@ -896,13 +951,16 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                         <button
                           type="button"
                           onClick={() => handleFileRemove(att)}
-                          className="text-sm flex-shrink-0"
+                          disabled={removingFiles.has(att.name)}
+                          className="text-sm flex-shrink-0 disabled:opacity-60"
                           style={{ color: '#FD5602' }}
                           onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
                           onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
                           title="Remove file"
                         >
-                          ✕
+                          {removingFiles.has(att.name)
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            : '✕'}
                         </button>
                       </div>
                     ))}
