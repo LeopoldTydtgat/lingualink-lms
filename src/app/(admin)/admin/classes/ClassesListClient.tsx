@@ -295,6 +295,7 @@ export default function ClassesListClient({ teachers }: Props) {
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={applyFilters}
+            disabled={loading}
             style={{
               backgroundColor: '#FF8303',
               color: 'white',
@@ -303,10 +304,11 @@ export default function ClassesListClient({ teachers }: Props) {
               padding: '8px 16px',
               fontSize: '14px',
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1,
             }}
           >
-            Apply
+            {loading ? 'Loading…' : 'Apply'}
           </button>
           <button
             onClick={clearFilters}
@@ -493,15 +495,15 @@ export default function ClassesListClient({ teachers }: Props) {
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '24px' }}>
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
+            disabled={page === 1 || loading}
             style={{
               padding: '8px 16px',
               border: '1px solid #D1D5DB',
               borderRadius: '6px',
               backgroundColor: 'white',
               fontSize: '14px',
-              cursor: page === 1 ? 'not-allowed' : 'pointer',
-              color: page === 1 ? '#9CA3AF' : '#374151',
+              cursor: page === 1 || loading ? 'not-allowed' : 'pointer',
+              color: page === 1 || loading ? '#9CA3AF' : '#374151',
             }}
           >
             Previous
@@ -511,15 +513,15 @@ export default function ClassesListClient({ teachers }: Props) {
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
+            disabled={page === totalPages || loading}
             style={{
               padding: '8px 16px',
               border: '1px solid #D1D5DB',
               borderRadius: '6px',
               backgroundColor: 'white',
               fontSize: '14px',
-              cursor: page === totalPages ? 'not-allowed' : 'pointer',
-              color: page === totalPages ? '#9CA3AF' : '#374151',
+              cursor: page === totalPages || loading ? 'not-allowed' : 'pointer',
+              color: page === totalPages || loading ? '#9CA3AF' : '#374151',
             }}
           >
             Next

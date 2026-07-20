@@ -83,34 +83,52 @@ export default function ClassDetailClient({ lesson }: Props) {
   const isCancellable = ['scheduled'].includes(lesson.status)
   const isCancelled = isCancelledStatus(lesson.status)
 
+  // res.json() stays INSIDE the try deliberately. It is a second throw source
+  // alongside fetch(): a non-JSON body — a Vercel gateway-timeout HTML page, say —
+  // makes it reject even when res.ok is true. Both must land in the same catch,
+  // because an escaping rejection used to leave `deleting` set forever, wedging the
+  // button at "Deleting..." AND the modal's "Go Back" (disabled={deleting}) with it,
+  // leaving no way out but a page reload. Clearing in a finally makes the modal
+  // escapable again on every path.
   async function handleDelete() {
     setDeleting(true)
     setDeleteError('')
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (!res.ok) {
-      setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) {
+        setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+        return
+      }
+      window.location.href = '/admin/classes'
+    } catch {
+      setDeleteError('Could not reach the server, or it returned an unreadable response. The class has NOT been deleted — try again.')
+    } finally {
       setDeleting(false)
-      return
     }
-    window.location.href = '/admin/classes'
   }
 
+  // Same two throw sources as handleDelete above; same finally for the same reason.
   async function handleCancel() {
     setCancelling(true)
     setCancelError('')
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason, refund_hours: refundHours }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setCancelError(data.error ?? 'Failed to cancel. Please try again.')
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason, refund_hours: refundHours }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setCancelError(data.error ?? 'Failed to cancel. Please try again.')
+        return
+      }
+      window.location.href = '/admin/classes'
+    } catch {
+      setCancelError('Could not reach the server, or it returned an unreadable response. The class has NOT been cancelled — try again.')
+    } finally {
       setCancelling(false)
-      return
     }
-    window.location.href = '/admin/classes'
   }
 
   function openCancelModal() {
@@ -357,7 +375,12 @@ export default function ClassDetailClient({ lesson }: Props) {
                   Are you sure you want to delete this class? This cannot be undone.
                 </p>
                 {deleteError && (
-                  <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{deleteError}</p>
+                  <div style={{
+                    borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6',
+                    borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#FD5602', margin: 0 }}>{deleteError}</p>
+                  </div>
                 )}
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                   <button
@@ -443,7 +466,12 @@ export default function ClassDetailClient({ lesson }: Props) {
               </p>
             )}
             {cancelError && (
-              <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{cancelError}</p>
+              <div style={{
+                borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6',
+                borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+              }}>
+                <p style={{ fontSize: '13px', color: '#FD5602', margin: 0 }}>{cancelError}</p>
+              </div>
             )}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button

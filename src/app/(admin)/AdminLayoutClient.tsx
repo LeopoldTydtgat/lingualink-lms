@@ -131,6 +131,8 @@ export default function AdminLayoutClient({
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [liveUnreadMessages, setLiveUnreadMessages] = useState(unreadMessagesCount)
   const [liveUnreadSupport, setLiveUnreadSupport] = useState(unreadSupportCount)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
 
   const supabaseRef = useRef(createClient())
   const messagesRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -219,12 +221,38 @@ export default function AdminLayoutClient({
     }
   }, [])
 
+  // A failed sign-out must never look like a successful one. Previously a rejected
+  // signOut() left the handler as an unhandled rejection: no navigation, no message,
+  // and an admin who believes they are logged out while the session is still live —
+  // the worst case being a shared machine. So the failure is stated explicitly.
+  // The flag is cleared only in the catch, not a finally: on success the browser is
+  // already navigating away and the button must stay disabled until it does.
   const handleLogout = async () => {
-    await supabaseRef.current.auth.signOut()
-    // Login route lives on the teacher portal — must be a full nav, not router.push
-    const teacherUrl = process.env.NEXT_PUBLIC_TEACHER_URL
-    window.location.href = teacherUrl ? `${teacherUrl}/login` : '/login'
+    setLoggingOut(true)
+    setLogoutError(null)
+    try {
+      const { error } = await supabaseRef.current.auth.signOut()
+      if (error) throw error
+      // Login route lives on the teacher portal — must be a full nav, not router.push
+      const teacherUrl = process.env.NEXT_PUBLIC_TEACHER_URL
+      window.location.href = teacherUrl ? `${teacherUrl}/login` : '/login'
+    } catch {
+      setLogoutError('Could not log out — you are still signed in. Check your connection and try again.')
+      setLoggingOut(false)
+    }
   }
+
+  // One element reused by all three sidebar footers below (desktop, mobile, and the
+  // Sidebar component). React elements are immutable descriptors, so sharing one
+  // across trees is safe even when two of them are mounted at once.
+  const logoutErrorCard = logoutError && (
+    <div
+      className="mb-2 rounded-lg px-3 py-2"
+      style={{ borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6' }}
+    >
+      <p className="text-xs leading-relaxed" style={{ color: '#FD5602', margin: 0 }}>{logoutError}</p>
+    </div>
+  )
 
   const isActive = (href: string, exact?: boolean) => {
     if (exact) return pathname === href
@@ -291,6 +319,7 @@ export default function AdminLayoutClient({
       </nav>
 
       <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+        {logoutErrorCard}
         <Link
           href="/dashboard"
           prefetch={false}
@@ -302,11 +331,12 @@ export default function AdminLayoutClient({
         </Link>
         <button
           onClick={handleLogout}
+          disabled={loggingOut}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ color: '#9ca3af' }}
+          style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
         >
           <LogOut size={18} style={{ color: '#9ca3af' }} />
-          Log Out
+          {loggingOut ? 'Logging out…' : 'Log Out'}
         </button>
       </div>
     </div>
@@ -373,6 +403,7 @@ export default function AdminLayoutClient({
             ))}
           </nav>
           <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+            {logoutErrorCard}
             <Link
               href="/dashboard"
               prefetch={false}
@@ -384,11 +415,12 @@ export default function AdminLayoutClient({
             </Link>
             <button
               onClick={handleLogout}
+              disabled={loggingOut}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ color: '#9ca3af' }}
+              style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
             >
               <LogOut size={18} style={{ color: '#9ca3af' }} />
-              Log Out
+              {loggingOut ? 'Logging out…' : 'Log Out'}
             </button>
           </div>
         </aside>
@@ -404,6 +436,7 @@ export default function AdminLayoutClient({
                 ))}
               </nav>
               <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+                {logoutErrorCard}
                 <Link
                   href="/dashboard"
                   prefetch={false}
@@ -415,11 +448,12 @@ export default function AdminLayoutClient({
                 </Link>
                 <button
                   onClick={handleLogout}
+                  disabled={loggingOut}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium"
-                  style={{ color: '#9ca3af' }}
+                  style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
                 >
                   <LogOut size={18} style={{ color: '#9ca3af' }} />
-                  Log Out
+                  {loggingOut ? 'Logging out…' : 'Log Out'}
                 </button>
               </div>
             </aside>

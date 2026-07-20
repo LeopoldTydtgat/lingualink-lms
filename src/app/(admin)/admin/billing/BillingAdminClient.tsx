@@ -220,6 +220,9 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
   const templateInputRef = useRef<HTMLInputElement>(null)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
+  // One surface for every way the template upload can fail, so the button never has
+  // two competing failure channels. Rendered as the error card beside the row below.
+  const [templateError, setTemplateError] = useState<string | null>(null)
 
   // ── Teacher Invoices tab ───────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -419,19 +422,22 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       return next
     })
 
-    // Bucket the invoice's lessons by the TEACHER's local month — the same basis
-    // as invoices.amount_eur (recomputeAmounts.ts buckets via getMonthKeyInTz in
-    // the teacher's timezone). UTC month bounds would mis-bucket boundary lessons
-    // for non-UTC teachers, so the itemised total could disagree with the stored
-    // amount. billing_month is 'YYYY-MM-01'; T12:00:00Z lands in that calendar
-    // month in every real IANA offset. Falls back to 'UTC' when the teacher has no
-    // timezone — result-identical to the previous UTC bounds (the filter string
-    // differs, bare date vs UTC ISO, but Postgres casts both to the same instant;
-    // and amount_eur isn't recomputed for timezone-less teachers anyway).
-    const tz = teachers.find(t => t.id === teacherId)?.timezone || 'UTC'
-    const { startUtc, endUtc } = getMonthRangeInTz(new Date(billingMonth + 'T12:00:00Z'), tz)
-
     try {
+      // Bucket the invoice's lessons by the TEACHER's local month — the same basis
+      // as invoices.amount_eur (recomputeAmounts.ts buckets via getMonthKeyInTz in
+      // the teacher's timezone). UTC month bounds would mis-bucket boundary lessons
+      // for non-UTC teachers, so the itemised total could disagree with the stored
+      // amount. billing_month is 'YYYY-MM-01'; T12:00:00Z lands in that calendar
+      // month in every real IANA offset. Falls back to 'UTC' when the teacher has no
+      // timezone — result-identical to the previous UTC bounds (the filter string
+      // differs, bare date vs UTC ISO, but Postgres casts both to the same instant;
+      // and amount_eur isn't recomputed for timezone-less teachers anyway).
+      // Both statements sit INSIDE the try: getMonthRangeInTz throwing on a malformed
+      // billing_month used to escape after setLoadingLessons(key) had already run,
+      // pinning the panel at "Loading classes…" with no way to clear it.
+      const tz = teachers.find(t => t.id === teacherId)?.timezone || 'UTC'
+      const { startUtc, endUtc } = getMonthRangeInTz(new Date(billingMonth + 'T12:00:00Z'), tz)
+
       const { data: raw, error } = await supabase
         .from('lessons')
         .select('id, teacher_id, student_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
@@ -528,16 +534,21 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   // ── Template upload ────────────────────────────────────────────────────────
   // Posts to /api/admin/invoice-template/upload which enforces admin role,
   // magic-byte PDF check, and size limit server-side.
+  // The bare `await fetch` used to have no catch, and setUploadingTemplate(false) was
+  // the last statement rather than a finally — so a network throw wedged the button
+  // at "Uploading…" (disabled) permanently, with no message at all. Every failure now
+  // lands in templateError and the flag always clears.
   const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    setTemplateError(null)
     if (file.type !== 'application/pdf') {
-      toast.error('Only PDF files are accepted.', { duration: 6000 })
+      setTemplateError('Only PDF files are accepted. The template has not been changed.')
       return
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast.error('File must be under 10 MB.', { duration: 6000 })
+      setTemplateError('File must be under 10 MB. The template has not been changed.')
       return
     }
 
@@ -545,18 +556,27 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
     const formData = new FormData()
     formData.append('file', file)
 
-    const res = await fetch('/api/admin/invoice-template/upload', { method: 'POST', body: formData })
+    try {
+      const res = await fetch('/api/admin/invoice-template/upload', { method: 'POST', body: formData })
 
-    if (res.ok) {
-      const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
-      // Cache-bust so freshly replaced templates load.
-      setTemplateUrl(`${urlData.publicUrl}?v=${Date.now()}`)
-      toast.success('Template uploaded!')
-    } else {
-      const body = await res.json().catch(() => ({}))
-      toast.error(body.error || 'Template upload failed.', { duration: 6000 })
+      if (res.ok) {
+        const { data: urlData } = supabase.storage.from('templates').getPublicUrl('invoice-template.pdf')
+        // Cache-bust so freshly replaced templates load.
+        setTemplateUrl(`${urlData.publicUrl}?v=${Date.now()}`)
+        toast.success('Template uploaded!')
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setTemplateError(
+          body.error || `Template upload failed (${res.status}). The previous template is still in place.`
+        )
+      }
+    } catch {
+      setTemplateError(
+        'Could not reach the server, so the template was not uploaded. The previous template is still in place.'
+      )
+    } finally {
+      setUploadingTemplate(false)
     }
-    setUploadingTemplate(false)
   }
 
   // ── Load Student Billing lessons ───────────────────────────────────────────
@@ -916,6 +936,24 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       {activeTab === 'teacher_invoices' && (
         <div className="space-y-5">
 
+          {/* Template upload failure — the previous template is still the live one */}
+          {templateError && (
+            <div
+              className="rounded-xl px-4 py-3 flex items-start gap-3"
+              style={{ border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6' }}
+            >
+              <p className="text-sm flex-1" style={{ color: '#FD5602' }}>{templateError}</p>
+              <button
+                onClick={() => setTemplateError(null)}
+                aria-label="Dismiss"
+                className="leading-none"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#FD5602', fontSize: '16px', padding: '0 0 1px 0' }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+
           {/* Invoice template management */}
           <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
             <div>
@@ -1062,11 +1100,24 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                               onClick={() => {
                                 const opening = expandedInvoiceId !== inv.id
                                 setExpandedInvoiceId(opening ? inv.id : null)
-                                if (opening) loadInvoiceLessons(inv.teacher_id, inv.billing_month)
+                                // Not floating: loadInvoiceLessons catches its own
+                                // failures, but the .catch is the backstop so a throw
+                                // added there later can never become an unhandled
+                                // rejection that leaves loadingLessons pinned.
+                                if (opening) {
+                                  loadInvoiceLessons(inv.teacher_id, inv.billing_month).catch(() => {
+                                    setInvoiceLessonErrors(prev => ({
+                                      ...prev,
+                                      [lessonKey]: "Could not load this invoice's classes. This is a failed load, not an empty invoice — collapse and reopen Detail to try again.",
+                                    }))
+                                    setLoadingLessons(null)
+                                  })
+                                }
                               }}
-                              className="text-xs underline text-gray-400 flex-shrink-0"
+                              disabled={isLoadingThis}
+                              className="text-xs underline text-gray-400 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              {isExpanded ? 'Hide' : 'Detail'}
+                              {isLoadingThis ? 'Loading…' : isExpanded ? 'Hide' : 'Detail'}
                             </button>
                           </div>
                         </div>

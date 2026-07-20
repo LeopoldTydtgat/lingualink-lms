@@ -281,7 +281,8 @@ export default function AdminMessagesClient({
               <button
                 key={conv.key}
                 onClick={() => handleSelectConv(conv)}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
+                disabled={loadingMessages}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={selectedConv?.key === conv.key ? { backgroundColor: '#FFF3E0' } : {}}
               >
                 {/* Overlapping avatars */}
