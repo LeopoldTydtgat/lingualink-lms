@@ -96,6 +96,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations)
   const [messages, setMessages] = useState<SupportMessage[]>([])
   const [messagesLoaded, setMessagesLoaded] = useState(false)
+  // Fail-safe: a thread whose load failed must NOT render as "no messages yet" — an
+  // empty thread and an unreadable one look identical otherwise.
+  const [messagesError, setMessagesError] = useState(false)
+  // Keyed per conversation id, not a shared boolean: the list renders every row at once,
+  // so a single flag would spin every row for one click.
+  const [openingConvIds, setOpeningConvIds] = useState<Set<string>>(new Set())
   const [sending, setSending] = useState(false)
   const [pendingAttachments, setPendingAttachments] = useState<Array<{ url: string; filename: string; size: number }>>([])
   const [uploading, setUploading] = useState(false)
@@ -166,16 +172,30 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     onTransaction: () => forceUpdate(n => n + 1),
   })
 
+  // Per-id pending helpers. Set-valued so several rows can be in flight at once
+  // without one clobbering another's flag. Used by the conversation list and the FAQ rows.
+  const addPendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+    setter(prev => { const next = new Set(prev); next.add(id); return next })
+  const removePendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
+    setter(prev => { const next = new Set(prev); next.delete(id); return next })
+
   // NEW300: mark all inbound user messages read for this conversation. Reusable so it fires
   // both on load and when a user message arrives live (previously reads only happened inside
   // loadMessages, so a live-arriving message never flipped the admin's tick — no UPDATE fired).
   const markUserMessagesRead = useCallback(async (conv: Conversation) => {
-    await supabase
+    const { error } = await supabase
       .from('support_messages')
       .update({ read_at: new Date().toISOString() })
       .eq('participant_auth_id', conv.participantAuthId)
       .eq('sender_role', 'user')
       .is('read_at', null)
+
+    if (error) {
+      // The rows are still unread in the database — zeroing the badge here would make it
+      // lie, and the count would silently reappear on the next page load.
+      toast.error('Could not mark these messages as read. The unread count may be out of date.', { duration: 6000 })
+      return
+    }
 
     // Clear the unread badge on this conversation in the list
     setConversations(prev =>
@@ -185,12 +205,24 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
 
   const loadMessages = useCallback(async (conv: Conversation) => {
     setMessagesLoaded(false)
+    setMessagesError(false)
     setEditingMessageId(null)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('support_messages')
       .select('id, sender_role, content, attachments, created_at, read_at, edited_at')
       .eq('participant_auth_id', conv.participantAuthId)
       .order('created_at', { ascending: true })
+
+    if (error) {
+      // Don't fall through to markUserMessagesRead: we never saw the thread, so claiming
+      // it was read (and clearing the badge) would be a second lie on top of the first.
+      setMessages([])
+      setMessagesError(true)
+      setMessagesLoaded(true)
+      toast.error('Conversation failed to load. Please try again.', { duration: 6000 })
+      return
+    }
+
     setMessages((data as SupportMessage[]) || [])
     setMessagesLoaded(true)
 
@@ -199,7 +231,18 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   }, [supabase, markUserMessagesRead])
 
   useEffect(() => {
-    if (selectedConv) loadMessages(selectedConv)
+    if (!selectedConv) return
+    // Feedback on the clicked row itself, keyed by its conversation id — the thread pane's
+    // "Loading..." is on the other side of the screen and the row looked inert.
+    const pendingId = selectedConv.participantId
+    addPendingId(setOpeningConvIds, pendingId)
+    void (async () => {
+      try {
+        await loadMessages(selectedConv)
+      } finally {
+        removePendingId(setOpeningConvIds, pendingId)
+      }
+    })()
   }, [selectedConv, loadMessages])
 
   useEffect(() => {
@@ -375,12 +418,15 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   }, [supabase])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
+    // Captured before the awaits below so the reset in `finally` can't hit a
+    // detached/re-pointed event target.
+    const input = e.target
+    const file = input.files?.[0]
     if (!file) return
 
     if (file.size > 10 * 1024 * 1024) {
       toast.error('File must be under 10MB.', { duration: 6000 })
-      e.target.value = ''
+      input.value = ''
       return
     }
 
@@ -388,17 +434,24 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     const form = new FormData()
     form.append('file', file)
 
-    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
-    const json = await res.json()
-
-    if (!res.ok) {
-      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
-    } else {
+    try {
+      const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+      if (!res.ok) {
+        // Parse only AFTER the ok check, and tolerantly: an error response is not
+        // guaranteed to carry a JSON body (a 502/HTML error page threw here before).
+        const json = await res.json().catch(() => null)
+        toast.error(json?.error ?? 'Upload failed. Please try again.', { duration: 6000 })
+        return
+      }
+      const json = await res.json()
       setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+    } catch {
+      toast.error('Upload failed. Please check your connection and try again.', { duration: 6000 })
+    } finally {
+      // Always clears the spinner — a thrown fetch/parse used to leave it stuck on.
+      setUploading(false)
+      input.value = ''
     }
-
-    setUploading(false)
-    e.target.value = ''
   }
 
   const handleSend = async () => {
@@ -422,46 +475,56 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     pendingSendIdRef.current = tempId
     setMessages(prev => [...prev, { id: tempId, sender_role: 'admin', content: contentToSend, attachments: attachmentsToSend, created_at: new Date().toISOString(), read_at: null, pending: true }])
 
-    const res = await fetch('/api/support/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        participantId: selectedConv.participantId,
-        participantType: selectedConv.participantType,
-        participantAuthId: selectedConv.participantAuthId,
-        content: contentToSend,
-        attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
-      }),
-    })
+    try {
+      const res = await fetch('/api/support/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          participantId: selectedConv.participantId,
+          participantType: selectedConv.participantType,
+          participantAuthId: selectedConv.participantAuthId,
+          content: contentToSend,
+          attachments: attachmentsToSend.length > 0 ? attachmentsToSend : undefined,
+        }),
+      })
 
-    if (!res.ok) {
-      // Restore the pending attachments so a failed send doesn't silently discard the
-      // already-uploaded file, and surface an error instead of failing quietly.
+      if (!res.ok) {
+        // Restore the pending attachments so a failed send doesn't silently discard the
+        // already-uploaded file, and surface an error instead of failing quietly.
+        setMessages(prev => prev.filter(m => m.id !== tempId))
+        setPendingAttachments(attachmentsToSend)
+        toast.error('Message failed to send. Please try again.', { duration: 6000 })
+      } else {
+        // Tolerant parse: the message WAS accepted, so an unreadable body must not roll the
+        // optimistic row back — the Realtime INSERT echo swaps it for the real one.
+        const json = await res.json().catch(() => null)
+        if (json?.message) {
+          // NEW300: if the user already read this reply before the real row landed, the Realtime
+          // UPDATE buffered its read_at here — carry it over instead of hardcoding null (which
+          // stomped the read tick). Otherwise honour the DB row's own read_at.
+          const real = json.message as SupportMessage
+          const bufferedRead = pendingReadsRef.current.get(real.id)
+          if (bufferedRead) {
+            real.read_at = bufferedRead
+            pendingReadsRef.current.delete(real.id)
+          }
+          setMessages(prev =>
+            prev.map(m => m.id === tempId ? real : m)
+          )
+        }
+      }
+    } catch {
+      // The fetch itself never completed, so nothing was sent: same rollback + attachment
+      // restore as a non-ok response, rather than leaving a temp row that will never resolve.
       setMessages(prev => prev.filter(m => m.id !== tempId))
       setPendingAttachments(attachmentsToSend)
-      toast.error('Message failed to send. Please try again.', { duration: 6000 })
-    } else {
-      // Replace temp message with real DB message so read_at updates work
-      const json = await res.json()
-      if (json.message) {
-        // NEW300: if the user already read this reply before the real row landed, the Realtime
-        // UPDATE buffered its read_at here — carry it over instead of hardcoding null (which
-        // stomped the read tick). Otherwise honour the DB row's own read_at.
-        const real = json.message as SupportMessage
-        const bufferedRead = pendingReadsRef.current.get(real.id)
-        if (bufferedRead) {
-          real.read_at = bufferedRead
-          pendingReadsRef.current.delete(real.id)
-        }
-        setMessages(prev =>
-          prev.map(m => m.id === tempId ? real : m)
-        )
-      }
+      toast.error('Message failed to send. Please check your connection and try again.', { duration: 6000 })
+    } finally {
+      // NEW304: this send is now resolved one way or another; stop tracking it so a later,
+      // unrelated Realtime INSERT never mistakes itself for this send.
+      if (pendingSendIdRef.current === tempId) pendingSendIdRef.current = null
+      setSending(false)
     }
-    // NEW304: this send is now resolved one way or another; stop tracking it so a later,
-    // unrelated Realtime INSERT never mistakes itself for this send.
-    if (pendingSendIdRef.current === tempId) pendingSendIdRef.current = null
-    setSending(false)
   }
 
   const handleStartMessageEdit = (msg: SupportMessage) => {
@@ -492,42 +555,41 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     const contentToSave = isEmpty ? '' : html
 
     setSavingEdit(true)
-    const res = await fetch('/api/support/edit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId: editingMessageId, content: contentToSave }),
-    })
+    try {
+      const res = await fetch('/api/support/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId: editingMessageId, content: contentToSave }),
+      })
 
-    if (!res.ok) {
-      // Surface the window rejection verbatim (retrying can't help there);
-      // everything else stays generic.
-      const json = await res.json().catch(() => null)
-      toast.error(
-        json?.error === EDIT_WINDOW_ERROR ? EDIT_WINDOW_ERROR : 'Edit failed to save. Please try again.',
-        { duration: 6000 }
-      )
-    } else {
-      const json = await res.json()
-      if (json.message) {
-        const updated = json.message as SupportMessage
-        setMessages(prev =>
-          prev.map(m => m.id === updated.id
-            ? { ...m, content: updated.content, edited_at: updated.edited_at }
-            : m)
+      if (!res.ok) {
+        // Surface the window rejection verbatim (retrying can't help there);
+        // everything else stays generic.
+        const json = await res.json().catch(() => null)
+        toast.error(
+          json?.error === EDIT_WINDOW_ERROR ? EDIT_WINDOW_ERROR : 'Edit failed to save. Please try again.',
+          { duration: 6000 }
         )
+      } else {
+        const json = await res.json().catch(() => null)
+        if (json?.message) {
+          const updated = json.message as SupportMessage
+          setMessages(prev =>
+            prev.map(m => m.id === updated.id
+              ? { ...m, content: updated.content, edited_at: updated.edited_at }
+              : m)
+          )
+        }
+        setEditingMessageId(null)
+        editEditor.commands.clearContent()
       }
-      setEditingMessageId(null)
-      editEditor.commands.clearContent()
+    } catch {
+      // Editor stays open with the typed edit intact so it isn't lost to a dropped request.
+      toast.error('Edit failed to save. Please check your connection and try again.', { duration: 6000 })
+    } finally {
+      setSavingEdit(false)
     }
-    setSavingEdit(false)
   }
-
-  // Per-id pending helpers for the FAQ rows. Set-valued so several rows can be
-  // in flight at once without one clobbering another's flag.
-  const addPendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
-    setter(prev => { const next = new Set(prev); next.add(id); return next })
-  const removePendingId = (setter: React.Dispatch<React.SetStateAction<Set<string>>>, id: string) =>
-    setter(prev => { const next = new Set(prev); next.delete(id); return next })
 
   const handleAddFaq = async () => {
     if (!newQuestion.trim() || !newAnswer.trim()) return
@@ -665,11 +727,14 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                 <p className="text-sm text-gray-500">No support messages yet</p>
               </div>
             ) : (
-              conversations.map(conv => (
+              conversations.map(conv => {
+                const opening = openingConvIds.has(conv.participantId)
+                return (
                 <button
                   key={conv.participantId}
                   onClick={() => setSelectedConv(conv)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-100"
+                  disabled={opening}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors border-b border-gray-100 disabled:opacity-60"
                   style={selectedConv?.participantId === conv.participantId ? { backgroundColor: '#fff7ed' } : {}}
                 >
                   <Avatar name={conv.participantName} photoUrl={conv.participantPhotoUrl} size={9} />
@@ -683,14 +748,19 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                     </div>
                     <p className="text-xs text-gray-400 truncate mt-0.5">{stripHtml(conv.latestMessage.content)}</p>
                   </div>
-                  {conv.unreadCount > 0 && (
+                  {/* The spinner takes the badge's slot while this row's thread is loading, so
+                      the click has feedback on the row itself and not only in the thread pane. */}
+                  {opening ? (
+                    <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: '#FF8303' }} />
+                  ) : conv.unreadCount > 0 ? (
                     <span className="w-5 h-5 rounded-full text-white text-xs flex items-center justify-center flex-shrink-0"
                       style={{ backgroundColor: '#FF8303' }}>
                       {conv.unreadCount}
                     </span>
-                  )}
+                  ) : null}
                 </button>
-              ))
+                )
+              })
             )}
           </div>
 
@@ -715,6 +785,23 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   {!messagesLoaded ? (
                     <div className="flex items-center justify-center h-full">
                       <p className="text-xs text-gray-400">Loading...</p>
+                    </div>
+                  ) : messagesError ? (
+                    /* A failed load must never look like an empty thread — say so and offer a retry. */
+                    <div className="flex flex-col items-center justify-center h-full text-center px-6">
+                      <p className="text-sm font-medium" style={{ color: '#b91c1c' }}>Messages failed to load.</p>
+                      <p className="text-xs text-gray-500 mt-1">This thread may contain messages that could not be fetched.</p>
+                      <button
+                        onClick={() => loadMessages(selectedConv)}
+                        className="mt-3 px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+                        style={{ backgroundColor: '#FF8303' }}
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : messages.length === 0 ? (
+                    <div className="flex items-center justify-center h-full">
+                      <p className="text-xs text-gray-400">No messages in this conversation yet</p>
                     </div>
                   ) : messages.map(msg => {
                     const isAdmin = msg.sender_role === 'admin'
@@ -878,7 +965,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                       aria-label="Attach file"
                       className="px-2 py-0.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-50"
                     >
-                      <Paperclip size={15} className={uploading ? 'animate-pulse' : ''} />
+                      {uploading
+                        ? <Loader2 size={15} className="animate-spin" />
+                        : <Paperclip size={15} />}
                     </button>
                   </div>
                   {pendingAttachments.length > 0 && (
@@ -910,7 +999,9 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                       className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 disabled:opacity-40"
                       style={{ backgroundColor: '#FF8303' }}
                     >
-                      <Send size={15} className="text-white" />
+                      {sending
+                        ? <Loader2 size={15} className="animate-spin text-white" />
+                        : <Send size={15} className="text-white" />}
                     </button>
                   </div>
                 </div>
