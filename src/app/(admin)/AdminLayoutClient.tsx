@@ -127,16 +127,16 @@ function AdminNavContent({
       style={{ opacity: pending ? 0.55 : 1 }}
     >
       {pending ? (
-        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#ffffff' : '#9ca3af' }} />
+        <Loader2 size={18} className="animate-spin" style={{ color: active ? '#FF8303' : '#9ca3af' }} />
       ) : (
-        <Icon size={18} style={active ? { color: '#ffffff' } : { color: '#9ca3af' }} />
+        <Icon size={18} style={active ? { color: '#FF8303' } : { color: '#9ca3af' }} />
       )}
       <span className="flex-1">{label}</span>
       {showBadge && (
         <span
           style={{
-            backgroundColor: active ? '#ffffff' : '#FF8303',
-            color: active ? '#FF8303' : '#ffffff',
+            backgroundColor: '#FF8303',
+            color: '#ffffff',
             fontSize: '11px',
             minWidth: '18px',
             height: '18px',
@@ -186,11 +186,16 @@ function NavLink({
       href={item.href}
       prefetch={false}
       onClick={onNavigate}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-white/10'}`}
+      className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'text-gray-600 hover:bg-brand-grey hover:text-gray-900'}`}
       style={
         active
-          ? { backgroundColor: '#FF8303', color: '#ffffff', clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)' }
-          : { color: '#9ca3af' }
+          ? {
+              clipPath: 'polygon(0 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 0 100%)',
+              backgroundColor: '#FFF0E0',
+              color: '#FF8303',
+              borderLeft: '3px solid #FF8303',
+            }
+          : { borderLeft: '3px solid transparent' }
       }
     >
       <AdminNavContent
@@ -350,7 +355,28 @@ export default function AdminLayoutClient({
   // component type per render.
   const sidebarInner = (
     <>
-      <nav className="flex-1 px-3 pt-4 overflow-y-auto admin-sidebar-scroll">
+      {/* Portal marker — the only thing distinguishing this shell from the
+          teacher portal now that the chrome is identical. */}
+      <div className="px-3 pt-4">
+        <p
+          style={{
+            fontSize: '10px',
+            fontWeight: 700,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            textAlign: 'center',
+            color: '#FF8303',
+            backgroundColor: 'rgba(255, 131, 3, 0.10)',
+            border: '1px solid rgba(255, 131, 3, 0.35)',
+            borderRadius: '6px',
+            padding: '5px 8px',
+            margin: 0,
+          }}
+        >
+          Admin Portal
+        </p>
+      </div>
+      <nav className="flex-1 px-3 pt-4 overflow-y-auto thin-scroll">
         {navGroups.map((group, groupIndex) => (
           <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : '18px' }}>
             <p
@@ -381,24 +407,25 @@ export default function AdminLayoutClient({
           </div>
         ))}
       </nav>
-      <div className="px-3 py-4 border-t border-gray-700 space-y-1">
+      <div className="px-3 py-4 space-y-1" style={{ borderTop: '1px solid #E0DFDC' }}>
         {logoutErrorCard}
+        {/* "Back to Teacher Portal" wrapped onto two lines in a 224px column —
+            shortened to "Teacher Portal" so the arrow + label stay on one line. */}
         <Link
           href="/dashboard"
           prefetch={false}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ color: '#9ca3af' }}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 transition-colors hover:bg-brand-grey hover:text-gray-900 whitespace-nowrap"
         >
-          <ArrowLeft size={18} style={{ color: '#9ca3af' }} />
-          Back to Teacher Portal
+          <ArrowLeft size={18} style={{ color: '#9ca3af', flexShrink: 0 }} />
+          Teacher Portal
         </Link>
         <button
           onClick={handleLogout}
           disabled={loggingOut}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ color: '#9ca3af', cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 transition-colors hover:bg-red-50 hover:text-red-600 whitespace-nowrap"
+          style={{ cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}
         >
-          <LogOut size={18} style={{ color: '#9ca3af' }} />
+          <LogOut size={18} style={{ color: '#9ca3af', flexShrink: 0 }} />
           {loggingOut ? 'Logging out…' : 'Log Out'}
         </button>
       </div>
@@ -416,28 +443,30 @@ export default function AdminLayoutClient({
   return (
     <div className="flex flex-col h-screen overflow-hidden">
 
-      {/* Full-width header across the top */}
+      {/* Full-width header across the top — teacher-portal chrome: white,
+          72px, single #E0DFDC hairline. zIndex 40 matches TopHeader so the
+          header paints above page-content stickies (which stay <= 20). */}
       <header
         className="flex items-center justify-between px-6 flex-shrink-0 w-full"
         style={{
-          backgroundColor: '#111827',
-          position: 'relative',
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid #E0DFDC',
           height: '72px',
-          zIndex: 10,
+          zIndex: 40,
         }}
       >
         <Link href="/admin" prefetch={false}>
           <img
-            src="/lingualink-logo-white.svg"
+            src="/lingualink-logo-clean.svg"
             alt="Lingualink Online"
             style={{ height: '56px', width: 'auto' }}
           />
         </Link>
         <div className="flex items-center gap-3">
-          <button className="lg:hidden text-white mr-2" onClick={() => setSidebarOpen(true)}>
+          <button className="lg:hidden mr-2" style={{ color: '#4b5563' }} onClick={() => setSidebarOpen(true)}>
             <Menu size={22} />
           </button>
-          <span className="text-sm font-medium hidden sm:block" style={{ color: '#d1d5db' }}>
+          <span className="text-sm font-semibold hidden sm:block" style={{ color: '#111827' }}>
             Hello {profile.full_name?.split(' ')[0]}!
           </span>
           <Link href="/admin/settings" prefetch={false}>
@@ -445,28 +474,29 @@ export default function AdminLayoutClient({
               <img
                 src={profile.photo_url}
                 alt={profile.full_name}
-                className="w-8 h-8 rounded-full object-cover border-2 border-white/50"
+                className="w-9 h-9 rounded-full object-cover"
+                style={{ border: '2px solid #E0DFDC' }}
               />
             ) : (
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white text-sm font-bold">
+              <div
+                className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2"
+                style={{ backgroundColor: '#f3f4f6', borderColor: '#E0DFDC', color: '#9ca3af' }}
+              >
                 {profile.full_name?.charAt(0).toUpperCase()}
               </div>
             )}
           </Link>
         </div>
-
-        <div
-          aria-hidden="true"
-          className="absolute bottom-0 right-0 left-0 lg:left-56"
-          style={{ height: '3px', backgroundColor: '#FF8303' }}
-        />
       </header>
 
       {/* Below header: sidebar + content */}
       <div className="flex flex-1 min-h-0">
 
         {/* Desktop sidebar */}
-        <aside className="hidden lg:flex flex-col w-56 flex-shrink-0 bg-gray-900">
+        <aside
+          className="hidden lg:flex flex-col w-56 flex-shrink-0"
+          style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
+        >
           {sidebarInner}
         </aside>
 
@@ -474,7 +504,10 @@ export default function AdminLayoutClient({
         {sidebarOpen && (
           <div className="lg:hidden fixed inset-0 z-40 flex">
             <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-            <aside className="relative flex flex-col w-56 bg-gray-900 z-50">
+            <aside
+              className="relative flex flex-col w-56 z-50"
+              style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
+            >
               {sidebarInner}
             </aside>
           </div>
