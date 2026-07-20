@@ -165,6 +165,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           currency: form.currency,
           native_languages: form.native_languages,
           teaching_languages: form.teaching_languages,
+          qualifications: form.qualifications || null,
           specialties: form.specialties || null,
           bio: form.bio || null,
           quote: form.quote || null,

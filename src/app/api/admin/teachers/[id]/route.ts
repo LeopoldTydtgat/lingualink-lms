@@ -89,20 +89,82 @@ export async function PATCH(
 
     const { data: current, error: fetchError } = await adminClient
       .from('profiles')
-      .select('id, full_name, timezone, account_types, status, role, teacher_type, contract_start, orientation_date, observed_lesson_date, date_of_birth, follow_up_date, title, gender, nationality, phone, street_address, area_code, city, paypal_email, iban, bic, vat_required, tax_number, hourly_rate, currency, native_languages, teaching_languages, specialties, bio, quote, admin_notes, follow_up_reason, preferred_payment_type')
+      .select('id, full_name, timezone, account_types, status, role, teacher_type, contract_start, orientation_date, observed_lesson_date, date_of_birth, follow_up_date, title, gender, nationality, phone, street_address, area_code, city, paypal_email, iban, bic, vat_required, tax_number, hourly_rate, currency, native_languages, teaching_languages, qualifications, specialties, bio, quote, admin_notes, follow_up_reason, preferred_payment_type')
       .eq('id', id)
-      .single<Record<string, unknown>>()
+      .maybeSingle<Record<string, unknown>>()
 
     if (fetchError || !current) {
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
+    // Only profiles the Teachers section manages may be modified here. The
+    // list page (admin/teachers/page.tsx) includes role 'teacher' and 'admin';
+    // the password route additionally recognises the 'teacher'/'teacher_exam'
+    // account types. Anything else (no role/type match) is off-limits — this
+    // route must not be usable against arbitrary profile rows.
+    const targetAccountTypes = Array.isArray(current.account_types)
+      ? (current.account_types as string[])
+      : []
+    const isTeacherProfile =
+      current.role === 'teacher' ||
+      current.role === 'admin' ||
+      targetAccountTypes.includes('teacher') ||
+      targetAccountTypes.includes('teacher_exam')
+    if (!isTeacherProfile) {
+      return NextResponse.json({ error: 'Target user is not a teacher.' }, { status: 403 })
+    }
+
+    // Self-target guard: an admin must never archive/ban/demote their own
+    // account — a status change bans the auth user, locking the admin out.
+    // Benign self-edits (bio, timezone, …) stay allowed; only a CHANGE to
+    // status, role, or account_types on your own profile is rejected.
+    if (id === user.id) {
+      const guarded = ['status', 'role', 'account_types'] as const
+      const selfDemotion = guarded.some(
+        (key) =>
+          key in parsed.data &&
+          JSON.stringify(parsed.data[key]) !== JSON.stringify(current[key])
+      )
+      if (selfDemotion) {
+        return NextResponse.json(
+          { error: 'You cannot change your own status, role, or account types. Ask another admin.' },
+          { status: 403 }
+        )
+      }
+    }
+
+    // Build the payload from ONLY the fields present in the request. The
+    // schema is all-optional, so a partial request (e.g. Archive sending just
+    // { status }) must never touch the other columns — defaulting absent
+    // fields to null wipes the rest of the profile. Zod 4 omits absent
+    // optional keys from parsed.data and keeps explicit nulls, so `in` is the
+    // correct presence check: absent → not written, null → cleared. The
+    // explicit field list also keeps unknown keys away from PostgREST — a
+    // single unrecognised column aborts the entire update.
+    const UPDATABLE_FIELDS = [
+      'full_name', 'timezone', 'account_types', 'status', 'role', 'teacher_type',
+      'contract_start', 'orientation_date', 'observed_lesson_date', 'title',
+      'date_of_birth', 'gender', 'nationality', 'phone', 'street_address',
+      'area_code', 'city', 'preferred_payment_type', 'paypal_email', 'iban',
+      'bic', 'vat_required', 'tax_number', 'hourly_rate', 'currency',
+      'native_languages', 'teaching_languages', 'qualifications', 'specialties',
+      'bio', 'quote', 'admin_notes', 'follow_up_date', 'follow_up_reason',
+    ] as const
+
+    const updatePayload: Record<string, unknown> = {}
+    for (const key of UPDATABLE_FIELDS) {
+      if (key in parsed.data) updatePayload[key] = parsed.data[key]
+    }
+    updatePayload.updated_at = new Date().toISOString()
+
+    // History entries derive from the SAME field set being written above —
+    // log exactly what changes, nothing more. admin_notes never enters the log.
     const SKIP_FIELDS = [
       'admin_notes',
       'updated_at',
       'created_at',
     ]
-    const historyEntries = Object.entries(parsed.data)
+    const historyEntries = Object.entries(updatePayload)
       .filter(([key]) => !SKIP_FIELDS.includes(key))
       .filter(([key, newVal]) => {
         const oldVal = current[key]
@@ -116,45 +178,6 @@ export async function PATCH(
         changed_by: user.id,
         changed_at: new Date().toISOString(),
       }))
-
-    // Build an explicit payload so unknown keys from the request body never
-    // reach PostgREST — a single unrecognised column aborts the entire update.
-    const updatePayload = {
-      full_name:             parsed.data.full_name,
-      timezone:              parsed.data.timezone,
-      account_types:         parsed.data.account_types,
-      status:                parsed.data.status,
-      role:                  parsed.data.role,
-      teacher_type:          parsed.data.teacher_type,
-      contract_start:        parsed.data.contract_start        ?? null,
-      orientation_date:      parsed.data.orientation_date      ?? null,
-      observed_lesson_date:  parsed.data.observed_lesson_date  ?? null,
-      title:                 parsed.data.title                 ?? null,
-      date_of_birth:         parsed.data.date_of_birth         ?? null,
-      gender:                parsed.data.gender                ?? null,
-      nationality:           parsed.data.nationality           ?? null,
-      phone:                 parsed.data.phone                 ?? null,
-      street_address:        parsed.data.street_address        ?? null,
-      area_code:             parsed.data.area_code             ?? null,
-      city:                  parsed.data.city                  ?? null,
-      preferred_payment_type: parsed.data.preferred_payment_type ?? null,
-      paypal_email:          parsed.data.paypal_email          ?? null,
-      iban:                  parsed.data.iban                  ?? null,
-      bic:                   parsed.data.bic                   ?? null,
-      vat_required:          parsed.data.vat_required          ?? false,
-      tax_number:            parsed.data.tax_number            ?? null,
-      hourly_rate:           parsed.data.hourly_rate           ?? null,
-      currency:              parsed.data.currency              ?? 'EUR',
-      native_languages:      parsed.data.native_languages      ?? [],
-      teaching_languages:    parsed.data.teaching_languages    ?? [],
-      specialties:           parsed.data.specialties           ?? null,
-      bio:                   parsed.data.bio                   ?? null,
-      quote:                 parsed.data.quote                 ?? null,
-      admin_notes:           parsed.data.admin_notes           ?? null,
-      follow_up_date:        parsed.data.follow_up_date        ?? null,
-      follow_up_reason:      parsed.data.follow_up_reason      ?? null,
-      updated_at:            new Date().toISOString(),
-    }
 
     const { error: updateError } = await adminClient
       .from('profiles')
