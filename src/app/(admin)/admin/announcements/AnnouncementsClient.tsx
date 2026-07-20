@@ -102,6 +102,7 @@ export default function AnnouncementsClient({
         </div>
         <Link
           href="/admin/announcements/new"
+          prefetch={false}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
           style={{ backgroundColor: '#FF8303' }}
         >
@@ -250,6 +251,7 @@ function AnnouncementRow({
           {/* Edit */}
           <Link
             href={`/admin/announcements/${a.id}/edit`}
+            prefetch={false}
             className="p-1.5 rounded hover:bg-gray-100 transition-colors"
             title="Edit"
           >

@@ -136,6 +136,7 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/admin/announcements"
+          prefetch={false}
           className="p-1.5 rounded hover:bg-gray-100 transition-colors"
         >
           <ArrowLeft size={18} className="text-gray-500" />
