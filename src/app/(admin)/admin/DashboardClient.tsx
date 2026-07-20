@@ -190,7 +190,7 @@ export default function DashboardClient({
   const statCards = [
     {
       label: 'Classes Today',
-      subLabel: 'Scheduled',
+      subLabel: 'Today',
       value: stats.classesTodayCount,
       icon: CalendarDays,
       // Null = timezone unset: point them to set it, not to the (un-bucketable) class list.
@@ -309,7 +309,6 @@ export default function DashboardClient({
                     className="bg-white rounded-xl border border-gray-200 p-4"
                     style={{
                       boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)',
-                      ...(emphasised ? { borderColor: '#FD5602' } : {}),
                     }}
                   >
                     <div className="flex items-center gap-2 mb-3">
@@ -347,7 +346,7 @@ export default function DashboardClient({
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
-                  <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Today&apos;s Classes</h2>
+                  <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Today&apos;s Activity</h2>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-400">{todayLabel}{' · '}{adminTimezone}</span>
