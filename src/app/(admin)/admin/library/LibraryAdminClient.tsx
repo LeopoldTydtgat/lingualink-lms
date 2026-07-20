@@ -193,7 +193,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         setSheets([])
         setActCounts({})
         setLoadError(true)
-        return
+        return null
       }
 
       setSheets(data || [])
@@ -208,7 +208,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         // count must not be rendered as zero, so the whole list is withheld.
         setActCounts({})
         setLoadError(true)
-        return
+        return data || []
       }
 
       const counts: Record<string, number> = {}
@@ -216,6 +216,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         counts[r.sheet_id] = (counts[r.sheet_id] ?? 0) + 1
       }
       setActCounts(counts)
+      return data || []
     } finally {
       setLoading(false)
     }
@@ -350,11 +351,26 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         )
       }
 
-      await loadSheets()
+      const reloaded = await loadSheets()
+
+      if (failed > 0) {
+        if (reloaded === null) {
+          // The reload itself failed — we have no reliable view of what survived,
+          // so the selection is left untouched rather than wrongly cleared.
+        } else {
+          // Trust the reloaded list, not the per-request ok flags — a sheet can be
+          // gone server-side even if its DELETE response looked like a failure.
+          // Intersecting keeps only ids that genuinely survived, so a retry can't
+          // re-issue DELETE for rows already gone.
+          const survivingIds = new Set(reloaded.map(s => s.id))
+          setSelectedIds(prev => new Set(Array.from(prev).filter(id => survivingIds.has(id))))
+        }
+      } else {
+        setSelectedIds(new Set())
+      }
     } finally {
       setBulkDeleting(false)
       setConfirmBulkDelete(false)
-      setSelectedIds(new Set())
     }
   }
 

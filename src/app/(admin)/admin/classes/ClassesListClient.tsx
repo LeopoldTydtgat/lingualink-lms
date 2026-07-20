@@ -71,6 +71,7 @@ export default function ClassesListClient({ teachers }: Props) {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   // Filter state
   const [search, setSearch] = useState('')
@@ -83,6 +84,7 @@ export default function ClassesListClient({ teachers }: Props) {
 
   const fetchLessons = useCallback(async (currentPage: number) => {
     setLoading(true)
+    setLoadError(false)
     const params = new URLSearchParams()
     params.set('page', currentPage.toString())
     if (search) params.set('search', search)
@@ -91,11 +93,19 @@ export default function ClassesListClient({ teachers }: Props) {
     if (filterDateFrom) params.set('date_from', filterDateFrom)
     if (filterDateTo) params.set('date_to', filterDateTo)
 
-    const res = await fetch(`/api/admin/classes?${params.toString()}`)
-    const data = await res.json()
-    setLessons(data.lessons ?? [])
-    setTotal(data.total ?? 0)
-    setLoading(false)
+    try {
+      const res = await fetch(`/api/admin/classes?${params.toString()}`)
+      if (!res.ok) throw new Error('Failed to load classes')
+      const data = await res.json()
+      setLessons(data.lessons ?? [])
+      setTotal(data.total ?? 0)
+    } catch {
+      setLessons([])
+      setTotal(0)
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
   }, [search, filterTeacher, filterStatus, filterDateFrom, filterDateTo])
 
   // Refetch when filters or page change
@@ -128,7 +138,7 @@ export default function ClassesListClient({ teachers }: Props) {
         <div>
           <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: 0 }}>Classes</h1>
           <p style={{ fontSize: '14px', color: '#6B7280', marginTop: '4px' }}>
-            {total} {total === 1 ? 'class' : 'classes'} found
+            {loadError ? '—' : `${total} ${total === 1 ? 'class' : 'classes'} found`}
           </p>
         </div>
         <Link href="/admin/classes/new" prefetch={false}>
@@ -349,6 +359,10 @@ export default function ClassesListClient({ teachers }: Props) {
         {loading ? (
           <div style={{ padding: '48px', textAlign: 'center', color: '#9CA3AF', fontSize: '14px' }}>
             Loading classes...
+          </div>
+        ) : loadError ? (
+          <div style={{ padding: '48px', textAlign: 'center', borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6', color: '#FD5602', fontSize: '14px' }}>
+            Couldn&apos;t load classes. This is not an empty result — try refreshing.
           </div>
         ) : lessons.length === 0 ? (
           <div style={{ padding: '48px', textAlign: 'center', color: '#9CA3AF', fontSize: '14px' }}>
