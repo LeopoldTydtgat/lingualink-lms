@@ -669,10 +669,11 @@ export default function BillingClient({
                             {invoice.file_path && (
                               <button
                                 onClick={() => handleViewInvoice(invoice.id)}
-                                className="text-xs underline"
+                                disabled={viewingInvoiceId === invoice.id}
+                                className="text-xs underline disabled:opacity-50"
                                 style={{ color: '#FF8303' }}
                               >
-                                View PDF
+                                {viewingInvoiceId === invoice.id ? 'Opening...' : 'View PDF'}
                               </button>
                             )}
                             {invoice.status !== 'paid' && markingPaidId !== invoice.id && (

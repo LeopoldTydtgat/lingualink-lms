@@ -211,6 +211,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   const [savingPaid, setSavingPaid] = useState(false)
   const [invoiceLessons, setInvoiceLessons] = useState<Record<string, LessonRow[]>>({})
   const [loadingLessons, setLoadingLessons] = useState<string | null>(null)
+  const [viewingInvoiceId, setViewingInvoiceId] = useState<string | null>(null)
 
   // ── Student Billing tab ────────────────────────────────────────────────────
   const [students, setStudents] = useState<StudentRow[]>([])
@@ -393,14 +394,24 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   // Signing happens server-side via /api/teacher/invoice/sign-url. The route
   // verifies the caller is the invoice owner or an admin before signing.
   const handleViewInvoice = async (invoiceId: string) => {
-    const res = await fetch('/api/teacher/invoice/sign-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ invoiceId }),
-    })
-    if (!res.ok) return
-    const { signedUrl } = await res.json()
-    if (signedUrl) window.open(signedUrl, '_blank')
+    setViewingInvoiceId(invoiceId)
+    try {
+      const res = await fetch('/api/teacher/invoice/sign-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoiceId }),
+      })
+      if (!res.ok) {
+        toast.error('Could not open invoice.', { duration: 6000 })
+        return
+      }
+      const { signedUrl } = await res.json()
+      if (signedUrl) window.open(signedUrl, '_blank')
+    } catch {
+      toast.error('Could not open invoice.', { duration: 6000 })
+    } finally {
+      setViewingInvoiceId(null)
+    }
   }
 
   // ── Template upload ────────────────────────────────────────────────────────
@@ -815,10 +826,11 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             {inv.file_path && (
                               <button
                                 onClick={() => handleViewInvoice(inv.id)}
-                                className="text-xs underline flex-shrink-0"
+                                disabled={viewingInvoiceId === inv.id}
+                                className="text-xs underline flex-shrink-0 disabled:opacity-50"
                                 style={{ color: '#FF8303' }}
                               >
-                                View PDF
+                                {viewingInvoiceId === inv.id ? 'Opening...' : 'View PDF'}
                               </button>
                             )}
 
