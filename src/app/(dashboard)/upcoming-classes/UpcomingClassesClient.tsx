@@ -231,6 +231,7 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
 }
 
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
@@ -354,7 +355,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             )}
             <ActionButton
               label={'Message ' + cls.student.full_name.split(' ')[0]}
-              onClick={() => window.location.href = `/messages?studentId=${cls.student.id}`}
+              onClick={() => router.push(`/messages?studentId=${cls.student.id}`)}
             />
           </div>
         </div>
