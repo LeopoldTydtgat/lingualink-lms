@@ -574,8 +574,10 @@ export default function AdminLayoutClient({
         </main>
 
         {/* Right panel — the dashboard renders these same five stats as full-width
-            cards, so the rail would be pure duplication there. */}
-        {pathname !== '/admin' && (
+            cards, so the rail would be pure duplication there. The Create Teacher
+            form is a single full-width scrolling form, so the rail is hidden there
+            too. */}
+        {pathname !== '/admin' && pathname !== '/admin/teachers/new' && (
           <aside ref={adminPanelRef} onWheel={handleAdminPanelWheel} className="hidden xl:flex flex-col w-56 flex-shrink-0 border-l border-gray-200 p-4 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA' }}>
             <div className="flex items-center gap-2 mb-3">
               <Activity size={14} color="#FF8303" style={{ flexShrink: 0 }} />

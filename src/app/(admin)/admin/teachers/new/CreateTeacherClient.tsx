@@ -126,6 +126,16 @@ function Field({ label, children, adminOnly }: {
   )
 }
 
+// Bordered section card — matches the Teacher Detail Overview tab's card style.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+      <h2 className="font-semibold text-gray-800">{title}</h2>
+      {children}
+    </div>
+  )
+}
+
 const inputClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
 const selectClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white"
 
@@ -133,7 +143,6 @@ export default function CreateTeacherClient() {
   const router = useRouter()
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-  const [activeSection, setActiveSection] = useState<'A' | 'B'>('A')
 
   function set(field: keyof FormData, value: string | boolean | string[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -191,7 +200,7 @@ export default function CreateTeacherClient() {
   }
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6 max-w-5xl">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button
@@ -204,27 +213,11 @@ export default function CreateTeacherClient() {
         <h1 className="text-2xl font-bold text-gray-900">Add Teacher</h1>
       </div>
 
-      {/* Section tabs */}
-      <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
-        {(['A', 'B'] as const).map((section) => (
-          <button
-            key={section}
-            onClick={() => setActiveSection(section)}
-            className="px-5 py-2 text-sm font-medium transition-colors"
-            style={activeSection === section
-              ? { backgroundColor: '#FF8303', color: 'white' }
-              : { backgroundColor: 'white', color: '#6b7280' }}
-          >
-            {section === 'A' ? 'Account & Login' : 'Profile & Admin Info'}
-          </button>
-        ))}
-      </div>
+      {/* Single scrolling form — one card per section */}
+      <div className="space-y-6">
 
-      {/* Section A */}
-      {activeSection === 'A' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-          <h2 className="font-semibold text-gray-800 text-base">Account & Login</h2>
-
+        {/* 1. Account & Login */}
+        <Section title="Account & Login">
           <div className="grid grid-cols-2 gap-4">
             <Field label="First Name">
               <input className={inputClass} value={form.first_name}
@@ -292,24 +285,10 @@ export default function CreateTeacherClient() {
               <DatePartInput value={form.observed_lesson_date} onChange={(v) => set('observed_lesson_date', v)} />
             </Field>
           </div>
+        </Section>
 
-          <div className="flex justify-end pt-2">
-            <button
-              onClick={() => setActiveSection('B')}
-              className="px-5 py-2 rounded-lg text-sm font-medium text-white"
-              style={{ backgroundColor: '#FF8303' }}
-            >
-              Next: Profile & Admin Info →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Section B */}
-      {activeSection === 'B' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-          <h2 className="font-semibold text-gray-800 text-base">Profile & Admin Info</h2>
-
+        {/* 2. Personal */}
+        <Section title="Personal">
           <div className="grid grid-cols-3 gap-4">
             <Field label="Title">
               <select className={selectClass} value={form.title}
@@ -357,183 +336,173 @@ export default function CreateTeacherClient() {
             <input className={inputClass} value={form.city}
               onChange={(e) => set('city', e.target.value)} />
           </Field>
+        </Section>
 
-          {/* Payment */}
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-semibold text-gray-700 mb-3">Payment Details</p>
-            <div className="space-y-4">
-              <Field label="Preferred Payment Type">
-                <select className={selectClass} value={form.preferred_payment_type}
-                  onChange={(e) => set('preferred_payment_type', e.target.value)}>
-                  <option value="bank">Bank Transfer</option>
-                  <option value="paypal">PayPal</option>
-                </select>
-              </Field>
-              <Field label="PayPal Email">
-                <input type="email" className={inputClass} value={form.paypal_email}
-                  onChange={(e) => set('paypal_email', e.target.value)} />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="IBAN">
-                  <input className={inputClass} value={form.iban}
-                    onChange={(e) => set('iban', e.target.value)} />
-                </Field>
-                <Field label="SWIFT / BIC">
-                  <input className={inputClass} value={form.bic}
-                    onChange={(e) => set('bic', e.target.value)} />
-                </Field>
-              </div>
-              <Field label="Tax Number">
-                <input className={inputClass} value={form.tax_number}
-                  onChange={(e) => set('tax_number', e.target.value)} />
-              </Field>
-              <Field label="VAT Required" adminOnly>
-                <label className="flex items-center gap-2 cursor-pointer mt-1">
-                  <input type="checkbox" checked={form.vat_required}
-                    onChange={(e) => set('vat_required', e.target.checked)}
-                    className="w-4 h-4 rounded" />
-                  <span className="text-sm text-gray-600">This teacher is required to charge VAT</span>
-                </label>
-              </Field>
-              <Field label="Hourly Rate" adminOnly>
-                <div className="flex">
-                  <select
-                    className="border border-gray-200 rounded-l-lg px-2 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white border-r-0"
-                    value={form.currency}
-                    onChange={(e) => set('currency', e.target.value)}
-                  >
-                    {CURRENCY_OPTIONS.map((c) => (
-                      <option key={c.value} value={c.value}>{c.symbol} {c.value}</option>
-                    ))}
-                  </select>
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">
-                      {CURRENCY_OPTIONS.find(c => c.value === form.currency)?.symbol ?? '€'}
-                    </span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className="w-full border border-gray-200 rounded-r-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-orange-400"
-                      value={form.hourly_rate}
-                      onChange={(e) => set('hourly_rate', e.target.value)}
-                    />
-                  </div>
-                </div>
-              </Field>
-            </div>
+        {/* 3. Payment */}
+        <Section title="Payment Details">
+          <Field label="Preferred Payment Type">
+            <select className={selectClass} value={form.preferred_payment_type}
+              onChange={(e) => {
+                const val = e.target.value
+                setForm((prev) => ({
+                  ...prev,
+                  preferred_payment_type: val,
+                  paypal_email: val === 'paypal' ? prev.paypal_email : '',
+                }))
+              }}>
+              <option value="bank">Bank Transfer</option>
+              <option value="paypal">PayPal</option>
+            </select>
+          </Field>
+          {form.preferred_payment_type === 'paypal' && (
+            <Field label="PayPal Email">
+              <input type="email" className={inputClass} value={form.paypal_email}
+                onChange={(e) => set('paypal_email', e.target.value)} />
+            </Field>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="IBAN">
+              <input className={inputClass} value={form.iban}
+                onChange={(e) => set('iban', e.target.value)} />
+            </Field>
+            <Field label="SWIFT / BIC">
+              <input className={inputClass} value={form.bic}
+                onChange={(e) => set('bic', e.target.value)} />
+            </Field>
           </div>
-
-          {/* Languages */}
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-semibold text-gray-700 mb-3">Languages</p>
-            <div className="space-y-4">
-              <Field label="Native Languages">
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {LANGUAGE_OPTIONS.map((lang) => (
-                    <button key={lang} type="button"
-                      onClick={() => toggleArrayItem('native_languages', lang)}
-                      className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                      style={form.native_languages.includes(lang)
-                        ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                      {lang}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              <Field label="Teaches (Languages)">
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {LANGUAGE_OPTIONS.map((lang) => (
-                    <button key={lang} type="button"
-                      onClick={() => toggleArrayItem('teaching_languages', lang)}
-                      className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                      style={form.teaching_languages.includes(lang)
-                        ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                      {lang}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-            </div>
-          </div>
-
-          {/* Public profile */}
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-semibold text-gray-700 mb-3">Public Profile</p>
-            <div className="space-y-4">
-              <Field label="Qualifications & Experience">
-                <textarea rows={3} className={inputClass} value={form.qualifications}
-                  onChange={(e) => set('qualifications', e.target.value)} />
-              </Field>
-              <Field label="Specialties">
-                <input className={inputClass} value={form.specialties}
-                  onChange={(e) => set('specialties', e.target.value)} />
-              </Field>
-              <Field label="About Me (Bio)">
-                <textarea rows={4} className={inputClass} value={form.bio}
-                  onChange={(e) => set('bio', e.target.value)} />
-              </Field>
-              <Field label="Inspirational Quote">
-                <input className={inputClass} value={form.quote}
-                  onChange={(e) => set('quote', e.target.value)} />
-              </Field>
-            </div>
-          </div>
-
-          {/* Admin only */}
-          <div className="border-t border-gray-100 pt-4"
-            style={{ backgroundColor: '#fffbeb', borderRadius: '8px', padding: '16px' }}>
-            <p className="text-sm font-semibold mb-3" style={{ color: '#92400e' }}>
-              🔒 Admin Only — Not visible to teacher
-            </p>
-            <div className="space-y-4">
-              <Field label="Admin Notes" adminOnly>
-                <textarea rows={4} className={inputClass} value={form.admin_notes}
-                  onChange={(e) => set('admin_notes', e.target.value)}
-                  placeholder="Internal notes: warnings, training records, performance observations..." />
-              </Field>
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Follow-up Date" adminOnly>
-                  <DatePartInput value={form.follow_up_date} onChange={(v) => set('follow_up_date', v)} />
-                </Field>
-                <Field label="Follow-up Reason" adminOnly>
-                  <input className={inputClass} value={form.follow_up_reason}
-                    onChange={(e) => set('follow_up_reason', e.target.value)}
-                    placeholder="e.g. Performance review, contract renewal..." />
-                </Field>
+          <Field label="Tax Number">
+            <input className={inputClass} value={form.tax_number}
+              onChange={(e) => set('tax_number', e.target.value)} />
+          </Field>
+          <Field label="VAT Required" adminOnly>
+            <label className="flex items-center gap-2 cursor-pointer mt-1">
+              <input type="checkbox" checked={form.vat_required}
+                onChange={(e) => set('vat_required', e.target.checked)}
+                className="w-4 h-4 rounded" />
+              <span className="text-sm text-gray-600">This teacher is required to charge VAT</span>
+            </label>
+          </Field>
+          <Field label="Hourly Rate" adminOnly>
+            <div className="flex">
+              <select
+                className="border border-gray-200 rounded-l-lg px-2 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white border-r-0"
+                value={form.currency}
+                onChange={(e) => set('currency', e.target.value)}
+              >
+                {CURRENCY_OPTIONS.map((c) => (
+                  <option key={c.value} value={c.value}>{c.symbol} {c.value}</option>
+                ))}
+              </select>
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">
+                  {CURRENCY_OPTIONS.find(c => c.value === form.currency)?.symbol ?? '€'}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="w-full border border-gray-200 rounded-r-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                  value={form.hourly_rate}
+                  onChange={(e) => set('hourly_rate', e.target.value)}
+                />
               </div>
             </div>
-          </div>
+          </Field>
+        </Section>
 
-          {/* Actions */}
-          <div className="flex items-center justify-between pt-2">
-            <button
-              onClick={() => setActiveSection('A')}
-              className="text-sm text-gray-500 hover:text-gray-700"
-            >
-              ← Back to Account & Login
-            </button>
-            <div className="flex gap-3">
-              <button
-                onClick={() => router.push('/admin/teachers')}
-                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={saving}
-                className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                style={{ backgroundColor: '#FF8303' }}
-              >
-                {saving ? 'Creating...' : 'Create Teacher'}
-              </button>
+        {/* 4. Languages */}
+        <Section title="Languages">
+          <Field label="Native Languages">
+            <div className="flex flex-wrap gap-2 mt-1">
+              {LANGUAGE_OPTIONS.map((lang) => (
+                <button key={lang} type="button"
+                  onClick={() => toggleArrayItem('native_languages', lang)}
+                  className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+                  style={form.native_languages.includes(lang)
+                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
+                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
+                  {lang}
+                </button>
+              ))}
             </div>
+          </Field>
+          <Field label="Teaches (Languages)">
+            <div className="flex flex-wrap gap-2 mt-1">
+              {LANGUAGE_OPTIONS.map((lang) => (
+                <button key={lang} type="button"
+                  onClick={() => toggleArrayItem('teaching_languages', lang)}
+                  className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+                  style={form.teaching_languages.includes(lang)
+                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
+                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
+                  {lang}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </Section>
+
+        {/* 5. Public Profile */}
+        <Section title="Public Profile">
+          <Field label="Qualifications & Experience">
+            <textarea rows={3} className={inputClass} value={form.qualifications}
+              onChange={(e) => set('qualifications', e.target.value)} />
+          </Field>
+          <Field label="Specialties">
+            <input className={inputClass} value={form.specialties}
+              onChange={(e) => set('specialties', e.target.value)} />
+          </Field>
+          <Field label="About Me (Bio)">
+            <textarea rows={4} className={inputClass} value={form.bio}
+              onChange={(e) => set('bio', e.target.value)} />
+          </Field>
+          <Field label="Inspirational Quote">
+            <input className={inputClass} value={form.quote}
+              onChange={(e) => set('quote', e.target.value)} />
+          </Field>
+        </Section>
+
+        {/* 6. Admin Notes — amber, admin-only */}
+        <div className="rounded-xl border p-5 space-y-4"
+          style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+          <h2 className="font-semibold" style={{ color: '#92400e' }}>
+            🔒 Admin Only — Not visible to teacher
+          </h2>
+          <Field label="Admin Notes" adminOnly>
+            <textarea rows={4} className={inputClass} value={form.admin_notes}
+              onChange={(e) => set('admin_notes', e.target.value)}
+              placeholder="Internal notes: warnings, training records, performance observations..." />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Follow-up Date" adminOnly>
+              <DatePartInput value={form.follow_up_date} onChange={(v) => set('follow_up_date', v)} />
+            </Field>
+            <Field label="Follow-up Reason" adminOnly>
+              <input className={inputClass} value={form.follow_up_reason}
+                onChange={(e) => set('follow_up_reason', e.target.value)}
+                placeholder="e.g. Performance review, contract renewal..." />
+            </Field>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
+      <div className="sticky bottom-0 mt-6 -mx-6 px-6 py-3 border-t border-gray-200 bg-white/95 backdrop-blur flex justify-end gap-3">
+        <button
+          onClick={() => router.push('/admin/teachers')}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          style={{ backgroundColor: '#FF8303' }}
+        >
+          {saving ? 'Creating...' : 'Create Teacher'}
+        </button>
+      </div>
     </div>
   )
 }
