@@ -101,6 +101,28 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// Report state uses the same pill vocabulary as the lesson StatusBadge above, so
+// the two panels read as one system rather than three ad-hoc text treatments.
+// Row tint stays reserved for flagged - the only state needing action right now.
+const REPORT_TONES: Record<string, { bg: string; color: string }> = {
+  flagged:  { bg: '#fee2e2', color: '#991b1b' },
+  reopened: { bg: '#ffedd5', color: '#9a3412' },
+  overdue:  { bg: '#fef3c7', color: '#92400e' },
+  due:      { bg: '#f3f4f6', color: '#374151' },
+}
+
+function ReportBadge({ tone, label }: { tone: string; label: string }) {
+  const s = REPORT_TONES[tone] ?? REPORT_TONES.due
+  return (
+    <span
+      className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap"
+      style={{ backgroundColor: s.bg, color: s.color }}
+    >
+      {label}
+    </span>
+  )
+}
+
 // ── overdue calculation ───────────────────────────────────────────────────────
 
 function hoursOverdue(report: PendingReportItem): number {
@@ -235,16 +257,27 @@ export default function DashboardClient({
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
             {statCards.map((card) => {
               const Icon = card.icon
+              // Von Restorff: a row of equal-weight cards where most read 0 makes the
+              // one number that matters invisible. Zero and unset go muted, non-zero
+              // goes full contrast, and a non-zero flagged count takes a red border so
+              // it is the single card that breaks the pattern.
+              const isNull = card.value === null
+              const isZero = card.value === 0
+              const emphasised = card.alert && !isZero && !isNull
+              const muted = isZero || isNull
               return (
                 <Link key={card.label} href={card.href} prefetch={false}>
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow">
+                  <div
+                    className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-shadow"
+                    style={emphasised ? { borderColor: '#dc2626' } : {}}
+                  >
                     <div className="flex items-center justify-between mb-3">
-                      <p className="text-xs text-gray-500 leading-snug">{card.label}</p>
-                      <Icon size={14} style={{ color: '#d1d5db' }} />
+                      <p className="text-xs leading-snug" style={{ color: muted ? '#9ca3af' : '#6b7280' }}>{card.label}</p>
+                      <Icon size={14} style={{ color: emphasised ? '#dc2626' : '#d1d5db' }} />
                     </div>
                     <p
                       className="text-3xl font-bold"
-                      style={{ color: card.alert ? '#dc2626' : '#111827' }}
+                      style={{ color: emphasised ? '#dc2626' : muted ? '#9ca3af' : '#111827' }}
                     >
                       {card.value === null ? (
                         <span className="text-base font-medium" style={{ color: '#9ca3af' }}>
@@ -266,11 +299,21 @@ export default function DashboardClient({
             {/* Left: live classes feed */}
             <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
                   <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Today&apos;s Classes</h2>
                 </div>
-                <span className="text-xs text-gray-400">{todayLabel}{' · '}{adminTimezone}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-400">{todayLabel}{' · '}{adminTimezone}</span>
+                  <Link
+                    href="/admin/classes"
+                    prefetch={false}
+                    className="text-xs hover:underline"
+                    style={{ color: '#FF8303' }}
+                  >
+                    View all
+                  </Link>
+                </div>
               </div>
 
               {timezoneMissing ? (
@@ -320,7 +363,7 @@ export default function DashboardClient({
             {/* Right: pending + flagged reports */}
             <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
                   <h2 style={{ fontSize: '15px', fontWeight: '600', color: '#111827', margin: 0 }}>Pending Reports</h2>
                 </div>
@@ -330,7 +373,7 @@ export default function DashboardClient({
                   className="text-xs hover:underline"
                   style={{ color: '#FF8303' }}
                 >
-                  View all
+                  View all ({pendingAndFlagged.length})
                 </Link>
               </div>
 
@@ -339,8 +382,11 @@ export default function DashboardClient({
                   All reports submitted ✓
                 </div>
               ) : (
-                <div className="divide-y divide-gray-50 overflow-y-auto max-h-80 thin-scroll">
-                  {pendingAndFlagged.map((report) => {
+                // Fixed four rows, no inner scroll: a clipped half-row reads as a
+                // rendering fault rather than "more below". The count in the header
+                // link states the truncation instead of implying it.
+                <div className="divide-y divide-gray-50">
+                  {pendingAndFlagged.slice(0, 4).map((report) => {
                     const isFlagged = report.status === 'flagged'
                     const overdue = hoursOverdue(report)
                     return (
@@ -367,12 +413,7 @@ export default function DashboardClient({
                           <div className="shrink-0 text-right">
                             {isFlagged ? (
                               <>
-                                <span
-                                  className="text-xs font-semibold"
-                                  style={{ color: '#dc2626' }}
-                                >
-                                  Flagged
-                                </span>
+                                <ReportBadge tone="flagged" label="Flagged" />
                                 {/* Reopen will be wired to a server action in Step 8 */}
                                 <div className="mt-1">
                                   <Link
@@ -386,15 +427,11 @@ export default function DashboardClient({
                                 </div>
                               </>
                             ) : report.status === 'reopened' ? (
-                              <span className="text-xs font-semibold" style={{ color: '#c2410c' }}>
-                                Reopened
-                              </span>
+                              <ReportBadge tone="reopened" label="Reopened" />
+                            ) : overdue >= 1 ? (
+                              <ReportBadge tone="overdue" label={`${Math.floor(overdue)}h overdue`} />
                             ) : (
-                              <span className="text-xs text-gray-500">
-                                {overdue >= 1
-                                  ? `${Math.floor(overdue)}h overdue`
-                                  : 'Due soon'}
-                              </span>
+                              <ReportBadge tone="due" label="Due soon" />
                             )}
                           </div>
                         </div>
