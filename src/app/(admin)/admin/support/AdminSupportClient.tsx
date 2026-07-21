@@ -13,6 +13,7 @@ import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
+import ReadTicks from '@/components/messages/ReadTicks'
 import { toast } from 'sonner'
 import { getSupportParticipant } from './actions'
 
@@ -232,6 +233,13 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
 
   useEffect(() => {
     if (!selectedConv) return
+    // Composer state belongs to the conversation it was typed in: a draft, an uploaded
+    // attachment or a half-finished message edit left over from the previous thread must
+    // never be sendable into this one. Same clear the send-success path uses.
+    editor?.commands.clearContent()
+    setPendingAttachments([])
+    setEditingMessageId(null)
+    editEditor?.commands.clearContent()
     // Feedback on the clicked row itself, keyed by its conversation id — the thread pane's
     // "Loading..." is on the other side of the screen and the row looked inert.
     const pendingId = selectedConv.participantId
@@ -243,7 +251,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
         removePendingId(setOpeningConvIds, pendingId)
       }
     })()
-  }, [selectedConv, loadMessages])
+  }, [selectedConv, loadMessages, editor, editEditor])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -806,6 +814,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                   ) : messages.map(msg => {
                     const isAdmin = msg.sender_role === 'admin'
                     const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
+                    // On-bubble ticks only where there is a real bubble to hang them in:
+                    // an emoji-only message has no bubble fill, and an attachment-only
+                    // message has no bubble at all, so both keep the metadata-row ticks.
+                    const isBubbleTicked = isAdmin && hasContent && !isEmojiOnly(msg.content)
                     return (
                       <div key={msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'} items-end gap-2`}>
                         {!isAdmin && <Avatar name={selectedConv.participantName} photoUrl={selectedConv.participantPhotoUrl} size={7} />}
@@ -840,6 +852,15 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                           ) : (
                           <>
                           {hasContent && (
+                            isBubbleTicked ? (
+                              <div
+                                className="admin-support-bubble px-3 py-2 rounded-2xl text-sm inline-flex items-end"
+                                style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
+                              >
+                                <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                                <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
+                              </div>
+                            ) : (
                           <div
                             className="admin-support-bubble px-3 py-2 rounded-2xl text-sm"
                             style={isEmojiOnly(msg.content)
@@ -850,6 +871,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                             }
                             dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
                           />
+                            )
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className={`flex flex-col gap-0.5 ${hasContent ? 'mt-1' : ''} ${isAdmin ? 'items-end' : 'items-start'}`}>
@@ -887,15 +909,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                               <span className="text-xs text-gray-400 italic">(edited)</span>
                             )}
                             <span className="text-xs text-gray-400">{formatTime(msg.created_at)}</span>
-                            {isAdmin && (
-                              <span
-                                className="text-xs font-bold leading-none"
-                                style={{ color: msg.read_at ? '#FF8303' : '#9ca3af' }}
-                                title={msg.read_at ? 'Read' : 'Sent'}
-                              >
-                                {msg.read_at ? '✓✓' : '✓'}
-                              </span>
-                            )}
+                            {isAdmin && !isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
                         </div>
                         {isAdmin && <Avatar name={adminProfile.full_name} photoUrl={adminProfile.photo_url} size={7} />}
