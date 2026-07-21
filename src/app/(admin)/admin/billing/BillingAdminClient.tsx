@@ -847,7 +847,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   ]
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-6">
       <input ref={templateInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleTemplateUpload} />
 
       {/* Page header */}
@@ -858,15 +858,15 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
       </div>
 
       {/* Tab switcher */}
-      <div className="flex gap-1 mb-6 border-b border-gray-200">
+      <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className="px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            className="px-5 py-2 text-sm font-medium transition-colors"
             style={activeTab === tab.key
-              ? { backgroundColor: '#FF8303', color: 'white', borderBottom: '2px solid #FF8303' }
-              : { color: '#4b5563' }}
+              ? { backgroundColor: '#FF8303', color: 'white' }
+              : { backgroundColor: 'white', color: '#6b7280' }}
           >
             {tab.label}
           </button>
@@ -955,7 +955,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
           )}
 
           {/* Invoice template management */}
-          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="card-elevated p-4 flex items-center justify-between">
             <div>
               <p className="font-medium text-gray-900">Invoice Template</p>
               <p className="text-sm text-gray-500">Upload the Lingualink branded PDF for teachers to download</p>
@@ -982,7 +982,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
             <select
               value={invoiceFilterTeacher}
               onChange={e => setInvoiceFilterTeacher(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
             >
               <option value="">All Teachers</option>
               {teachers.map(t => (
@@ -993,7 +993,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
             <select
               value={invoiceFilterMonth}
               onChange={e => setInvoiceFilterMonth(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
             >
               <option value="">All Months</option>
               {monthOptions.map(m => (
@@ -1004,7 +1004,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
             <select
               value={invoiceFilterStatus}
               onChange={e => setInvoiceFilterStatus(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
             >
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
@@ -1032,7 +1032,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
           {filteredInvoices.length === 0 ? (
             <p className="text-sm text-gray-400">No invoices match the current filters.</p>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="card-elevated overflow-hidden">
               <div className="divide-y divide-gray-100">
                 {filteredInvoices.map(inv => {
                   const teacher = teachers.find(t => t.id === inv.teacher_id)
@@ -1222,7 +1222,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
               <select
                 value={sbFilterStudent}
                 onChange={e => setSbFilterStudent(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               >
                 <option value="">All Students</option>
                 {students.map(s => (
@@ -1236,7 +1236,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 type="date"
                 value={sbFilterDateFrom}
                 onChange={e => setSbFilterDateFrom(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               />
             </div>
             <div>
@@ -1245,7 +1245,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 type="date"
                 value={sbFilterDateTo}
                 onChange={e => setSbFilterDateTo(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               />
             </div>
             <button
@@ -1278,7 +1278,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
 
           {sbLoaded && sbLessons.length > 0 && (
             <>
-              <div className="flex gap-6 bg-white border border-gray-200 rounded-lg px-5 py-3">
+              <div className="flex gap-6 card-elevated px-5 py-3">
                 <div>
                   <p className="text-xs text-gray-400">Total classes</p>
                   <p className="text-lg font-semibold text-gray-900">{sbLessons.length}</p>
@@ -1289,7 +1289,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 </div>
               </div>
 
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="card-elevated overflow-hidden">
                 <div className="grid grid-cols-6 gap-3 px-5 py-3 text-xs font-medium text-gray-400 uppercase border-b border-gray-100">
                   <span className="col-span-2">Student / Teacher</span>
                   <span>Date &amp; Time</span>
@@ -1339,7 +1339,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
               <select
                 value={cbFilterCompany}
                 onChange={e => setCbFilterCompany(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               >
                 <option value="">All Companies</option>
                 {companies.map(c => (
@@ -1353,7 +1353,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 type="date"
                 value={cbFilterDateFrom}
                 onChange={e => setCbFilterDateFrom(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               />
             </div>
             <div>
@@ -1362,7 +1362,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 type="date"
                 value={cbFilterDateTo}
                 onChange={e => setCbFilterDateTo(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
               />
             </div>
             <button
@@ -1448,7 +1448,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                 const totalHours = billableToTeacherLessons.reduce((sum, l) => sum + l.duration_minutes / 60, 0)
 
                 return (
-                  <div key={companyId} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div key={companyId} className="card-elevated overflow-hidden">
                     <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                       <div>
                         <h3 className="font-semibold text-gray-900">{companyName}</h3>
