@@ -210,7 +210,7 @@ function InfoRow({ label, value, adminOnly }: {
         {label}
         {adminOnly && (
           <span className="px-1.5 py-0.5 rounded text-xs"
-            style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+            style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>
             Admin only
           </span>
         )}

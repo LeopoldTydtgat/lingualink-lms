@@ -568,8 +568,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <button
             onClick={handleBulkChangeAccess}
             disabled={!bulkRoles || bulkSaving}
-            className="px-3 py-1.5 text-sm font-medium rounded-md text-white disabled:opacity-40"
-            style={{ backgroundColor: '#FF8303' }}
+            className="px-3 py-1.5 text-sm font-medium rounded-md disabled:opacity-40"
+            style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FF8303' }}
           >
             {bulkSaving ? 'Saving…' : 'Apply'}
           </button>

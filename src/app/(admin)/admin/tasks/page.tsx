@@ -41,8 +41,8 @@ const REASON_LABEL: Record<string, string> = {
 }
 
 function priorityStyle(priority: string) {
-  if (priority === 'high') return { backgroundColor: '#fee2e2', color: '#991b1b' }
-  if (priority === 'medium') return { backgroundColor: '#fef3c7', color: '#92400e' }
+  if (priority === 'high') return { backgroundColor: '#FFEEE6', color: '#FD5602' }
+  if (priority === 'medium') return { backgroundColor: '#FFF8E8', color: '#B45309' }
   return { backgroundColor: '#f3f4f6', color: '#374151' }
 }
 
@@ -307,12 +307,12 @@ export default function AdminTasksPage() {
                         {PRIORITY_LABEL[task.priority]}
                       </span>
                       {task.status === 'completed' && (
-                        <span style={{ backgroundColor: '#d1fae5', color: '#065f46', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px' }}>
+                        <span style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px' }}>
                           Completed
                         </span>
                       )}
                       {overdue && (
-                        <span style={{ backgroundColor: '#fee2e2', color: '#991b1b', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px' }}>
+                        <span style={{ backgroundColor: '#FFEEE6', color: '#FD5602', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px' }}>
                           Overdue
                         </span>
                       )}
@@ -338,7 +338,8 @@ export default function AdminTasksPage() {
                           <span style={{ fontWeight: 500 }}>Linked:</span>{' '}
                           <span
                             onClick={() => navigateToLinked(task)}
-                            style={{ color: '#FF8303', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: '2px' }}
+                            className="hover:underline"
+                            style={{ color: '#FF8303', cursor: 'pointer', fontWeight: 500, textUnderlineOffset: '2px' }}
                           >
                             {task.linked_entity_name}
                           </span>

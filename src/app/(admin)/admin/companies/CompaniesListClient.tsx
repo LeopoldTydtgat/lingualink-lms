@@ -125,7 +125,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
                         className="px-2 py-0.5 rounded text-xs font-medium"
                         style={
                           c.cancellation_policy === '48hr'
-                            ? { backgroundColor: '#fef3c7', color: '#92400e' }
+                            ? { backgroundColor: '#FFF8E8', color: '#B45309' }
                             : { backgroundColor: '#f3f4f6', color: '#6b7280' }
                         }
                       >

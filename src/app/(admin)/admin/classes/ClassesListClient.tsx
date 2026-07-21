@@ -294,9 +294,9 @@ export default function ClassesListClient({ teachers }: Props) {
             onClick={applyFilters}
             disabled={loading}
             style={{
-              backgroundColor: '#FF8303',
-              color: 'white',
-              border: 'none',
+              backgroundColor: '#FFF0E0',
+              color: '#FF8303',
+              border: '1px solid #FF8303',
               borderRadius: '6px',
               padding: '8px 16px',
               fontSize: '14px',

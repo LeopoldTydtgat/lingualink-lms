@@ -194,7 +194,7 @@ function AnnouncementRow({
               className="text-xs px-2 py-0.5 rounded-full font-medium"
               style={
                 a.is_active
-                  ? { backgroundColor: '#dcfce7', color: '#166534' }
+                  ? { backgroundColor: '#DCFCE7', color: '#15803D' }
                   : { backgroundColor: '#f3f4f6', color: '#6b7280' }
               }
             >
@@ -209,7 +209,7 @@ function AnnouncementRow({
             {/* Audience badge */}
             <span
               className="text-xs px-2 py-0.5 rounded-full font-medium"
-              style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}
+              style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}
             >
               {AUDIENCE_LABELS[a.target_audience] ?? a.target_audience}
             </span>

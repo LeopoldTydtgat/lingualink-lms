@@ -113,7 +113,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
             <span className="text-sm text-gray-500 w-44 flex-shrink-0">Cancellation Policy</span>
             <span className="px-2 py-0.5 rounded text-xs font-medium"
               style={company.cancellation_policy === '48hr'
-                ? { backgroundColor: '#fef3c7', color: '#92400e' }
+                ? { backgroundColor: '#FFF8E8', color: '#B45309' }
                 : { backgroundColor: '#f3f4f6', color: '#6b7280' }}>
               {(company.cancellation_policy as string) ?? '24hr'}
             </span>
@@ -183,7 +183,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded text-xs font-medium"
                           style={s.cancellation_policy === '48hr'
-                            ? { backgroundColor: '#fef3c7', color: '#92400e' }
+                            ? { backgroundColor: '#FFF8E8', color: '#B45309' }
                             : { backgroundColor: '#f3f4f6', color: '#6b7280' }}>
                           {s.cancellation_policy ?? '24hr'}
                         </span>

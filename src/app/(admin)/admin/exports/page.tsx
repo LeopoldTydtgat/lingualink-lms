@@ -349,9 +349,9 @@ export default function AdminExportsPage() {
                   onClick={() => handleDownload(exportDef)}
                   disabled={isLoading}
                   style={{
-                    backgroundColor: isLoading ? '#e5e7eb' : '#FF8303',
-                    color: isLoading ? '#9ca3af' : '#fff',
-                    border: 'none', borderRadius: '8px', padding: '9px 20px',
+                    backgroundColor: isLoading ? '#e5e7eb' : '#FFF0E0',
+                    color: isLoading ? '#9ca3af' : '#FF8303',
+                    border: isLoading ? 'none' : '1px solid #FF8303', borderRadius: '8px', padding: '9px 20px',
                     fontSize: '13px', fontWeight: 600,
                     cursor: isLoading ? 'not-allowed' : 'pointer',
                     whiteSpace: 'nowrap', flexShrink: 0,

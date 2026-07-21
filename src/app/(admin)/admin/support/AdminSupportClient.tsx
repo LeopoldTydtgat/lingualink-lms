@@ -793,8 +793,8 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                       <p className="text-xs text-gray-500 mt-1">This thread may contain messages that could not be fetched.</p>
                       <button
                         onClick={() => loadMessages(selectedConv)}
-                        className="mt-3 px-3 py-1.5 rounded-lg text-xs font-medium text-white"
-                        style={{ backgroundColor: '#FF8303' }}
+                        className="mt-3 px-3 py-1.5 rounded-lg text-xs font-medium"
+                        style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FF8303' }}
                       >
                         Try again
                       </button>
@@ -830,8 +830,8 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                                 <button
                                   onClick={handleSaveMessageEdit}
                                   disabled={savingEdit}
-                                  className="px-2.5 py-1 rounded-lg text-xs font-medium text-white disabled:opacity-50"
-                                  style={{ backgroundColor: '#FF8303' }}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-medium disabled:opacity-50"
+                                  style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FF8303' }}
                                 >
                                   {savingEdit ? 'Saving...' : 'Save'}
                                 </button>
@@ -1119,7 +1119,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
                             disabled={togglingFaqIds.has(faq.id)}
                             className="text-xs px-2 py-0.5 rounded-full font-medium disabled:opacity-50"
                             style={faq.is_active
-                              ? { backgroundColor: '#dcfce7', color: '#16a34a' }
+                              ? { backgroundColor: '#DCFCE7', color: '#15803D' }
                               : { backgroundColor: '#f3f4f6', color: '#9ca3af' }
                             }>
                             {togglingFaqIds.has(faq.id) ? 'Saving...' : (faq.is_active ? 'Active' : 'Inactive')}

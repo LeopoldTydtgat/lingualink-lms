@@ -296,7 +296,7 @@ export default function DashboardClient({
               const emphasised = card.alert && !isZero && !isNull
               const muted = isZero || isNull
 
-              const chipBg = muted ? '#f3f4f6' : emphasised ? '#FEE2E2' : '#FFF0E0'
+              const chipBg = muted ? '#f3f4f6' : emphasised ? '#FFEEE6' : '#FFF0E0'
               const chipColor = muted ? '#9ca3af' : emphasised ? '#FD5602' : '#FF8303'
               const numberColor = muted ? '#9ca3af' : emphasised ? '#FD5602' : '#111827'
 
