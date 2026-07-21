@@ -413,7 +413,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
   ]
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6">
       {/* Back */}
       <button
         onClick={() => router.push('/admin/teachers')}
@@ -524,7 +524,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Overview tab */}
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-3 gap-6">
           {/* Personal info */}
           <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Personal Information</h2>
@@ -578,7 +578,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           </div>
 
           {/* Admin notes — full width, amber background */}
-          <div className="col-span-2 rounded-xl border p-5 space-y-2"
+          <div className="col-span-3 rounded-xl border p-5 space-y-2"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
               🔒 Admin Notes — Not visible to teacher
@@ -589,7 +589,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           </div>
 
           {/* Password override — admin only */}
-          <div className="col-span-2 rounded-xl border p-5 space-y-3"
+          <div className="col-span-3 rounded-xl border p-5 space-y-3"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
               🔑 Set New Password — Admin only
@@ -647,7 +647,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
           {/* Bio */}
           {!!(teacher.bio as string) && (
-            <div className="col-span-2 card-elevated p-5 space-y-2">
+            <div className="col-span-3 card-elevated p-5 space-y-2">
               <h2 className="font-semibold text-gray-800">Bio</h2>
               <p className="text-sm text-gray-600">{teacher.bio as string}</p>
             </div>

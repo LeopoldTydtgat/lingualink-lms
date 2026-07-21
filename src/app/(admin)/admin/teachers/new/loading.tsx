@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6 max-w-6xl">
       {/* header */}
       <div className="flex items-center gap-3 mb-6">
         <div className="h-4 w-20 rounded bg-gray-200 animate-pulse" />
@@ -15,10 +15,7 @@ export default function Loading() {
       </div>
 
       {/* card */}
-      <div
-        className="bg-white rounded-xl p-6 space-y-5"
-        style={{ border: '1px solid #E0DFDC' }}
-      >
+      <div className="card-elevated p-6 space-y-5">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i}>
             <div className="h-3 w-24 rounded bg-gray-200 animate-pulse mb-2" />

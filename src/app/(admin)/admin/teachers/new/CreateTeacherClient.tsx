@@ -136,7 +136,7 @@ function Field({ label, children, adminOnly }: {
 // Bordered section card — matches the Teacher Detail Overview tab's card style.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: '#E0DFDC' }}>
+    <div className="card-elevated p-5 space-y-4">
       <div className="flex items-center gap-2.5">
         <span className="block rounded-full" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
         <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
@@ -212,7 +212,7 @@ export default function CreateTeacherClient() {
   return (
     <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
       {/* Header */}
-      <div className="max-w-4xl mx-auto flex items-center gap-3 mb-6">
+      <div className="max-w-6xl mx-auto flex items-center gap-3 mb-6">
         <button
           onClick={() => router.push('/admin/teachers')}
           className="text-sm text-gray-500 hover:text-gray-700"
@@ -225,7 +225,7 @@ export default function CreateTeacherClient() {
 
       {/* Single scrolling form — one card per section.
           pb-28 keeps the last field clear of the sticky action bar. */}
-      <div className="max-w-4xl mx-auto space-y-8 pb-28">
+      <div className="max-w-6xl mx-auto space-y-8 pb-28">
 
         {/* 1. Account & Login */}
         <Section title="Account & Login">

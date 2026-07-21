@@ -12,8 +12,7 @@ export default function Loading() {
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
-            className="bg-white rounded-xl p-4 flex items-center gap-4"
-            style={{ border: '1px solid #E0DFDC' }}
+            className="card-elevated p-4 flex items-center gap-4"
           >
             <div className="h-10 w-10 rounded-full bg-gray-200 animate-pulse shrink-0" />
             <div className="flex-1 space-y-2">
