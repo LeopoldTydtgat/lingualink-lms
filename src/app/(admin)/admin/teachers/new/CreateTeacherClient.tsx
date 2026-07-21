@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DatePartInput } from '../../_components/DatePartInput'
+import { LanguagePicker } from '../../_components/LanguagePicker'
 import { toast } from 'sonner'
 
 const TIMEZONES = [
@@ -42,12 +43,6 @@ const STATUS_OPTIONS = [
   { value: 'current', label: 'Current' },
   { value: 'former', label: 'Former' },
   { value: 'on_hold', label: 'On Hold' },
-]
-
-const LANGUAGE_OPTIONS = [
-  'English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese',
-  'Dutch', 'Polish', 'Czech', 'Hungarian', 'Romanian', 'Swedish',
-  'Norwegian', 'Danish', 'Finnish', 'Afrikaans', 'Zulu', 'Xhosa',
 ]
 
 const TITLE_OPTIONS = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof']
@@ -147,92 +142,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
       </div>
       {children}
-    </div>
-  )
-}
-
-// Preset + custom language pills. Selected pills show a check; custom (non-preset)
-// entries also get an × to remove them. The "+ Other" input is local state scoped
-// to this component instance, so Native and Teaches stay independent.
-function LanguagePicker({ values, onToggle, onAddCustom, onRemoveCustom }: {
-  values: string[]
-  onToggle: (lang: string) => void
-  onAddCustom: (lang: string) => void
-  onRemoveCustom: (lang: string) => void
-}) {
-  const [otherOpen, setOtherOpen] = useState(false)
-  const [otherText, setOtherText] = useState('')
-
-  const customValues = values.filter((v) => !LANGUAGE_OPTIONS.includes(v))
-
-  function confirmOther() {
-    const trimmed = otherText.trim()
-    if (trimmed && !values.some((v) => v.toLowerCase() === trimmed.toLowerCase())) {
-      onAddCustom(trimmed)
-    }
-    setOtherText('')
-    setOtherOpen(false)
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2 mt-1 items-center">
-      {LANGUAGE_OPTIONS.map((lang) => {
-        const selected = values.includes(lang)
-        return (
-          <button key={lang} type="button"
-            onClick={() => onToggle(lang)}
-            className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-            style={selected
-              ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
-              : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}>
-            {selected && <span className="mr-1">✓</span>}
-            {lang}
-          </button>
-        )
-      })}
-
-      {customValues.map((lang) => (
-        <span key={lang}
-          className="px-3 py-1 rounded-full text-xs font-medium border inline-flex items-center gap-1"
-          style={{ backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }}>
-          <span>✓</span>
-          {lang}
-          <button type="button" onClick={() => onRemoveCustom(lang)}
-            aria-label={`Remove ${lang}`}
-            className="leading-none cursor-pointer"
-            style={{ color: '#FF8303' }}>
-            ×
-          </button>
-        </span>
-      ))}
-
-      {otherOpen ? (
-        <span className="inline-flex items-center gap-1">
-          <input
-            autoFocus
-            value={otherText}
-            onChange={(e) => setOtherText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); confirmOther() }
-              if (e.key === 'Escape') { setOtherText(''); setOtherOpen(false) }
-            }}
-            placeholder="Language..."
-            className="px-2 py-1 rounded-full text-xs border w-28 focus:outline-none"
-            style={{ borderColor: '#E0DFDC', color: '#4b5563' }}
-          />
-          <button type="button" onClick={confirmOther}
-            className="px-2 py-1 rounded-full text-xs font-medium border"
-            style={{ backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }}>
-            Add
-          </button>
-        </span>
-      ) : (
-        <button type="button" onClick={() => setOtherOpen(true)}
-          className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-          style={{ backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}>
-          + Other
-        </button>
-      )}
     </div>
   )
 }

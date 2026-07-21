@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { DatePartInput } from '../../../_components/DatePartInput'
+import { LanguagePicker } from '../../../_components/LanguagePicker'
 
 const TIMEZONES = [
   'Africa/Johannesburg', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
@@ -30,12 +31,6 @@ const STATUS_OPTIONS = [
   { value: 'current', label: 'Current' },
   { value: 'former', label: 'Former' },
   { value: 'on_hold', label: 'On Hold' },
-]
-
-const LANGUAGE_OPTIONS = [
-  'English', 'French', 'Spanish', 'German', 'Italian', 'Portuguese',
-  'Dutch', 'Polish', 'Czech', 'Hungarian', 'Romanian', 'Swedish',
-  'Norwegian', 'Danish', 'Finnish', 'Afrikaans', 'Zulu', 'Xhosa',
 ]
 
 const TITLE_OPTIONS = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof']
@@ -438,32 +433,20 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
             <p className="text-sm font-semibold text-gray-700 mb-3">Languages</p>
             <div className="space-y-4">
               <Field label="Native Languages">
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {LANGUAGE_OPTIONS.map((lang) => (
-                    <button key={lang} type="button"
-                      onClick={() => toggleArrayItem('native_languages', lang)}
-                      className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                      style={form.native_languages.includes(lang)
-                        ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                      {lang}
-                    </button>
-                  ))}
-                </div>
+                <LanguagePicker
+                  values={form.native_languages}
+                  onToggle={(lang) => toggleArrayItem('native_languages', lang)}
+                  onAddCustom={(lang) => setForm((prev) => ({ ...prev, native_languages: [...prev.native_languages, lang] }))}
+                  onRemoveCustom={(lang) => setForm((prev) => ({ ...prev, native_languages: prev.native_languages.filter((v) => v !== lang) }))}
+                />
               </Field>
               <Field label="Teaches (Languages)">
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {LANGUAGE_OPTIONS.map((lang) => (
-                    <button key={lang} type="button"
-                      onClick={() => toggleArrayItem('teaching_languages', lang)}
-                      className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                      style={form.teaching_languages.includes(lang)
-                        ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                      {lang}
-                    </button>
-                  ))}
-                </div>
+                <LanguagePicker
+                  values={form.teaching_languages}
+                  onToggle={(lang) => toggleArrayItem('teaching_languages', lang)}
+                  onAddCustom={(lang) => setForm((prev) => ({ ...prev, teaching_languages: [...prev.teaching_languages, lang] }))}
+                  onRemoveCustom={(lang) => setForm((prev) => ({ ...prev, teaching_languages: prev.teaching_languages.filter((v) => v !== lang) }))}
+                />
               </Field>
             </div>
           </div>
