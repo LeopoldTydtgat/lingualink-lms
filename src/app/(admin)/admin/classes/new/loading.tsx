@@ -1,35 +1,28 @@
 export default function Loading() {
   return (
-    <div className="p-6 max-w-4xl">
-      {/* header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="h-4 w-20 rounded bg-gray-200 animate-pulse" />
-        <div className="h-7 w-40 rounded bg-gray-200 animate-pulse" />
-      </div>
+    <div className="p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* back link */}
+        <div className="h-4 w-32 rounded bg-gray-200 animate-pulse mb-5" />
 
-      {/* tab bar */}
-      <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-9 w-36 bg-gray-200 animate-pulse" />
-        ))}
-      </div>
+        {/* title */}
+        <div className="h-6 w-40 rounded bg-gray-200 animate-pulse mb-2" />
 
-      {/* card */}
-      <div
-        className="bg-white rounded-xl p-6 space-y-5"
-        style={{ border: '1px solid #E0DFDC' }}
-      >
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i}>
-            <div className="h-3 w-24 rounded bg-gray-200 animate-pulse mb-2" />
-            <div className="h-10 w-full rounded-lg bg-gray-200 animate-pulse" />
-          </div>
-        ))}
+        {/* step progress bar */}
+        <div className="h-1 w-full rounded bg-gray-200 animate-pulse mb-8" />
 
-        {/* action row */}
-        <div className="flex justify-end gap-3 pt-2">
-          <div className="h-9 w-24 rounded-lg bg-gray-200 animate-pulse" />
-          <div className="h-9 w-32 rounded-lg bg-gray-200 animate-pulse" />
+        {/* step content card */}
+        <div className="card-elevated p-6 space-y-4">
+          <div className="h-4 w-40 rounded bg-gray-200 animate-pulse" />
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3.5">
+              <div className="h-11 w-11 rounded-full bg-gray-200 animate-pulse shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-3 w-1/3 rounded bg-gray-200 animate-pulse" />
+                <div className="h-3 w-1/4 rounded bg-gray-200 animate-pulse" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

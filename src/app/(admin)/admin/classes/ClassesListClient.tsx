@@ -160,10 +160,7 @@ export default function ClassesListClient({ teachers }: Props) {
       </div>
 
       {/* Filters row */}
-      <div style={{
-        backgroundColor: 'white',
-        border: '1px solid #E5E7EB',
-        borderRadius: '10px',
+      <div className="card-elevated" style={{
         padding: '16px',
         marginBottom: '20px',
         display: 'flex',
@@ -328,10 +325,7 @@ export default function ClassesListClient({ teachers }: Props) {
       </div>
 
       {/* Table */}
-      <div style={{
-        backgroundColor: 'white',
-        border: '1px solid #E5E7EB',
-        borderRadius: '10px',
+      <div className="card-elevated" style={{
         overflow: 'hidden',
       }}>
         {/* Table header */}

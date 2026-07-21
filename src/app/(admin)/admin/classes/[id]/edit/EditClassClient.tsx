@@ -171,17 +171,19 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
 
   if (!selectedTeacherTz) {
     return (
-      <div style={{ padding: '32px', maxWidth: '600px' }}>
-        <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
-          ← Back to Class Detail
-        </Link>
-        <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: '20px 0 4px' }}>
-          Edit Class
-        </h1>
-        <p style={{ fontSize: '14px', color: '#B91C1C', marginTop: '20px' }}>
-          This class&apos;s teacher has no timezone set, so it cannot be safely edited.
-          Set the teacher&apos;s timezone first, then return here.
-        </p>
+      <div style={{ padding: '32px' }}>
+        <div className="max-w-6xl mx-auto">
+          <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
+            ← Back to Class Detail
+          </Link>
+          <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: '20px 0 4px' }}>
+            Edit Class
+          </h1>
+          <p style={{ fontSize: '14px', color: '#B91C1C', marginTop: '20px' }}>
+            This class&apos;s teacher has no timezone set, so it cannot be safely edited.
+            Set the teacher&apos;s timezone first, then return here.
+          </p>
+        </div>
       </div>
     )
   }
@@ -282,7 +284,8 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
     teachers.find((t) => t.id === teacherId)?.full_name ?? lesson.teacher?.full_name ?? 'the teacher'
 
   return (
-    <div style={{ padding: '32px', maxWidth: '600px' }}>
+    <div style={{ padding: '32px' }}>
+      <div className="max-w-6xl mx-auto">
 
       <Link href={`/admin/classes/${lesson.id}`} prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
         ← Back to Class Detail
@@ -295,7 +298,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
         {lesson.student?.full_name} · Admin edits have no time restrictions.
       </p>
 
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div className="card-elevated" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
         {/* Teacher */}
         <div>
@@ -376,9 +379,9 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
                   onClick={() => setDuration(mins)}
                   disabled={insufficient}
                   title={insufficient ? 'Insufficient hours - top up first' : undefined}
+                  className={`card-elevated${duration === mins ? ' card-elevated-active' : ''}`}
                   style={{
-                    flex: 1, padding: '12px', borderRadius: '8px',
-                    border: duration === mins ? '2px solid #FF8303' : '1px solid #E5E7EB',
+                    flex: 1, padding: '12px',
                     backgroundColor: insufficient ? '#F3F4F6' : (duration === mins ? '#FFF7ED' : 'white'),
                     cursor: insufficient ? 'not-allowed' : 'pointer',
                     fontSize: '14px', fontWeight: 600,
@@ -460,6 +463,7 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
             {checkingAvailability ? 'Checking…' : saving ? 'Saving…' : 'Save Changes'}
           </button>
         )}
+      </div>
       </div>
     </div>
   )

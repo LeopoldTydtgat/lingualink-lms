@@ -149,7 +149,8 @@ export default function ClassDetailClient({ lesson }: Props) {
   }
 
   return (
-    <div style={{ padding: '32px', maxWidth: '720px' }}>
+    <div style={{ padding: '32px' }}>
+      <div className="max-w-6xl mx-auto">
 
       {/* Back */}
       <Link href="/admin/classes" prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
@@ -206,7 +207,7 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* Main details card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+      <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
         <SectionTitle>Class Information</SectionTitle>
         <DetailRow label="Date & Time" value={formatDateTime(lesson.scheduled_at)} />
         <DetailRow label="Duration" value={`${lesson.duration_minutes} minutes`} />
@@ -248,16 +249,15 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* People card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+      <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
         <SectionTitle>Teacher &amp; Student</SectionTitle>
 
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
           {/* Teacher */}
           <Link href={`/admin/teachers/${lesson.teacher_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
-            <div style={{
+            <div className="card-elevated card-elevated-interactive" style={{
               display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
-              backgroundColor: '#F9FAFB', cursor: 'pointer',
+              padding: '14px', cursor: 'pointer',
             }}>
               <div style={{
                 width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E5E7EB',
@@ -282,10 +282,9 @@ export default function ClassDetailClient({ lesson }: Props) {
 
           {/* Student */}
           <Link href={`/admin/students/${lesson.student_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
-            <div style={{
+            <div className="card-elevated card-elevated-interactive" style={{
               display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
-              backgroundColor: '#F9FAFB', cursor: 'pointer',
+              padding: '14px', cursor: 'pointer',
             }}>
               <div style={{
                 width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E5E7EB',
@@ -313,7 +312,7 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* Report card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px' }}>
+      <div className="card-elevated" style={{ padding: '24px' }}>
         <SectionTitle>Class Report</SectionTitle>
         {lesson.report ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -499,6 +498,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }
