@@ -151,6 +151,92 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// Preset + custom language pills. Selected pills show a check; custom (non-preset)
+// entries also get an × to remove them. The "+ Other" input is local state scoped
+// to this component instance, so Native and Teaches stay independent.
+function LanguagePicker({ values, onToggle, onAddCustom, onRemoveCustom }: {
+  values: string[]
+  onToggle: (lang: string) => void
+  onAddCustom: (lang: string) => void
+  onRemoveCustom: (lang: string) => void
+}) {
+  const [otherOpen, setOtherOpen] = useState(false)
+  const [otherText, setOtherText] = useState('')
+
+  const customValues = values.filter((v) => !LANGUAGE_OPTIONS.includes(v))
+
+  function confirmOther() {
+    const trimmed = otherText.trim()
+    if (trimmed && !values.some((v) => v.toLowerCase() === trimmed.toLowerCase())) {
+      onAddCustom(trimmed)
+    }
+    setOtherText('')
+    setOtherOpen(false)
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2 mt-1 items-center">
+      {LANGUAGE_OPTIONS.map((lang) => {
+        const selected = values.includes(lang)
+        return (
+          <button key={lang} type="button"
+            onClick={() => onToggle(lang)}
+            className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+            style={selected
+              ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+              : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}>
+            {selected && <span className="mr-1">✓</span>}
+            {lang}
+          </button>
+        )
+      })}
+
+      {customValues.map((lang) => (
+        <span key={lang}
+          className="px-3 py-1 rounded-full text-xs font-medium border inline-flex items-center gap-1"
+          style={{ backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }}>
+          <span>✓</span>
+          {lang}
+          <button type="button" onClick={() => onRemoveCustom(lang)}
+            aria-label={`Remove ${lang}`}
+            className="leading-none cursor-pointer"
+            style={{ color: '#FF8303' }}>
+            ×
+          </button>
+        </span>
+      ))}
+
+      {otherOpen ? (
+        <span className="inline-flex items-center gap-1">
+          <input
+            autoFocus
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); confirmOther() }
+              if (e.key === 'Escape') { setOtherText(''); setOtherOpen(false) }
+            }}
+            placeholder="Language..."
+            className="px-2 py-1 rounded-full text-xs border w-28 focus:outline-none"
+            style={{ borderColor: '#E0DFDC', color: '#4b5563' }}
+          />
+          <button type="button" onClick={confirmOther}
+            className="px-2 py-1 rounded-full text-xs font-medium border"
+            style={{ backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }}>
+            Add
+          </button>
+        </span>
+      ) : (
+        <button type="button" onClick={() => setOtherOpen(true)}
+          className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+          style={{ backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}>
+          + Other
+        </button>
+      )}
+    </div>
+  )
+}
+
 const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
@@ -429,32 +515,20 @@ export default function CreateTeacherClient() {
         {/* 4. Languages */}
         <Section title="Languages">
           <Field label="Native Languages">
-            <div className="flex flex-wrap gap-2 mt-1">
-              {LANGUAGE_OPTIONS.map((lang) => (
-                <button key={lang} type="button"
-                  onClick={() => toggleArrayItem('native_languages', lang)}
-                  className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                  style={form.native_languages.includes(lang)
-                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                  {lang}
-                </button>
-              ))}
-            </div>
+            <LanguagePicker
+              values={form.native_languages}
+              onToggle={(lang) => toggleArrayItem('native_languages', lang)}
+              onAddCustom={(lang) => setForm((prev) => ({ ...prev, native_languages: [...prev.native_languages, lang] }))}
+              onRemoveCustom={(lang) => setForm((prev) => ({ ...prev, native_languages: prev.native_languages.filter((v) => v !== lang) }))}
+            />
           </Field>
           <Field label="Teaches (Languages)">
-            <div className="flex flex-wrap gap-2 mt-1">
-              {LANGUAGE_OPTIONS.map((lang) => (
-                <button key={lang} type="button"
-                  onClick={() => toggleArrayItem('teaching_languages', lang)}
-                  className="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-                  style={form.teaching_languages.includes(lang)
-                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}>
-                  {lang}
-                </button>
-              ))}
-            </div>
+            <LanguagePicker
+              values={form.teaching_languages}
+              onToggle={(lang) => toggleArrayItem('teaching_languages', lang)}
+              onAddCustom={(lang) => setForm((prev) => ({ ...prev, teaching_languages: [...prev.teaching_languages, lang] }))}
+              onRemoveCustom={(lang) => setForm((prev) => ({ ...prev, teaching_languages: prev.teaching_languages.filter((v) => v !== lang) }))}
+            />
           </Field>
         </Section>
 
