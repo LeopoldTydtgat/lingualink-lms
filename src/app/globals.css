@@ -287,3 +287,10 @@
               0 8px 20px rgba(17, 24, 39, 0.10) !important;
   transform: translateY(-3px);
 }
+
+/* Active/selected card - soft orange glow (opt-in, pair with .card-elevated) */
+.card-elevated-active {
+  border-color: #FF8303 !important;
+  box-shadow: 0 0 0 1px #FF8303,
+              0 4px 16px rgba(255, 131, 3, 0.18) !important;
+}
