@@ -104,6 +104,23 @@ const EMPTY_FORM: FormData = {
   admin_notes: '', follow_up_date: '', follow_up_reason: '',
 }
 
+// Quiet grey "admin only" pill — the loud amber card at the bottom carries the message.
+function AdminOnlyBadge() {
+  return (
+    <span
+      className="ml-2 inline-flex items-center gap-1 align-middle text-[10px] font-normal px-1.5 py-0.5 rounded"
+      style={{ backgroundColor: '#f3f4f6', color: '#6b7280' }}
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        strokeLinecap="round" strokeLinejoin="round" style={{ width: '9px', height: '9px' }} aria-hidden="true">
+        <rect x="3" y="11" width="18" height="11" rx="2" />
+        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      </svg>
+      Admin only
+    </span>
+  )
+}
+
 // Reusable field wrapper
 function Field({ label, children, adminOnly }: {
   label: string
@@ -112,14 +129,9 @@ function Field({ label, children, adminOnly }: {
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
+      <label className="block text-xs font-medium mb-1" style={{ color: '#4b5563' }}>
         {label}
-        {adminOnly && (
-          <span className="ml-2 text-xs font-normal px-1.5 py-0.5 rounded"
-            style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
-            Admin only
-          </span>
-        )}
+        {adminOnly && <AdminOnlyBadge />}
       </label>
       {children}
     </div>
@@ -129,15 +141,18 @@ function Field({ label, children, adminOnly }: {
 // Bordered section card — matches the Teacher Detail Overview tab's card style.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-      <h2 className="font-semibold text-gray-800">{title}</h2>
+    <div className="bg-white rounded-xl border p-5 space-y-4" style={{ borderColor: '#E0DFDC' }}>
+      <div className="flex items-center gap-2.5">
+        <span className="block rounded-full" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
+        <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+      </div>
       {children}
     </div>
   )
 }
 
-const inputClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
-const selectClass = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white"
+const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
 export default function CreateTeacherClient() {
   const router = useRouter()
@@ -200,9 +215,9 @@ export default function CreateTeacherClient() {
   }
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="max-w-4xl mx-auto flex items-center gap-3 mb-6">
         <button
           onClick={() => router.push('/admin/teachers')}
           className="text-sm text-gray-500 hover:text-gray-700"
@@ -213,8 +228,9 @@ export default function CreateTeacherClient() {
         <h1 className="text-2xl font-bold text-gray-900">Add Teacher</h1>
       </div>
 
-      {/* Single scrolling form — one card per section */}
-      <div className="space-y-6">
+      {/* Single scrolling form — one card per section.
+          pb-28 keeps the last field clear of the sticky action bar. */}
+      <div className="max-w-4xl mx-auto space-y-8 pb-28">
 
         {/* 1. Account & Login */}
         <Section title="Account & Login">
@@ -256,8 +272,8 @@ export default function CreateTeacherClient() {
                   onClick={() => toggleArrayItem('account_types', opt.value)}
                   className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
                   style={form.account_types.includes(opt.value)
-                    ? { backgroundColor: '#FF8303', color: 'white', borderColor: '#FF8303' }
-                    : { backgroundColor: 'white', color: '#6b7280', borderColor: '#e5e7eb' }}
+                    ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                    : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}
                 >
                   {opt.label}
                 </button>
@@ -379,13 +395,13 @@ export default function CreateTeacherClient() {
               <input type="checkbox" checked={form.vat_required}
                 onChange={(e) => set('vat_required', e.target.checked)}
                 className="w-4 h-4 rounded" />
-              <span className="text-sm text-gray-600">This teacher is required to charge VAT</span>
+              <span className="text-sm" style={{ color: '#4b5563' }}>This teacher is required to charge VAT</span>
             </label>
           </Field>
           <Field label="Hourly Rate" adminOnly>
             <div className="flex">
               <select
-                className="border border-gray-200 rounded-l-lg px-2 py-2 text-sm focus:outline-none focus:border-orange-400 bg-white border-r-0"
+                className="border border-[#E0DFDC] rounded-l-lg px-2 py-1.5 text-sm text-gray-800 bg-white border-r-0 transition-colors focus:outline-none focus:border-[#FF8303]"
                 value={form.currency}
                 onChange={(e) => set('currency', e.target.value)}
               >
@@ -401,7 +417,7 @@ export default function CreateTeacherClient() {
                   type="number"
                   min="0"
                   step="0.01"
-                  className="w-full border border-gray-200 rounded-r-lg pl-7 pr-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                  className="w-full border border-[#E0DFDC] rounded-r-lg pl-7 pr-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
                   value={form.hourly_rate}
                   onChange={(e) => set('hourly_rate', e.target.value)}
                 />
@@ -487,17 +503,19 @@ export default function CreateTeacherClient() {
       </div>
 
       {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
-      <div className="sticky bottom-0 mt-6 -mx-6 px-6 py-3 border-t border-gray-200 bg-white/95 backdrop-blur flex justify-end gap-3">
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+        style={{ borderColor: '#E0DFDC' }}>
         <button
           onClick={() => router.push('/admin/teachers')}
-          className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
+          style={{ color: '#4b5563' }}
         >
           Cancel
         </button>
         <button
           onClick={handleSubmit}
           disabled={saving}
-          className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+          className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
           style={{ backgroundColor: '#FF8303' }}
         >
           {saving ? 'Creating...' : 'Create Teacher'}
