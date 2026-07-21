@@ -586,7 +586,7 @@ export default function AdminLayoutClient({
             <div className="space-y-3">
               {panelWidgets.map((w) => (
                 <Link key={w.label} href={w.href} prefetch={false}>
-                  <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 hover:shadow-md hover:border-orange-200 transition-all">
+                  <div className="card-elevated card-elevated-interactive p-3">
                     <p className="text-xs text-gray-500">{w.label}</p>
                     <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827', fontVariantNumeric: 'tabular-nums' }}>
                       {w.value === null ? (
@@ -600,7 +600,7 @@ export default function AdminLayoutClient({
               ))}
             </div>
             {rightPanelStats.activeAnnouncementText && (
-              <div className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 mt-4">
+              <div className="card-elevated p-3 mt-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                   Announcement
                 </p>

@@ -302,12 +302,7 @@ export default function DashboardClient({
 
               return (
                 <Link key={card.label} href={card.href} prefetch={false}>
-                  <div
-                    className="stat-card-hover cursor-pointer bg-white rounded-xl border border-gray-200 p-4"
-                    style={{
-                      boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)',
-                    }}
-                  >
+                  <div className="card-elevated card-elevated-interactive cursor-pointer p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <div
                         className="flex items-center justify-center shrink-0 rounded-lg"
@@ -339,7 +334,7 @@ export default function DashboardClient({
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
 
             {/* Left: live classes feed */}
-            <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
+            <div className="lg:col-span-3 card-elevated flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
@@ -425,7 +420,7 @@ export default function DashboardClient({
             </div>
 
             {/* Right: pending + flagged reports */}
-            <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 flex flex-col" style={{ boxShadow: '0 1px 2px 0 rgba(17,24,39,0.08)' }}>
+            <div className="lg:col-span-2 card-elevated flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />

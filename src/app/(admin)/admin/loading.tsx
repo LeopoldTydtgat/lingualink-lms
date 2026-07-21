@@ -16,11 +16,7 @@ export default function Loading() {
       {/* stat card row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className="bg-white rounded-xl p-4"
-            style={{ border: '1px solid #E0DFDC' }}
-          >
+          <div key={i} className="card-elevated p-4">
             <div className="h-3 w-2/3 rounded bg-gray-200 animate-pulse mb-3" />
             <div className="h-7 w-10 rounded bg-gray-200 animate-pulse" />
           </div>
@@ -30,10 +26,7 @@ export default function Loading() {
       {/* two-panel row */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* left: today's classes */}
-        <div
-          className="lg:col-span-3 bg-white rounded-xl"
-          style={{ border: '1px solid #E0DFDC' }}
-        >
+        <div className="lg:col-span-3 card-elevated">
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="h-4 w-32 rounded bg-gray-200 animate-pulse" />
           </div>
@@ -52,10 +45,7 @@ export default function Loading() {
         </div>
 
         {/* right: pending reports */}
-        <div
-          className="lg:col-span-2 bg-white rounded-xl"
-          style={{ border: '1px solid #E0DFDC' }}
-        >
+        <div className="lg:col-span-2 card-elevated">
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="h-4 w-32 rounded bg-gray-200 animate-pulse" />
           </div>
@@ -71,10 +61,7 @@ export default function Loading() {
       </div>
 
       {/* alerts panel */}
-      <div
-        className="bg-white rounded-xl px-5 py-4"
-        style={{ border: '1px solid #E0DFDC' }}
-      >
+      <div className="card-elevated px-5 py-4">
         <div className="h-4 w-20 rounded bg-gray-200 animate-pulse mb-4" />
         <div className="space-y-3">
           <div className="h-4 w-3/4 rounded bg-gray-200 animate-pulse" />

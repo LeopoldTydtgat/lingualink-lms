@@ -242,15 +242,6 @@
   transition: background-color 0.18s ease;
 }
 
-/* Admin dashboard stat card hover lift — overrides the inline resting box-shadow */
-.stat-card-hover {
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-.stat-card-hover:hover {
-  box-shadow: 0 4px 8px 0 rgba(17, 24, 39, 0.10) !important;
-  transform: translateY(-1px);
-}
-
 /* Thin scrollbar - applies thickness only, lets browser default colours through */
 .thin-scroll {
   scrollbar-width: thin;
