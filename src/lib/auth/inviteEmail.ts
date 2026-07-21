@@ -70,14 +70,21 @@ export async function sendAccountInviteEmail(
         ? 'teachers@lingualinkonline.com'
         : 'support@lingualinkonline.com'
 
-    const subject = 'Lingualink Online - Welcome! Set up your account'
+    const subject =
+      portal === 'teacher'
+        ? "Welcome to Lingualink Online - let's get you set up"
+        : 'Welcome to Lingualink Online - your learning journey starts here'
 
     const bodyHtml = `
       <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-        Welcome to Lingualink Online! An account has been created for you.
+        ${portal === 'teacher'
+          ? "Welcome to the Lingualink Online team! We're really glad to have you on board."
+          : "Welcome to Lingualink Online! We're excited to be part of your English learning journey."}
       </p>
       <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-        Click the button below to set your password and log in to your portal.
+        ${portal === 'teacher'
+          ? "Your teacher account is ready. Click below to set your password - after that you can log in to your portal, where you'll manage your schedule, classes, and students."
+          : "Your student account is ready. Click below to set your password - then you can log in to your portal to book classes, chat with your teacher, and track your progress."}
       </p>
       <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
         <tr>
