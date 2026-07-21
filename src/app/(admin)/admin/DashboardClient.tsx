@@ -444,14 +444,14 @@ export default function DashboardClient({
                 // Fixed four rows, no inner scroll: a clipped half-row reads as a
                 // rendering fault rather than "more below". The count in the header
                 // link states the truncation instead of implying it.
-                <div className="divide-y divide-gray-50">
+                <div className="space-y-3">
                   {pendingAndFlagged.slice(0, 4).map((report) => {
                     const isFlagged = report.status === 'flagged'
                     const overdue = hoursOverdue(report)
                     return (
                       <div
                         key={report.id}
-                        className="px-5 py-3"
+                        className="px-5 py-3 rounded-lg"
                         style={isFlagged ? { backgroundColor: '#fff5f5' } : {}}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -469,28 +469,26 @@ export default function DashboardClient({
                             </p>
                           </div>
 
-                          <div className="shrink-0 text-right">
+                          <div className="shrink-0 flex items-center gap-2">
                             {isFlagged ? (
                               <>
                                 <ReportBadge tone="flagged" label="Flagged" />
                                 {/* Reopen will be wired to a server action in Step 8 */}
-                                <div className="mt-1">
-                                  <Link
-                                    href={`/admin/reports?reopen=${report.id}`}
-                                    prefetch={false}
-                                    className="inline-block"
-                                    style={{
-                                      backgroundColor: '#ffffff',
-                                      border: '1px solid #FF8303',
-                                      color: '#FF8303',
-                                      borderRadius: '6px',
-                                      padding: '3px 10px',
-                                      fontSize: '12px',
-                                    }}
-                                  >
-                                    Reopen
-                                  </Link>
-                                </div>
+                                <Link
+                                  href={`/admin/reports?reopen=${report.id}`}
+                                  prefetch={false}
+                                  className="inline-block"
+                                  style={{
+                                    backgroundColor: '#ffffff',
+                                    border: '1px solid #FF8303',
+                                    color: '#FF8303',
+                                    borderRadius: '6px',
+                                    padding: '3px 10px',
+                                    fontSize: '12px',
+                                  }}
+                                >
+                                  Reopen
+                                </Link>
                               </>
                             ) : report.status === 'reopened' ? (
                               <ReportBadge tone="reopened" label="Reopened" />
