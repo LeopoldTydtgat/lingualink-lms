@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { Settings } from 'lucide-react'
 import SettingsClient from './SettingsClient'
 
 // Keys we display on this page — must match the API route
@@ -47,28 +46,5 @@ export default async function AdminSettingsPage() {
     }
   }
 
-  return (
-    <div className="p-6 max-w-3xl">
-
-      {/* ── Page header ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 mb-8">
-        <div
-          className="flex items-center justify-center w-10 h-10 rounded-lg"
-          style={{ backgroundColor: '#fff3e0' }}
-        >
-          <Settings className="h-5 w-5" style={{ color: '#FF8303' }} />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Platform Settings</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Configure thresholds, windows, and defaults used across the platform.
-          </p>
-        </div>
-      </div>
-
-      {/* ── Settings form ───────────────────────────────────────────── */}
-      <SettingsClient initialSettings={initialSettings} />
-
-    </div>
-  )
+  return <SettingsClient initialSettings={initialSettings} />
 }
