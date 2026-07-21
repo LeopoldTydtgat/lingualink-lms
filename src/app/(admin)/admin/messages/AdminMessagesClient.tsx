@@ -1,15 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import dynamic from 'next/dynamic'
-import data from '@emoji-mart/data'
 import { createClient } from '@/lib/supabase/client'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
+import ReadTicks from '@/components/messages/ReadTicks'
 import { getAdminThreadMessages, markAdminThreadRead } from './actions'
-
-const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +21,7 @@ interface AdminMessage {
   read_at: string | null
   admin_read_at: string | null
   created_at: string
+  edited_at?: string | null
 }
 
 interface AdminConversation {
@@ -74,45 +72,37 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
 }
 
+// Sizing is inline, not `w-${size}` Tailwind classes: Tailwind v4 never emits CSS for
+// a dynamically constructed class name, so the interpolated version renders unsized
+// avatars. Same pattern as AdminSupportClient. The font-size tiers stay because this
+// page renders avatars as small as size 5 in the overlapping pair.
 function Avatar({ name, photoUrl, size = 10 }: {
   name: string
   photoUrl: string | null
   size?: number
 }) {
-  const sizeClass = `w-${size} h-${size}`
   if (photoUrl) {
-    return <img src={photoUrl} alt={name} className={`${sizeClass} rounded-full object-cover flex-shrink-0`} />
-  }
-  return (
-    <div
-      className={`${sizeClass} rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0`}
-      style={{ backgroundColor: '#FF8303', fontSize: size <= 6 ? '9px' : size <= 8 ? '11px' : '14px' }}
-    >
-      {name.charAt(0).toUpperCase()}
-    </div>
-  )
-}
-
-function ReadTicks({ readAt }: { readAt: string | null }) {
-  if (readAt) {
     return (
-      <span className="inline-flex items-center gap-0.5 ml-1" aria-label="Read">
-        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
-          <path d="M1 4L3.5 6.5L9 1" stroke="#FF8303" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </span>
+      <img
+        src={photoUrl}
+        alt={name}
+        className="rounded-full object-cover flex-shrink-0"
+        style={{ width: size * 4, height: size * 4 }}
+      />
     )
   }
   return (
-    <span className="inline-flex items-center ml-1" aria-label="Sent">
-      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-        <path d="M1 4L3.5 6.5L9 1" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    </span>
+    <div
+      className="rounded-full flex items-center justify-center text-white font-semibold flex-shrink-0"
+      style={{
+        width: size * 4,
+        height: size * 4,
+        backgroundColor: '#FF8303',
+        fontSize: size <= 6 ? '9px' : size <= 8 ? '11px' : '14px',
+      }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
   )
 }
 
@@ -131,22 +121,10 @@ export default function AdminMessagesClient({
   const [messagesError, setMessagesError] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
-  const emojiPickerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
-        setShowEmojiPicker(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   const fetchMessages = useCallback(async (conv: AdminConversation) => {
     setLoadingMessages(true)
@@ -212,6 +190,32 @@ export default function AdminMessagesClient({
       }
     }
 
+    // UPDATE carries two things this read-only viewer cares about: the counterpart's
+    // read receipt (read_at → double tick) and an in-window edit (content + edited_at).
+    // Filters mirror the INSERT subscriptions so an UPDATE in some unrelated thread
+    // never reaches this handler.
+    const handleUpdate = (payload: { new: AdminMessage }) => {
+      const updated = payload.new
+      // Return prev UNCHANGED (same array reference) when no message matches — an
+      // UPDATE outside the open thread must not re-fire the scroll-to-bottom effect,
+      // which keys on the messages array identity.
+      setMessages(prev => {
+        if (!prev.some(m => m.id === updated.id)) return prev
+        // Non-regressing merge: a payload that omits a field (or arrives before the
+        // other field is set — e.g. an edit UPDATE on a still-unread message) must
+        // never null out what is already on screen. admin_read_at is deliberately not
+        // merged: the browser role holds no column grant on it, so it never arrives.
+        return prev.map(m => m.id === updated.id
+          ? {
+              ...m,
+              read_at: updated.read_at ?? m.read_at,
+              content: updated.content ?? m.content,
+              edited_at: updated.edited_at ?? m.edited_at,
+            }
+          : m)
+      })
+    }
+
     const channel = supabase
       .channel(`admin-thread-${selectedConv.teacherSideId}-${selectedConv.studentId}`)
       .on(
@@ -231,13 +235,18 @@ export default function AdminMessagesClient({
       )
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
-        (payload) => {
-          const updated = payload.new as AdminMessage
-          setMessages(prev =>
-            prev.map(m => m.id === updated.id ? { ...m, read_at: updated.read_at } : m)
-          )
-        }
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
+        handleUpdate
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
+        handleUpdate
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
+        handleUpdate
       )
       .subscribe()
 
@@ -256,6 +265,15 @@ export default function AdminMessagesClient({
       className="flex bg-white rounded-lg border border-gray-200 overflow-hidden"
       style={{ height: 'calc(100vh - 120px)' }}
     >
+      {/* Bubble list styling. The teacher inbox carries these rules on its composer
+          block; this viewer has no composer, so they mount unconditionally here or
+          bulleted/numbered message content renders unstyled. */}
+      <style>{`
+        .message-bubble ul { list-style-type: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
+        .message-bubble ol { list-style-type: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
+        .message-bubble li { margin: 0.1rem 0; }
+      `}</style>
+
       {/* ── Left panel: conversation list ── */}
       <div className="w-72 border-r border-gray-200 flex flex-col flex-shrink-0">
         <div className="p-4 border-b border-gray-200">
@@ -325,7 +343,7 @@ export default function AdminMessagesClient({
         </div>
       </div>
 
-      {/* ── Right panel: thread + composer ── */}
+      {/* ── Right panel: thread (read-only) ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {!selectedConv ? (
           <div className="flex-1 flex items-center justify-center text-gray-400">
@@ -377,7 +395,11 @@ export default function AdminMessagesClient({
                   const isStudent = msg.sender_type === 'student'
                   const isAdmin   = msg.sender_type === 'admin'
                   const isRight   = isStudent || isAdmin
-                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || isEmojiOnly(msg.content)
+                  const emojiOnly = isEmojiOnly(msg.content)
+                  const hasContent = msg.content.replace(/<[^>]*>/g, '').trim().length > 0 || emojiOnly
+                  // Right-aligned, non-emoji, non-empty messages carry their read ticks
+                  // inside the bubble (WhatsApp pattern) instead of the metadata row.
+                  const isBubbleTicked = isRight && hasContent && !emojiOnly
 
                   const showDate =
                     index === 0 ||
@@ -400,25 +422,40 @@ export default function AdminMessagesClient({
 
                       <div className={`flex ${isRight ? 'justify-end' : 'justify-start'}`}>
                         <div className="max-w-[72%]">
-                          {/* Colour key:
-                              teacher = dark charcoal (#1F2937), left-aligned
-                              student = orange (#FF8303), right-aligned
-                              admin   = slate (#374151), right-aligned
+                          {/* Three-way sender mapping (the admin views someone else's thread,
+                              so "sent" here means the student side, not the viewer):
+                                teacher = LEFT,  received style — #ffffff fill, #1f2937 text,
+                                                 1px solid #f3f4f6 border, 4px bottom-left radius
+                                student = RIGHT, sent style — #1f2937 fill, #f9fafb text,
+                                                 4px bottom-right radius
+                                admin   = RIGHT, same sent style, distinguished by the small
+                                                 "Admin" label above the bubble
                               NEW302: hide the bubble entirely for an attachment-only
                               (empty-content) message so it doesn't render a blank box. */}
+                          {isAdmin && (
+                            <div className="text-[10px] text-gray-400 text-right mb-0.5">Admin</div>
+                          )}
                           {hasContent && (
-                          <div
-                            className="px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
-                            style={isEmojiOnly(msg.content)
-                              ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
-                              : isStudent
-                              ? { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomRightRadius: '4px' }
-                              : isAdmin
-                              ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
-                              : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
-                            }
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
-                          />
+                          isBubbleTicked ? (
+                            <div
+                              className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed inline-flex items-end"
+                              style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
+                            >
+                              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                              <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
+                            </div>
+                          ) : (
+                            <div
+                              className="message-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
+                              style={emojiOnly
+                                ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
+                                : isRight
+                                ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
+                                : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #f3f4f6', borderBottomLeftRadius: '4px' }
+                              }
+                              dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
+                            />
+                          )
                           )}
                           {msg.attachments && msg.attachments.length > 0 && (
                             <div className={`${hasContent ? 'mt-1' : ''} flex flex-col gap-1`}>
@@ -436,16 +473,17 @@ export default function AdminMessagesClient({
                               ))}
                             </div>
                           )}
-                          <div className={`flex items-center gap-1 mt-1 ${isRight ? 'justify-end' : 'justify-start'}`}>
-                            <span className="text-xs text-gray-400">
+                          {/* Timestamp + read ticks row. Ticks render for every message,
+                              not just admin ones — the admin is an observer, so both
+                              sides' read state is information they need. */}
+                          <div className={`flex items-center gap-1 mt-0.5 ${isRight ? 'justify-end' : 'justify-start'}`}>
+                            {msg.edited_at && (
+                              <span className="text-gray-400 italic" style={{ fontSize: '11px' }}>(edited)</span>
+                            )}
+                            <span className="text-gray-400" style={{ fontSize: '11px' }}>
                               {formatTime(msg.created_at)}
                             </span>
-                            {isAdmin && (
-                              <>
-                                <span className="text-xs text-gray-400">· Admin</span>
-                                <ReadTicks readAt={msg.read_at} />
-                              </>
-                            )}
+                            {!isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
                         </div>
                       </div>
@@ -456,7 +494,7 @@ export default function AdminMessagesClient({
               <div ref={messagesEndRef} />
             </div>
 
-            {/* ── Composer ── */}
+            {/* ── Read-only footer (no composer by design) ── */}
             <div style={{
               padding: '16px',
               textAlign: 'center',
