@@ -194,7 +194,7 @@ export default function DashboardClient({
       value: stats.classesTodayCount,
       icon: CalendarDays,
       // Null = timezone unset: point them to set it, not to the (un-bucketable) class list.
-      href: stats.classesTodayCount === null ? '/admin/settings' : '/admin/classes',
+      href: stats.classesTodayCount === null ? '/admin/settings' : '/admin/classes?filter=today',
       alert: false,
     },
     {
@@ -226,7 +226,7 @@ export default function DashboardClient({
       subLabel: 'This month',
       value: stats.invoicesToReviewCount,
       icon: CreditCard,
-      href: '/admin/billing',
+      href: '/admin/billing?filter=invoices_review',
       alert: false,
     },
     {
@@ -541,7 +541,7 @@ export default function DashboardClient({
                         {zeroBalanceWithClassesCount === 1 ? 'has' : 'have'} upcoming classes booked
                       </p>
                       <Link
-                        href="/admin/students?filter=zero_balance"
+                        href="/admin/students?filter=low_hours"
                         prefetch={false}
                         className="text-xs hover:underline mt-0.5 inline-block"
                         style={{ color: '#FF8303' }}

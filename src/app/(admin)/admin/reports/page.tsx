@@ -14,9 +14,11 @@ const FILTER_TO_STATUS: Record<string, string> = {
 export default async function AdminReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>
+  searchParams: Promise<{ filter?: string; reopen?: string }>
 }) {
-  const { filter } = await searchParams;
+  // ?reopen=<report id> (the dashboard's flagged-report Reopen button) opens the
+  // existing reopen-confirmation modal for that report on load.
+  const { filter, reopen } = await searchParams;
   const initialStatusFilter = (filter && FILTER_TO_STATUS[filter]) || '';
 
   const supabase = await createClient();
@@ -136,6 +138,7 @@ export default async function AdminReportsPage({
       teachers={teachersData ?? []}
       students={allStudentsData ?? []}
       initialStatusFilter={initialStatusFilter}
+      initialReopenId={reopen}
     />
   );
 }

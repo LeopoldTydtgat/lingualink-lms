@@ -43,6 +43,9 @@ interface Props {
   students:       { id: string; full_name: string }[];
   // Seeded from ?filter= by the server page; '' means "All Statuses".
   initialStatusFilter?: string;
+  // Seeded from ?reopen= by the server page; opens the reopen-confirmation modal
+  // for that report on load. undefined means "no modal open".
+  initialReopenId?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,11 +117,13 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   const [listError,     setListError]     = useState('');
-  const [reopenId,      setReopenId]      = useState<string | null>(null);
+  // Seeded from the ?reopen= deep link so the confirmation modal is already open on
+  // mount; from there it is the same state the in-row Reopen button drives.
+  const [reopenId,      setReopenId]      = useState<string | null>(initialReopenId ?? null);
   const [reopenLoading, setReopenLoading] = useState(false);
   const [reopenError,   setReopenError]   = useState('');
 
@@ -426,7 +431,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '' }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
@@ -594,7 +599,7 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} />}
       {activeTab === 'trace' && <LiveTrace />}
 
       {showExport && (

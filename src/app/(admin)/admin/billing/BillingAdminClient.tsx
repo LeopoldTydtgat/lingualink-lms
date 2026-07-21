@@ -195,10 +195,22 @@ async function fetchBillingEntities(
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function BillingAdminClient({ adminId, exportTz }: { adminId: string; exportTz: string }) {
+export default function BillingAdminClient({
+  adminId,
+  exportTz,
+  initialTab,
+  initialInvoiceStatus,
+}: {
+  adminId: string
+  exportTz: string
+  // Seeded from ?filter=invoices_review by the server page; undefined falls back to
+  // the defaults below.
+  initialTab?: ActiveTab
+  initialInvoiceStatus?: string
+}) {
   const supabase = createClient()
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('teacher_invoices')
+  const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab ?? 'teacher_invoices')
 
   // ── CSV export state (shared across all three tabs' Export buttons) ─────────
   const [downloadingType, setDownloadingType] = useState<string | null>(null)
@@ -229,7 +241,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [invoiceFilterTeacher, setInvoiceFilterTeacher] = useState('')
   const [invoiceFilterMonth, setInvoiceFilterMonth] = useState('')
-  const [invoiceFilterStatus, setInvoiceFilterStatus] = useState('')
+  const [invoiceFilterStatus, setInvoiceFilterStatus] = useState(initialInvoiceStatus ?? '')
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null)
   const [savingPaid, setSavingPaid] = useState(false)
