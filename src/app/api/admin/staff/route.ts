@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -15,19 +16,22 @@ export async function GET(request: NextRequest) {
   const adminUser = await requireAdmin()
   if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  // Return all profiles that have at least one admin-level role
-  const { data: profiles, error } = await supabase
+  // Admin client: profiles.role is not guaranteed readable under the anon-key
+  // grants, and requireAdmin() above already gates this route server-side.
+  const adminClient = createAdminClient()
+
+  // Admin (role) plus staff accounts (account_types) populate the dropdown.
+  const { data: profiles, error } = await adminClient
     .from('profiles')
-    .select('id, full_name, account_types')
+    .select('id, full_name, role, account_types')
     .order('full_name')
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  const allowedRoles = ['school_admin']
   const staff = (profiles ?? []).filter((p: any) =>
-    p.account_types?.some((r: string) => allowedRoles.includes(r))
+    p.role === 'admin' || p.account_types?.includes('staff')
   ).map((p: any) => ({ id: p.id, full_name: p.full_name }))
 
   return NextResponse.json({ staff, currentUserId: user.id })

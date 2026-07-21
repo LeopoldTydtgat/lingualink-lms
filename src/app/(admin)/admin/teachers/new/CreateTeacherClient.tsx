@@ -35,8 +35,6 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'teacher', label: 'Teacher' },
   { value: 'teacher_exam', label: 'Teacher+Exam' },
   { value: 'staff', label: 'Staff' },
-  { value: 'hr_admin', label: 'HR Admin' },
-  { value: 'school_admin', label: 'School Admin' },
 ]
 
 const STATUS_OPTIONS = [

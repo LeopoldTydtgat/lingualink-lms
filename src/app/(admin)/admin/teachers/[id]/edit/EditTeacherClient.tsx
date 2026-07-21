@@ -23,8 +23,6 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'teacher', label: 'Teacher' },
   { value: 'teacher_exam', label: 'Teacher+Exam' },
   { value: 'staff', label: 'Staff' },
-  { value: 'hr_admin', label: 'HR Admin' },
-  { value: 'school_admin', label: 'School Admin' },
 ]
 
 const STATUS_OPTIONS = [
@@ -192,7 +190,6 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           admin_notes: form.admin_notes || null,
           follow_up_date: form.follow_up_date || null,
           follow_up_reason: form.follow_up_reason || null,
-          role: form.account_types.includes('school_admin') ? 'admin' : 'teacher',
           teacher_type: form.account_types.includes('teacher_exam') ? 'teacher_exam' : 'teacher',
         }),
       })
