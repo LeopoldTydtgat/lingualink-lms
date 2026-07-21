@@ -32,6 +32,42 @@ const REASON_OPTIONS = [
   { value: 'hr_note', label: 'HR Note' },
 ]
 
+// ─── Layout helpers ───────────────────────────────────────────────────────────
+
+// Bordered section card — matches the Teacher/Student form pattern.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card-elevated p-5 space-y-4">
+      <div className="flex items-center gap-2.5">
+        <span className="block rounded-full" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
+        <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function Field({ label, required, children }: {
+  label: string
+  required?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1" style={{ color: '#4b5563' }}>
+        {label}
+        {required && <span style={{ color: '#ef4444' }}> *</span>}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+// Read-only stand-ins keep the input silhouette with a grey fill.
+const readOnlyClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm flex items-center"
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TaskForm({
@@ -189,201 +225,165 @@ export default function TaskForm({
   const linkedOptions = linkedType === 'teacher' ? teacherOptions : linkedType === 'student' ? studentOptions : []
 
   if (loading) {
-    return <div style={{ padding: '60px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>Loading…</div>
+    return <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
   }
 
   return (
-    <div style={{ padding: '32px', maxWidth: '640px' }}>
+    <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
 
       {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
+      <div className="max-w-6xl mx-auto flex items-center gap-3 mb-6">
         <button
           onClick={() => router.back()}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', fontSize: '13px', padding: 0, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+          className="text-sm text-gray-500 hover:text-gray-700"
         >
-          ← Back to Tasks
+          ← Tasks
         </button>
-        <h1 style={{ fontSize: '22px', fontWeight: 700, color: '#111827', margin: 0 }}>
+        <span className="text-gray-300">/</span>
+        <h1 className="text-2xl font-bold text-gray-900">
           {mode === 'create' ? 'New Task' : 'Edit Task'}
         </h1>
       </div>
 
-      {error && (
-        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' }}>
-          {error}
-        </div>
-      )}
+      {/* Single scrolling form — one card per section.
+          pb-28 keeps the last field clear of the sticky action bar. */}
+      <div className="max-w-6xl mx-auto space-y-6 pb-28">
 
-      <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '28px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-        {/* Title */}
-        <div>
-          <label style={labelStyle}>Title <span style={{ color: '#ef4444' }}>*</span></label>
-          <input
-            type="text"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            placeholder="e.g. Follow up on missed report"
-            style={inputStyle}
-          />
-        </div>
-
-        {/* Priority + Reason row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          <div>
-            <label style={labelStyle}>Priority <span style={{ color: '#ef4444' }}>*</span></label>
-            <select value={priority} onChange={e => setPriority(e.target.value)} style={inputStyle}>
-              <option value="">Select…</option>
-              {PRIORITY_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+        {error && (
+          <div
+            className="rounded-lg px-4 py-3 text-sm"
+            style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+          >
+            {error}
           </div>
-          <div>
-            <label style={labelStyle}>Follow-up Reason <span style={{ color: '#ef4444' }}>*</span></label>
-            <select value={followUpReason} onChange={e => setFollowUpReason(e.target.value)} style={inputStyle}>
-              <option value="">Select…</option>
-              {REASON_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+        )}
 
-        {/* Assigned To */}
-        <div>
-          <label style={labelStyle}>Assigned To</label>
-          <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} style={inputStyle}>
-            <option value="">Defaults to Shannon</option>
-            {staffMembers.map(s => (
-              <option key={s.id} value={s.id}>{s.full_name}</option>
-            ))}
-          </select>
-        </div>
+        {/* 1. Task Details */}
+        <Section title="Task Details">
+          <Field label="Title" required>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g. Follow up on missed report"
+              className={inputClass}
+            />
+          </Field>
 
-        {/* Due Date */}
-        <div>
-          <label style={labelStyle}>Due Date</label>
-          <input
-            type="date"
-            value={dueDate}
-            onChange={e => setDueDate(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
-
-        {/* Linked To */}
-        <div>
-          <label style={labelStyle}>Linked To (optional)</label>
-          {/* If pre-filled from a detail page, show read-only */}
-          {prefillLinkedId && prefillLinkedName ? (
-            <div style={{ ...inputStyle, backgroundColor: '#f9fafb', color: '#374151', display: 'flex', alignItems: 'center' }}>
-              <span style={{ fontSize: '12px', color: '#9ca3af', marginRight: '8px', textTransform: 'capitalize' }}>
-                {prefillLinkedType}:
-              </span>
-              {prefillLinkedName}
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '8px' }}>
-              <select
-                value={linkedType}
-                onChange={e => handleLinkedTypeChange(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">None</option>
-                <option value="teacher">Teacher</option>
-                <option value="student">Student</option>
+          {/* Priority + Reason row */}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Priority" required>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className={selectClass}>
+                <option value="">Select…</option>
+                {PRIORITY_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
-              {linkedType ? (
+            </Field>
+            <Field label="Follow-up Reason" required>
+              <select value={followUpReason} onChange={e => setFollowUpReason(e.target.value)} className={selectClass}>
+                <option value="">Select…</option>
+                {REASON_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Assigned To">
+            <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)} className={selectClass}>
+              <option value="">Defaults to Shannon</option>
+              {staffMembers.map(s => (
+                <option key={s.id} value={s.id}>{s.full_name}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Due Date">
+            <input
+              type="date"
+              value={dueDate}
+              onChange={e => setDueDate(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        </Section>
+
+        {/* 2. Link & Notes */}
+        <Section title="Link & Notes">
+          <Field label="Linked To (optional)">
+            {/* If pre-filled from a detail page, show read-only */}
+            {prefillLinkedId && prefillLinkedName ? (
+              <div className={readOnlyClass} style={{ backgroundColor: '#f9fafb', color: '#374151' }}>
+                <span className="text-xs text-gray-400 mr-2 capitalize">
+                  {prefillLinkedType}:
+                </span>
+                {prefillLinkedName}
+              </div>
+            ) : (
+              <div className="grid gap-2" style={{ gridTemplateColumns: '140px 1fr' }}>
                 <select
-                  value={linkedId}
-                  onChange={e => setLinkedId(e.target.value)}
-                  style={inputStyle}
+                  value={linkedType}
+                  onChange={e => handleLinkedTypeChange(e.target.value)}
+                  className={selectClass}
                 >
-                  <option value="">Select {linkedType}…</option>
-                  {linkedOptions.map(o => (
-                    <option key={o.id} value={o.id}>{o.full_name}</option>
-                  ))}
+                  <option value="">None</option>
+                  <option value="teacher">Teacher</option>
+                  <option value="student">Student</option>
                 </select>
-              ) : (
-                <div style={{ ...inputStyle, backgroundColor: '#f9fafb', color: '#9ca3af' }}>
-                  Select a type first
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                {linkedType ? (
+                  <select
+                    value={linkedId}
+                    onChange={e => setLinkedId(e.target.value)}
+                    className={selectClass}
+                  >
+                    <option value="">Select {linkedType}…</option>
+                    {linkedOptions.map(o => (
+                      <option key={o.id} value={o.id}>{o.full_name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className={readOnlyClass} style={{ backgroundColor: '#f9fafb', color: '#9ca3af' }}>
+                    Select a type first
+                  </div>
+                )}
+              </div>
+            )}
+          </Field>
 
-        {/* Notes */}
-        <div>
-          <label style={labelStyle}>Notes</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Add any relevant details, context, or instructions…"
-            rows={4}
-            style={{ ...inputStyle, resize: 'vertical', lineHeight: '1.5' }}
-          />
-        </div>
+          <Field label="Notes">
+            <textarea
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Add any relevant details, context, or instructions…"
+              rows={4}
+              className={`${inputClass} leading-relaxed`}
+              style={{ resize: 'vertical' }}
+            />
+          </Field>
+        </Section>
+      </div>
 
-        {/* Actions */}
-        <div style={{ display: 'flex', gap: '10px', paddingTop: '8px' }}>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            style={{
-              backgroundColor: '#FF8303',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '10px 24px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            {saving ? 'Saving…' : mode === 'create' ? 'Create Task' : 'Save Changes'}
-          </button>
-          <button
-            onClick={() => router.back()}
-            disabled={saving}
-            style={{
-              backgroundColor: '#fff',
-              color: '#374151',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              padding: '10px 24px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-        </div>
+      {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+        style={{ borderColor: '#E0DFDC' }}>
+        <button
+          onClick={() => router.back()}
+          disabled={saving}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
+          style={{ color: '#4b5563' }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+          style={{ backgroundColor: '#FF8303' }}
+        >
+          {saving ? 'Saving…' : mode === 'create' ? 'Create Task' : 'Save Changes'}
+        </button>
       </div>
     </div>
   )
-}
-
-// ─── Shared input styles ───────────────────────────────────────────────────────
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: '13px',
-  fontWeight: 600,
-  color: '#374151',
-  marginBottom: '6px',
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  border: '1px solid #d1d5db',
-  borderRadius: '6px',
-  padding: '8px 12px',
-  fontSize: '14px',
-  color: '#111827',
-  backgroundColor: '#fff',
-  boxSizing: 'border-box',
 }

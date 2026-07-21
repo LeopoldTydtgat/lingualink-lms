@@ -59,6 +59,9 @@ function isOverdue(task: Task) {
   return new Date(task.due_date) < today
 }
 
+// Filter selects — reference select styling, sized to content rather than full width.
+const filterSelectClass = "border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-[13px] text-gray-700 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function AdminTasksPage() {
@@ -161,66 +164,54 @@ export default function AdminTasksPage() {
   const overdueCount = tasks.filter(t => isOverdue(t)).length
 
   return (
-    <div style={{ padding: '32px', maxWidth: '1200px' }}>
+    <div className="p-6">
 
       {/* ── Page header ── */}
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div
+        className="w-full flex items-center justify-between pb-4 mb-6 border-b"
+        style={{ borderColor: '#E0DFDC' }}
+      >
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: 0 }}>Tasks</h1>
-          <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
             Internal follow-ups and action items
           </p>
         </div>
         <button
           onClick={() => router.push('/admin/tasks/new')}
-          style={{
-            backgroundColor: '#FF8303',
-            color: '#ffffff',
-            border: 'none',
-            borderRadius: '8px',
-            padding: '10px 20px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
+          className="btn-primary-hover px-4 py-2 rounded-lg text-sm font-medium text-white"
+          style={{ backgroundColor: '#FF8303' }}
         >
           + New Task
         </button>
       </div>
 
       {/* ── Summary pills ── */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
-        <div style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px 20px', minWidth: '120px' }}>
-          <div style={{ fontSize: '22px', fontWeight: 700, color: '#111827' }}>{openCount}</div>
-          <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>Open tasks</div>
+      <div className="flex flex-wrap gap-3 mb-6">
+        <div className="card-elevated px-5 py-3 min-w-[120px]">
+          <div className="text-[22px] font-bold text-gray-900">{openCount}</div>
+          <div className="text-xs text-gray-500 mt-0.5">Open tasks</div>
         </div>
         {overdueCount > 0 && (
-          <div style={{ backgroundColor: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '12px 20px', minWidth: '120px' }}>
-            <div style={{ fontSize: '22px', fontWeight: 700, color: '#991b1b' }}>{overdueCount}</div>
-            <div style={{ fontSize: '12px', color: '#991b1b', marginTop: '2px' }}>Overdue</div>
+          <div
+            className="rounded-lg border px-5 py-3 min-w-[120px]"
+            style={{ backgroundColor: '#fee2e2', borderColor: '#fca5a5' }}
+          >
+            <div className="text-[22px] font-bold" style={{ color: '#991b1b' }}>{overdueCount}</div>
+            <div className="text-xs mt-0.5" style={{ color: '#991b1b' }}>Overdue</div>
           </div>
         )}
       </div>
 
       {/* ── Filters ── */}
-      <div style={{
-        backgroundColor: '#fff',
-        border: '1px solid #e5e7eb',
-        borderRadius: '10px',
-        padding: '16px 20px',
-        marginBottom: '20px',
-        display: 'flex',
-        gap: '12px',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-      }}>
-        <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Filter:</span>
+      <div className="card-elevated px-5 py-4 mb-5 flex flex-wrap items-center gap-3">
+        <span className="text-[13px] font-semibold text-gray-700">Filter:</span>
 
         {/* Status */}
         <select
           value={filterStatus}
           onChange={e => setFilterStatus(e.target.value)}
-          style={{ fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '6px 10px', color: '#374151', backgroundColor: '#fff' }}
+          className={filterSelectClass}
         >
           <option value="">All Statuses</option>
           <option value="open">Open</option>
@@ -231,7 +222,7 @@ export default function AdminTasksPage() {
         <select
           value={filterPriority}
           onChange={e => setFilterPriority(e.target.value)}
-          style={{ fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '6px 10px', color: '#374151', backgroundColor: '#fff' }}
+          className={filterSelectClass}
         >
           <option value="">All Priorities</option>
           <option value="high">High</option>
@@ -243,7 +234,7 @@ export default function AdminTasksPage() {
         <select
           value={filterLinkedType}
           onChange={e => setFilterLinkedType(e.target.value)}
-          style={{ fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', padding: '6px 10px', color: '#374151', backgroundColor: '#fff' }}
+          className={filterSelectClass}
         >
           <option value="">All Linked Entities</option>
           <option value="teacher">Linked to Teacher</option>
@@ -253,7 +244,8 @@ export default function AdminTasksPage() {
         {(filterStatus !== 'open' || filterPriority || filterLinkedType) && (
           <button
             onClick={() => { setFilterStatus('open'); setFilterPriority(''); setFilterLinkedType('') }}
-            style={{ fontSize: '13px', color: '#FF8303', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}
+            className="text-[13px] font-semibold bg-transparent border-none cursor-pointer"
+            style={{ color: '#FF8303' }}
           >
             Clear filters
           </button>
@@ -262,45 +254,55 @@ export default function AdminTasksPage() {
 
       {/* ── Content ── */}
       {error && (
-        <div style={{ backgroundColor: '#fee2e2', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px' }}>
+        <div
+          className="rounded-lg px-4 py-3 mb-4 text-sm"
+          style={{ backgroundColor: '#fee2e2', color: '#991b1b' }}
+        >
           {error}
         </div>
       )}
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: '#9ca3af', fontSize: '14px' }}>Loading tasks…</div>
+        <div className="text-center py-16 text-sm text-gray-400">Loading tasks…</div>
       ) : tasks.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: '#9ca3af', fontSize: '14px' }}>
+        <div className="text-center py-16 text-sm text-gray-400">
           No tasks found.{' '}
           <span
-            style={{ color: '#FF8303', cursor: 'pointer', fontWeight: 600 }}
+            className="cursor-pointer font-semibold"
+            style={{ color: '#FF8303' }}
             onClick={() => router.push('/admin/tasks/new')}
           >
             Create one
           </span>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="flex flex-col gap-2.5">
           {tasks.map(task => {
             const overdue = isOverdue(task)
             return (
               <div
                 key={task.id}
+                className="card-elevated px-5 py-4"
                 style={{
-                  backgroundColor: '#fff',
-                  border: `1px solid ${overdue ? '#fca5a5' : '#e5e7eb'}`,
+                  // Overdue rows get a red outline; every row keeps its priority/status
+                  // accent on the left edge. Both are state-dependent, so they stay inline.
+                  borderColor: overdue ? '#fca5a5' : '#E0DFDC',
                   borderLeft: `4px solid ${task.status === 'completed' ? '#d1d5db' : overdue ? '#ef4444' : task.priority === 'high' ? '#ef4444' : task.priority === 'medium' ? '#f59e0b' : '#6b7280'}`,
-                  borderRadius: '10px',
-                  padding: '16px 20px',
                   opacity: task.status === 'completed' ? 0.65 : 1,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
 
                   {/* Left: task info */}
-                  <div style={{ flex: 1, minWidth: '200px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: 600, color: task.status === 'completed' ? '#9ca3af' : '#111827', textDecoration: task.status === 'completed' ? 'line-through' : 'none' }}>
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex flex-wrap items-center gap-2.5 mb-1.5">
+                      <span
+                        className="text-[15px] font-semibold"
+                        style={{
+                          color: task.status === 'completed' ? '#9ca3af' : '#111827',
+                          textDecoration: task.status === 'completed' ? 'line-through' : 'none',
+                        }}
+                      >
                         {task.title}
                       </span>
                       <span style={{ ...priorityStyle(task.priority), fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px' }}>
@@ -319,66 +321,62 @@ export default function AdminTasksPage() {
                     </div>
 
                     {/* Meta row */}
-                    <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', color: '#6b7280' }}>
+                    <div className="flex flex-wrap gap-4 text-xs text-gray-500">
                       <span>
-                        <span style={{ fontWeight: 500 }}>Reason:</span> {REASON_LABEL[task.follow_up_reason] ?? task.follow_up_reason}
+                        <span className="font-medium">Reason:</span> {REASON_LABEL[task.follow_up_reason] ?? task.follow_up_reason}
                       </span>
                       {task.assigned_to_name && (
                         <span>
-                          <span style={{ fontWeight: 500 }}>Assigned to:</span> {task.assigned_to_name}
+                          <span className="font-medium">Assigned to:</span> {task.assigned_to_name}
                         </span>
                       )}
                       {task.due_date && (
                         <span style={{ color: overdue ? '#ef4444' : '#6b7280' }}>
-                          <span style={{ fontWeight: 500 }}>Due:</span> {formatDate(task.due_date)}
+                          <span className="font-medium">Due:</span> {formatDate(task.due_date)}
                         </span>
                       )}
                       {task.linked_entity_name && task.linked_entity_type && (
                         <span>
-                          <span style={{ fontWeight: 500 }}>Linked:</span>{' '}
+                          <span className="font-medium">Linked:</span>{' '}
                           <span
                             onClick={() => navigateToLinked(task)}
-                            className="hover:underline"
-                            style={{ color: '#FF8303', cursor: 'pointer', fontWeight: 500, textUnderlineOffset: '2px' }}
+                            className="hover:underline cursor-pointer font-medium"
+                            style={{ color: '#FF8303', textUnderlineOffset: '2px' }}
                           >
                             {task.linked_entity_name}
                           </span>
-                          <span style={{ marginLeft: '4px', color: '#9ca3af' }}>
+                          <span className="ml-1 text-gray-400">
                             ({task.linked_entity_type === 'teacher' ? 'Teacher' : 'Student'})
                           </span>
                         </span>
                       )}
                       {task.completed_at && (
                         <span>
-                          <span style={{ fontWeight: 500 }}>Completed:</span> {formatDate(task.completed_at)}
+                          <span className="font-medium">Completed:</span> {formatDate(task.completed_at)}
                         </span>
                       )}
                     </div>
 
                     {task.notes && (
-                      <p style={{ fontSize: '13px', color: '#4b5563', marginTop: '8px', margin: '8px 0 0 0', lineHeight: '1.5' }}>
+                      <p className="text-[13px] text-gray-600 mt-2 mb-0 leading-relaxed">
                         {task.notes}
                       </p>
                     )}
                   </div>
 
                   {/* Right: actions */}
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+                  <div className="flex items-center gap-2 shrink-0">
                     {task.status === 'open' ? (
                       <button
                         onClick={() => handleComplete(task.id)}
                         disabled={completing === task.id}
+                        className="rounded-lg border px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
                         style={{
                           backgroundColor: '#f0fdf4',
                           color: '#15803d',
-                          border: '1px solid #bbf7d0',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          fontWeight: 600,
+                          borderColor: '#bbf7d0',
                           cursor: completing === task.id ? 'not-allowed' : 'pointer',
                           opacity: completing === task.id ? 0.6 : 1,
-                          whiteSpace: 'nowrap',
                         }}
                       >
                         {completing === task.id ? 'Completing…' : '✓ Complete'}
@@ -387,17 +385,12 @@ export default function AdminTasksPage() {
                       <button
                         onClick={() => handleReopen(task.id)}
                         disabled={reopening === task.id}
+                        className="rounded-lg border border-[#E0DFDC] px-3 py-1.5 text-xs font-semibold whitespace-nowrap hover:bg-gray-50"
                         style={{
                           backgroundColor: '#f9fafb',
                           color: '#374151',
-                          border: '1px solid #d1d5db',
-                          borderRadius: '6px',
-                          padding: '6px 12px',
-                          fontSize: '12px',
-                          fontWeight: 600,
                           cursor: reopening === task.id ? 'not-allowed' : 'pointer',
                           opacity: reopening === task.id ? 0.6 : 1,
-                          whiteSpace: 'nowrap',
                         }}
                       >
                         {reopening === task.id ? 'Reopening…' : 'Reopen'}
@@ -405,30 +398,17 @@ export default function AdminTasksPage() {
                     )}
                     <button
                       onClick={() => router.push(`/admin/tasks/${task.id}/edit`)}
-                      style={{
-                        backgroundColor: '#fff',
-                        color: '#374151',
-                        border: '1px solid #d1d5db',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
+                      className="rounded-lg border border-[#E0DFDC] bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 cursor-pointer hover:bg-gray-50"
                     >
                       Edit
                     </button>
                     <button
                       onClick={() => handleDelete(task.id, task.title)}
                       disabled={deleting === task.id}
+                      className="rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold"
                       style={{
-                        backgroundColor: '#fff',
                         color: '#dc2626',
-                        border: '1px solid #fca5a5',
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        fontWeight: 600,
+                        borderColor: '#fca5a5',
                         cursor: deleting === task.id ? 'not-allowed' : 'pointer',
                         opacity: deleting === task.id ? 0.6 : 1,
                       }}
