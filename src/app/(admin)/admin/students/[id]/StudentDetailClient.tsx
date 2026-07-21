@@ -548,14 +548,14 @@ export default function StudentDetailClient({
     }
   }
 
-  const tabs: { key: Tab; label: string }[] = [
+  const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'classes', label: `Classes (${lessons.length})` },
-    { key: 'hours', label: `Hours Log (${hoursLog.length})` },
-    { key: 'reports', label: `Reports (${reports.length})` },
-    { key: 'assignments', label: `Assignments (${localAssignments.length})` },
-    { key: 'messages', label: `Messages (${conversations.length})` },
-    { key: 'reviews', label: `Reviews (${reviews.length})` },
+    { key: 'classes', label: 'Classes', count: lessons.length },
+    { key: 'hours', label: 'Hours Log', count: hoursLog.length },
+    { key: 'reports', label: 'Reports', count: reports.length },
+    { key: 'assignments', label: 'Assignments', count: localAssignments.length },
+    { key: 'messages', label: 'Messages', count: conversations.length },
+    { key: 'reviews', label: 'Reviews', count: reviews.length },
   ]
 
   const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400'
@@ -680,6 +680,22 @@ export default function StudentDetailClient({
             }
           >
             {tab.label}
+            {tab.count !== undefined && (
+              <span
+                style={{
+                  padding: '2px 7px',
+                  borderRadius: 9999,
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  marginLeft: '6px',
+                  ...(activeTab === tab.key
+                    ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }
+                    : { backgroundColor: '#F3F4F6', color: '#6b7280' }),
+                }}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         ))}
       </div>

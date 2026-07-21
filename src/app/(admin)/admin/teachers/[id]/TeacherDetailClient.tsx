@@ -418,12 +418,12 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
     }
   }
 
-  const tabs: { key: Tab; label: string }[] = [
+  const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'classes', label: `Classes (${lessons.length})` },
-    { key: 'invoices', label: `Invoices (${invoices.length})` },
+    { key: 'classes', label: 'Classes', count: lessons.length },
+    { key: 'invoices', label: 'Invoices', count: invoices.length },
     { key: 'history', label: 'History' },
-    { key: 'messages', label: `Messages (${conversations.length})` },
+    { key: 'messages', label: 'Messages', count: conversations.length },
   ]
 
   return (
@@ -532,6 +532,22 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               : { backgroundColor: 'white', color: '#6b7280' }}
           >
             {tab.label}
+            {tab.count !== undefined && (
+              <span
+                style={{
+                  padding: '2px 7px',
+                  borderRadius: 9999,
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  marginLeft: '6px',
+                  ...(activeTab === tab.key
+                    ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }
+                    : { backgroundColor: '#F3F4F6', color: '#6b7280' }),
+                }}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         ))}
       </div>

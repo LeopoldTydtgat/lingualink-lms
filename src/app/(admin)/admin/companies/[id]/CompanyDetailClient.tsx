@@ -59,7 +59,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
   const tagsArr = Array.isArray(company.tags) ? company.tags as string[] : []
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6">
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -68,7 +68,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
             ← Companies
           </button>
           <span className="text-gray-300">/</span>
-          <h1 className="text-2xl font-bold text-gray-900">{company.name as string}</h1>
+          <h1 className="text-xl font-bold text-gray-900">{company.name as string}</h1>
           {(company.status as string) && (
             <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
               style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
@@ -101,7 +101,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
 
       {/* ── General Info ── */}
       {activeTab === 'info' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-1">
+        <div className="card-elevated p-6 space-y-1">
           <InfoRow label="Company Name"     value={company.name as string} />
           <InfoRow label="Type"             value={TYPE_LABELS[company.type as string] ?? (company.type as string)} />
           <InfoRow label="Contact Person"   value={company.contact_name as string} />
@@ -136,7 +136,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
 
       {/* ── Students ── */}
       {activeTab === 'students' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           {students.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <Users size={36} className="mb-3 opacity-30" />
@@ -205,7 +205,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
 
       {/* ── Notes ── */}
       {activeTab === 'notes' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="card-elevated p-6">
           <div className="rounded-lg p-4" style={{ backgroundColor: '#fffbeb' }}>
             <p className="text-sm font-semibold mb-2" style={{ color: '#92400e' }}>
               🔒 Admin Only

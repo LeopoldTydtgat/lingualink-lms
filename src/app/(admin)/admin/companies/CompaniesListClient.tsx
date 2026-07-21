@@ -51,7 +51,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
         </div>
         <button
           onClick={() => router.push('/admin/companies/new')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
+          className="btn-primary-hover flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
           style={{ backgroundColor: '#FF8303' }}
         >
           <Plus size={16} />
@@ -82,7 +82,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="card-elevated overflow-hidden">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <Building2 size={40} className="mb-3 opacity-30" />
