@@ -25,11 +25,19 @@ export default async function AdminMessagesPage() {
 
   const { data: adminProfile } = await adminDb
     .from('profiles')
-    .select('id, full_name, photo_url')
+    .select('id, full_name, photo_url, role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
-  if (!adminProfile) redirect('/login')
+  // Admin gate, mirroring admin/support/page.tsx:19 — the same role-only rule the
+  // sibling support page uses, and the same /admin redirect target. It must run
+  // BEFORE the service-role sweep below: that query reads EVERY row of
+  // public.messages with RLS bypassed, so a bare "a session exists" check let any
+  // authenticated user (teacher or student) read every private conversation in the
+  // system. A null profile fails this check too (undefined !== 'admin'), so a
+  // missing or unreadable profile row is denied here rather than redirected to
+  // /login — profile-null does not mean unauthenticated.
+  if (adminProfile?.role !== 'admin') redirect('/admin')
 
   // Fetch all messages newest-first — service role bypasses RLS
   const { data: allMessages } = await adminDb
