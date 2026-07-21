@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { format } from 'date-fns'
 import { reopenReport } from './actions'
 
@@ -241,15 +242,16 @@ function PendingReportCard({
             <span className="text-xs" style={deadlineStyle}>{deadlineLabel}</span>
           )
         )}
-        <a
+        <Link
           href={`/reports/${report.id}`}
+          prefetch={false}
           style={{ backgroundColor: '#FF8303' }}
           className="text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors btn-primary-hover"
           onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
           onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
         >
           Complete Report
-        </a>
+        </Link>
       </div>
     </div>
   )
@@ -316,13 +318,14 @@ function CompletedReportCard({
         >
           {label}
         </span>
-        <a
+        <Link
           href={`/reports/${report.id}`}
+          prefetch={false}
           className="text-sm"
           style={{ color: '#FF8303', fontWeight: 500 }}
         >
           View
-        </a>
+        </Link>
       </div>
     </div>
   )
@@ -395,13 +398,14 @@ function MissedReportCard({
         >
           Missed — payment forfeited
         </span>
-        <a
+        <Link
           href={`/reports/${report.id}`}
+          prefetch={false}
           className="text-sm"
           style={{ color: '#FF8303', fontWeight: 500 }}
         >
           View
-        </a>
+        </Link>
         {isAdmin && (
           <button
             onClick={handleReopen}

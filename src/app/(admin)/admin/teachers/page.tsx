@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { TEACHER_PROFILE_FILTER } from '@/lib/auth/isTeacherProfile'
 import TeachersListClient from './TeachersListClient'
 
 export default async function TeachersPage() {
@@ -21,7 +22,7 @@ export default async function TeachersPage() {
       email_bounce_reason,
       lessons (count)
     `)
-    .in('role', ['teacher', 'admin'])
+    .or(TEACHER_PROFILE_FILTER)
     .order('full_name', { ascending: true })
 
   if (error) {

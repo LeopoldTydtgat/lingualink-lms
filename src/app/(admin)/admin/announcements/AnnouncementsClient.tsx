@@ -7,7 +7,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Announcement {
@@ -102,6 +102,7 @@ export default function AnnouncementsClient({
         </div>
         <Link
           href="/admin/announcements/new"
+          prefetch={false}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
           style={{ backgroundColor: '#FF8303' }}
         >
@@ -238,7 +239,9 @@ function AnnouncementRow({
             title={a.is_active ? 'Deactivate' : 'Activate'}
             className="p-1.5 rounded hover:bg-gray-100 transition-colors disabled:opacity-50"
           >
-            {a.is_active ? (
+            {isToggling ? (
+              <Loader2 size={20} className="animate-spin text-gray-400" />
+            ) : a.is_active ? (
               <ToggleRight size={20} style={{ color: '#FF8303' }} />
             ) : (
               <ToggleLeft size={20} className="text-gray-400" />
@@ -248,6 +251,7 @@ function AnnouncementRow({
           {/* Edit */}
           <Link
             href={`/admin/announcements/${a.id}/edit`}
+            prefetch={false}
             className="p-1.5 rounded hover:bg-gray-100 transition-colors"
             title="Edit"
           >
@@ -261,7 +265,11 @@ function AnnouncementRow({
             title="Delete"
             className="p-1.5 rounded hover:bg-red-50 transition-colors disabled:opacity-50"
           >
-            <Trash2 size={16} className="text-red-400" />
+            {isDeleting ? (
+              <Loader2 size={16} className="animate-spin text-red-400" />
+            ) : (
+              <Trash2 size={16} className="text-red-400" />
+            )}
           </button>
         </div>
       </div>

@@ -231,13 +231,13 @@ export default function PastClassDetailClient({
       {/* ── Teacher + class header ── */}
       <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
         <div className="flex items-center gap-4">
-          <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', backgroundColor: '#f3f4f6', flexShrink: 0 }}>
+          <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden', backgroundColor: '#f3f4f6', flexShrink: 0 }}>
             {lesson.teacher?.photo_url ? (
               <Image
                 src={lesson.teacher.photo_url}
                 alt={lesson.teacher.full_name}
-                width={64}
-                height={64}
+                width={72}
+                height={72}
                 style={{ objectFit: 'cover', width: '100%', height: '100%' }}
               />
             ) : (

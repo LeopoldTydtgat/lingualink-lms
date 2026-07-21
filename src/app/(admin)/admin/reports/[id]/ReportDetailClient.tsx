@@ -63,6 +63,17 @@ function formatDateTime(iso: string) {
   return `${day} ${mon} ${yr} at ${hr}:${min}`;
 }
 
+// Prefer the server's error string, fall back to the status code when the body is not JSON.
+async function errorText(res: Response, fallback: string) {
+  try {
+    const body = await res.json();
+    if (body?.error) return String(body.error);
+  } catch {
+    // non-JSON error body; keep the status message
+  }
+  return `${fallback} (${res.status}).`;
+}
+
 const CEFR_TO_NUM: Record<string, number> = {
   A1: 1,
   A2: 2,
@@ -126,20 +137,29 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
 export default function ReportDetailClient({ report, assignments }: Props) {
   const router = useRouter();
   const [reopening,   setReopening]   = useState(false);
+  const [reopenError, setReopenError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
 
   async function handleReopen() {
+    setReopenError('');
     setReopening(true);
     try {
-      await fetch(`/api/admin/reports/${report.id}`, {
+      const res = await fetch(`/api/admin/reports/${report.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reopen' }),
       });
+      if (!res.ok) {
+        // Stay on the page - the report is still flagged and the admin can retry.
+        setReopenError(await errorText(res, 'Reopen failed'));
+        return;
+      }
+      setShowConfirm(false);
       router.push('/admin/reports');
+    } catch {
+      setReopenError('Network error - the report was not reopened. Please try again.');
     } finally {
       setReopening(false);
-      setShowConfirm(false);
     }
   }
 
@@ -158,10 +178,16 @@ export default function ReportDetailClient({ report, assignments }: Props) {
           {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>Pending</span>}
           {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEDD5', color: '#C2410C' }}>Reopened</span>}
           {report.status === 'flagged' && (
-            <button onClick={() => setShowConfirm(true)} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
+            <button onClick={() => { setReopenError(''); setShowConfirm(true); }} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
         </div>
       </div>
+
+      {reopenError && !showConfirm && (
+        <div className="text-sm rounded-lg p-3 mb-5" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>
+          <strong>Report not reopened:</strong> {reopenError}
+        </div>
+      )}
 
       {report.impersonation_note && (
         <div className="text-sm rounded-lg p-3 mb-5" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
@@ -291,10 +317,13 @@ export default function ReportDetailClient({ report, assignments }: Props) {
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen this report?</h3>
             <p className="text-sm text-gray-600 mb-5">The report will be reopened and the teacher will be able to submit it late.</p>
+            {reopenError && (
+              <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
+            )}
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowConfirm(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopening}>Cancel</button>
               <button onClick={handleReopen} disabled={reopening} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>
-                {reopening ? 'Reopening…' : 'Reopen Report'}
+                {reopening ? 'Reopening…' : reopenError ? 'Try again' : 'Reopen Report'}
               </button>
             </div>
           </div>

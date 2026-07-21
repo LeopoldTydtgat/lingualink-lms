@@ -2,10 +2,30 @@ import { createClient } from '@/lib/supabase/server'
 import type { User } from '@supabase/supabase-js'
 
 /**
+ * THE canonical admin rule — the single source of truth shared by the (admin)
+ * layout, the admin pages, and every /api/admin route:
+ *
+ *   isAdmin = role === 'admin' OR account_types contains 'school_admin'
+ *
+ * Use this predicate directly when the caller already fetched the profile row
+ * it needs anyway (layout, pages); use requireAdmin() when the profile would
+ * be fetched solely to authorise. Routes whose rule is deliberately different
+ * (school_admin-only, school_admin-or-staff, support's role-only check) do NOT
+ * use this helper — see the flagged exceptions where they are defined.
+ */
+export function isAdminProfile(
+  profile: { role?: string | null; account_types?: string[] | null } | null | undefined
+): boolean {
+  return (
+    profile?.role === 'admin' ||
+    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
+  )
+}
+
+/**
  * Resolves the caller and returns them only if they are an admin.
  *
- * Mirrors the inline gate used across /api/admin routes: `role = 'admin'` OR
- * `account_types` containing 'school_admin'. Returns null for anonymous callers
+ * Applies the canonical rule above. Returns null for anonymous callers
  * AND for non-admins, so the
  * caller cannot accidentally treat "logged in" as "authorised".
  *
@@ -21,13 +41,9 @@ export async function requireAdmin(): Promise<User | null> {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, account_types')
+    .select('id, role, account_types')
     .eq('id', user.id)
     .maybeSingle()
 
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
-
-  return isAdmin ? user : null
+  return isAdminProfile(profile) ? user : null
 }

@@ -41,6 +41,8 @@ interface Props {
   initialReports: Report[];
   teachers:       { id: string; full_name: string }[];
   students:       { id: string; full_name: string }[];
+  // Seeded from ?filter= by the server page; '' means "All Statuses".
+  initialStatusFilter?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -61,6 +63,18 @@ function hoursAgo(iso: string) {
   const mins = Math.floor((diff % 3_600_000) / 60_000);
   if (hrs > 0) return `${hrs}h ${mins}m ago`;
   return `${mins}m ago`;
+}
+
+// Mirrors the exportError pattern in generateExport: prefer the server's error
+// string, fall back to the status code when the body is not JSON.
+async function errorText(res: Response, fallback: string) {
+  try {
+    const body = await res.json();
+    if (body?.error) return String(body.error);
+  } catch {
+    // non-JSON error body; keep the status message
+  }
+  return `${fallback} (${res.status}).`;
 }
 
 // ─── Badges ───────────────────────────────────────────────────────────────────
@@ -100,20 +114,26 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers }: { initialReports: Report[]; teachers: { id: string; full_name: string }[] }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
+  const [listError,     setListError]     = useState('');
   const [reopenId,      setReopenId]      = useState<string | null>(null);
   const [reopenLoading, setReopenLoading] = useState(false);
+  const [reopenError,   setReopenError]   = useState('');
 
-  const [statusFilter,      setStatusFilter]      = useState('');
+  // Seeded from the ?filter= deep link; the mount-time fetchReports effect below
+  // then loads the list through the same query path as a manual dropdown pick.
+  const [statusFilter,      setStatusFilter]      = useState(initialStatusFilter);
   const [teacherFilter,     setTeacherFilter]     = useState('');
   const [classStatusFilter, setClassStatusFilter] = useState('');
   const [dateFrom,          setDateFrom]          = useState('');
   const [dateTo,            setDateTo]            = useState('');
 
+  // Returns true only when the list was actually refreshed from the server.
   const fetchReports = useCallback(async () => {
     setLoading(true);
+    setListError('');
     const params = new URLSearchParams();
     if (statusFilter)      params.set('status',       statusFilter);
     if (teacherFilter)     params.set('teacher_id',   teacherFilter);
@@ -121,9 +141,17 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
     if (dateFrom)          params.set('date_from',    dateFrom);
     if (dateTo)            params.set('date_to',      dateTo);
     try {
-      const res  = await fetch(`/api/admin/reports?${params.toString()}`);
+      const res = await fetch(`/api/admin/reports?${params.toString()}`);
+      if (!res.ok) {
+        setListError(await errorText(res, 'Could not load reports'));
+        return false;
+      }
       const data = await res.json();
       setReports(data.reports ?? []);
+      return true;
+    } catch {
+      setListError('Network error - could not load reports.');
+      return false;
     } finally {
       setLoading(false);
     }
@@ -132,17 +160,25 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
   useEffect(() => { fetchReports(); }, [fetchReports]);
 
   async function handleReopen(reportId: string) {
+    setReopenError('');
     setReopenLoading(true);
     try {
-      await fetch(`/api/admin/reports/${reportId}`, {
+      const res = await fetch(`/api/admin/reports/${reportId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reopen' }),
       });
+      if (!res.ok) {
+        // Keep the modal open so the admin can retry - the report is still flagged.
+        setReopenError(await errorText(res, 'Reopen failed'));
+        return;
+      }
       await fetchReports();
+      setReopenId(null);
+    } catch {
+      setReopenError('Network error - the report was not reopened. Please try again.');
     } finally {
       setReopenLoading(false);
-      setReopenId(null);
     }
   }
 
@@ -178,6 +214,14 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
 
       {loading ? (
         <div className="text-sm text-gray-500 py-8 text-center">Loading reports…</div>
+      ) : listError ? (
+        <div className="py-12 text-center">
+          <p className="text-sm font-medium" style={{ color: '#DC2626' }}>{listError}</p>
+          <p className="text-xs text-gray-500 mt-1">This list may be out of date - it is not an empty result.</p>
+          <button onClick={() => { fetchReports(); }} className="mt-3 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">
+            Try again
+          </button>
+        </div>
       ) : reports.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No reports match these filters.</div>
       ) : (
@@ -227,7 +271,7 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
                           <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                         )}
                         {r.status === 'flagged' && (
-                          <button onClick={() => setReopenId(r.id)} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
+                          <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
                         )}
                         {(r.status === 'pending' || r.status === 'reopened') && (
                           <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
@@ -247,10 +291,13 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen flagged report?</h3>
             <p className="text-sm text-gray-600 mb-5">This will reopen the report and allow the teacher to submit it late.</p>
+            {reopenError && (
+              <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
+            )}
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setReopenId(null)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopenLoading}>Cancel</button>
+              <button onClick={() => { setReopenError(''); setReopenId(null); }} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopenLoading}>Cancel</button>
               <button onClick={() => handleReopen(reopenId)} disabled={reopenLoading} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>
-                {reopenLoading ? 'Reopening…' : 'Reopen Report'}
+                {reopenLoading ? 'Reopening…' : reopenError ? 'Try again' : 'Reopen Report'}
               </button>
             </div>
           </div>
@@ -265,19 +312,37 @@ function ReportsList({ initialReports, teachers }: { initialReports: Report[]; t
 function LiveTrace() {
   const [lessons,      setLessons]      = useState<TraceLesson[]>([]);
   const [loading,      setLoading]      = useState(true);
+  const [traceError,   setTraceError]   = useState('');
+  const [refreshing,   setRefreshing]   = useState(false);
   const [lastRefresh,  setLastRefresh]  = useState<Date | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchTrace = useCallback(async () => {
     try {
-      const res  = await fetch('/api/admin/reports/live-trace');
+      const res = await fetch('/api/admin/reports/live-trace');
+      if (!res.ok) {
+        setTraceError(await errorText(res, 'Could not load the class trace'));
+        return;
+      }
       const data = await res.json();
       setLessons(data.lessons ?? []);
+      setTraceError('');
       setLastRefresh(new Date());
+    } catch {
+      setTraceError('Network error - could not load the class trace.');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function handleRefreshNow() {
+    setRefreshing(true);
+    try {
+      await fetchTrace();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     fetchTrace();
@@ -295,12 +360,24 @@ function LiveTrace() {
               Updated {lastRefresh.getHours().toString().padStart(2,'0')}:{lastRefresh.getMinutes().toString().padStart(2,'0')}
             </span>
           )}
-          <button onClick={fetchTrace} className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50">Refresh now</button>
+          <button onClick={handleRefreshNow} disabled={refreshing} className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60">
+            {refreshing ? 'Refreshing…' : 'Refresh now'}
+          </button>
         </div>
       </div>
 
+      {traceError && !loading && (
+        <p className="text-sm mb-4" style={{ color: '#DC2626' }}>
+          {traceError}{lessons.length > 0 ? ' Showing the last successful load.' : ''}
+        </p>
+      )}
+
       {loading ? (
         <div className="text-sm text-gray-500 py-8 text-center">Loading…</div>
+      ) : traceError && lessons.length === 0 ? (
+        <div className="py-12 text-center">
+          <p className="text-sm text-gray-500">The trace could not be loaded - this is not an empty result.</p>
+        </div>
       ) : lessons.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No classes found.</div>
       ) : (
@@ -345,7 +422,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '' }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
@@ -514,7 +591,7 @@ export default function ReportsClient({ initialReports, teachers, students }: Pr
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 p-5">
-        {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} />}
+        {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} />}
         {activeTab === 'trace' && <LiveTrace />}
       </div>
 

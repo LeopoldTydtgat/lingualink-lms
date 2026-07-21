@@ -1,25 +1,14 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { isSenderCurrent } from '@/lib/access/accountStatus'
 
 async function assertAdmin() {
-  // RLS-bound client — role lookup must run as the user, not via service role.
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (profile?.account_types ?? []).includes('school_admin')
-  if (!isAdmin) throw new Error('Unauthorized')
+  // Canonical admin rule via the shared helper (RLS-bound lookup inside — the
+  // role lookup must run as the user, not via service role).
+  const user = await requireAdmin()
+  if (!user) throw new Error('Unauthorized')
 
   // NEW348: role/account_types alone let a deactivated admin account through this
   // gate. isSenderCurrent checks BOTH profiles.status and students.status for this

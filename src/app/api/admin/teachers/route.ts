@@ -1,38 +1,14 @@
-import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { cookies } from 'next/headers'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { TEACHER_PROFILE_FILTER } from '@/lib/auth/isTeacherProfile'
 import { NextRequest, NextResponse } from 'next/server'
 import { CreateTeacherSchema } from '@/lib/validation/schemas'
 import { generateThrowawayPassword, sendAccountInviteEmail } from '@/lib/auth/inviteEmail'
 
 // ─── GET – list teachers (supports ?minimal=true&search=name) ─────────────────
 export async function GET(req: NextRequest) {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types, role')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (profile?.account_types ?? []).includes('school_admin')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const user = await requireAdmin()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const minimal = searchParams.get('minimal') === 'true'
@@ -47,11 +23,14 @@ export async function GET(req: NextRequest) {
   let query = adminClient
     .from('profiles')
     .select(minimal ? 'id, full_name' : 'id, full_name, email, status, account_types, hourly_rate, photo_url')
-    .not('account_types', 'is', null)
+    // THE canonical teacher rule - src/lib/auth/isTeacherProfile.ts. Replaces
+    // the old `.not(account_types,is,null)` + `.contains(['teacher'])` pair,
+    // which silently dropped teacher_exam-only and role-admin profiles and so
+    // disagreed with the Teachers list page. The null guard goes with it: the
+    // filter itself already excludes null account_types except via role.eq.admin,
+    // where the rule says the profile IS managed as a teacher.
+    .or(TEACHER_PROFILE_FILTER)
     .order('full_name')
-
-  // Only return actual teachers (not pure admin/HR accounts)
-  query = query.contains('account_types', ['teacher'])
 
   if (search) {
     query = query.ilike('full_name', `%${search}%`)
@@ -80,35 +59,9 @@ export async function POST(req: NextRequest) {
     const data = parsed.data
 
     // ── 2. Verify the requesting user is an admin ────────────────────────────
-    const cookieStore = await cookies()
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-          setAll() {},
-        },
-      }
-    )
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const { data: adminProfile } = await supabase
-      .from('profiles')
-      .select('account_types, role')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin =
-      adminProfile?.role === 'admin' ||
-      (adminProfile?.account_types ?? []).includes('school_admin')
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // ── Cross-role email guard: reject if a student already uses this email ──
@@ -161,7 +114,8 @@ export async function POST(req: NextRequest) {
         speaking_languages: data.native_languages ?? [],
         preferred_payment_type: data.preferred_payment_type ?? null,
         paypal_email: data.paypal_email ?? null,
-        banking_details: data.banking_details ?? null,
+        iban: data.iban ?? null,
+        bic: data.bic ?? null,
         tax_number: data.tax_number ?? null,
         title: data.title ?? null,
         gender: data.gender ?? null,

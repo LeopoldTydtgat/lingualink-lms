@@ -1,7 +1,6 @@
-import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { fetchLessonRateMap } from '@/lib/billing/lessonRates'
-import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
@@ -26,35 +25,9 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(req: NextRequest) {
   try {
     // ── 1. Verify the requesting user is an admin via session cookie ──────────
-    const cookieStore = await cookies()
-    const sessionClient = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() { return cookieStore.getAll() },
-          setAll() {},
-        },
-      }
-    )
-
-    const { data: { user }, error: authError } = await sessionClient.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const { data: profile } = await sessionClient
-      .from('profiles')
-      .select('role, account_types')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin =
-      profile?.role === 'admin' ||
-      (profile?.account_types ?? []).includes('school_admin')
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // ── 2. Parse and validate request body ───────────────────────────────────

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { isAdminProfile } from '@/lib/auth/requireAdmin'
 import LibraryAdminClient from './LibraryAdminClient'
 
 export default async function AdminLibraryPage() {
@@ -15,11 +16,7 @@ export default async function AdminLibraryPage() {
 
   if (!profile) redirect('/login')
 
-  const isAdmin =
-    profile.role === 'admin' ||
-    (Array.isArray(profile.account_types) && profile.account_types.includes('school_admin'))
-
-  if (!isAdmin) redirect('/dashboard')
+  if (!isAdminProfile(profile)) redirect('/dashboard')
 
   return <LibraryAdminClient adminId={profile.id} />
 }

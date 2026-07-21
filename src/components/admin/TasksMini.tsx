@@ -77,13 +77,20 @@ export default function TasksMini({
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [completing, setCompleting] = useState<string | null>(null)
+  const [completeError, setCompleteError] = useState<string | null>(null)
 
   const fetchTasks = useCallback(async () => {
+    setLoadError(false)
     try {
       const res = await fetch(`/api/admin/tasks?linkedType=${linkedType}&linkedId=${linkedId}&status=open`)
+      if (!res.ok) throw new Error('Failed to load tasks')
       const data = await res.json()
-      if (res.ok) setTasks(data.tasks ?? [])
+      setTasks(data.tasks ?? [])
+    } catch {
+      setTasks([])
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
@@ -93,13 +100,20 @@ export default function TasksMini({
 
   async function handleComplete(taskId: string) {
     setCompleting(taskId)
+    setCompleteError(null)
     try {
       const res = await fetch(`/api/admin/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'complete' }),
       })
-      if (res.ok) await fetchTasks()
+      if (res.ok) {
+        await fetchTasks()
+      } else {
+        setCompleteError('Could not mark the task complete. Please try again.')
+      }
+    } catch {
+      setCompleteError('Could not reach the server, so the task was not completed. Check your connection and try again.')
     } finally {
       setCompleting(null)
     }
@@ -152,8 +166,45 @@ export default function TasksMini({
         </button>
       </div>
 
+      {completeError && (
+        <div style={{
+          fontSize: '12px',
+          color: '#FD5602',
+          backgroundColor: '#FFEEE6',
+          borderLeft: '3px solid #FD5602',
+          borderRadius: '6px',
+          padding: '8px 10px',
+          marginBottom: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+        }}>
+          <span>{completeError}</span>
+          <button
+            onClick={() => setCompleteError(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#FD5602', fontSize: '13px', lineHeight: 1, flexShrink: 0 }}
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ fontSize: '13px', color: '#9ca3af', padding: '12px 0' }}>Loading…</div>
+      ) : loadError ? (
+        <div style={{
+          fontSize: '13px',
+          color: '#FD5602',
+          padding: '16px',
+          backgroundColor: '#FFEEE6',
+          borderLeft: '3px solid #FD5602',
+          borderRadius: '8px',
+          textAlign: 'center',
+        }}>
+          Couldn&apos;t load tasks. This is not &quot;no tasks&quot; — try refreshing.
+        </div>
       ) : tasks.length === 0 ? (
         <div style={{
           fontSize: '13px',
@@ -216,7 +267,7 @@ export default function TasksMini({
                       flexShrink: 0,
                     }}
                   >
-                    {completing === task.id ? '…' : '✓ Done'}
+                    {completing === task.id ? 'Completing…' : '✓ Done'}
                   </button>
                 </div>
               </div>

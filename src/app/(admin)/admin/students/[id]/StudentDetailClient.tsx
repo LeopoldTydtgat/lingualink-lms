@@ -561,7 +561,7 @@ export default function StudentDetailClient({
   const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400'
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6">
       {/* Back */}
       <button
         onClick={() => router.push('/admin/students')}
@@ -571,15 +571,15 @@ export default function StudentDetailClient({
       </button>
 
       {/* Top card */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="card-elevated p-6 mb-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             {photoUrl ? (
               <img src={photoUrl} alt={fullName}
-                className="w-16 h-16 rounded-full object-cover" />
+                className="w-[72px] h-[72px] rounded-full object-cover" />
             ) : (
               <div
-                className="w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold"
+                className="w-[72px] h-[72px] rounded-full flex items-center justify-center text-white text-xl font-bold"
                 style={{ backgroundColor: '#FF8303' }}
               >
                 {fullName.charAt(0).toUpperCase()}
@@ -666,7 +666,8 @@ export default function StudentDetailClient({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit flex-wrap">
+      <div className="flex gap-0 mb-6 rounded-lg overflow-hidden w-fit flex-wrap"
+        style={{ border: '1px solid #E0DFDC' }}>
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -687,7 +688,7 @@ export default function StudentDetailClient({
       {activeTab === 'overview' && (
         <div className="grid grid-cols-2 gap-6">
           {/* Personal info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Personal Information</h2>
             <InfoRow label="Full Name" value={fullName} />
             <InfoRow label="Email" value={student.email as string} />
@@ -700,7 +701,7 @@ export default function StudentDetailClient({
           </div>
 
           {/* Learning info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Learning Info</h2>
             <InfoRow label="Native Language" value={student.native_language as string} />
             <InfoRow label="Learning Language" value={student.learning_language as string} />
@@ -711,7 +712,7 @@ export default function StudentDetailClient({
           </div>
 
           {/* Training info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Training</h2>
             {activeTrain ? (
               <>
@@ -733,7 +734,7 @@ export default function StudentDetailClient({
           </div>
 
           {/* Assigned teachers */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Assigned Teachers</h2>
             {assignedTeachers.length === 0 ? (
               <p className="text-sm text-gray-400">No teachers assigned.</p>
@@ -752,7 +753,7 @@ export default function StudentDetailClient({
           </div>
 
           {/* Teacher notes */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2">
+          <div className="card-elevated p-5 space-y-2">
             <h2 className="font-semibold text-gray-800">Teacher Notes</h2>
             <p className="text-sm text-gray-600">
               {(student.teacher_notes as string) || 'No teacher notes.'}
@@ -832,7 +833,7 @@ export default function StudentDetailClient({
 
       {/* ── Classes ── */}
       {activeTab === 'classes' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -891,7 +892,7 @@ export default function StudentDetailClient({
 
           {/* Inline add/remove form */}
           {hoursAction && (
-            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div className="card-elevated p-5 space-y-4">
               <h3 className="font-semibold text-gray-800">
                 {hoursAction === 'add' ? 'Add Hours' : 'Remove Hours'}
               </h3>
@@ -976,7 +977,7 @@ export default function StudentDetailClient({
           )}
 
           {/* Hours log table */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="card-elevated overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -1024,7 +1025,7 @@ export default function StudentDetailClient({
 
       {/* ── Reports ── */}
       {activeTab === 'reports' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -1088,7 +1089,7 @@ export default function StudentDetailClient({
               {revokeError}
             </div>
           )}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="card-elevated overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
@@ -1187,7 +1188,7 @@ export default function StudentDetailClient({
       {/* ── Messages ── */}
       {activeTab === 'messages' && (
         conversations.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <div className="card-elevated p-8 text-center">
             <p className="text-gray-400 text-sm">No conversations yet.</p>
           </div>
         ) : (
@@ -1256,12 +1257,12 @@ export default function StudentDetailClient({
       {activeTab === 'reviews' && (
         <div className="space-y-4">
           {reviews.length === 0 ? (
-            <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+            <div className="card-elevated p-8 text-center">
               <p className="text-gray-400 text-sm">No reviews submitted yet.</p>
             </div>
           ) : (
             reviews.map((review) => (
-              <div key={review.id} className="bg-white rounded-xl border border-gray-200 p-5">
+              <div key={review.id} className="card-elevated p-5">
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <p className="text-sm font-medium text-gray-800">{review.teacher_name}</p>

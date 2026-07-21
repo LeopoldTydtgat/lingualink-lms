@@ -13,8 +13,10 @@ import {
   GraduationCap,
   Clock,
   Flame,
+  Loader2,
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
+import { formatCompoundCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -108,19 +110,6 @@ function formatEndDate(isoDate: string): string {
     month: '2-digit',
     year: 'numeric',
   }).format(new Date(isoDate))
-}
-
-function formatCountdown(secondsUntil: number): string {
-  if (secondsUntil <= 0) return 'Now'
-  const days = Math.floor(secondsUntil / 86400)
-  const hours = Math.floor((secondsUntil % 86400) / 3600)
-  const minutes = Math.floor((secondsUntil % 3600) / 60)
-  const seconds = secondsUntil % 60
-
-  if (days > 0) {
-    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
-  }
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
 function getSecondsUntil(isoString: string, now: number): number {
@@ -357,14 +346,8 @@ function LessonRow({
 
           {/* Countdown */}
           {!isCancelled && mounted && (
-            <span style={{
-              fontSize: '13px',
-              fontWeight: '600',
-              color: '#FF8303',
-              fontVariantNumeric: 'tabular-nums',
-              flexShrink: 0,
-            }}>
-              {formatCountdown(secondsUntil)}
+            <span className="font-mono text-sm" style={{ color: '#FF8303', flexShrink: 0 }}>
+              {formatCompoundCountdown(secondsUntil)}
             </span>
           )}
 
@@ -386,7 +369,7 @@ function LessonRow({
                 padding="5px 10px"
                 fontSize="12px"
               >
-                {isCancelling ? '...' : 'Cancel'}
+                {isCancelling ? 'Cancelling...' : 'Cancel'}
               </SecondaryButton>
             </div>
           )}
@@ -425,6 +408,7 @@ export default function MyClassesClient({
   const router = useRouter()
 
   const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted && !bannerDismissed)
+  const [isDismissingBanner, setIsDismissingBanner] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [hideCancelled, setHideCancelled] = useState(false)
@@ -537,6 +521,7 @@ export default function MyClassesClient({
   const scheduledCount = scheduledLessons.length
 
   async function handleDismissBanner() {
+    setIsDismissingBanner(true)
     try {
       const res = await fetch('/api/student/profile/dismiss-banner', { method: 'POST' })
       if (!res.ok) {
@@ -545,6 +530,8 @@ export default function MyClassesClient({
       }
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
+    } finally {
+      setIsDismissingBanner(false)
     }
     setShowProfileBanner(false)
   }
@@ -585,19 +572,21 @@ export default function MyClassesClient({
           </p>
           <button
             onClick={handleDismissBanner}
+            disabled={isDismissingBanner}
             aria-label="Dismiss"
             style={{
               background: 'none',
               border: 'none',
-              cursor: 'pointer',
+              cursor: isDismissingBanner ? 'wait' : 'pointer',
               fontSize: '18px',
               color: '#9ca3af',
               lineHeight: 1,
               padding: '0 4px',
               flexShrink: 0,
+              opacity: isDismissingBanner ? 0.5 : 1,
             }}
           >
-            ×
+            {isDismissingBanner ? <Loader2 size={16} className="animate-spin" /> : '×'}
           </button>
         </div>
       )}
@@ -680,19 +669,19 @@ export default function MyClassesClient({
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
 
             {/* Teacher photo */}
-            <div style={{ flexShrink: 0, width: '48px', height: '48px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #E0DFDC' }}>
+            <div style={{ flexShrink: 0, width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #E0DFDC' }}>
               {nextLesson.teacher?.photo_url ? (
                 <Image
                   src={nextLesson.teacher.photo_url}
                   alt={nextLesson.teacher.full_name}
-                  width={48}
-                  height={48}
+                  width={64}
+                  height={64}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               ) : (
                 <div style={{
-                  width: '48px',
-                  height: '48px',
+                  width: '64px',
+                  height: '64px',
                   borderRadius: '50%',
                   backgroundColor: '#f3f4f6',
                   display: 'flex',
@@ -740,19 +729,8 @@ export default function MyClassesClient({
             </div>
 
             {/* Countdown */}
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{
-                fontSize: '24px',
-                fontWeight: '700',
-                color: '#FF8303',
-                fontVariantNumeric: 'tabular-nums',
-                lineHeight: 1,
-              }}>
-                {mounted ? formatCountdown(nextSeconds) : '—'}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                until class
-              </div>
+            <div className="font-mono text-base" style={{ textAlign: 'right', flexShrink: 0, color: '#FF8303', lineHeight: 1 }}>
+              {mounted ? formatCompoundCountdown(nextSeconds) : '—'}
             </div>
           </div>
 
@@ -841,7 +819,7 @@ export default function MyClassesClient({
               padding="8px 14px"
               fontSize="13px"
             >
-              {nextCancelling ? '...' : 'Cancel'}
+              {nextCancelling ? 'Cancelling...' : 'Cancel'}
             </SecondaryButton>
           </div>
 

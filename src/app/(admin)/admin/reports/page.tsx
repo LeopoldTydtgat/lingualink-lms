@@ -4,7 +4,21 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import ReportsClient from './ReportsClient';
 
-export default async function AdminReportsPage() {
+// Stat-card deep links (/admin/reports?filter=pending|flagged) seed the status
+// filter. Anything else falls through to the default "All Statuses".
+const FILTER_TO_STATUS: Record<string, string> = {
+  pending: 'pending',
+  flagged: 'flagged',
+};
+
+export default async function AdminReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>
+}) {
+  const { filter } = await searchParams;
+  const initialStatusFilter = (filter && FILTER_TO_STATUS[filter]) || '';
+
   const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
@@ -121,6 +135,7 @@ export default async function AdminReportsPage() {
       initialReports={initialReports}
       teachers={teachersData ?? []}
       students={allStudentsData ?? []}
+      initialStatusFilter={initialStatusFilter}
     />
   );
 }

@@ -128,6 +128,7 @@ export default function AdminMessagesClient({
   const [selectedConv, setSelectedConv] = useState<AdminConversation | null>(null)
   const [messages, setMessages] = useState<AdminMessage[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [messagesError, setMessagesError] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -149,19 +150,30 @@ export default function AdminMessagesClient({
 
   const fetchMessages = useCallback(async (conv: AdminConversation) => {
     setLoadingMessages(true)
+    setMessagesError(false)
+    let loadedOk = false
     try {
       const data = await getAdminThreadMessages(conv.teacherSideId, conv.studentId)
       setMessages(data as AdminMessage[])
+      loadedOk = true
+    } catch {
+      setMessages([])
+      setMessagesError(true)
+    } finally {
+      setLoadingMessages(false)
+    }
+
+    if (!loadedOk) return
+
+    // Read-marking is best-effort bookkeeping; if it fails the messages that
+    // already loaded successfully must stay on screen, so the failure is
+    // tolerated silently rather than surfaced.
+    try {
       await markAdminThreadRead(conv.teacherSideId, conv.studentId)
       setConversations(prev =>
         prev.map(c => c.key === conv.key ? { ...c, unreadCount: 0 } : c)
       )
-    } catch (err) {
-      console.error('Failed to load admin thread messages', err)
-      setMessages([])
-    } finally {
-      setLoadingMessages(false)
-    }
+    } catch {}
   }, [])
 
   const handleSelectConv = useCallback(async (conv: AdminConversation) => {
@@ -269,7 +281,8 @@ export default function AdminMessagesClient({
               <button
                 key={conv.key}
                 onClick={() => handleSelectConv(conv)}
-                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50"
+                disabled={loadingMessages}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left border-b border-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
                 style={selectedConv?.key === conv.key ? { backgroundColor: '#FFF3E0' } : {}}
               >
                 {/* Overlapping avatars */}
@@ -345,6 +358,15 @@ export default function AdminMessagesClient({
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">
                   Loading...
+                </div>
+              ) : messagesError ? (
+                <div className="flex items-center justify-center h-full">
+                  <div
+                    className="text-sm text-center px-4 py-3 rounded-lg"
+                    style={{ borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6', color: '#FD5602' }}
+                  >
+                    Couldn&apos;t load messages for this conversation. Try selecting it again.
+                  </div>
                 </div>
               ) : messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm text-gray-400">

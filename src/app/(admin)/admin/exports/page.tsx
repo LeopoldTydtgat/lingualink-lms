@@ -110,6 +110,7 @@ function AutocompleteInput({
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [searchError, setSearchError] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -125,10 +126,12 @@ function AutocompleteInput({
   }, [])
 
   const search = useCallback(async (q: string) => {
-    if (!q.trim()) { setSuggestions([]); setOpen(false); return }
+    if (!q.trim()) { setSuggestions([]); setOpen(false); setSearchError(false); return }
     setLoading(true)
+    setSearchError(false)
     try {
       const res = await fetch(fetchUrl(q))
+      if (!res.ok) throw new Error('Search failed')
       const data = await res.json()
       // Teachers return data.teachers, students return data.students, companies return data.companies
       const items: Suggestion[] = data.teachers ?? data.students ?? data.companies ?? []
@@ -136,6 +139,8 @@ function AutocompleteInput({
       setOpen(true)
     } catch {
       setSuggestions([])
+      setSearchError(true)
+      setOpen(true)
     } finally {
       setLoading(false)
     }
@@ -215,7 +220,17 @@ function AutocompleteInput({
           ))}
         </div>
       )}
-      {open && suggestions.length === 0 && query.trim() && !loading && (
+      {open && searchError && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+          backgroundColor: '#FFEEE6', border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602',
+          borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: '#FD5602',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '2px',
+        }}>
+          Couldn&apos;t search. Try again.
+        </div>
+      )}
+      {open && !searchError && suggestions.length === 0 && query.trim() && !loading && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
           backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
@@ -244,11 +259,15 @@ export default function AdminExportsPage() {
 
   // Companies list loaded once for the company filter (small list, no need for autocomplete)
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
+  const [companiesError, setCompaniesError] = useState(false)
   useEffect(() => {
     fetch('/api/admin/companies?minimal=true')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error('Failed to load companies')
+        return r.json()
+      })
       .then(d => setCompanies(d.companies ?? []))
-      .catch(() => {})
+      .catch(() => setCompaniesError(true))
   }, [])
 
   function setFilter(type: ExportType, updates: Partial<FilterSet>) {
@@ -405,17 +424,24 @@ export default function AdminExportsPage() {
                         </div>
                       </div>
                     ) : (
-                      <select
-                        value={f.companyId}
-                        onChange={e => {
-                          const selected = companies.find(c => c.id === e.target.value)
-                          setFilter(exportDef.type, { companyId: e.target.value, companyName: selected?.name ?? '' })
-                        }}
-                        style={{ ...filterInputStyle, width: '180px' }}
-                      >
-                        <option value="">All companies</option>
-                        {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
+                      <>
+                        <select
+                          value={f.companyId}
+                          onChange={e => {
+                            const selected = companies.find(c => c.id === e.target.value)
+                            setFilter(exportDef.type, { companyId: e.target.value, companyName: selected?.name ?? '' })
+                          }}
+                          style={{ ...filterInputStyle, width: '180px' }}
+                        >
+                          <option value="">All companies</option>
+                          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        {companiesError && (
+                          <p style={{ fontSize: '11px', color: '#FD5602', marginTop: '4px' }}>
+                            Couldn&apos;t load companies. Refresh to try again.
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

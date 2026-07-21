@@ -91,11 +91,15 @@ function StatCard({
   label,
   value,
   caption,
+  unknown = false,
 }: {
   icon: typeof BookOpen
   label: string
   value: number
   caption: string
+  // True when the underlying data failed to load. A count of 0 is a claim the
+  // data does not support, so a neutral placeholder is shown instead.
+  unknown?: boolean
 }) {
   return (
     <div className="flex-1 min-w-[200px] rounded-xl p-5 shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6' }}>
@@ -108,7 +112,11 @@ function StatCard({
         </span>
         <span className="text-sm font-medium" style={{ color: '#4b5563' }}>{label}</span>
       </div>
-      <p className="text-3xl font-semibold" style={{ color: '#111827' }}>{value}</p>
+      {unknown ? (
+        <p className="text-3xl font-semibold" style={{ color: '#9ca3af' }}>—</p>
+      ) : (
+        <p className="text-3xl font-semibold" style={{ color: '#111827' }}>{value}</p>
+      )}
       <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
     </div>
   )
@@ -125,6 +133,13 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const [actCounts, setActCounts] = useState<Record<string, number>>({})
   const [students, setStudents] = useState<StudentOption[]>([])
   const [loading, setLoading] = useState(true)
+  // Set when either library query fails. Without it a failed read renders as an
+  // empty library: the admin would be told to create the first sheet while the
+  // real ones are still there, and every activity count would read 0 — which
+  // also disables Assign on sheets that do have content.
+  const [loadError, setLoadError] = useState(false)
+  // Same hazard on the students list: an empty dropdown reads as "no students".
+  const [studentsError, setStudentsError] = useState(false)
 
   // -- Filters --
   const [search, setSearch] = useState('')
@@ -139,6 +154,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const [bulkSaving, setBulkSaving] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  // Each PATCH is independent, so an access change can land on some sheets and
+  // not others. The reloaded pills show which — this says how many.
+  const [bulkAccessError, setBulkAccessError] = useState<string | null>(null)
 
   // -- Row action menu (kebab) --
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
@@ -163,31 +181,61 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   // -- Load sheets --
   const loadSheets = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('study_sheets')
-      .select('*')
-      .order('title', { ascending: true })
-    setSheets(data || [])
+    setLoadError(false)
 
-    // Activity counts come from the activities table — content.exercises is no
-    // longer written. One lightweight query, reduced to a per-sheet count map.
-    // Select only id, sheet_id — never content/answer_key (column-level grants).
-    const { data: actRows } = await supabase.from('activities').select('id, sheet_id')
-    const counts: Record<string, number> = {}
-    for (const r of actRows ?? []) {
-      counts[r.sheet_id] = (counts[r.sheet_id] ?? 0) + 1
+    try {
+      const { data, error } = await supabase
+        .from('study_sheets')
+        .select('*')
+        .order('title', { ascending: true })
+
+      if (error) {
+        setSheets([])
+        setActCounts({})
+        setLoadError(true)
+        return null
+      }
+
+      setSheets(data || [])
+
+      // Activity counts come from the activities table — content.exercises is no
+      // longer written. One lightweight query, reduced to a per-sheet count map.
+      // Select only id, sheet_id — never content/answer_key (column-level grants).
+      const { data: actRows, error: actError } = await supabase.from('activities').select('id, sheet_id')
+
+      if (actError) {
+        // Counts drive both the Activities column and isSheetEmpty. An unknown
+        // count must not be rendered as zero, so the whole list is withheld.
+        setActCounts({})
+        setLoadError(true)
+        return data || []
+      }
+
+      const counts: Record<string, number> = {}
+      for (const r of actRows ?? []) {
+        counts[r.sheet_id] = (counts[r.sheet_id] ?? 0) + 1
+      }
+      setActCounts(counts)
+      return data || []
+    } finally {
+      setLoading(false)
     }
-    setActCounts(counts)
-
-    setLoading(false)
   }, [])
 
   // -- Load students (for assign modal) --
   const loadStudents = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('students')
       .select('id, full_name, email')
       .order('full_name')
+
+    if (error) {
+      setStudents([])
+      setStudentsError(true)
+      return
+    }
+
+    setStudentsError(false)
     setStudents(data || [])
   }, [])
 
@@ -236,23 +284,45 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
   const handleBulkChangeAccess = async () => {
     if (!bulkRoles || selectedIds.size === 0) return
     setBulkSaving(true)
+    setBulkAccessError(null)
+
     const rolesArray =
       bulkRoles === 'all' ? ['teacher', 'teacher_exam'] :
       bulkRoles === 'exam' ? ['teacher_exam'] :
       ['admin']
-    await Promise.all(
-      Array.from(selectedIds).map(id =>
-        fetch(`/api/admin/library/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ allowed_roles: rolesArray }),
-        })
+
+    const ids = Array.from(selectedIds)
+
+    try {
+      const results = await Promise.all(
+        ids.map(id =>
+          fetch(`/api/admin/library/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allowed_roles: rolesArray }),
+          })
+            .then(res => res.ok)
+            .catch(() => false)
+        )
       )
-    )
-    setBulkSaving(false)
-    setSelectedIds(new Set())
-    setBulkRoles('')
-    await loadSheets()
+
+      const failed = results.filter(ok => !ok).length
+
+      if (failed > 0) {
+        // The selection is the only record of which sheets were targeted, so it
+        // stays put — clearing it would leave the admin nothing to retry from.
+        setBulkAccessError(
+          `${failed} of ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} could not be updated and ${failed === 1 ? 'still has' : 'still have'} the old access. The selection is kept so you can try again.`
+        )
+      } else {
+        setSelectedIds(new Set())
+        setBulkRoles('')
+      }
+
+      await loadSheets()
+    } finally {
+      setBulkSaving(false)
+    }
   }
 
   // -- Bulk delete --
@@ -261,29 +331,47 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     setDeleteError(null)
 
     const ids = Array.from(selectedIds)
-    const results = await Promise.all(
-      ids.map(id =>
-        fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
-          .then(res => res.ok)
-          .catch(() => false)
+
+    try {
+      const results = await Promise.all(
+        ids.map(id =>
+          fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
+            .then(res => res.ok)
+            .catch(() => false)
+        )
       )
-    )
 
-    const failed = results.filter(ok => !ok).length
+      const failed = results.filter(ok => !ok).length
 
-    setBulkDeleting(false)
-    setConfirmBulkDelete(false)
-    setSelectedIds(new Set())
+      // Partial failure is real: each sheet is deleted independently, so some can
+      // survive. The reloaded list shows which — this says how many, and why to look.
+      if (failed > 0) {
+        setDeleteError(
+          `${failed} of ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} could not be deleted and ${failed === 1 ? 'is' : 'are'} still listed. Try again, or delete them one at a time to see why.`
+        )
+      }
 
-    // Partial failure is real: each sheet is deleted independently, so some can
-    // survive. The reloaded list shows which — this says how many, and why to look.
-    if (failed > 0) {
-      setDeleteError(
-        `${failed} of ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} could not be deleted and ${failed === 1 ? 'is' : 'are'} still listed. Try again, or delete them one at a time to see why.`
-      )
+      const reloaded = await loadSheets()
+
+      if (failed > 0) {
+        if (reloaded === null) {
+          // The reload itself failed — we have no reliable view of what survived,
+          // so the selection is left untouched rather than wrongly cleared.
+        } else {
+          // Trust the reloaded list, not the per-request ok flags — a sheet can be
+          // gone server-side even if its DELETE response looked like a failure.
+          // Intersecting keeps only ids that genuinely survived, so a retry can't
+          // re-issue DELETE for rows already gone.
+          const survivingIds = new Set(reloaded.map(s => s.id))
+          setSelectedIds(prev => new Set(Array.from(prev).filter(id => survivingIds.has(id))))
+        }
+      } else {
+        setSelectedIds(new Set())
+      }
+    } finally {
+      setBulkDeleting(false)
+      setConfirmBulkDelete(false)
     }
-
-    await loadSheets()
   }
 
   // -- Single delete --
@@ -291,15 +379,22 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     setDeletingId(id)
     setDeleteError(null)
 
-    const res = await fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
+    try {
+      const res = await fetch(`/api/admin/library/${id}`, { method: 'DELETE' })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      setDeleteError(body.error || 'Could not delete the sheet. Please try again.')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setDeleteError(body.error || 'Could not delete the sheet. Please try again.')
+      }
+    } catch {
+      // Without this the confirmation modal wedges at "Deleting..." with both of
+      // its buttons disabled and no way out.
+      setDeleteError('Could not reach the server, so the sheet was not deleted. Check your connection and try again.')
+    } finally {
+      setDeletingId(null)
+      setConfirmDeleteId(null)
     }
 
-    setDeletingId(null)
-    setConfirmDeleteId(null)
     await loadSheets()
   }
 
@@ -341,10 +436,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
       {/* Stat cards */}
       <div className="flex flex-wrap gap-4">
-        <StatCard icon={BookOpen} label="Total Sheets" value={sheets.length} caption="In the shared library" />
-        <StatCard icon={ClipboardCheck} label="Assignable" value={sheets.filter(s => !isSheetEmpty(s, actCounts)).length} caption="Have content or activities" />
-        <StatCard icon={Lock} label="Admin Only" value={sheets.filter(s => s.allowed_roles?.length === 1 && s.allowed_roles.includes('admin')).length} caption="Hidden from teachers" />
-        <StatCard icon={Layers} label="Total Activities" value={Object.values(actCounts).reduce((a, b) => a + b, 0)} caption="Across all sheets" />
+        <StatCard icon={BookOpen} label="Total Sheets" value={sheets.length} caption="In the shared library" unknown={loadError} />
+        <StatCard icon={ClipboardCheck} label="Assignable" value={sheets.filter(s => !isSheetEmpty(s, actCounts)).length} caption="Have content or activities" unknown={loadError} />
+        <StatCard icon={Lock} label="Admin Only" value={sheets.filter(s => s.allowed_roles?.length === 1 && s.allowed_roles.includes('admin')).length} caption="Hidden from teachers" unknown={loadError} />
+        <StatCard icon={Layers} label="Total Activities" value={Object.values(actCounts).reduce((a, b) => a + b, 0)} caption="Across all sheets" unknown={loadError} />
       </div>
 
       {/* Filters */}
@@ -432,6 +527,23 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         </div>
       )}
 
+      {/* Bulk access-change failure — the pills below are still the old ones */}
+      {bulkAccessError && (
+        <div
+          className="mb-4 rounded-xl px-4 py-3 flex items-start gap-3"
+          style={{ border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6' }}
+        >
+          <p className="text-sm text-red-700 flex-1">{bulkAccessError}</p>
+          <button
+            onClick={() => setBulkAccessError(null)}
+            className="text-red-400 hover:text-red-600 text-sm leading-none flex-shrink-0"
+            title="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Bulk action bar — shown when items selected */}
       {selectedIds.size > 0 && (
         <div
@@ -510,6 +622,16 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       {loading ? (
         <div className="rounded-xl px-6 py-12 text-center text-sm shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}>
           Loading library…
+        </div>
+      ) : loadError ? (
+        <div
+          className="rounded-xl px-6 py-12 text-center text-sm shadow-sm"
+          style={{ border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6', color: '#FD5602' }}
+        >
+          <p className="font-medium">Couldn&apos;t load the library.</p>
+          <p className="mt-1">
+            This is not an empty library — the sheets are still there. Refresh the page to try again.
+          </p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl px-6 py-12 text-center text-sm shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}>
@@ -741,6 +863,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         <AssignSheetModal
           sheet={assigningSheet}
           students={students}
+          studentsError={studentsError}
           adminId={adminId}
           onClose={() => { setShowAssign(false); setAssigningSheet(null) }}
         />

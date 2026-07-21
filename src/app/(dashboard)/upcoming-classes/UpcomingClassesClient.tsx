@@ -4,8 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
-import { CalendarDays, Plus, History } from 'lucide-react'
+import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
+import { formatCompoundCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -108,21 +109,8 @@ function Countdown({ startsAt }: { startsAt: string }) {
 
   useEffect(() => {
     function update() {
-      const diff = new Date(startsAt).getTime() - Date.now()
-      if (diff <= 0) {
-        setTimeLeft('Starting now')
-        return
-      }
-      const totalSeconds = Math.floor(diff / 1000)
-      const days = Math.floor(totalSeconds / 86400)
-      const hours = Math.floor((totalSeconds % 86400) / 3600)
-      const minutes = Math.floor((totalSeconds % 3600) / 60)
-      const seconds = totalSeconds % 60
-      if (days > 0) {
-        setTimeLeft(days + 'd ' + hours + 'h ' + String(minutes).padStart(2, '0') + 'm')
-      } else {
-        setTimeLeft(hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's')
-      }
+      const totalSeconds = Math.floor((new Date(startsAt).getTime() - Date.now()) / 1000)
+      setTimeLeft(formatCompoundCountdown(totalSeconds))
     }
     update()
     const interval = setInterval(update, 1000)
@@ -243,6 +231,7 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
 }
 
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
@@ -366,7 +355,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
             )}
             <ActionButton
               label={'Message ' + cls.student.full_name.split(' ')[0]}
-              onClick={() => window.location.href = `/messages?studentId=${cls.student.id}`}
+              onClick={() => router.push(`/messages?studentId=${cls.student.id}`)}
             />
           </div>
         </div>
@@ -527,12 +516,13 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         }}>
           <p style={{ margin: 0, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>
             Complete your profile to get the most out of your portal.{' '}
-            <a
+            <Link
               href="/account"
+              prefetch={false}
               style={{ color: '#FF8303', fontWeight: 600, textDecoration: 'none' }}
             >
               Complete now →
-            </a>
+            </Link>
           </p>
           <button
             onClick={handleDismissBanner}
@@ -540,7 +530,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             style={{ background: 'none', border: 'none', cursor: isDismissing ? 'wait' : 'pointer', color: '#9ca3af', padding: '0 4px', fontSize: '18px', lineHeight: 1, flexShrink: 0, opacity: isDismissing ? 0.5 : 1 }}
             aria-label="Dismiss"
           >
-            ×
+            {isDismissing ? <Loader2 size={16} className="animate-spin" /> : '×'}
           </button>
         </div>
       )}

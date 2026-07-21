@@ -12,11 +12,14 @@ type StudentOption = {
 type Props = {
   sheet: StudySheet
   students: StudentOption[]
+  // True when the students query failed. An empty dropdown is indistinguishable
+  // from "there are no students", so the list is replaced with the reason.
+  studentsError: boolean
   adminId: string
   onClose: () => void
 }
 
-export default function AssignSheetModal({ sheet, students, adminId, onClose }: Props) {
+export default function AssignSheetModal({ sheet, students, studentsError, adminId, onClose }: Props) {
   const [selectedStudentId, setSelectedStudentId] = useState('')
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState(false)
@@ -27,25 +30,29 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
     setSaving(true)
     setError(null)
 
-    const res = await fetch('/api/admin/library/assign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        study_sheet_id: sheet.id,
-        student_id: selectedStudentId,
-        assigned_by: adminId,
-      }),
-    })
+    try {
+      const res = await fetch('/api/admin/library/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          study_sheet_id: sheet.id,
+          student_id: selectedStudentId,
+          assigned_by: adminId,
+        }),
+      })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      setError(body.error || 'Failed to assign sheet. Please try again.')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error || 'Failed to assign sheet. Please try again.')
+        return
+      }
+
+      setSuccess(true)
+    } catch {
+      setError("Could not reach the server. It is not known whether the sheet was assigned — check the student's Study tab before assigning again.")
+    } finally {
       setSaving(false)
-      return
     }
-
-    setSaving(false)
-    setSuccess(true)
   }
 
   return (
@@ -85,18 +92,25 @@ export default function AssignSheetModal({ sheet, students, adminId, onClose }: 
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Select Student *
                 </label>
-                <select
-                  value={selectedStudentId}
-                  onChange={e => setSelectedStudentId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
-                >
-                  <option value="">Choose a student…</option>
-                  {students.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.full_name} — {s.email}
-                    </option>
-                  ))}
-                </select>
+                {studentsError ? (
+                  <p className="text-sm" style={{ color: '#FD5602' }}>
+                    Could not load students, so the list is unavailable. This does not mean there are none —
+                    close this and refresh the page to try again.
+                  </p>
+                ) : (
+                  <select
+                    value={selectedStudentId}
+                    onChange={e => setSelectedStudentId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                  >
+                    <option value="">Choose a student…</option>
+                    {students.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.full_name} — {s.email}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <p className="text-xs text-gray-400">

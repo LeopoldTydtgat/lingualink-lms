@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Tag as TagIcon } from 'lucide-react'
+import { Check, Loader2, Tag as TagIcon } from 'lucide-react'
 
 // -- Types --
 
@@ -171,7 +171,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 style={{ opacity: 0.7 }}
                 title="Delete tag"
               >
-                ×
+                {deletingId === tag.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '×'}
               </button>
             </span>
           ))}
@@ -258,7 +258,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                 onMouseEnter={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#e67300' }}
                 onMouseLeave={e => { if (!(creating || !name.trim())) e.currentTarget.style.backgroundColor = '#FF8303' }}
               >
-                {creating ? 'Creating...' : 'Create Tag'}
+                {creating ? 'Creating…' : 'Create Tag'}
               </button>
 
               {error && <p className="text-sm" style={{ color: '#FD5602' }}>{error}</p>}
@@ -324,7 +324,7 @@ export default function TagManagerModal({ onClose, onSaved }: Props) {
                   ? { backgroundColor: '#E5E7EB', color: '#9CA3AF' }
                   : { backgroundColor: '#FD5602', color: 'white' }}
               >
-                {deletingId === confirmDeleteId ? 'Deleting...' : 'Yes, Delete Tag'}
+                {deletingId === confirmDeleteId ? 'Deleting…' : 'Yes, Delete Tag'}
               </button>
             </div>
           </div>

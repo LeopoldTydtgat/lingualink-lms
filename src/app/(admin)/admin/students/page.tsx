@@ -2,7 +2,16 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import StudentsListClient from './StudentsListClient'
 
-export default async function StudentsPage() {
+export default async function StudentsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>
+}) {
+  // Stat-card deep link (/admin/students?filter=low_hours) seeds the Low Hours
+  // toggle. Any other value leaves the toggle off.
+  const { filter } = await searchParams
+  const initialLowHoursOnly = filter === 'low_hours'
+
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -100,5 +109,10 @@ export default async function StudentsPage() {
     }
   })
 
-  return <StudentsListClient students={studentsFlattened} />
+  return (
+    <StudentsListClient
+      students={studentsFlattened}
+      initialLowHoursOnly={initialLowHoursOnly}
+    />
+  )
 }

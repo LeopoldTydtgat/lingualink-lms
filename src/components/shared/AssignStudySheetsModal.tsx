@@ -84,6 +84,7 @@ export default function AssignStudySheetsModal({
   const [levelFilter, setLevelFilter] = useState('all')
   const [selected, setSelected] = useState<Set<string>>(new Set(alreadyAssigned))
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -238,60 +239,82 @@ export default function AssignStudySheetsModal({
 
   async function handleSave() {
     setSaving(true)
+    // Clear any previous error so a retry never shows a stale message.
+    setError(null)
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const toRemove = alreadyAssigned.filter(id => !selected.has(id))
-    if (toRemove.length > 0) {
-      await supabase
-        .from('assignments')
-        .delete()
-        .eq('lesson_id', lessonId)
-        .in('study_sheet_id', toRemove)
-    }
-
-    const toAdd = Array.from(selected).filter(id => !alreadyAssigned.includes(id))
-    if (toAdd.length > 0) {
-      await supabase
-        .from('assignments')
-        .insert(
-          toAdd.map(sheetId => ({
-            lesson_id: lessonId,
-            student_id: studentId,
-            study_sheet_id: sheetId,
-            assigned_by: user.id,
-          }))
-        )
-
-      try {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .single()
-
-        const addedTitles = sheets
-          .filter(s => toAdd.includes(s.id))
-          .map(s => s.title)
-
-        await fetch('/api/teacher/notify-homework-assigned', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            studentId,
-            teacherName: profile?.full_name ?? 'Your teacher',
-            sheetTitles: addedTitles,
-          }),
-        })
-      } catch {
-        // email failure is non-blocking
+    // try/finally guarantees the saving state is reset on EVERY exit path —
+    // the early `!user` return, a thrown Supabase/network error, or success —
+    // so the button can never get stuck disabled reading "Saving...".
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setError('Could not save your assignments. Please try again.')
+        return
       }
-    }
 
-    onSaved(sheets.filter(s => selected.has(s.id)))
-    setSaving(false)
-    onClose()
+      const toRemove = alreadyAssigned.filter(id => !selected.has(id))
+      if (toRemove.length > 0) {
+        // supabase-js returns { error } rather than throwing — a discarded
+        // error would wrongly report success, so capture it and bail out
+        // without calling onSaved/onClose.
+        const { error: removeError } = await supabase
+          .from('assignments')
+          .delete()
+          .eq('lesson_id', lessonId)
+          .in('study_sheet_id', toRemove)
+        if (removeError) {
+          setError('Could not save your assignments. Please try again.')
+          return
+        }
+      }
+
+      const toAdd = Array.from(selected).filter(id => !alreadyAssigned.includes(id))
+      if (toAdd.length > 0) {
+        const { error: addError } = await supabase
+          .from('assignments')
+          .insert(
+            toAdd.map(sheetId => ({
+              lesson_id: lessonId,
+              student_id: studentId,
+              study_sheet_id: sheetId,
+              assigned_by: user.id,
+            }))
+          )
+        if (addError) {
+          setError('Could not save your assignments. Please try again.')
+          return
+        }
+
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name')
+            .eq('id', user.id)
+            .single()
+
+          const addedTitles = sheets
+            .filter(s => toAdd.includes(s.id))
+            .map(s => s.title)
+
+          await fetch('/api/teacher/notify-homework-assigned', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              studentId,
+              teacherName: profile?.full_name ?? 'Your teacher',
+              sheetTitles: addedTitles,
+            }),
+          })
+        } catch {
+          // email failure is non-blocking
+        }
+      }
+
+      onSaved(sheets.filter(s => selected.has(s.id)))
+      onClose()
+    } finally {
+      setSaving(false)
+    }
   }
 
   const LEVELS = ['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
@@ -479,6 +502,10 @@ export default function AssignStudySheetsModal({
             </div>
           )}
         </div>
+
+        {error && (
+          <p className="px-6 pt-2 text-sm" style={{ color: '#FD5602' }}>{error}</p>
+        )}
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">

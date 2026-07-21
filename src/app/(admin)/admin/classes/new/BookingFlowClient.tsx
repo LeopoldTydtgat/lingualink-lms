@@ -254,7 +254,8 @@ export default function BookingFlowClient({ teachers, students }: Props) {
   const steps = ['Teacher', 'Student', 'Duration', 'Date & Time', 'Confirm']
 
   return (
-    <div style={{ padding: '32px', maxWidth: '720px' }}>
+    <div style={{ padding: '32px' }}>
+      <div className="max-w-6xl mx-auto">
 
       {/* Back link */}
       <button
@@ -318,10 +319,10 @@ export default function BookingFlowClient({ teachers, students }: Props) {
                 <div
                   key={teacher.id}
                   onClick={() => { setSelectedTeacher(teacher); setStep(2) }}
+                  className={`card-elevated${selectedTeacher?.id === teacher.id ? ' card-elevated-active' : ''}`}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '14px',
-                    padding: '14px 16px', borderRadius: '10px', cursor: 'pointer',
-                    border: selectedTeacher?.id === teacher.id ? '2px solid #FF8303' : '1px solid #E5E7EB',
+                    padding: '14px 16px', cursor: 'pointer',
                     backgroundColor: selectedTeacher?.id === teacher.id ? '#FFF7ED' : 'white',
                   }}
                 >
@@ -379,11 +380,11 @@ export default function BookingFlowClient({ teachers, students }: Props) {
                   <div
                     key={student.id}
                     onClick={() => { if (!noTraining) { setSelectedStudent(student); setStep(3) } }}
+                    className={`card-elevated${selectedStudent?.id === student.id ? ' card-elevated-active' : ''}`}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '14px',
-                      padding: '14px 16px', borderRadius: '10px',
+                      padding: '14px 16px',
                       cursor: noTraining ? 'not-allowed' : 'pointer',
-                      border: selectedStudent?.id === student.id ? '2px solid #FF8303' : '1px solid #E5E7EB',
                       backgroundColor: noTraining ? '#F9FAFB' : selectedStudent?.id === student.id ? '#FFF7ED' : 'white',
                       opacity: noTraining ? 0.6 : 1,
                     }}
@@ -432,9 +433,9 @@ export default function BookingFlowClient({ teachers, students }: Props) {
                   key={mins}
                   disabled={insufficient}
                   onClick={() => { setSelectedDuration(mins); setStep(4) }}
+                  className={`card-elevated${selectedDuration === mins ? ' card-elevated-active' : ''}`}
                   style={{
-                    flex: 1, padding: '20px 12px', borderRadius: '10px',
-                    border: selectedDuration === mins ? '2px solid #FF8303' : '1px solid #E5E7EB',
+                    flex: 1, padding: '20px 12px',
                     backgroundColor: insufficient ? '#F9FAFB' : selectedDuration === mins ? '#FFF7ED' : 'white',
                     cursor: insufficient ? 'not-allowed' : 'pointer',
                     opacity: insufficient ? 0.5 : 1,
@@ -563,10 +564,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
             Confirm Booking
           </h2>
 
-          <div style={{
-            backgroundColor: 'white', border: '1px solid #E5E7EB',
-            borderRadius: '12px', padding: '24px', marginBottom: '20px',
-          }}>
+          <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
             <Row label="Teacher" value={selectedTeacher.full_name} />
             <Row label="Student" value={selectedStudent.full_name} />
             <Row label="Date" value={selectedDate} />
@@ -623,6 +621,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

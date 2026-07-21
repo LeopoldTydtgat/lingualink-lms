@@ -59,7 +59,8 @@ export const CreateTeacherSchema = z.object({
   currency: z.enum(['EUR', 'GBP', 'USD']).default('EUR').optional(),
   vat_required: z.boolean().optional().default(false),
   tax_number: z.string().max(100).optional().nullable(),
-  banking_details: z.string().max(2000).optional().nullable(),
+  iban: z.string().max(50).optional().nullable(),
+  bic: z.string().max(50).optional().nullable(),
   paypal_email: optionalEmail,
   preferred_payment_type: z.string().max(50).optional().nullable(),
 
@@ -165,6 +166,7 @@ export const UpdateTeacherSchema = z.object({
   currency: z.enum(['EUR', 'GBP', 'USD']).optional(),
   native_languages: z.array(z.string().max(100)).optional(),
   teaching_languages: z.array(z.string().max(100)).optional(),
+  qualifications: z.string().max(2000).optional().nullable(),
   specialties: z.string().max(1000).optional().nullable(),
   bio: z.string().max(2000).optional().nullable(),
   quote: z.string().max(500).optional().nullable(),

@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { createClient as createServerSupabaseClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 import resend from '@/lib/email/client'
 import { CreateStudentSchema } from '@/lib/validation/schemas'
@@ -22,20 +22,10 @@ export async function GET(req: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types, role')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (profile?.account_types ?? []).includes('school_admin')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Gate via the shared canonical rule; `supabase` (the RLS-bound client
+  // above) stays for the student list query below.
+  const user = await requireAdmin()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const minimal = searchParams.get('minimal') === 'true'
@@ -72,25 +62,9 @@ export async function POST(req: NextRequest) {
     const data = parsed.data
 
     // ── 2. Verify the requesting user is an admin ────────────────────────────
-    const supabase = await createServerSupabaseClient()
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    const { data: adminProfile } = await supabase
-      .from('profiles')
-      .select('account_types, role')
-      .eq('id', user.id)
-      .single()
-
-    const isAdmin =
-      adminProfile?.role === 'admin' ||
-      (adminProfile?.account_types ?? []).includes('school_admin')
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // ── Cross-role email guard: reject if a teacher already uses this email ──

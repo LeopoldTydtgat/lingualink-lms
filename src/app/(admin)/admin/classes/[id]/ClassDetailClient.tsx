@@ -83,34 +83,52 @@ export default function ClassDetailClient({ lesson }: Props) {
   const isCancellable = ['scheduled'].includes(lesson.status)
   const isCancelled = isCancelledStatus(lesson.status)
 
+  // res.json() stays INSIDE the try deliberately. It is a second throw source
+  // alongside fetch(): a non-JSON body — a Vercel gateway-timeout HTML page, say —
+  // makes it reject even when res.ok is true. Both must land in the same catch,
+  // because an escaping rejection used to leave `deleting` set forever, wedging the
+  // button at "Deleting..." AND the modal's "Go Back" (disabled={deleting}) with it,
+  // leaving no way out but a page reload. Clearing in a finally makes the modal
+  // escapable again on every path.
   async function handleDelete() {
     setDeleting(true)
     setDeleteError('')
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
-    const data = await res.json()
-    if (!res.ok) {
-      setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) {
+        setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+        return
+      }
+      window.location.href = '/admin/classes'
+    } catch {
+      setDeleteError('Could not reach the server, or it returned an unreadable response. The class has NOT been deleted — try again.')
+    } finally {
       setDeleting(false)
-      return
     }
-    window.location.href = '/admin/classes'
   }
 
+  // Same two throw sources as handleDelete above; same finally for the same reason.
   async function handleCancel() {
     setCancelling(true)
     setCancelError('')
-    const res = await fetch(`/api/admin/classes/${lesson.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason, refund_hours: refundHours }),
-    })
-    const data = await res.json()
-    if (!res.ok) {
-      setCancelError(data.error ?? 'Failed to cancel. Please try again.')
+    try {
+      const res = await fetch(`/api/admin/classes/${lesson.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', cancellation_reason: cancelReason, refund_hours: refundHours }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setCancelError(data.error ?? 'Failed to cancel. Please try again.')
+        return
+      }
+      window.location.href = '/admin/classes'
+    } catch {
+      setCancelError('Could not reach the server, or it returned an unreadable response. The class has NOT been cancelled — try again.')
+    } finally {
       setCancelling(false)
-      return
     }
-    window.location.href = '/admin/classes'
   }
 
   function openCancelModal() {
@@ -131,7 +149,8 @@ export default function ClassDetailClient({ lesson }: Props) {
   }
 
   return (
-    <div style={{ padding: '32px', maxWidth: '720px' }}>
+    <div style={{ padding: '32px' }}>
+      <div className="max-w-6xl mx-auto">
 
       {/* Back */}
       <Link href="/admin/classes" prefetch={false} style={{ fontSize: '14px', color: '#FF8303', textDecoration: 'none' }}>
@@ -188,7 +207,7 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* Main details card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+      <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
         <SectionTitle>Class Information</SectionTitle>
         <DetailRow label="Date & Time" value={formatDateTime(lesson.scheduled_at)} />
         <DetailRow label="Duration" value={`${lesson.duration_minutes} minutes`} />
@@ -230,16 +249,15 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* People card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px', marginBottom: '20px' }}>
+      <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
         <SectionTitle>Teacher &amp; Student</SectionTitle>
 
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
           {/* Teacher */}
           <Link href={`/admin/teachers/${lesson.teacher_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
-            <div style={{
+            <div className="card-elevated card-elevated-interactive" style={{
               display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
-              backgroundColor: '#F9FAFB', cursor: 'pointer',
+              padding: '14px', cursor: 'pointer',
             }}>
               <div style={{
                 width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E5E7EB',
@@ -264,10 +282,9 @@ export default function ClassDetailClient({ lesson }: Props) {
 
           {/* Student */}
           <Link href={`/admin/students/${lesson.student_id}`} prefetch={false} style={{ textDecoration: 'none', flex: '1 1 200px' }}>
-            <div style={{
+            <div className="card-elevated card-elevated-interactive" style={{
               display: 'flex', alignItems: 'center', gap: '12px',
-              padding: '14px', borderRadius: '10px', border: '1px solid #E5E7EB',
-              backgroundColor: '#F9FAFB', cursor: 'pointer',
+              padding: '14px', cursor: 'pointer',
             }}>
               <div style={{
                 width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#E5E7EB',
@@ -295,7 +312,7 @@ export default function ClassDetailClient({ lesson }: Props) {
       </div>
 
       {/* Report card */}
-      <div style={{ backgroundColor: 'white', border: '1px solid #E5E7EB', borderRadius: '12px', padding: '24px' }}>
+      <div className="card-elevated" style={{ padding: '24px' }}>
         <SectionTitle>Class Report</SectionTitle>
         {lesson.report ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -357,7 +374,12 @@ export default function ClassDetailClient({ lesson }: Props) {
                   Are you sure you want to delete this class? This cannot be undone.
                 </p>
                 {deleteError && (
-                  <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{deleteError}</p>
+                  <div style={{
+                    borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6',
+                    borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+                  }}>
+                    <p style={{ fontSize: '13px', color: '#FD5602', margin: 0 }}>{deleteError}</p>
+                  </div>
                 )}
                 <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                   <button
@@ -443,7 +465,12 @@ export default function ClassDetailClient({ lesson }: Props) {
               </p>
             )}
             {cancelError && (
-              <p style={{ fontSize: '13px', color: '#B91C1C', marginBottom: '12px' }}>{cancelError}</p>
+              <div style={{
+                borderLeft: '3px solid #FD5602', backgroundColor: '#FFEEE6',
+                borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
+              }}>
+                <p style={{ fontSize: '13px', color: '#FD5602', margin: 0 }}>{cancelError}</p>
+              </div>
             )}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
               <button
@@ -471,6 +498,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

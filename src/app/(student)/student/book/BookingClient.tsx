@@ -332,20 +332,20 @@ function TeacherProfileModal({
           {/* Header: photo + name + rating */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px', paddingRight: '20px' }}>
             {teacher.photo_url ? (
-              <div style={{ width: '72px', height: '72px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+              <div style={{ width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
                 <Image
                   src={teacher.photo_url}
                   alt={teacher.full_name}
-                  width={72}
-                  height={72}
+                  width={80}
+                  height={80}
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               </div>
             ) : (
               <div
                 style={{
-                  width: '72px',
-                  height: '72px',
+                  width: '80px',
+                  height: '80px',
                   borderRadius: '50%',
                   backgroundColor: '#f3f4f6',
                   display: 'flex',
@@ -579,20 +579,20 @@ function StepTeacher({
               }}
             >
               {teacher.photo_url ? (
-                <div style={{ width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
                   <Image
                     src={teacher.photo_url}
                     alt={teacher.full_name}
-                    width={56}
-                    height={56}
+                    width={64}
+                    height={64}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 </div>
               ) : (
                 <div
                   style={{
-                    width: '56px',
-                    height: '56px',
+                    width: '64px',
+                    height: '64px',
                     borderRadius: '50%',
                     backgroundColor: '#f3f4f6',
                     display: 'flex',

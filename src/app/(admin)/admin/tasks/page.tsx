@@ -75,6 +75,7 @@ export default function AdminTasksPage() {
 
   // Action feedback
   const [completing, setCompleting] = useState<string | null>(null)
+  const [reopening, setReopening] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
   const fetchTasks = useCallback(async () => {
@@ -117,6 +118,7 @@ export default function AdminTasksPage() {
   }
 
   async function handleReopen(taskId: string) {
+    setReopening(taskId)
     try {
       const res = await fetch(`/api/admin/tasks/${taskId}`, {
         method: 'PATCH',
@@ -127,6 +129,8 @@ export default function AdminTasksPage() {
       await fetchTasks()
     } catch (err: any) {
       toast.error(err.message || 'Failed to reopen task', { duration: 6000 })
+    } finally {
+      setReopening(null)
     }
   }
 
@@ -376,11 +380,12 @@ export default function AdminTasksPage() {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        {completing === task.id ? '…' : '✓ Complete'}
+                        {completing === task.id ? 'Completing…' : '✓ Complete'}
                       </button>
                     ) : (
                       <button
                         onClick={() => handleReopen(task.id)}
+                        disabled={reopening === task.id}
                         style={{
                           backgroundColor: '#f9fafb',
                           color: '#374151',
@@ -389,11 +394,12 @@ export default function AdminTasksPage() {
                           padding: '6px 12px',
                           fontSize: '12px',
                           fontWeight: 600,
-                          cursor: 'pointer',
+                          cursor: reopening === task.id ? 'not-allowed' : 'pointer',
+                          opacity: reopening === task.id ? 0.6 : 1,
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        Reopen
+                        {reopening === task.id ? 'Reopening…' : 'Reopen'}
                       </button>
                     )}
                     <button
@@ -426,7 +432,7 @@ export default function AdminTasksPage() {
                         opacity: deleting === task.id ? 0.6 : 1,
                       }}
                     >
-                      Delete
+                      {deleting === task.id ? 'Deleting…' : 'Delete'}
                     </button>
                   </div>
                 </div>

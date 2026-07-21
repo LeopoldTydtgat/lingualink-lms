@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { requireAdmin } from '@/lib/auth/requireAdmin';
 import { getExportTimezone, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
@@ -30,23 +31,11 @@ const COLUMN_COUNT = 22;
 
 export async function GET(request: NextRequest) {
   try {
-    // --- Auth gate (copied verbatim from src/app/api/admin/reports/route.ts) ---
+    // --- Auth gate — shared canonical rule (same as /api/admin/reports) ---
     const supabase = await createClient();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 });
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role, account_types')
-      .eq('id', user.id)
-      .single();
-
-    const isAdmin =
-      profile?.role === 'admin' ||
-      (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'));
-
-    if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const user = await requireAdmin();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // --- Params ---
     const { searchParams } = new URL(request.url);

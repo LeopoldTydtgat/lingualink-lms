@@ -26,6 +26,12 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Repo root, derived from this file's own location (.claude/hooks/quality-gate.mjs)
+// rather than process.cwd() — the hook can be spawned with an unpredictable cwd.
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function readStdin() {
   try {
@@ -56,6 +62,7 @@ if (event.stop_hook_active) {
 const result = spawnSync("npx", ["tsc", "--noEmit"], {
   encoding: "utf8",
   shell: true, // needed on Windows so `npx` resolves
+  cwd: repoRoot,
 });
 
 const output = `${result.stdout || ""}${result.stderr || ""}`.trim();

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { isAdminProfile } from '@/lib/auth/requireAdmin'
 import BillingAdminClient from './BillingAdminClient'
 import { recomputeInvoiceAmountsForAllTeachers } from '@/lib/billing/recomputeAmounts'
 import { getExportTimezone } from '@/lib/exportTime'
@@ -18,11 +19,7 @@ export default async function AdminBillingPage() {
 
   if (!profile) redirect('/login')
 
-  const isAdmin =
-    profile.role === 'admin' ||
-    (Array.isArray(profile.account_types) && profile.account_types.includes('school_admin'))
-
-  if (!isAdmin) redirect('/dashboard')
+  if (!isAdminProfile(profile)) redirect('/dashboard')
 
   // Refresh the cached amount_eur for every teacher so the page header total
   // always matches the recomputed-from-lessons figure shown in expanded detail.
