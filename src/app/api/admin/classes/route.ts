@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -26,17 +27,14 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const { data: profile } = await supabase
     .from('profiles')
-    .select('account_types, timezone')
+    .select('timezone')
     .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    .maybeSingle()
 
   // Parse query params for filters
   const { searchParams } = new URL(request.url)
@@ -179,17 +177,8 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
 

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { redirect } from 'next/navigation'
 import ClassesListClient from './ClassesListClient'
 import { getDayKeyInTz } from '@/lib/billing/monthRange'
@@ -17,17 +18,14 @@ export default async function AdminClassesPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const staffUser = await requireStaff()
+  if (!staffUser) redirect('/dashboard')
+
   const { data: profile } = await supabase
     .from('profiles')
-    .select('account_types, full_name, timezone')
+    .select('full_name, timezone')
     .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) redirect('/dashboard')
+    .maybeSingle()
 
   // Fetch teacher list for the filter dropdown
   const { data: teachers } = await supabase

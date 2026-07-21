@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { redirect } from 'next/navigation'
 import SettingsClient from './SettingsClient'
 
@@ -21,16 +22,8 @@ export default async function AdminSettingsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin = Array.isArray(profile?.account_types) &&
-    (profile.account_types.includes('school_admin') || profile.account_types.includes('admin'))
-
-  if (!isAdmin) redirect('/dashboard')
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
 
   // Fetch current settings from Supabase
   const { data: rows } = await supabase

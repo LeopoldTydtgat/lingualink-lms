@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getMonthKeyInTz } from '@/lib/billing/monthRange'
@@ -40,20 +41,6 @@ function formatDate(iso: string | null): string {
 
 // Teacher billability comes from the canonical getBillability() in @/lib/billing/billability — do not reintroduce a local copy.
 
-// ─── Auth guard ───────────────────────────────────────────────────────────────
-
-async function checkAdminAccess(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return false
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-  const allowedRoles = ['school_admin']
-  return profile?.account_types?.some((r: string) => allowedRoles.includes(r)) ?? false
-}
-
 // ─── Main handler ─────────────────────────────────────────────────────────────
 
 export async function GET(
@@ -63,8 +50,8 @@ export async function GET(
   const supabase = await createClient()
   const { type } = await params
 
-  const allowed = await checkAdminAccess(supabase)
-  if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminUser = await requireAdmin()
+  if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // Resolve the settings-driven export timezone once per request. Every instant
   // (timestamptz) column below renders in this zone and its header carries the

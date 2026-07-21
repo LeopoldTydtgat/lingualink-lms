@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { redirect } from 'next/navigation'
 import EditClassClient from './EditClassClient'
 
@@ -14,17 +15,8 @@ export default async function AdminEditClassPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) redirect('/dashboard')
+  const staffUser = await requireStaff()
+  if (!staffUser) redirect('/dashboard')
 
   // Fetch lesson with teacher and student names
   const { data: lessonRaw, error } = await supabase

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 
 // GET /api/admin/staff
@@ -11,15 +12,8 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: currentProfile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const allowedRoles = ['school_admin']
-  const hasAccess = currentProfile?.account_types?.some((r: string) => allowedRoles.includes(r))
-  if (!hasAccess) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminUser = await requireAdmin()
+  if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // Return all profiles that have at least one admin-level role
   const { data: profiles, error } = await supabase
@@ -31,6 +25,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
+  const allowedRoles = ['school_admin']
   const staff = (profiles ?? []).filter((p: any) =>
     p.account_types?.some((r: string) => allowedRoles.includes(r))
   ).map((p: any) => ({ id: p.id, full_name: p.full_name }))

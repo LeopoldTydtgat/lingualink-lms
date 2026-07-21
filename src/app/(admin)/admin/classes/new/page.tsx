@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { redirect } from 'next/navigation'
 import BookingFlowClient from './BookingFlowClient'
 
@@ -8,17 +9,8 @@ export default async function AdminNewClassPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) redirect('/dashboard')
+  const staffUser = await requireStaff()
+  if (!staffUser) redirect('/dashboard')
 
   // Fetch all active teachers for Step 1 selection
   const { data: teachers } = await supabase
