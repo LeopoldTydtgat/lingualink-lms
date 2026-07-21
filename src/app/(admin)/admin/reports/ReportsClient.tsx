@@ -81,10 +81,10 @@ async function errorText(res: Response, fallback: string) {
 
 function ReportStatusBadge({ status }: { status: string }) {
   const styles: Record<string, { bg: string; text: string; label: string }> = {
-    pending:   { bg: '#FEF3C7', text: '#92400E', label: 'Pending' },
-    completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
-    flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
-    reopened:  { bg: '#FFEDD5', text: '#C2410C', label: 'Reopened' },
+    pending:   { bg: '#FFF8E8', text: '#B45309', label: 'Pending' },
+    completed: { bg: '#DCFCE7', text: '#15803D', label: 'Completed' },
+    flagged:   { bg: '#FFEEE6', text: '#FD5602', label: 'Flagged' },
+    reopened:  { bg: '#FFF8E8', text: '#B45309', label: 'Reopened' },
   };
   const s = styles[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
   return (
@@ -97,12 +97,12 @@ function ReportStatusBadge({ status }: { status: string }) {
 function LessonStatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
     upcoming:  { bg: '#EFF6FF', text: '#1D4ED8', label: 'Upcoming' },
-    completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
+    completed: { bg: '#DCFCE7', text: '#15803D', label: 'Completed' },
     cancelled: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled' },
     cancelled_by_student: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by student' },
     cancelled_by_teacher: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by teacher' },
-    no_show:   { bg: '#FEF3C7', text: '#92400E', label: 'No-Show' },
-    flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
+    no_show:   { bg: '#FFF8E8', text: '#B45309', label: 'No-Show' },
+    flagged:   { bg: '#FFEEE6', text: '#FD5602', label: 'Flagged' },
   };
   const s = map[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
   return (
@@ -206,7 +206,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter }: { initia
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
         <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
         {(statusFilter || teacherFilter || classStatusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="text-sm text-gray-500 hover:text-gray-700 underline">
+          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
             Clear filters
           </button>
         )}
@@ -272,7 +272,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter }: { initia
                             <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                           )}
                           {r.status === 'flagged' && (
-                            <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
+                            <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
                           )}
                           {(r.status === 'pending' || r.status === 'reopened') && (
                             <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
@@ -557,12 +557,12 @@ export default function ReportsClient({ initialReports, teachers, students, init
           {(pendingCount > 0 || flaggedCount > 0) && (
             <div className="flex gap-3 mt-3">
               {pendingCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFFBEB', color: '#92400E' }}>
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>
                   <span className="font-semibold">{pendingCount}</span> pending
                 </span>
               )}
               {flaggedCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FEF2F2', color: '#991B1B' }}>
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}>
                   <span className="font-semibold">{flaggedCount}</span> flagged — action required
                 </span>
               )}

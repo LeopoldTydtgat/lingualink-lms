@@ -114,13 +114,14 @@ function currencySymbol(code: string | null | undefined): string {
   return '€'
 }
 
-function getInvoiceStatusColor(status: string): string {
+function getInvoiceStatusColor(status: string): { bg: string; text: string } {
   switch (status) {
-    case 'paid': return '#16a34a'
-    case 'uploaded': return '#2563eb'
-    case 'pending': return '#FF8303'
-    case 'overdue': return '#FD5602'
-    default: return '#6b7280'
+    case 'paid': return { bg: '#DCFCE7', text: '#15803D' }
+    case 'uploaded': return { bg: '#EFF6FF', text: '#3B82F6' }
+    case 'pending': return { bg: '#FFF8E8', text: '#B45309' }
+    case 'overdue':
+    case 'late': return { bg: '#FFEEE6', text: '#FD5602' }
+    default: return { bg: '#f3f4f6', text: '#6b7280' }
   }
 }
 
@@ -962,7 +963,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
             </div>
             <div className="flex items-center gap-3">
               {templateUrl && (
-                <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="text-sm underline" style={{ color: '#FF8303' }}>
+                <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
                   View Current
                 </a>
               )}
@@ -1064,8 +1065,8 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             </span>
 
                             <span
-                              className="text-xs font-medium px-2.5 py-1 rounded-full text-white"
-                              style={{ backgroundColor: getInvoiceStatusColor(inv.status) }}
+                              className="text-xs px-2 py-0.5 rounded-full font-medium"
+                              style={{ backgroundColor: getInvoiceStatusColor(inv.status).bg, color: getInvoiceStatusColor(inv.status).text }}
                             >
                               {inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}
                             </span>
@@ -1074,7 +1075,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                               <button
                                 onClick={() => handleViewInvoice(inv.id)}
                                 disabled={viewingInvoiceId === inv.id}
-                                className="text-xs underline flex-shrink-0 disabled:opacity-50"
+                                className="text-xs font-medium hover:underline flex-shrink-0 disabled:opacity-50"
                                 style={{ color: '#FF8303' }}
                               >
                                 {viewingInvoiceId === inv.id ? 'Opening...' : 'View PDF'}
@@ -1084,8 +1085,8 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             {inv.status !== 'paid' && markingPaidId !== inv.id && (
                               <button
                                 onClick={() => setMarkingPaidId(inv.id)}
-                                className="px-3 py-1 text-xs rounded-lg text-white flex-shrink-0"
-                                style={{ backgroundColor: '#16a34a' }}
+                                className="px-3 py-1 text-xs rounded-lg font-medium flex-shrink-0"
+                                style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
                               >
                                 Mark Paid
                               </button>
@@ -1115,7 +1116,7 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                                 }
                               }}
                               disabled={isLoadingThis}
-                              className="text-xs underline text-gray-400 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="text-xs hover:underline text-gray-400 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {isLoadingThis ? 'Loading…' : isExpanded ? 'Hide' : 'Detail'}
                             </button>
@@ -1131,12 +1132,12 @@ export default function BillingAdminClient({ adminId, exportTz }: { adminId: str
                             <button
                               onClick={() => handleMarkPaid(inv.id)}
                               disabled={savingPaid}
-                              className="px-3 py-1.5 text-xs rounded-lg text-white disabled:opacity-50"
-                              style={{ backgroundColor: '#16a34a' }}
+                              className="px-3 py-1.5 text-xs rounded-lg font-medium disabled:opacity-50"
+                              style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
                             >
                               {savingPaid ? 'Saving…' : 'Confirm'}
                             </button>
-                            <button onClick={() => setMarkingPaidId(null)} className="text-xs text-gray-400 underline">
+                            <button onClick={() => setMarkingPaidId(null)} className="text-xs text-gray-400 hover:underline">
                               Cancel
                             </button>
                           </div>

@@ -173,10 +173,10 @@ export default function ReportDetailClient({ report, assignments }: Props) {
       <div className="flex items-center justify-between mt-3 mb-6">
         <h1 className="text-xl font-bold text-gray-900">Report Detail</h1>
         <div className="flex items-center gap-3">
-          {report.status === 'flagged'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>Flagged</span>}
-          {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#166534' }}>Completed</span>}
-          {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>Pending</span>}
-          {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEDD5', color: '#C2410C' }}>Reopened</span>}
+          {report.status === 'flagged'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}>Flagged</span>}
+          {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>Completed</span>}
+          {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Pending</span>}
+          {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Reopened</span>}
           {report.status === 'flagged' && (
             <button onClick={() => { setReopenError(''); setShowConfirm(true); }} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
