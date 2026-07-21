@@ -89,6 +89,18 @@ const EXPORTS: ExportDef[] = [
   },
 ]
 
+// ─── Shared styles ────────────────────────────────────────────────────────────
+
+// Filter labels — small uppercase caption above each control.
+const filterLabelClass = "block text-[11px] font-semibold text-gray-500 mb-1 uppercase tracking-[0.04em]"
+
+// Filter inputs/selects — reference input styling; width is set per usage site.
+const filterInputClass = "border border-[#E0DFDC] rounded-lg px-2.5 py-1.5 text-[13px] text-gray-700 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+
+// Selected-entity pill (teacher / student / company).
+const pillClass = "flex items-center gap-1.5 rounded-lg border border-[#E0DFDC] bg-[#FFF0E0] px-2.5 py-[5px] text-[13px] text-[#FF8303]"
+const pillClearClass = "bg-transparent border-none cursor-pointer text-[#FF8303] text-sm leading-none pb-px"
+
 // ─── Autocomplete input component ────────────────────────────────────────────
 
 function AutocompleteInput({
@@ -164,17 +176,10 @@ function AutocompleteInput({
   // If a value is already selected, show it as a pill
   if (value) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '6px',
-          backgroundColor: '#fff7ed', border: '1px solid #fed7aa',
-          borderRadius: '6px', padding: '5px 10px', fontSize: '13px', color: '#9a3412',
-        }}>
+      <div className="flex items-center gap-1.5">
+        <div className={pillClass}>
           <span>{value}</span>
-          <button
-            onClick={onClear}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9a3412', fontSize: '14px', padding: '0 0 1px 0', lineHeight: 1 }}
-          >
+          <button onClick={onClear} className={pillClearClass}>
             ×
           </button>
         </div>
@@ -183,37 +188,27 @@ function AutocompleteInput({
   }
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '200px' }}>
+    <div ref={containerRef} className="relative w-[200px]">
       <input
         type="text"
         value={query}
         onChange={handleChange}
         onFocus={() => { if (suggestions.length > 0) setOpen(true) }}
         placeholder={placeholder}
-        style={{ ...filterInputStyle, width: '100%' }}
+        className={`${filterInputClass} w-full`}
       />
       {loading && (
-        <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: '#9ca3af' }}>
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400">
           …
         </div>
       )}
       {open && suggestions.length > 0 && (
-        <div className="thin-scroll" style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '2px',
-          maxHeight: '200px', overflowY: 'auto',
-        }}>
+        <div className="thin-scroll absolute top-full left-0 right-0 z-50 mt-0.5 max-h-[200px] overflow-y-auto rounded-lg border border-[#E0DFDC] bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)]">
           {suggestions.map(item => (
             <div
               key={item.id}
               onMouseDown={() => handleSelect(item)}
-              style={{
-                padding: '8px 12px', fontSize: '13px', color: '#111827',
-                cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
-              }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#fff7ed')}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#fff')}
+              className="cursor-pointer border-b border-[#E0DFDC] px-3 py-2 text-[13px] text-gray-900 hover:bg-gray-50"
             >
               {item[labelKey]}
             </div>
@@ -221,22 +216,12 @@ function AutocompleteInput({
         </div>
       )}
       {open && searchError && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          backgroundColor: '#FFEEE6', border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602',
-          borderRadius: '6px', padding: '8px 12px', fontSize: '13px', color: '#FD5602',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '2px',
-        }}>
+        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-lg border border-[#E0DFDC] border-l-[3px] border-l-[#FD5602] bg-[#FFEEE6] px-3 py-2 text-[13px] text-[#FD5602] shadow-[0_4px_12px_rgba(0,0,0,0.1)]">
           Couldn&apos;t search. Try again.
         </div>
       )}
       {open && !searchError && suggestions.length === 0 && query.trim() && !loading && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          backgroundColor: '#fff', border: '1px solid #d1d5db', borderRadius: '6px',
-          padding: '8px 12px', fontSize: '13px', color: '#9ca3af',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)', marginTop: '2px',
-        }}>
+        <div className="absolute top-full left-0 right-0 z-50 mt-0.5 rounded-lg border border-[#E0DFDC] bg-white px-3 py-2 text-[13px] text-gray-400 shadow-[0_4px_12px_rgba(0,0,0,0.1)]">
           No results found
         </div>
       )}
@@ -320,41 +305,45 @@ export default function AdminExportsPage() {
   }
 
   return (
-    <div style={{ padding: '32px', maxWidth: '1000px' }}>
-      <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div className="p-6 space-y-6">
+
+      {/* ── Page header ── */}
+      <div
+        className="w-full flex items-center justify-between pb-4 border-b"
+        style={{ borderColor: '#E0DFDC' }}
+      >
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#111827', margin: 0 }}>Data Exports</h1>
-          <p style={{ fontSize: '14px', color: '#6b7280', marginTop: '4px' }}>
+          <h1 className="text-2xl font-bold text-gray-900">Data Exports</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
             Download CSV reports for analysis in Excel or Google Sheets. Use the filters to narrow by date, teacher, or student.
           </p>
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div className="flex flex-col gap-4">
         {EXPORTS.map(exportDef => {
           const f = filters[exportDef.type]
           const isLoading = loading[exportDef.type]
           const err = errors[exportDef.type]
 
           return (
-            <div key={exportDef.type} style={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '24px' }}>
+            <div key={exportDef.type} className="card-elevated p-6">
 
               {/* Card header */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', marginBottom: '14px', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '200px' }}>
-                  <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', margin: '0 0 4px 0' }}>{exportDef.title}</h2>
-                  <p style={{ fontSize: '13px', color: '#6b7280', margin: 0 }}>{exportDef.description}</p>
+              <div className="flex flex-wrap items-start justify-between gap-4 mb-3.5">
+                <div className="flex-1 min-w-[200px]">
+                  <h2 className="text-base font-bold text-gray-900 mb-1">{exportDef.title}</h2>
+                  <p className="text-[13px] text-gray-500">{exportDef.description}</p>
                 </div>
                 <button
                   onClick={() => handleDownload(exportDef)}
                   disabled={isLoading}
+                  className="btn-primary-hover shrink-0 whitespace-nowrap rounded-lg px-5 py-2 text-[13px] font-semibold text-white"
                   style={{
-                    backgroundColor: isLoading ? '#e5e7eb' : '#FFF0E0',
-                    color: isLoading ? '#9ca3af' : '#FF8303',
-                    border: isLoading ? 'none' : '1px solid #FF8303', borderRadius: '8px', padding: '9px 20px',
-                    fontSize: '13px', fontWeight: 600,
+                    // Disabled/loading state greys the button out — state-dependent, stays inline.
+                    backgroundColor: isLoading ? '#e5e7eb' : '#FF8303',
+                    color: isLoading ? '#9ca3af' : '#fff',
                     cursor: isLoading ? 'not-allowed' : 'pointer',
-                    whiteSpace: 'nowrap', flexShrink: 0,
                   }}
                 >
                   {isLoading ? 'Generating…' : '⬇ Download CSV'}
@@ -362,31 +351,41 @@ export default function AdminExportsPage() {
               </div>
 
               {/* Columns preview */}
-              <div style={{ marginBottom: '14px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Columns:</span>
-                <span style={{ fontSize: '12px', color: '#6b7280', marginLeft: '6px' }}>{exportDef.columns.join(' · ')}</span>
+              <div className="mb-3.5">
+                <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.05em]">Columns:</span>
+                <span className="text-xs text-gray-500 ml-1.5">{exportDef.columns.join(' · ')}</span>
               </div>
 
               {/* Filters */}
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="flex flex-wrap items-end gap-3">
 
                 {exportDef.filters.includes('from') && (
                   <div>
-                    <label style={labelStyle}>From</label>
-                    <input type="date" value={f.from} onChange={e => setFilter(exportDef.type, { from: e.target.value })} style={filterInputStyle} />
+                    <label className={filterLabelClass}>From</label>
+                    <input
+                      type="date"
+                      value={f.from}
+                      onChange={e => setFilter(exportDef.type, { from: e.target.value })}
+                      className={`${filterInputClass} w-[140px]`}
+                    />
                   </div>
                 )}
 
                 {exportDef.filters.includes('to') && (
                   <div>
-                    <label style={labelStyle}>To</label>
-                    <input type="date" value={f.to} onChange={e => setFilter(exportDef.type, { to: e.target.value })} style={filterInputStyle} />
+                    <label className={filterLabelClass}>To</label>
+                    <input
+                      type="date"
+                      value={f.to}
+                      onChange={e => setFilter(exportDef.type, { to: e.target.value })}
+                      className={`${filterInputClass} w-[140px]`}
+                    />
                   </div>
                 )}
 
                 {exportDef.filters.includes('teacher') && (
                   <div>
-                    <label style={labelStyle}>Teacher</label>
+                    <label className={filterLabelClass}>Teacher</label>
                     <AutocompleteInput
                       placeholder="Search by name…"
                       value={f.teacherName}
@@ -400,7 +399,7 @@ export default function AdminExportsPage() {
 
                 {exportDef.filters.includes('student') && (
                   <div>
-                    <label style={labelStyle}>Student</label>
+                    <label className={filterLabelClass}>Student</label>
                     <AutocompleteInput
                       placeholder="Search by name…"
                       value={f.studentName}
@@ -414,13 +413,18 @@ export default function AdminExportsPage() {
 
                 {exportDef.filters.includes('company') && (
                   <div>
-                    <label style={labelStyle}>Company</label>
+                    <label className={filterLabelClass}>Company</label>
                     {/* Companies are few enough for a simple dropdown */}
                     {f.companyName ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '6px', padding: '5px 10px', fontSize: '13px', color: '#9a3412', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div className="flex items-center gap-1.5">
+                        <div className={pillClass}>
                           {f.companyName}
-                          <button onClick={() => setFilter(exportDef.type, { companyId: '', companyName: '' })} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9a3412', fontSize: '14px', padding: '0 0 1px 0' }}>×</button>
+                          <button
+                            onClick={() => setFilter(exportDef.type, { companyId: '', companyName: '' })}
+                            className={pillClearClass}
+                          >
+                            ×
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -431,13 +435,13 @@ export default function AdminExportsPage() {
                             const selected = companies.find(c => c.id === e.target.value)
                             setFilter(exportDef.type, { companyId: e.target.value, companyName: selected?.name ?? '' })
                           }}
-                          style={{ ...filterInputStyle, width: '180px' }}
+                          className={`${filterInputClass} w-[180px]`}
                         >
                           <option value="">All companies</option>
                           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                         {companiesError && (
-                          <p style={{ fontSize: '11px', color: '#FD5602', marginTop: '4px' }}>
+                          <p className="mt-1 rounded-lg bg-[#FFEEE6] px-2 py-1 text-[11px] text-[#FD5602]">
                             Couldn&apos;t load companies. Refresh to try again.
                           </p>
                         )}
@@ -449,7 +453,7 @@ export default function AdminExportsPage() {
                 {hasFilters(f) && (
                   <button
                     onClick={() => clearFilters(exportDef.type)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '12px', padding: '0 0 1px 0', alignSelf: 'flex-end' }}
+                    className="self-end bg-transparent border-none cursor-pointer pb-px text-xs text-gray-400"
                   >
                     Clear all
                   </button>
@@ -457,7 +461,7 @@ export default function AdminExportsPage() {
               </div>
 
               {err && (
-                <div style={{ marginTop: '12px', backgroundColor: '#fee2e2', color: '#991b1b', padding: '8px 12px', borderRadius: '6px', fontSize: '13px' }}>
+                <div className="mt-3 rounded-lg bg-[#FFEEE6] px-3 py-2 text-[13px] text-[#FD5602]">
                   {err}
                 </div>
               )}
@@ -467,16 +471,4 @@ export default function AdminExportsPage() {
       </div>
     </div>
   )
-}
-
-// ─── Shared styles ────────────────────────────────────────────────────────────
-
-const labelStyle: React.CSSProperties = {
-  display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280',
-  marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em',
-}
-
-const filterInputStyle: React.CSSProperties = {
-  border: '1px solid #d1d5db', borderRadius: '6px', padding: '6px 10px',
-  fontSize: '13px', color: '#374151', backgroundColor: '#fff', width: '140px',
 }
