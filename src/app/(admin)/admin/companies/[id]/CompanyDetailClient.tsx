@@ -31,9 +31,9 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLOURS: Record<string, { bg: string; text: string }> = {
-  current: { bg: '#dcfce7', text: '#166534' },
+  current: { bg: '#DCFCE7', text: '#15803D' },
   former:  { bg: '#f3f4f6', text: '#6b7280' },
-  on_hold: { bg: '#fef3c7', text: '#92400e' },
+  on_hold: { bg: '#FFF8E8', text: '#B45309' },
 }
 
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
@@ -71,7 +71,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
           <h1 className="text-2xl font-bold text-gray-900">{company.name as string}</h1>
           {(company.status as string) && (
             <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize"
-              style={{ backgroundColor: '#dcfce7', color: '#166534' }}>
+              style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
               {company.status as string}
             </span>
           )}

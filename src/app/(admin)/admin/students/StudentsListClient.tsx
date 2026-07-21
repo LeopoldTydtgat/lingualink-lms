@@ -44,11 +44,11 @@ const LOW_HOURS_THRESHOLD = 2
 function StatusBadge({ status }: { status: string | null }) {
   const colour =
     status === 'current'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
       : status === 'former'
       ? { backgroundColor: '#f3f4f6', color: '#6b7280' }
       : status === 'on_hold'
-      ? { backgroundColor: '#fef9c3', color: '#854d0e' }
+      ? { backgroundColor: '#FFF8E8', color: '#B45309' }
       : { backgroundColor: '#f3f4f6', color: '#6b7280' }
 
   return (
@@ -73,7 +73,7 @@ function HoursBadge({ hours }: { hours: number | null }) {
       className="px-2 py-0.5 rounded-full text-xs font-medium"
       style={
         isLow
-          ? { backgroundColor: '#fee2e2', color: '#991b1b' }
+          ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
           : { backgroundColor: '#f3f4f6', color: '#374151' }
       }
     >

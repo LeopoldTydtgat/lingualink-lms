@@ -314,8 +314,8 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
                 </button>
               </div>
               <button onClick={() => setActiveSection('B')}
-                className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#FF8303' }}>
+                className="px-5 py-2 rounded-lg text-sm font-semibold"
+                style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FF8303' }}>
                 Next: Profile & Admin Info →
               </button>
             </div>

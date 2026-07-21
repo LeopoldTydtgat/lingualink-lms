@@ -17,7 +17,7 @@ type Company = {
 }
 
 const STATUS_COLOURS: Record<string, { bg: string; text: string }> = {
-  active:  { bg: '#dcfce7', text: '#166534' },
+  active:  { bg: '#DCFCE7', text: '#15803D' },
   former:  { bg: '#f3f4f6', text: '#6b7280' },
 }
 

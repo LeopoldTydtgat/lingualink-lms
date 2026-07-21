@@ -117,11 +117,11 @@ type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messa
 function StatusBadge({ status }: { status: string | null }) {
   const colour =
     status === 'current'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
       : status === 'former'
       ? { backgroundColor: '#f3f4f6', color: '#6b7280' }
       : status === 'on_hold'
-      ? { backgroundColor: '#fef9c3', color: '#854d0e' }
+      ? { backgroundColor: '#FFF8E8', color: '#B45309' }
       : { backgroundColor: '#f3f4f6', color: '#6b7280' }
   const label: Record<string, string> = {
     current: 'Current', former: 'Former', on_hold: 'On Hold',
@@ -135,13 +135,13 @@ function StatusBadge({ status }: { status: string | null }) {
 
 function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }) {
   const meta: Record<string, { bg: string; color: string; label: string }> = {
-    completed: { bg: '#dcfce7', color: '#166534', label: 'Completed' },
+    completed: { bg: '#DCFCE7', color: '#15803D', label: 'Completed' },
     scheduled: { bg: '#dbeafe', color: '#1e40af', label: 'Scheduled' },
     cancelled: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled' },
     cancelled_by_student: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by student' },
     cancelled_by_teacher: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by teacher' },
-    student_no_show: { bg: '#fef3c7', color: '#92400e', label: 'Student no show' },
-    teacher_no_show: { bg: '#fee2e2', color: '#dc2626', label: 'Teacher no show' },
+    student_no_show: { bg: '#FFF8E8', color: '#B45309', label: 'Student no show' },
+    teacher_no_show: { bg: '#FFEEE6', color: '#FD5602', label: 'Teacher no show' },
   }
   const entry = meta[status] ?? { bg: '#f3f4f6', color: '#6b7280', label: status.replace(/_/g, ' ') }
   // Colour keys off status (via meta); the label gets cancellation/reschedule
@@ -160,9 +160,9 @@ function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: s
 function HoursTypeBadge({ type }: { type: string }) {
   const colour =
     type === 'add'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
       : type === 'deduct' || type === 'class_booking'
-      ? { backgroundColor: '#fee2e2', color: '#991b1b' }
+      ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
       : type === 'cancellation_refund'
       ? { backgroundColor: '#dbeafe', color: '#1e40af' }
       : { backgroundColor: '#f3f4f6', color: '#6b7280' }
@@ -190,7 +190,7 @@ function CategoryBadge({ category }: { category: string | null }) {
     category.toLowerCase() === 'vocabulary'
       ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
       : category.toLowerCase() === 'grammar'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
       : { backgroundColor: '#f3f4f6', color: '#374151' }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
@@ -607,7 +607,7 @@ export default function StudentDetailClient({
                     className="px-2 py-0.5 rounded-full text-xs font-medium"
                     style={
                       hoursRemaining < 2
-                        ? { backgroundColor: '#fee2e2', color: '#991b1b' }
+                        ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
                         : { backgroundColor: '#f3f4f6', color: '#374151' }
                     }
                   >
@@ -1057,8 +1057,8 @@ export default function StudentDetailClient({
                         className="px-2 py-0.5 rounded-full text-xs font-medium"
                         style={
                           report.happened
-                            ? { backgroundColor: '#dcfce7', color: '#166534' }
-                            : { backgroundColor: '#fee2e2', color: '#991b1b' }
+                            ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                            : { backgroundColor: '#FFEEE6', color: '#FD5602' }
                         }
                       >
                         {report.happened ? 'Yes' : 'No'}
@@ -1135,7 +1135,7 @@ export default function StudentDetailClient({
                             className="px-2 py-0.5 rounded-full text-xs font-medium"
                             style={
                               assignment.lesson_id
-                                ? { backgroundColor: '#fff7ed', color: '#c2410c' }
+                                ? { backgroundColor: '#FFF8E8', color: '#B45309' }
                                 : { backgroundColor: '#f3f4f6', color: '#6b7280' }
                             }
                           >
