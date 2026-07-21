@@ -13,6 +13,7 @@ import { sanitizeHtml } from '@/lib/sanitize'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
+import ReadTicks from '@/components/messages/ReadTicks'
 import { toast } from 'sonner'
 
 const EmojiPicker = dynamic(() => import('@emoji-mart/react'), { ssr: false })
@@ -114,42 +115,6 @@ function FaqAccordion({ faqs }: { faqs: FaqItem[] }) {
         </div>
       ))}
     </div>
-  )
-}
-
-// ─── Read ticks ─────────────────────────────────────────────
-// Single tick = sent (grey). Double tick = read (orange).
-// Only shown on messages sent by the current user.
-function ReadTicks({
-  readAt,
-  variant = 'default',
-  className = 'ml-1',
-}: {
-  readAt: string | null
-  variant?: 'default' | 'bubble'
-  className?: string
-}) {
-  const single = variant === 'bubble' ? 'rgba(255,255,255,0.7)' : '#9ca3af'
-  const double = '#FF8303'
-  if (readAt) {
-    return (
-      <span className={`inline-flex items-center gap-0.5 ${className}`} aria-label="Read">
-        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" style={{ marginLeft: '-4px' }}>
-          <path d="M1 4L3.5 6.5L9 1" stroke={double} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </span>
-    )
-  }
-  return (
-    <span className={`inline-flex items-center ${className}`} aria-label="Sent">
-      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-        <path d="M1 4L3.5 6.5L9 1" stroke={single} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    </span>
   )
 }
 

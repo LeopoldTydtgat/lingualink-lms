@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -15,6 +16,7 @@ import { requireTz } from '@/lib/time/requireTz'
 import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { adminClassesPostSchema } from '@/lib/validation/schemas'
+import { localMidnightToUtc } from '@/lib/billing/monthRange'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -25,25 +27,22 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const { data: profile } = await supabase
     .from('profiles')
-    .select('account_types')
+    .select('timezone')
     .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    .maybeSingle()
 
   // Parse query params for filters
   const { searchParams } = new URL(request.url)
   const teacherId = searchParams.get('teacher_id')
   const studentId = searchParams.get('student_id')
   const status = searchParams.get('status')        // upcoming|completed|cancelled|no_show
-  const dateFrom = searchParams.get('date_from')   // ISO date string
-  const dateTo = searchParams.get('date_to')       // ISO date string
+  const dateFrom = searchParams.get('date_from')   // yyyy-mm-dd calendar day, admin-local
+  const dateTo = searchParams.get('date_to')       // yyyy-mm-dd calendar day, admin-local (inclusive)
   const search = searchParams.get('search')        // free text — matches teacher or student name
   const page = parseInt(searchParams.get('page') ?? '1')
   const pageSize = 50
@@ -78,8 +77,42 @@ export async function GET(request: NextRequest) {
 
   if (teacherId) query = query.eq('teacher_id', teacherId)
   if (studentId) query = query.eq('student_id', studentId)
-  if (dateFrom) query = query.gte('scheduled_at', dateFrom)
-  if (dateTo) query = query.lte('scheduled_at', dateTo)
+
+  // The date filters name calendar DAYS in the admin's own timezone, but scheduled_at is
+  // a UTC instant. Resolve each edge through localMidnightToUtc — the same helper
+  // getDayRangeInTz uses for the dashboard's "Classes Today" bucket — into a half-open
+  // [from-midnight, midnight-after-to) instant pair. The previous bare-string gte/lte
+  // compared a yyyy-mm-dd against a timestamptz: that pinned both edges to UTC midnight,
+  // so the To-day was excluded apart from its very first instant (from == to returned
+  // almost nothing) and the day boundary was UTC rather than the admin's.
+  // Fail-safe: with no timezone on the profile there is no local day to resolve, so the
+  // original bare-string comparison stands unchanged rather than guessing UTC.
+  const adminTz: string | null = profile?.timezone ?? null
+  const isDateKey = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
+
+  if (dateFrom && isDateKey(dateFrom)) {
+    if (adminTz) {
+      const [y, m, d] = dateFrom.split('-').map(Number)
+      query = query.gte('scheduled_at', localMidnightToUtc(y, m, d, adminTz))
+    } else {
+      query = query.gte('scheduled_at', dateFrom)
+    }
+  }
+
+  if (dateTo && isDateKey(dateTo)) {
+    if (adminTz) {
+      const [y, m, d] = dateTo.split('-').map(Number)
+      // Next calendar day via the Date constructor's own month/year rollover — the same
+      // approach getDayRangeInTz uses to find its exclusive end edge.
+      const next = new Date(Date.UTC(y, m - 1, d + 1))
+      query = query.lt(
+        'scheduled_at',
+        localMidnightToUtc(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), adminTz)
+      )
+    } else {
+      query = query.lte('scheduled_at', dateTo)
+    }
+  }
 
   // Map friendly status filter to DB values
   if (status === 'upcoming') {
@@ -144,17 +177,8 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
 

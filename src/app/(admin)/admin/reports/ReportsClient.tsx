@@ -43,6 +43,9 @@ interface Props {
   students:       { id: string; full_name: string }[];
   // Seeded from ?filter= by the server page; '' means "All Statuses".
   initialStatusFilter?: string;
+  // Seeded from ?reopen= by the server page; opens the reopen-confirmation modal
+  // for that report on load. undefined means "no modal open".
+  initialReopenId?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,10 +84,10 @@ async function errorText(res: Response, fallback: string) {
 
 function ReportStatusBadge({ status }: { status: string }) {
   const styles: Record<string, { bg: string; text: string; label: string }> = {
-    pending:   { bg: '#FEF3C7', text: '#92400E', label: 'Pending' },
-    completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
-    flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
-    reopened:  { bg: '#FFEDD5', text: '#C2410C', label: 'Reopened' },
+    pending:   { bg: '#FFF8E8', text: '#B45309', label: 'Pending' },
+    completed: { bg: '#DCFCE7', text: '#15803D', label: 'Completed' },
+    flagged:   { bg: '#FFEEE6', text: '#FD5602', label: 'Flagged' },
+    reopened:  { bg: '#FFF8E8', text: '#B45309', label: 'Reopened' },
   };
   const s = styles[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
   return (
@@ -97,12 +100,12 @@ function ReportStatusBadge({ status }: { status: string }) {
 function LessonStatusBadge({ status }: { status: string }) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
     upcoming:  { bg: '#EFF6FF', text: '#1D4ED8', label: 'Upcoming' },
-    completed: { bg: '#DCFCE7', text: '#166534', label: 'Completed' },
+    completed: { bg: '#DCFCE7', text: '#15803D', label: 'Completed' },
     cancelled: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled' },
     cancelled_by_student: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by student' },
     cancelled_by_teacher: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by teacher' },
-    no_show:   { bg: '#FEF3C7', text: '#92400E', label: 'No-Show' },
-    flagged:   { bg: '#FEE2E2', text: '#991B1B', label: 'Flagged' },
+    no_show:   { bg: '#FFF8E8', text: '#B45309', label: 'No-Show' },
+    flagged:   { bg: '#FFEEE6', text: '#FD5602', label: 'Flagged' },
   };
   const s = map[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
   return (
@@ -114,11 +117,13 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   const [listError,     setListError]     = useState('');
-  const [reopenId,      setReopenId]      = useState<string | null>(null);
+  // Seeded from the ?reopen= deep link so the confirmation modal is already open on
+  // mount; from there it is the same state the in-row Reopen button drives.
+  const [reopenId,      setReopenId]      = useState<string | null>(initialReopenId ?? null);
   const [reopenLoading, setReopenLoading] = useState(false);
   const [reopenError,   setReopenError]   = useState('');
 
@@ -206,7 +211,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter }: { initia
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
         <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
         {(statusFilter || teacherFilter || classStatusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="text-sm text-gray-500 hover:text-gray-700 underline">
+          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
             Clear filters
           </button>
         )}
@@ -225,64 +230,66 @@ function ReportsList({ initialReports, teachers, initialStatusFilter }: { initia
       ) : reports.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No reports match these filters.</div>
       ) : (
-        <div className="overflow-x-auto thin-scroll">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Date</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report Status</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Deadline / Flag</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.map((r) => {
-                let rowBg = '';
-                if (r.status === 'flagged') rowBg = '#FEF2F2';
-                if (r.status === 'pending') rowBg = '#FFFBEB';
-                if (r.status === 'reopened') rowBg = '#FFF7ED';
-                return (
-                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
-                    <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at) : '—'}</td>
-                    <td className="py-3 px-3 font-medium text-gray-800">{r.teacher?.full_name ?? '—'}</td>
-                    <td className="py-3 px-3 text-gray-700">{r.student?.full_name ?? '—'}</td>
-                    <td className="py-3 px-3 text-gray-600">{r.lesson?.duration_minutes ? `${r.lesson.duration_minutes} min` : '—'}</td>
-                    <td className="py-3 px-3">
-                      <div className="flex flex-col gap-1">
-                        <ReportStatusBadge status={r.status} />
-                        {r.did_class_happen === false && r.no_show_type && (
-                          <span className="text-xs text-gray-400 capitalize">{r.no_show_type} no-show</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-3 text-gray-600 text-xs">
-                      {r.status === 'flagged' && r.flagged_at
-                        ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
-                        : r.status === 'reopened'
-                          ? '—'
-                          : r.deadline_at ? formatDateTime(r.deadline_at) : '—'}
-                    </td>
-                    <td className="py-3 px-3">
-                      <div className="flex items-center gap-2">
-                        {(r.status === 'completed' || r.status === 'flagged') && (
-                          <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
-                        )}
-                        {r.status === 'flagged' && (
-                          <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium text-white px-2 py-0.5 rounded" style={{ backgroundColor: '#FF8303' }}>Reopen</button>
-                        )}
-                        {(r.status === 'pending' || r.status === 'reopened') && (
-                          <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="card-elevated overflow-hidden">
+          <div className="overflow-x-auto thin-scroll">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Date</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report Status</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Deadline / Flag</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.map((r) => {
+                  let rowBg = '';
+                  if (r.status === 'flagged') rowBg = '#FEF2F2';
+                  if (r.status === 'pending') rowBg = '#FFFBEB';
+                  if (r.status === 'reopened') rowBg = '#FFF7ED';
+                  return (
+                    <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
+                      <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at) : '—'}</td>
+                      <td className="py-3 px-3 font-medium text-gray-800">{r.teacher?.full_name ?? '—'}</td>
+                      <td className="py-3 px-3 text-gray-700">{r.student?.full_name ?? '—'}</td>
+                      <td className="py-3 px-3 text-gray-600">{r.lesson?.duration_minutes ? `${r.lesson.duration_minutes} min` : '—'}</td>
+                      <td className="py-3 px-3">
+                        <div className="flex flex-col gap-1">
+                          <ReportStatusBadge status={r.status} />
+                          {r.did_class_happen === false && r.no_show_type && (
+                            <span className="text-xs text-gray-400 capitalize">{r.no_show_type} no-show</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 text-gray-600 text-xs">
+                        {r.status === 'flagged' && r.flagged_at
+                          ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
+                          : r.status === 'reopened'
+                            ? '—'
+                            : r.deadline_at ? formatDateTime(r.deadline_at) : '—'}
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-2">
+                          {(r.status === 'completed' || r.status === 'flagged') && (
+                            <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
+                          )}
+                          {r.status === 'flagged' && (
+                            <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
+                          )}
+                          {(r.status === 'pending' || r.status === 'reopened') && (
+                            <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -381,39 +388,41 @@ function LiveTrace() {
       ) : lessons.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No classes found.</div>
       ) : (
-        <div className="overflow-x-auto thin-scroll">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Date / Time</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Status</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report</th>
-                <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {lessons.map((l) => (
-                <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-3 text-gray-700 whitespace-nowrap">{formatDateTime(l.scheduled_at)}</td>
-                  <td className="py-3 px-3 font-medium text-gray-800">{l.teacher?.full_name ?? '—'}</td>
-                  <td className="py-3 px-3 text-gray-700">{l.student?.full_name ?? '—'}</td>
-                  <td className="py-3 px-3 text-gray-600">{l.duration_minutes} min</td>
-                  <td className="py-3 px-3"><LessonStatusBadge status={l.lesson_status} /></td>
-                  <td className="py-3 px-3">
-                    {l.report ? <ReportStatusBadge status={l.report.status} /> : <span className="text-xs text-gray-400 italic">No report</span>}
-                  </td>
-                  <td className="py-3 px-3">
-                    {l.report?.id && (
-                      <Link href={`/admin/reports/${l.report.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View report →</Link>
-                    )}
-                  </td>
+        <div className="card-elevated overflow-hidden">
+          <div className="overflow-x-auto thin-scroll">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Date / Time</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Status</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report</th>
+                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lessons.map((l) => (
+                  <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                    <td className="py-3 px-3 text-gray-700 whitespace-nowrap">{formatDateTime(l.scheduled_at)}</td>
+                    <td className="py-3 px-3 font-medium text-gray-800">{l.teacher?.full_name ?? '—'}</td>
+                    <td className="py-3 px-3 text-gray-700">{l.student?.full_name ?? '—'}</td>
+                    <td className="py-3 px-3 text-gray-600">{l.duration_minutes} min</td>
+                    <td className="py-3 px-3"><LessonStatusBadge status={l.lesson_status} /></td>
+                    <td className="py-3 px-3">
+                      {l.report ? <ReportStatusBadge status={l.report.status} /> : <span className="text-xs text-gray-400 italic">No report</span>}
+                    </td>
+                    <td className="py-3 px-3">
+                      {l.report?.id && (
+                        <Link href={`/admin/reports/${l.report.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View report →</Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -422,7 +431,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '' }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
@@ -548,17 +557,17 @@ export default function ReportsClient({ initialReports, teachers, students, init
     <div className="p-6">
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Reports</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
           <p className="text-sm text-gray-500 mt-1">Class reports submitted by teachers. Flagged reports require your attention.</p>
           {(pendingCount > 0 || flaggedCount > 0) && (
             <div className="flex gap-3 mt-3">
               {pendingCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFFBEB', color: '#92400E' }}>
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>
                   <span className="font-semibold">{pendingCount}</span> pending
                 </span>
               )}
               {flaggedCount > 0 && (
-                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FEF2F2', color: '#991B1B' }}>
+                <span className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full" style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}>
                   <span className="font-semibold">{flaggedCount}</span> flagged — action required
                 </span>
               )}
@@ -575,25 +584,23 @@ export default function ReportsClient({ initialReports, teachers, students, init
         </button>
       </div>
 
-      <div className="border-b border-gray-200 mb-6">
-        <div className="flex gap-0">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="flex items-center justify-center px-5 py-3 text-sm font-medium border-b-2 transition-colors"
-              style={activeTab === tab.id ? { borderBottomColor: '#FF8303', color: '#FF8303', minWidth: '180px' } : { borderBottomColor: 'transparent', color: '#6B7280', minWidth: '180px' }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className="px-5 py-2 text-sm font-medium transition-colors"
+            style={activeTab === tab.id
+              ? { backgroundColor: '#FF8303', color: 'white' }
+              : { backgroundColor: 'white', color: '#6b7280' }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-100 p-5">
-        {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} />}
-        {activeTab === 'trace' && <LiveTrace />}
-      </div>
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} />}
+      {activeTab === 'trace' && <LiveTrace />}
 
       {showExport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

@@ -5,7 +5,17 @@ import BillingAdminClient from './BillingAdminClient'
 import { recomputeInvoiceAmountsForAllTeachers } from '@/lib/billing/recomputeAmounts'
 import { getExportTimezone } from '@/lib/exportTime'
 
-export default async function AdminBillingPage() {
+export default async function AdminBillingPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ filter?: string }>
+}) {
+  // Stat-card deep link (/admin/billing?filter=invoices_review) opens the Teacher
+  // Invoices tab pre-filtered to 'uploaded' — the exact status the card counts.
+  // Anything else leaves both at the client's own defaults.
+  const { filter } = await searchParams
+  const invoicesReview = filter === 'invoices_review'
+
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
@@ -30,5 +40,12 @@ export default async function AdminBillingPage() {
   // as the server-route exports. getExportTimezone is server-only.
   const exportTz = await getExportTimezone()
 
-  return <BillingAdminClient adminId={profile.id} exportTz={exportTz} />
+  return (
+    <BillingAdminClient
+      adminId={profile.id}
+      exportTz={exportTz}
+      initialTab={invoicesReview ? 'teacher_invoices' : undefined}
+      initialInvoiceStatus={invoicesReview ? 'uploaded' : undefined}
+    />
+  )
 }

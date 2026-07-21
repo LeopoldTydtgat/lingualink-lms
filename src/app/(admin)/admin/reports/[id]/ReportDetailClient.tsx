@@ -167,16 +167,16 @@ export default function ReportDetailClient({ report, assignments }: Props) {
     Object.values(report.level_data).some((v) => v !== undefined && v !== null);
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6">
       <Link href="/admin/reports" prefetch={false} className="text-sm hover:underline mb-5 inline-flex items-center gap-1" style={{ color: '#FF8303' }}>← Back to Reports</Link>
 
       <div className="flex items-center justify-between mt-3 mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">Report Detail</h1>
+        <h1 className="text-xl font-bold text-gray-900">Report Detail</h1>
         <div className="flex items-center gap-3">
-          {report.status === 'flagged'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>Flagged</span>}
-          {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#166534' }}>Completed</span>}
-          {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>Pending</span>}
-          {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEDD5', color: '#C2410C' }}>Reopened</span>}
+          {report.status === 'flagged'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}>Flagged</span>}
+          {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>Completed</span>}
+          {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Pending</span>}
+          {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Reopened</span>}
           {report.status === 'flagged' && (
             <button onClick={() => { setReopenError(''); setShowConfirm(true); }} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
@@ -196,7 +196,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="bg-white rounded-xl border border-gray-100 p-5">
+        <div className="card-elevated p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Class Info</h2>
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between">
@@ -230,7 +230,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
           </dl>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-100 p-5">
+        <div className="card-elevated p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Participants</h2>
           <div className="space-y-4">
             {report.teacher && (
@@ -260,21 +260,21 @@ export default function ReportDetailClient({ report, assignments }: Props) {
       </div>
 
       {report.feedback_text && (
-        <div className="bg-white rounded-xl border border-gray-100 p-5 mt-5">
+        <div className="card-elevated p-5 mt-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Class Recap, Feedback &amp; Next Steps</h2>
           <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{report.feedback_text}</p>
         </div>
       )}
 
       {report.additional_details && (
-        <div className="bg-white rounded-xl border border-gray-100 p-5 mt-5">
+        <div className="card-elevated p-5 mt-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Additional Details</h2>
           <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">{report.additional_details}</p>
         </div>
       )}
 
       {hasLevelData && (
-        <div className="bg-white rounded-xl border border-gray-100 p-5 mt-5">
+        <div className="card-elevated p-5 mt-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Student Level Assessment</h2>
           <div className="flex flex-col items-center">
             <RadarChart levelData={report.level_data!} />
@@ -296,7 +296,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
       )}
 
       {assignments.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 p-5 mt-5">
+        <div className="card-elevated p-5 mt-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Assigned for Next Time</h2>
           <div className="space-y-2">
             {assignments.map((a) => (

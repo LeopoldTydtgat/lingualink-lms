@@ -96,11 +96,11 @@ type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
 function StatusBadge({ status }: { status: string | null }) {
   const colour =
     status === 'current'
-      ? { backgroundColor: '#dcfce7', color: '#166534' }
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
       : status === 'former'
       ? { backgroundColor: '#f3f4f6', color: '#6b7280' }
       : status === 'on_hold'
-      ? { backgroundColor: '#fef9c3', color: '#854d0e' }
+      ? { backgroundColor: '#FFF8E8', color: '#B45309' }
       : { backgroundColor: '#f3f4f6', color: '#6b7280' }
 
   return (
@@ -112,13 +112,13 @@ function StatusBadge({ status }: { status: string | null }) {
 
 function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }) {
   const meta: Record<string, { bg: string; color: string; label: string }> = {
-    completed: { bg: '#dcfce7', color: '#166534', label: 'Completed' },
+    completed: { bg: '#DCFCE7', color: '#15803D', label: 'Completed' },
     scheduled: { bg: '#dbeafe', color: '#1e40af', label: 'Scheduled' },
     cancelled: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled' },
     cancelled_by_student: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by student' },
     cancelled_by_teacher: { bg: '#f3f4f6', color: '#6b7280', label: 'Cancelled by teacher' },
-    student_no_show: { bg: '#fef3c7', color: '#92400e', label: 'Student no show' },
-    teacher_no_show: { bg: '#fee2e2', color: '#dc2626', label: 'Teacher no show' },
+    student_no_show: { bg: '#FFF8E8', color: '#B45309', label: 'Student no show' },
+    teacher_no_show: { bg: '#FFEEE6', color: '#FD5602', label: 'Teacher no show' },
   }
   const entry = meta[status] ?? { bg: '#f3f4f6', color: '#6b7280', label: status.replace(/_/g, ' ') }
   // Colour keys off status (via meta); the label gets cancellation/reschedule
@@ -135,6 +135,20 @@ function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: s
   )
 }
 
+// Mirrors getInvoiceStatusColor in the admin billing client. Status strings come
+// from public.invoices.status: 'pending' | 'uploaded' | 'paid' | 'overdue'
+// (the admin billing filter's option set); 'late' is carried as a red alias.
+function invoiceStatusStyle(status: string | null): { bg: string; text: string } {
+  switch (status) {
+    case 'paid': return { bg: '#DCFCE7', text: '#15803D' }
+    case 'uploaded': return { bg: '#EFF6FF', text: '#3B82F6' }
+    case 'pending': return { bg: '#FFF8E8', text: '#B45309' }
+    case 'overdue':
+    case 'late': return { bg: '#FFEEE6', text: '#FD5602' }
+    default: return { bg: '#f3f4f6', text: '#6b7280' }
+  }
+}
+
 function InfoRow({ label, value, adminOnly }: {
   label: string
   value: string | null | undefined
@@ -146,7 +160,7 @@ function InfoRow({ label, value, adminOnly }: {
         {label}
         {adminOnly && (
           <span className="px-1.5 py-0.5 rounded text-xs"
-            style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+            style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>
             Admin only
           </span>
         )}
@@ -404,12 +418,12 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
     }
   }
 
-  const tabs: { key: Tab; label: string }[] = [
+  const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'classes', label: `Classes (${lessons.length})` },
-    { key: 'invoices', label: `Invoices (${invoices.length})` },
+    { key: 'classes', label: 'Classes', count: lessons.length },
+    { key: 'invoices', label: 'Invoices', count: invoices.length },
     { key: 'history', label: 'History' },
-    { key: 'messages', label: `Messages (${conversations.length})` },
+    { key: 'messages', label: 'Messages', count: conversations.length },
   ]
 
   return (
@@ -518,6 +532,22 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               : { backgroundColor: 'white', color: '#6b7280' }}
           >
             {tab.label}
+            {tab.count !== undefined && (
+              <span
+                style={{
+                  padding: '2px 7px',
+                  borderRadius: 9999,
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  marginLeft: '6px',
+                  ...(activeTab === tab.key
+                    ? { backgroundColor: 'rgba(255,255,255,0.25)', color: '#ffffff' }
+                    : { backgroundColor: '#F3F4F6', color: '#6b7280' }),
+                }}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -724,7 +754,10 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
                       {inv.amount_eur != null ? `${currencySymbol}${Number(inv.amount_eur).toFixed(2)}` : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 capitalize">
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
+                        style={{ backgroundColor: invoiceStatusStyle(inv.status).bg, color: invoiceStatusStyle(inv.status).text }}
+                      >
                         {inv.status ?? '—'}
                       </span>
                     </td>

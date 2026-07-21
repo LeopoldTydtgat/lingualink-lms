@@ -91,11 +91,11 @@ export default function AnnouncementsClient({
   const inactive = announcements.filter((a) => !a.is_active)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6">
       {/* Header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Announcements</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Announcements</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             Banners displayed on Teacher and Student portals
           </p>
@@ -180,7 +180,7 @@ function AnnouncementRow({
   isDeleting: boolean
 }) {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4">
+    <div className="card-elevated p-4">
       <div className="flex items-start justify-between gap-4">
         {/* Left: content */}
         <div className="flex-1 min-w-0">
@@ -194,7 +194,7 @@ function AnnouncementRow({
               className="text-xs px-2 py-0.5 rounded-full font-medium"
               style={
                 a.is_active
-                  ? { backgroundColor: '#dcfce7', color: '#166534' }
+                  ? { backgroundColor: '#DCFCE7', color: '#15803D' }
                   : { backgroundColor: '#f3f4f6', color: '#6b7280' }
               }
             >
@@ -209,7 +209,7 @@ function AnnouncementRow({
             {/* Audience badge */}
             <span
               className="text-xs px-2 py-0.5 rounded-full font-medium"
-              style={{ backgroundColor: '#fff7ed', color: '#c2410c' }}
+              style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}
             >
               {AUDIENCE_LABELS[a.target_audience] ?? a.target_audience}
             </span>

@@ -106,7 +106,8 @@ export async function POST(req: NextRequest) {
         id: newUserId,
         email: data.email,
         full_name: data.full_name,
-        role: data.account_types.includes('school_admin') ? 'admin' : 'teacher',
+        // Admin role is never minted from this form.
+        role: 'teacher',
         timezone: data.timezone,
         bio: data.bio ?? null,
         qualifications: data.qualifications ?? null,

@@ -187,7 +187,7 @@ function NavLink({
       href={item.href}
       prefetch={false}
       onClick={onNavigate}
-      className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'text-gray-600 hover:bg-brand-grey hover:text-gray-900'}`}
+      className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${active ? '' : 'hover:bg-[#f9fafb]'}`}
       style={
         active
           ? {
@@ -196,7 +196,7 @@ function NavLink({
               color: '#FF8303',
               borderLeft: '3px solid #FF8303',
             }
-          : { borderLeft: '3px solid transparent' }
+          : { borderLeft: '3px solid transparent', color: '#4b5563' }
       }
     >
       <AdminNavContent
@@ -548,7 +548,7 @@ export default function AdminLayoutClient({
         {/* Desktop sidebar */}
         <aside
           className="hidden lg:flex flex-col w-56 flex-shrink-0"
-          style={{ backgroundColor: '#F1EFEC', borderRight: '1px solid #E0DFDC' }}
+          style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
         >
           {sidebarInner}
         </aside>
@@ -559,7 +559,7 @@ export default function AdminLayoutClient({
             <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
             <aside
               className="relative flex flex-col w-56 z-50"
-              style={{ backgroundColor: '#F1EFEC', borderRight: '1px solid #E0DFDC' }}
+              style={{ backgroundColor: '#ffffff', borderRight: '1px solid #E0DFDC' }}
             >
               {sidebarInner}
             </aside>

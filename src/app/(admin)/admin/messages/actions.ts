@@ -27,7 +27,7 @@ export async function getAdminThreadMessages(teacherSideId: string, studentId: s
 
   const { data } = await adminDb
     .from('messages')
-    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, admin_read_at, created_at')
+    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, admin_read_at, created_at, edited_at')
     .or(
       `and(sender_id.eq.${teacherSideId},receiver_id.eq.${studentId}),` +
       `and(sender_id.eq.${studentId},receiver_id.eq.${teacherSideId}),` +

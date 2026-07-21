@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Save, Mail, Clock, FileText, CreditCard, AlertTriangle, Ban, Globe } from 'lucide-react'
+import { Save } from 'lucide-react'
 import { toast } from 'sonner'
 
 // Shape of the settings object we receive from the API
@@ -31,6 +31,9 @@ const DEFAULTS: SettingsValues = {
   default_cancellation_window: '24',
   export_timezone: 'Africa/Johannesburg',
 }
+
+const inputClass = "border border-[#E0DFDC] rounded-lg px-3 py-2 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+const selectClass = "border border-[#E0DFDC] rounded-lg px-3 py-2 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
 export default function SettingsClient({ initialSettings }: Props) {
   // Merge database values over defaults so every field has a value
@@ -70,237 +73,231 @@ export default function SettingsClient({ initialSettings }: Props) {
   }
 
   return (
-    <>
-    <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Platform Settings</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Configure platform-wide settings and defaults.</p>
-      </div>
-    </div>
-    <div className="space-y-8">
+    <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
 
-      {/* ── Section: Contact ─────────────────────────────────────────── */}
-      <SettingSection
-        icon={<Mail className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Contact"
-        description="The support email address displayed to teachers and students across the portal."
-      >
-        <SettingRow
-          label="Admin support email"
-          hint="Shown in portal footers and notification emails as the contact address."
-        >
-          <input
-            type="email"
-            value={values.admin_email}
-            onChange={e => handleChange('admin_email', e.target.value)}
-            placeholder="e.g. support@lingualinkonline.com"
-            className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-            
-          />
-        </SettingRow>
-      </SettingSection>
+      <div className="max-w-6xl mx-auto space-y-8 pb-28">
 
-      {/* ── Section: Teacher Availability ────────────────────────────── */}
-      <SettingSection
-        icon={<Clock className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Teacher Availability"
-        description="Alert thresholds used when monitoring teacher schedules."
-      >
-        <SettingRow
-          label="Minimum available hours per week"
-          hint="If a teacher's weekly availability drops below this number, an alert appears on the admin dashboard."
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              max={60}
-              value={values.min_available_hours}
-              onChange={e => handleChange('min_available_hours', e.target.value)}
-              className="w-24 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-            />
-            <span className="text-sm text-gray-500">hours / week</span>
+        {/* ── Page header ─────────────────────────────────────────────── */}
+        <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Platform Settings</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Configure platform-wide settings and defaults.</p>
           </div>
-        </SettingRow>
-      </SettingSection>
+        </div>
 
-      {/* ── Section: Billing & Invoices ───────────────────────────────── */}
-      <SettingSection
-        icon={<FileText className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Billing &amp; Invoices"
-        description="Controls the invoice upload window and payment timeline shown to teachers."
-      >
-        <SettingRow
-          label="Invoice upload window"
-          hint="The days of the month during which teachers can upload their invoice. Outside this window, the upload option is hidden."
+        {/* ── Section: Contact ─────────────────────────────────────────── */}
+        <SettingSection
+          title="Contact"
+          description="The support email address displayed to teachers and students across the portal."
         >
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">From day</span>
-              <input
-                type="number"
-                min={1}
-                max={28}
-                value={values.invoice_upload_start}
-                onChange={e => handleChange('invoice_upload_start', e.target.value)}
-                className="w-20 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">to day</span>
-              <input
-                type="number"
-                min={1}
-                max={28}
-                value={values.invoice_upload_end}
-                onChange={e => handleChange('invoice_upload_end', e.target.value)}
-                className="w-20 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-              />
-              <span className="text-sm text-gray-500">of each month</span>
-            </div>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label="Payment timeline"
-          hint="How many days after receiving a teacher's invoice Shannon aims to process payment."
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              max={90}
-              value={values.payment_timeline_days}
-              onChange={e => handleChange('payment_timeline_days', e.target.value)}
-              className="w-24 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-            />
-            <span className="text-sm text-gray-500">days after invoice receipt</span>
-          </div>
-        </SettingRow>
-      </SettingSection>
-
-      {/* ── Section: Student Hours ────────────────────────────────────── */}
-      <SettingSection
-        icon={<AlertTriangle className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Student Hours"
-        description="The threshold that triggers low-balance warnings for students."
-      >
-        <SettingRow
-          label="Low balance warning threshold"
-          hint="When a student's remaining hours drop to or below this number, a warning appears on their portal and the admin dashboard."
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min={0.5}
-              max={20}
-              step={0.5}
-              value={values.low_balance_threshold}
-              onChange={e => handleChange('low_balance_threshold', e.target.value)}
-              className="w-24 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2"
-            />
-            <span className="text-sm text-gray-500">hours remaining</span>
-          </div>
-        </SettingRow>
-      </SettingSection>
-
-      {/* ── Section: Cancellation Policy ─────────────────────────────── */}
-      <SettingSection
-        icon={<Ban className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Cancellation Policy"
-        description="The default cancellation window applied to all new student accounts. Individual students can be overridden in Student Management."
-      >
-        <SettingRow
-          label="Default cancellation window"
-          hint="Students who cancel within this window lose their hours. This default applies to all private students. B2B students can be set to 48 hours individually."
-        >
-          <div className="flex gap-3">
-            {['24', '48'].map(option => {
-              const isSelected = values.default_cancellation_window === option
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => handleChange('default_cancellation_window', option)}
-                  className="px-5 py-2 rounded-md text-sm font-medium border transition-colors"
-                  style={
-                    isSelected
-                      ? { backgroundColor: '#FF8303', borderColor: '#FF8303', color: '#ffffff' }
-                      : { backgroundColor: '#ffffff', borderColor: '#d1d5db', color: '#4b5563' }
-                  }
-                >
-                  {option} hours
-                </button>
-              )
-            })}
-          </div>
-        </SettingRow>
-      </SettingSection>
-
-      {/* ── Section: Exports ─────────────────────────────────────────── */}
-      <SettingSection
-        icon={<Globe className="h-5 w-5" style={{ color: '#FF8303' }} />}
-        title="Exports"
-        description="The timezone used for all date and time columns in CSV and Excel exports."
-      >
-        <SettingRow
-          label="Export timezone"
-          hint="Every exported date and time column is rendered in this timezone. Date-only fields (billing months, training start/end dates) are unaffected."
-        >
-          <select
-            value={values.export_timezone}
-            onChange={e => handleChange('export_timezone', e.target.value)}
-            className="w-full max-w-xs rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2"
-            style={{ color: '#FF8303', fontWeight: 500 }}
+          <SettingRow
+            label="Admin support email"
+            hint="Shown in portal footers and notification emails as the contact address."
           >
-            <option value="Africa/Johannesburg">South Africa (SAST)</option>
-            <option value="Europe/London">UK (London)</option>
-            <option value="Europe/Lisbon">Portugal (Lisbon)</option>
-            <option value="Europe/Madrid">Spain (Madrid)</option>
-            <option value="Europe/Paris">France (Paris)</option>
-            <option value="Europe/Berlin">Germany (Berlin)</option>
-          </select>
-        </SettingRow>
-      </SettingSection>
+            <input
+              type="email"
+              value={values.admin_email}
+              onChange={e => handleChange('admin_email', e.target.value)}
+              placeholder="e.g. support@lingualinkonline.com"
+              className={`w-full ${inputClass}`}
+            />
+          </SettingRow>
+        </SettingSection>
 
-      {/* ── Save button + inline feedback ────────────────────────────── */}
-      <div className="flex items-center justify-end gap-4 pt-2">
+        {/* ── Section: Teacher Availability ────────────────────────────── */}
+        <SettingSection
+          title="Teacher Availability"
+          description="Alert thresholds used when monitoring teacher schedules."
+        >
+          <SettingRow
+            label="Minimum available hours per week"
+            hint="If a teacher's weekly availability drops below this number, an alert appears on the admin dashboard."
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={values.min_available_hours}
+                onChange={e => handleChange('min_available_hours', e.target.value)}
+                className={`w-24 ${inputClass}`}
+              />
+              <span className="text-sm text-gray-500">hours / week</span>
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        {/* ── Section: Billing & Invoices ───────────────────────────────── */}
+        <SettingSection
+          title="Billing &amp; Invoices"
+          description="Controls the invoice upload window and payment timeline shown to teachers."
+        >
+          <SettingRow
+            label="Invoice upload window"
+            hint="The days of the month during which teachers can upload their invoice. Outside this window, the upload option is hidden."
+          >
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">From day</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={values.invoice_upload_start}
+                  onChange={e => handleChange('invoice_upload_start', e.target.value)}
+                  className={`w-20 ${inputClass}`}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">to day</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={28}
+                  value={values.invoice_upload_end}
+                  onChange={e => handleChange('invoice_upload_end', e.target.value)}
+                  className={`w-20 ${inputClass}`}
+                />
+                <span className="text-sm text-gray-500">of each month</span>
+              </div>
+            </div>
+          </SettingRow>
+
+          <SettingRow
+            label="Payment timeline"
+            hint="How many days after receiving a teacher's invoice Shannon aims to process payment."
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={90}
+                value={values.payment_timeline_days}
+                onChange={e => handleChange('payment_timeline_days', e.target.value)}
+                className={`w-24 ${inputClass}`}
+              />
+              <span className="text-sm text-gray-500">days after invoice receipt</span>
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        {/* ── Section: Student Hours ────────────────────────────────────── */}
+        <SettingSection
+          title="Student Hours"
+          description="The threshold that triggers low-balance warnings for students."
+        >
+          <SettingRow
+            label="Low balance warning threshold"
+            hint="When a student's remaining hours drop to or below this number, a warning appears on their portal and the admin dashboard."
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0.5}
+                max={20}
+                step={0.5}
+                value={values.low_balance_threshold}
+                onChange={e => handleChange('low_balance_threshold', e.target.value)}
+                className={`w-24 ${inputClass}`}
+              />
+              <span className="text-sm text-gray-500">hours remaining</span>
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        {/* ── Section: Cancellation Policy ─────────────────────────────── */}
+        <SettingSection
+          title="Cancellation Policy"
+          description="The default cancellation window applied to all new student accounts. Individual students can be overridden in Student Management."
+        >
+          <SettingRow
+            label="Default cancellation window"
+            hint="Students who cancel within this window lose their hours. This default applies to all private students. B2B students can be set to 48 hours individually."
+          >
+            <div className="flex gap-3">
+              {['24', '48'].map(option => {
+                const isSelected = values.default_cancellation_window === option
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => handleChange('default_cancellation_window', option)}
+                    className="px-5 py-2 rounded-md text-sm font-medium border transition-colors"
+                    style={
+                      isSelected
+                        ? { backgroundColor: '#FFF0E0', borderColor: '#FF8303', color: '#FF8303' }
+                        : { backgroundColor: '#ffffff', borderColor: '#d1d5db', color: '#4b5563' }
+                    }
+                  >
+                    {option} hours
+                  </button>
+                )
+              })}
+            </div>
+          </SettingRow>
+        </SettingSection>
+
+        {/* ── Section: Exports ─────────────────────────────────────────── */}
+        <SettingSection
+          title="Exports"
+          description="The timezone used for all date and time columns in CSV and Excel exports."
+        >
+          <SettingRow
+            label="Export timezone"
+            hint="Every exported date and time column is rendered in this timezone. Date-only fields (billing months, training start/end dates) are unaffected."
+          >
+            <select
+              value={values.export_timezone}
+              onChange={e => handleChange('export_timezone', e.target.value)}
+              className={`w-full max-w-xs ${selectClass}`}
+            >
+              <option value="Africa/Johannesburg">South Africa (SAST)</option>
+              <option value="Europe/London">UK (London)</option>
+              <option value="Europe/Lisbon">Portugal (Lisbon)</option>
+              <option value="Europe/Madrid">Spain (Madrid)</option>
+              <option value="Europe/Paris">France (Paris)</option>
+              <option value="Europe/Berlin">Germany (Berlin)</option>
+            </select>
+          </SettingRow>
+        </SettingSection>
+
+      </div>
+
+      {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+        style={{ borderColor: '#E0DFDC' }}>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-md text-sm font-medium text-white transition-opacity disabled:opacity-60"
+          className="btn-primary-hover flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
           style={{ backgroundColor: '#FF8303' }}
         >
           <Save className="h-4 w-4" />
           {saving ? 'Saving…' : 'Save Settings'}
         </button>
       </div>
-
     </div>
-    </>
   )
 }
 
 // ── Reusable layout components ─────────────────────────────────────────────
 
 function SettingSection({
-  icon,
   title,
   description,
   children,
 }: {
-  icon: React.ReactNode
   title: string
   description: string
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+    <div className="card-elevated overflow-hidden">
       {/* Section header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-100" style={{ backgroundColor: '#fafafa' }}>
-        {icon}
+      <div className="flex items-start gap-2.5 px-6 py-4">
+        <span className="block rounded-full shrink-0 mt-0.5" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
         <div>
-          <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
+          <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
           <p className="text-xs text-gray-500 mt-0.5">{description}</p>
         </div>
       </div>

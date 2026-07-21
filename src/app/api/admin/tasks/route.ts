@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
@@ -8,15 +9,8 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const allowedRoles = ['school_admin']
-  const hasAccess = profile?.account_types?.some((r: string) => allowedRoles.includes(r))
-  if (!hasAccess) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminUser = await requireAdmin()
+  if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(request.url)
   const assignee = searchParams.get('assignee')       // profile id
@@ -125,15 +119,8 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const allowedRoles = ['school_admin']
-  const hasAccess = profile?.account_types?.some((r: string) => allowedRoles.includes(r))
-  if (!hasAccess) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const adminUser = await requireAdmin()
+  if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
   const {

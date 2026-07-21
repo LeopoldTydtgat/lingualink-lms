@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
@@ -24,17 +25,8 @@ export async function GET(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: lesson, error } = await supabase
     .from('lessons')
@@ -114,17 +106,8 @@ export async function PATCH(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await request.json()
   const parsed = adminClassesPatchSchema.safeParse(body)
@@ -660,17 +643,8 @@ export async function DELETE(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const staffUser = await requireStaff()
+  if (!staffUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const adminClient = createAdminClient()
 

@@ -23,8 +23,6 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'teacher', label: 'Teacher' },
   { value: 'teacher_exam', label: 'Teacher+Exam' },
   { value: 'staff', label: 'Staff' },
-  { value: 'hr_admin', label: 'HR Admin' },
-  { value: 'school_admin', label: 'School Admin' },
 ]
 
 const STATUS_OPTIONS = [
@@ -71,6 +69,19 @@ function Field({ label, children, adminOnly }: {
         {label}
         {adminOnly && <AdminOnlyBadge />}
       </label>
+      {children}
+    </div>
+  )
+}
+
+// Bordered section card — matches the Teacher Detail Overview tab's card style.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card-elevated p-5 space-y-4">
+      <div className="flex items-center gap-2.5">
+        <span className="block rounded-full" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
+        <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+      </div>
       {children}
     </div>
   )
@@ -179,7 +190,6 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
           admin_notes: form.admin_notes || null,
           follow_up_date: form.follow_up_date || null,
           follow_up_reason: form.follow_up_reason || null,
-          role: form.account_types.includes('school_admin') ? 'admin' : 'teacher',
           teacher_type: form.account_types.includes('teacher_exam') ? 'teacher_exam' : 'teacher',
         }),
       })
@@ -197,21 +207,23 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
 
   return (
     <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button
-            onClick={() => router.push(`/admin/teachers/${id}`)}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            ← {teacher.full_name as string}
-          </button>
-          <span className="text-gray-300">/</span>
-          <h1 className="text-2xl font-bold text-gray-900">Edit Teacher</h1>
-        </div>
+      {/* Header */}
+      <div className="max-w-6xl mx-auto flex items-center gap-3 mb-6">
+        <button
+          onClick={() => router.push(`/admin/teachers/${id}`)}
+          className="text-sm text-gray-500 hover:text-gray-700"
+        >
+          ← {teacher.full_name as string}
+        </button>
+        <span className="text-gray-300">/</span>
+        <h1 className="text-2xl font-bold text-gray-900">Edit Teacher</h1>
+      </div>
 
-        {/* Section tabs */}
-        <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
+      {/* Section tabs — both sections share the single handleSave submit path;
+          the tabs only choose which fields are on screen.
+          pb-28 keeps the last field clear of the sticky action bar. */}
+      <div className="max-w-6xl mx-auto space-y-6 pb-28">
+        <div className="flex gap-0 border border-gray-200 rounded-lg overflow-hidden w-fit">
           {(['A', 'B'] as const).map((section) => (
             <button
               key={section}
@@ -228,9 +240,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
 
         {/* Section A */}
         {activeSection === 'A' && (
-          <div className="card-elevated p-6 space-y-5">
-            <h2 className="font-semibold text-gray-800 text-base">Account & Login</h2>
-
+          <Section title="Account & Login">
             <div className="grid grid-cols-2 gap-4">
               <Field label="First Name">
                 <input className={inputClass} value={form.first_name}
@@ -297,36 +307,20 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
               </Field>
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <div className="flex gap-3">
-                <button
-                  onClick={() => router.push(`/admin/teachers/${id}`)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
-                  style={{ color: '#4b5563' }}>
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                  style={{ backgroundColor: '#FF8303' }}>
-                  {saving ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
+            {/* Section navigation only — saving lives in the sticky bar below. */}
+            <div className="flex justify-end pt-2">
               <button onClick={() => setActiveSection('B')}
-                className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white"
-                style={{ backgroundColor: '#FF8303' }}>
+                className="px-5 py-2 rounded-lg text-sm font-semibold"
+                style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FF8303' }}>
                 Next: Profile & Admin Info →
               </button>
             </div>
-          </div>
+          </Section>
         )}
 
         {/* Section B */}
         {activeSection === 'B' && (
-          <div className="card-elevated p-6 space-y-5">
-            <h2 className="font-semibold text-gray-800 text-base">Profile & Admin Info</h2>
-
+          <Section title="Profile & Admin Info">
             <div className="grid grid-cols-3 gap-4">
               <Field label="Title">
                 <select className={selectClass} value={form.title}
@@ -511,30 +505,35 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-between pt-2">
+            {/* Section navigation only — saving lives in the sticky bar below. */}
+            <div className="pt-2">
               <button onClick={() => setActiveSection('A')}
                 className="text-sm text-gray-500 hover:text-gray-700">
                 ← Back to Account & Login
               </button>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => router.push(`/admin/teachers/${id}`)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
-                  style={{ color: '#4b5563' }}>
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                  style={{ backgroundColor: '#FF8303' }}>
-                  {saving ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
             </div>
-          </div>
+          </Section>
         )}
+      </div>
+
+      {/* Sticky action bar — one save path covers both sections */}
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+        style={{ borderColor: '#E0DFDC' }}>
+        <button
+          onClick={() => router.push(`/admin/teachers/${id}`)}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
+          style={{ color: '#4b5563' }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+          style={{ backgroundColor: '#FF8303' }}
+        >
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
       </div>
     </div>
   )

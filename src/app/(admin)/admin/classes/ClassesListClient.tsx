@@ -28,6 +28,10 @@ interface Lesson {
 
 interface Props {
   teachers: Teacher[]
+  // Seeded from ?filter=today by the server page (admin's own timezone); '' means
+  // "no date filter".
+  initialDateFrom?: string
+  initialDateTo?: string
 }
 
 // Maps raw DB status values to a display label and colour
@@ -64,7 +68,7 @@ function formatDateTime(isoString: string): string {
   return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
-export default function ClassesListClient({ teachers }: Props) {
+export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '' }: Props) {
   const router = useRouter()
 
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -77,8 +81,8 @@ export default function ClassesListClient({ teachers }: Props) {
   const [search, setSearch] = useState('')
   const [filterTeacher, setFilterTeacher] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterDateFrom, setFilterDateFrom] = useState('')
-  const [filterDateTo, setFilterDateTo] = useState('')
+  const [filterDateFrom, setFilterDateFrom] = useState(initialDateFrom)
+  const [filterDateTo, setFilterDateTo] = useState(initialDateTo)
 
   const pageSize = 50
 
@@ -294,9 +298,9 @@ export default function ClassesListClient({ teachers }: Props) {
             onClick={applyFilters}
             disabled={loading}
             style={{
-              backgroundColor: '#FF8303',
-              color: 'white',
-              border: 'none',
+              backgroundColor: '#FFF0E0',
+              color: '#FF8303',
+              border: '1px solid #FF8303',
               borderRadius: '6px',
               padding: '8px 16px',
               fontSize: '14px',

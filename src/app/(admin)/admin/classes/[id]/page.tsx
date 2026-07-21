@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { redirect } from 'next/navigation'
 import ClassDetailClient from './ClassDetailClient'
 
@@ -13,17 +14,8 @@ export default async function AdminClassDetailPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin =
-    profile?.account_types?.includes('school_admin') ||
-    profile?.account_types?.includes('staff')
-
-  if (!isAdmin) redirect('/dashboard')
+  const staffUser = await requireStaff()
+  if (!staffUser) redirect('/dashboard')
 
   // Fetch lesson with joined teacher, student, and training
   const { data: lessonRaw, error } = await supabase

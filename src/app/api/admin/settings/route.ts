@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { EXPORT_TZ_ALLOWED } from '@/lib/exportTime'
 import { NextResponse } from 'next/server'
 
@@ -23,16 +24,8 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin = Array.isArray(profile?.account_types) &&
-    profile.account_types.includes('school_admin')
-
-  if (!isAdmin) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -67,16 +60,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_types')
-    .eq('id', user.id)
-    .single()
-
-  const isAdmin = Array.isArray(profile?.account_types) &&
-    profile.account_types.includes('school_admin')
-
-  if (!isAdmin) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

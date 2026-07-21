@@ -17,7 +17,7 @@ type Company = {
 }
 
 const STATUS_COLOURS: Record<string, { bg: string; text: string }> = {
-  active:  { bg: '#dcfce7', text: '#166534' },
+  active:  { bg: '#DCFCE7', text: '#15803D' },
   former:  { bg: '#f3f4f6', text: '#6b7280' },
 }
 
@@ -51,7 +51,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
         </div>
         <button
           onClick={() => router.push('/admin/companies/new')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
+          className="btn-primary-hover flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
           style={{ backgroundColor: '#FF8303' }}
         >
           <Plus size={16} />
@@ -82,7 +82,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="card-elevated overflow-hidden">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-gray-400">
             <Building2 size={40} className="mb-3 opacity-30" />
@@ -125,7 +125,7 @@ export default function CompaniesListClient({ companies }: { companies: Company[
                         className="px-2 py-0.5 rounded text-xs font-medium"
                         style={
                           c.cancellation_policy === '48hr'
-                            ? { backgroundColor: '#fef3c7', color: '#92400e' }
+                            ? { backgroundColor: '#FFF8E8', color: '#B45309' }
                             : { backgroundColor: '#f3f4f6', color: '#6b7280' }
                         }
                       >
