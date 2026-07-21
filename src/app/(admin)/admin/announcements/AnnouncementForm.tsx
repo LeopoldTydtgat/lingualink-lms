@@ -8,8 +8,6 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, Save } from 'lucide-react'
-import Link from 'next/link'
 import { toast } from 'sonner'
 
 interface Announcement {
@@ -48,6 +46,37 @@ function toDateInputValue(iso: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 10)
 }
+
+// Reusable field wrapper
+function Field({ label, children }: {
+  label: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium mb-1" style={{ color: '#4b5563' }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  )
+}
+
+// Bordered section card — matches the Teacher Detail Overview tab's card style.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card-elevated p-5 space-y-4">
+      <div className="flex items-center gap-2.5">
+        <span className="block rounded-full" style={{ width: '3px', height: '18px', backgroundColor: '#FF8303' }} />
+        <h2 className="text-[15px] font-semibold text-gray-900">{title}</h2>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
+const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
 export default function AnnouncementForm({ announcement, teachers, students }: Props) {
   const router = useRouter()
@@ -131,167 +160,162 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <div className="p-6 min-h-full" style={{ backgroundColor: '#f9fafb' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <Link
-          href="/admin/announcements"
-          prefetch={false}
-          className="p-1.5 rounded hover:bg-gray-100 transition-colors"
+      <div className="max-w-6xl mx-auto flex items-center gap-3 mb-6">
+        <button
+          onClick={() => router.push('/admin/announcements')}
+          className="text-sm text-gray-500 hover:text-gray-700"
         >
-          <ArrowLeft size={18} className="text-gray-500" />
-        </Link>
-        <h1 className="text-xl font-bold text-gray-900">
+          ← Announcements
+        </button>
+        <span className="text-gray-300">/</span>
+        <h1 className="text-2xl font-bold text-gray-900">
           {isEdit ? 'Edit Announcement' : 'New Announcement'}
         </h1>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-        {/* Title */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Title <span className="text-gray-400 font-normal">(optional)</span>
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Platform maintenance scheduled"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent"
-          />
-        </div>
+      {/* Single scrolling form — one card per section.
+          pb-28 keeps the last field clear of the sticky action bar. */}
+      <div className="max-w-6xl mx-auto space-y-8 pb-28">
 
-        {/* Message */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Message <span className="text-red-500">*</span>
-          </label>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={3}
-            placeholder="The announcement text shown in the banner..."
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none resize-none"
-          />
-        </div>
+        {/* 1. Content */}
+        <Section title="Content">
+          <Field label={<>Title <span className="text-gray-400 font-normal">(optional)</span></>}>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Platform maintenance scheduled"
+              className={inputClass}
+            />
+          </Field>
 
-        {/* Target audience */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Target Audience
-          </label>
-          <select
-            value={targetAudience}
-            onChange={(e) => {
-              setTargetAudience(e.target.value)
-              setTargetId('')
-            }}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
-          >
-            {AUDIENCE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
+          <Field label={<>Message <span className="text-red-500">*</span></>}>
+            <textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              rows={3}
+              placeholder="The announcement text shown in the banner..."
+              className={`${inputClass} resize-none`}
+            />
+          </Field>
+        </Section>
 
-        {/* Specific teacher selector */}
-        {targetAudience === 'specific_teacher' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Select Teacher <span className="text-red-500">*</span>
-            </label>
+        {/* 2. Targeting */}
+        <Section title="Targeting">
+          <Field label="Target Audience">
             <select
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
+              value={targetAudience}
+              onChange={(e) => {
+                setTargetAudience(e.target.value)
+                setTargetId('')
+              }}
+              className={selectClass}
             >
-              <option value="">— Choose a teacher —</option>
-              {teachers.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.full_name}
+              {AUDIENCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
             </select>
-          </div>
-        )}
+          </Field>
 
-        {/* Specific student selector */}
-        {targetAudience === 'specific_student' && (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Select Student <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={targetId}
-              onChange={(e) => setTargetId(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
-            >
-              <option value="">— Choose a student —</option>
-              {students.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+          {/* Specific teacher selector */}
+          {targetAudience === 'specific_teacher' && (
+            <Field label={<>Select Teacher <span className="text-red-500">*</span></>}>
+              <select
+                value={targetId}
+                onChange={(e) => setTargetId(e.target.value)}
+                className={selectClass}
+              >
+                <option value="">— Choose a teacher —</option>
+                {teachers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.full_name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
 
-        {/* Date range */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Start Date <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
+          {/* Specific student selector */}
+          {targetAudience === 'specific_student' && (
+            <Field label={<>Select Student <span className="text-red-500">*</span></>}>
+              <select
+                value={targetId}
+                onChange={(e) => setTargetId(e.target.value)}
+                className={selectClass}
+              >
+                <option value="">— Choose a student —</option>
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+        </Section>
+
+        {/* 3. Behaviour */}
+        <Section title="Behaviour">
+          {/* Date range */}
+          <div className="grid grid-cols-2 gap-4">
+            <Field label={<>Start Date <span className="text-gray-400 font-normal">(optional)</span></>}>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+            <Field label={<>End Date <span className="text-gray-400 font-normal">(optional)</span></>}>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className={inputClass}
+              />
+            </Field>
+          </div>
+
+          {/* Toggles */}
+          <div className="space-y-3 pt-1">
+            <ToggleField
+              label="Dismissable"
+              description="Users can close this banner. If off, it stays visible until you deactivate it."
+              checked={isDismissable}
+              onChange={setIsDismissable}
+            />
+            <ToggleField
+              label="Active"
+              description="Banner is currently showing on the portal(s). You can activate it later."
+              checked={isActive}
+              onChange={setIsActive}
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              End Date <span className="text-gray-400 font-normal">(optional)</span>
-            </label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
-            />
-          </div>
-        </div>
+        </Section>
+      </div>
 
-        {/* Toggles */}
-        <div className="space-y-3 pt-1">
-          <ToggleField
-            label="Dismissable"
-            description="Users can close this banner. If off, it stays visible until you deactivate it."
-            checked={isDismissable}
-            onChange={setIsDismissable}
-          />
-          <ToggleField
-            label="Active"
-            description="Banner is currently showing on the portal(s). You can activate it later."
-            checked={isActive}
-            onChange={setIsActive}
-          />
-        </div>
-
-        {/* Save button */}
-        <div className="pt-2">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-            style={{ backgroundColor: '#FF8303' }}
-          >
-            <Save size={15} />
-            {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Announcement'}
-          </button>
-        </div>
+      {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+        style={{ borderColor: '#E0DFDC' }}>
+        <button
+          onClick={() => router.push('/admin/announcements')}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"
+          style={{ color: '#4b5563' }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+          style={{ backgroundColor: '#FF8303' }}
+        >
+          {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Announcement'}
+        </button>
       </div>
     </div>
   )
@@ -318,12 +342,12 @@ function ToggleField({
       <button
         type="button"
         onClick={() => onChange(!checked)}
-        className="relative flex-shrink-0 w-10 h-6 rounded-full transition-colors mt-0.5"
-        style={{ backgroundColor: checked ? '#FF8303' : '#d1d5db' }}
+        className="relative flex-shrink-0 rounded-full transition-colors mt-0.5"
+        style={{ backgroundColor: checked ? '#FF8303' : '#d1d5db', width: '40px', height: '24px' }}
       >
         <span
-          className="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform"
-          style={{ transform: checked ? 'translateX(18px)' : 'translateX(4px)' }}
+          className="absolute top-1 left-0 bg-white rounded-full shadow transition-transform"
+          style={{ width: '16px', height: '16px', transform: checked ? 'translateX(20px)' : 'translateX(4px)' }}
         />
       </button>
     </div>
