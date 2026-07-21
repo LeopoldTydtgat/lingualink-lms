@@ -18,17 +18,15 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   // Gate pattern mirrors /api/teacher/notify-homework-assigned: session profile,
-  // role teacher/admin OR account_types includes school_admin. full_name comes
-  // from the session profile, never the request body.
+  // role teacher or admin. full_name comes from the session profile, never the
+  // request body.
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role, account_types')
+    .select('full_name, role')
     .eq('id', user.id)
     .single()
 
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
+  const isAdmin = profile?.role === 'admin'
   const isAuthorized = profile?.role === 'teacher' || isAdmin
 
   if (!profile || !isAuthorized) {

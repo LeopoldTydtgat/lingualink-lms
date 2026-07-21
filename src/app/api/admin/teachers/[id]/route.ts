@@ -43,8 +43,8 @@ export async function PATCH(
     // Only profiles the Teachers section manages may be modified here, under
     // THE canonical teacher rule (src/lib/auth/isTeacherProfile.ts) that the
     // list page and the teachers list API now apply too: account_types overlaps
-    // ['teacher','teacher_exam'] OR role 'admin'. school_admin accounts are
-    // created with role 'admin', so they stay editable. Anything else is
+    // ['teacher','teacher_exam'] OR role 'admin' (so the admin account stays
+    // editable). Anything else is
     // off-limits - this route must not be usable against arbitrary profile rows.
     if (!isTeacherProfile(current)) {
       return NextResponse.json({ error: 'Target user is not a teacher.' }, { status: 403 })
@@ -53,9 +53,10 @@ export async function PATCH(
     // Self-target guard: an admin must never archive/ban/demote their own
     // account — a status change bans the auth user, locking the admin out.
     // Benign self-edits (bio, timezone, …) stay allowed; only a CHANGE to
-    // status, role, or account_types on your own profile is rejected.
+    // status or account_types on your own profile is rejected. (role is no
+    // longer accepted by UpdateTeacherSchema at all, so it cannot change here.)
     if (id === user.id) {
-      const guarded = ['status', 'role', 'account_types'] as const
+      const guarded = ['status', 'account_types'] as const
       const selfDemotion = guarded.some(
         (key) =>
           key in parsed.data &&
@@ -78,7 +79,7 @@ export async function PATCH(
     // explicit field list also keeps unknown keys away from PostgREST — a
     // single unrecognised column aborts the entire update.
     const UPDATABLE_FIELDS = [
-      'full_name', 'timezone', 'account_types', 'status', 'role', 'teacher_type',
+      'full_name', 'timezone', 'account_types', 'status', 'teacher_type',
       'contract_start', 'orientation_date', 'observed_lesson_date', 'title',
       'date_of_birth', 'gender', 'nationality', 'phone', 'street_address',
       'area_code', 'city', 'preferred_payment_type', 'paypal_email', 'iban',

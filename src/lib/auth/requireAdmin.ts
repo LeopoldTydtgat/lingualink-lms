@@ -5,21 +5,18 @@ import type { User } from '@supabase/supabase-js'
  * THE canonical admin rule — the single source of truth shared by the (admin)
  * layout, the admin pages, and every /api/admin route:
  *
- *   isAdmin = role === 'admin' OR account_types contains 'school_admin'
+ *   isAdmin = role === 'admin'
  *
  * Use this predicate directly when the caller already fetched the profile row
  * it needs anyway (layout, pages); use requireAdmin() when the profile would
- * be fetched solely to authorise. Routes whose rule is deliberately different
- * (school_admin-only, school_admin-or-staff, support's role-only check) do NOT
- * use this helper — see the flagged exceptions where they are defined.
+ * be fetched solely to authorise. Staff-permitted routes use requireStaff()
+ * (role 'admin' OR account_types contains 'staff') instead — see
+ * src/lib/auth/requireStaff.ts.
  */
 export function isAdminProfile(
   profile: { role?: string | null; account_types?: string[] | null } | null | undefined
 ): boolean {
-  return (
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
-  )
+  return profile?.role === 'admin'
 }
 
 /**

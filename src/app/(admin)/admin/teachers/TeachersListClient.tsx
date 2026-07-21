@@ -30,8 +30,6 @@ const ROLE_LABEL: Record<string, string> = {
   teacher: 'Teacher',
   teacher_exam: 'Teacher+Exam',
   staff: 'Staff',
-  hr_admin: 'HR Admin',
-  school_admin: 'School Admin',
 }
 
 const STATUS_LABEL: Record<string, string> = {

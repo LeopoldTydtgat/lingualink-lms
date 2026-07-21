@@ -23,7 +23,7 @@ export default async function StudySheetsPage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, account_types')
+    .select('role')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -39,11 +39,8 @@ export default async function StudySheetsPage() {
     )
   }
 
-  // NEW373: mirror requireAdmin.ts exactly - role = 'admin' OR account_types
-  // containing 'school_admin'. No variant.
-  const isAdmin =
-    profile.role === 'admin' ||
-    (Array.isArray(profile.account_types) && profile.account_types.includes('school_admin'))
+  // NEW373: mirror requireAdmin.ts exactly - role = 'admin'. No variant.
+  const isAdmin = profile.role === 'admin'
 
   // Existing user-scoped sheet fetch - unchanged.
   const { data: studySheets } = await supabase

@@ -13,16 +13,13 @@ export async function reopenReport(reportId: string) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, account_types')
+    .select('role')
     .eq('id', user.id)
     .single()
 
   // Mirror the admin route's exact admin check
-  // (src/app/api/admin/reports/[id]/route.ts):
-  //   role === 'admin' || account_types includes 'school_admin'
-  const isAdmin =
-    profile?.role === 'admin' ||
-    (Array.isArray(profile?.account_types) && profile.account_types.includes('school_admin'))
+  // (src/app/api/admin/reports/[id]/route.ts): role === 'admin'
+  const isAdmin = profile?.role === 'admin'
 
   if (!isAdmin) return { error: 'Not authorised' }
 
