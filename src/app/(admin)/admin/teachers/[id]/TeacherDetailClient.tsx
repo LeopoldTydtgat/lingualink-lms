@@ -423,7 +423,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       </button>
 
       {/* Top card */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+      <div className="card-elevated p-6 mb-6">
         <div className="flex items-start justify-between gap-4">
           {/* Left: photo + name */}
           <div className="flex items-center gap-4">
@@ -526,7 +526,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       {activeTab === 'overview' && (
         <div className="grid grid-cols-2 gap-6">
           {/* Personal info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Personal Information</h2>
             <InfoRow label="Full Name" value={teacher.full_name as string} />
             <InfoRow label="Email" value={teacher.email as string} />
@@ -540,7 +540,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           </div>
 
           {/* Professional info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Professional</h2>
             <InfoRow label="Teaching Languages"
               value={(teacher.teaching_languages as string[] | null)?.join(', ')} />
@@ -559,7 +559,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           </div>
 
           {/* Payment info */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Payment Details</h2>
             <InfoRow label="Preferred Payment" value={teacher.preferred_payment_type === "bank" ? "Bank Transfer" : teacher.preferred_payment_type === "paypal" ? "PayPal" : teacher.preferred_payment_type as string} />
             <InfoRow label="PayPal Email" value={teacher.paypal_email as string} />
@@ -569,7 +569,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
           </div>
 
           {/* Follow-up */}
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+          <div className="card-elevated p-5 space-y-4">
             <h2 className="font-semibold text-gray-800">Follow-up</h2>
             <InfoRow label="Follow-up Date"
               value={teacher.follow_up_date as string} adminOnly />
@@ -647,7 +647,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
           {/* Bio */}
           {!!(teacher.bio as string) && (
-            <div className="col-span-2 bg-white rounded-xl border border-gray-200 p-5 space-y-2">
+            <div className="col-span-2 card-elevated p-5 space-y-2">
               <h2 className="font-semibold text-gray-800">Bio</h2>
               <p className="text-sm text-gray-600">{teacher.bio as string}</p>
             </div>
@@ -657,7 +657,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Classes tab */}
       {activeTab === 'classes' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -699,7 +699,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Invoices tab */}
       {activeTab === 'invoices' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -744,7 +744,7 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* History tab */}
       {activeTab === 'history' && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="card-elevated overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -787,12 +787,12 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       {/* Messages tab */}
       {activeTab === 'messages' && (
         conversations.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <div className="card-elevated p-8 text-center">
             <p className="text-gray-400 text-sm">No conversations yet.</p>
           </div>
         ) : (
           <div
-            className="flex bg-white rounded-xl border border-gray-200 overflow-hidden"
+            className="flex card-elevated overflow-hidden"
             style={{ height: '620px' }}
           >
             {/* Left: conversation list */}
