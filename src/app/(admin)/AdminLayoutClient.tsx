@@ -568,9 +568,7 @@ export default function AdminLayoutClient({
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto thin-scroll">
-          <div className="max-w-[1600px] mx-auto">
-            {children}
-          </div>
+          {children}
         </main>
 
         {/* Right panel — the dashboard renders these same five stats as full-width
