@@ -6,6 +6,10 @@
 // original-lesson context strip; error display (`data.message ?? data.error`),
 // confirm label, success redirect and the 24hr footnote are byte-identical to
 // the old wizard's, which special-cases none of them for reschedule.
+//
+// UX pass: fixed 7-day Mon–Sun grid (empty days render as grey columns, not
+// hidden), text-less slot cells (time lives in the aria-label), and a sticky
+// summary column beside the grid replacing the old bottom confirm panel.
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
@@ -29,10 +33,8 @@ import {
 // approved palette when design lands. All state-dependent colours go through
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
 const CELL_BOOKABLE_BG = '#E8F5E9'
-const CELL_BOOKABLE_TEXT = '#2E7D32'
 const CELL_GREY_BG = '#F7F6F4'
 const CELL_SELECTED_BG = '#FF8303'
-const CELL_SELECTED_TEXT = '#ffffff'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -596,15 +598,19 @@ export default function BookingGridClient({
   const columnKeys = getWeekColumnKeys(weekStartKey)
   const instantSet = buildInstantSet(slots)
   const validStartsByColumn = getValidStartsByColumn(columnKeys, slots, instantSet, selectedDuration)
+  // Only used for the whole-week-empty check: the grid always renders all 7
+  // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
   const bands = collapseEmptyBands(validStartsByColumn, studentTimezone)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
-  // On a DST fall-back day two instants can share a wall-clock row; the later
-  // write wins the cell — a known Stage B limitation, the earlier instant is
-  // simply not offered in the grid.
+  // Built for all 7 columns — a day with no bookable starts just yields no
+  // cell hits, so every row renders grey there. On a DST fall-back day two
+  // instants can share a wall-clock row; the later write wins the cell — a
+  // known Stage B limitation, the earlier instant is simply not offered in
+  // the grid.
   const cellMaps = new Map<string, Map<number, GridStartSlot>>()
-  for (const key of visibleColumns) {
+  for (const key of columnKeys) {
     const m = new Map<number, GridStartSlot>()
     for (const slot of validStartsByColumn[key]) {
       const parts = utcInstantToTzParts(slot.startIso, studentTimezone)
@@ -794,7 +800,7 @@ export default function BookingGridClient({
   )
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+    <div>
       {/* ── Header row: title + timezone line left, balance right ── */}
       <div
         style={{
@@ -1094,351 +1100,349 @@ export default function BookingGridClient({
         </button>
       </div>
 
-      {/* ── Grid area ── */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>
-          Loading availability...
-        </div>
-      )}
+      {/* ── Grid + sticky summary: responsive two-column layout. Static Tailwind
+          classes are LAYOUT ONLY — the inline-style rule applies to
+          state-dependent colours, which all stay inline below. ── */}
+      <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+        {/* ── Grid area ── */}
+        <div className="flex-1 min-w-0">
+          {loading && (
+            <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>
+              Loading availability...
+            </div>
+          )}
 
-      {error && (
-        <div
-          style={{
-            padding: '14px 16px',
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: '8px',
-            fontSize: '13px',
-            color: '#FD5602',
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {!loading && !error && visibleColumns.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '32px 16px' }}>
-          <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-            No openings this week.
-          </p>
-          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-            Use the arrow above to check the next week.
-          </p>
-        </div>
-      )}
-
-      {!loading && !error && visibleColumns.length > 0 && (
-        // Horizontally scrollable on mobile; the time column stays sticky.
-        <div
-          style={{
-            overflowX: 'auto',
-            border: '1px solid #E0DFDC',
-            borderRadius: '12px',
-            backgroundColor: '#ffffff',
-          }}
-        >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: `56px repeat(${visibleColumns.length}, minmax(88px, 1fr))`,
-              gap: '3px',
-              padding: '10px',
-            }}
-          >
-            {/* Header row: sticky corner + one label per visible day column */}
+          {error && (
             <div
               style={{
-                position: 'sticky',
-                left: 0,
-                zIndex: 2,
+                padding: '14px 16px',
+                backgroundColor: '#fef2f2',
+                border: '1px solid #fecaca',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: '#FD5602',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && visibleColumns.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
+                No openings this week.
+              </p>
+              <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+                Use the arrow above to check the next week.
+              </p>
+            </div>
+          )}
+
+          {!loading && !error && visibleColumns.length > 0 && (
+            // Horizontally scrollable on mobile; the time column stays sticky.
+            <div
+              style={{
+                overflowX: 'auto',
+                border: '1px solid #E0DFDC',
+                borderRadius: '12px',
                 backgroundColor: '#ffffff',
               }}
-            />
-            {visibleColumns.map((key) => {
-              const day = columnDate(key)
-              return (
-                <div key={key} style={{ textAlign: 'center', padding: '4px 2px' }}>
-                  <p
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: '500',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      color: '#6b7280',
-                    }}
-                  >
-                    {weekdayFormatter.format(day)}
-                  </p>
-                  <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-                    {dayMonthFormatter.format(day)}
-                  </p>
-                </div>
-              )
-            })}
-
-            {/* Time rows, band by band, with a gap marker between bands */}
-            {bands.map((band, bandIdx) => (
-              <div key={band[0]} style={{ display: 'contents' }}>
-                {bandIdx > 0 && (
-                  <div
-                    style={{
-                      gridColumn: '1 / -1',
-                      textAlign: 'center',
-                      padding: '3px 0',
-                      fontSize: '10px',
-                      letterSpacing: '3px',
-                      color: '#d1d5db',
-                      backgroundColor: '#fbfaf9',
-                      borderRadius: '6px',
-                    }}
-                  >
-                    · · ·
-                  </div>
-                )}
-                {band.map((minutes) => (
-                  <div key={minutes} style={{ display: 'contents' }}>
-                    {/* Sticky time column */}
-                    <div
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        zIndex: 2,
-                        backgroundColor: '#ffffff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'flex-end',
-                        paddingRight: '8px',
-                        fontSize: '12px',
-                        fontWeight: '500',
-                        color: '#6b7280',
-                      }}
-                    >
-                      {formatRowLabel(minutes)}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  // Fixed 7-day Mon–Sun frame: every column renders every week,
+                  // all at identical widths — empty days are all-grey columns.
+                  gridTemplateColumns: '56px repeat(7, minmax(88px, 1fr))',
+                  gap: '3px',
+                  padding: '10px',
+                }}
+              >
+                {/* Header row: sticky corner + one label per day column */}
+                <div
+                  style={{
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 2,
+                    backgroundColor: '#ffffff',
+                  }}
+                />
+                {columnKeys.map((key) => {
+                  const day = columnDate(key)
+                  return (
+                    <div key={key} style={{ textAlign: 'center', padding: '4px 2px' }}>
+                      <p
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: '500',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          color: '#6b7280',
+                        }}
+                      >
+                        {weekdayFormatter.format(day)}
+                      </p>
+                      <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
+                        {dayMonthFormatter.format(day)}
+                      </p>
                     </div>
-                    {visibleColumns.map((key) => {
-                      const slot = cellMaps.get(key)?.get(minutes)
-                      // bookable:false deliberately merges "blocked/booked" with
-                      // "free but the remaining run is too short for the chosen
-                      // duration" — the raw available flag was discarded in
-                      // Stage A, so both render as the same grey cell. A cell
-                      // with no slot at all on this row renders grey too.
-                      if (slot === undefined || !slot.bookable) {
-                        return (
-                          <div
-                            key={key}
-                            aria-hidden="true"
-                            style={{
-                              minHeight: '34px',
-                              borderRadius: '6px',
-                              backgroundColor: CELL_GREY_BG,
-                            }}
-                          />
-                        )
-                      }
-                      const isSelected = slot.startIso === selectedStartIso
-                      return (
-                        <button
-                          key={key}
-                          onClick={() => setSelectedStartIso(slot.startIso)}
-                          aria-pressed={isSelected}
+                  )
+                })}
+
+                {/* Time rows, band by band, with a gap marker between bands */}
+                {bands.map((band, bandIdx) => (
+                  <div key={band[0]} style={{ display: 'contents' }}>
+                    {bandIdx > 0 && (
+                      <div
+                        style={{
+                          gridColumn: '1 / -1',
+                          textAlign: 'center',
+                          padding: '3px 0',
+                          fontSize: '10px',
+                          letterSpacing: '3px',
+                          color: '#d1d5db',
+                          backgroundColor: '#fbfaf9',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        · · ·
+                      </div>
+                    )}
+                    {band.map((minutes) => (
+                      <div key={minutes} style={{ display: 'contents' }}>
+                        {/* Sticky time column */}
+                        <div
                           style={{
-                            minHeight: '34px',
-                            borderRadius: '6px',
-                            border: 'none',
-                            cursor: 'pointer',
+                            position: 'sticky',
+                            left: 0,
+                            zIndex: 2,
+                            backgroundColor: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            paddingRight: '8px',
                             fontSize: '12px',
-                            fontWeight: '600',
-                            backgroundColor: isSelected ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
-                            color: isSelected ? CELL_SELECTED_TEXT : CELL_BOOKABLE_TEXT,
+                            fontWeight: '500',
+                            color: '#6b7280',
                           }}
                         >
-                          {formatSlotTime(slot.startIso, studentTimezone)}
-                        </button>
-                      )
-                    })}
+                          {formatRowLabel(minutes)}
+                        </div>
+                        {columnKeys.map((key) => {
+                          const slot = cellMaps.get(key)?.get(minutes)
+                          // bookable:false deliberately merges "blocked/booked" with
+                          // "free but the remaining run is too short for the chosen
+                          // duration" — the raw available flag was discarded in
+                          // Stage A, so both render as the same grey cell. A cell
+                          // with no slot at all on this row renders grey too.
+                          if (slot === undefined || !slot.bookable) {
+                            return (
+                              <div
+                                key={key}
+                                aria-hidden="true"
+                                style={{
+                                  minHeight: '28px',
+                                  borderRadius: '6px',
+                                  backgroundColor: CELL_GREY_BG,
+                                }}
+                              />
+                            )
+                          }
+                          const isSelected = slot.startIso === selectedStartIso
+                          // Text-less cell: the slot time lives in the aria-label
+                          // (and in the summary column once selected).
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => setSelectedStartIso(slot.startIso)}
+                              aria-pressed={isSelected}
+                              aria-label={`Book ${formatSlotTime(slot.startIso, studentTimezone)}`}
+                              style={{
+                                minHeight: '28px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                cursor: 'pointer',
+                                backgroundColor: isSelected ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Confirm panel — space reserved so selecting a slot never jumps the layout ── */}
-      <div style={{ minHeight: '260px', marginTop: '14px' }}>
-        {selectedStart !== null && selectedEnd !== null ? (
-          <div>
-            {/* Teacher context strip */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                flexWrap: 'wrap',
-                padding: '8px 16px',
-                backgroundColor: '#ffffff',
-                border: '1px solid #E0DFDC',
-                borderRadius: '10px',
-                marginBottom: '10px',
-              }}
-            >
-              {selectedTeacher.photo_url ? (
-                <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
-                  <Image
-                    src={selectedTeacher.photo_url}
-                    alt={selectedTeacher.full_name}
-                    width={36}
-                    height={36}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    backgroundColor: '#f3f4f6',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <User size={18} color="#9ca3af" />
-                </div>
-              )}
-              <div style={{ flex: 1, minWidth: '120px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
-                  {selectedTeacher.full_name}
-                </p>
-                {selectedTeacher.reviewCount > 0 && (
-                  <RatingLine avgRating={selectedTeacher.avgRating} reviewCount={selectedTeacher.reviewCount} starSize={12} />
-                )}
-              </div>
             </div>
+          )}
+        </div>
 
-            {/* Details card */}
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #E0DFDC',
-                borderRadius: '12px',
-                overflow: 'hidden',
-                marginBottom: '10px',
-              }}
-            >
-              {/* Date & time — full-width row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '9px 20px' }}>
-                {renderCell(
-                  Calendar,
-                  'Date & time',
-                  `${longDateFormatter.format(selectedStart)} · ${timeFormatter.format(selectedStart)} – ${timeFormatter.format(selectedEnd)}`
-                )}
-              </div>
-
-              {/* Duration + Hours deducted — two columns in one row */}
+        {/* ── Sticky summary column — the confirm panel, restacked for 280px ── */}
+        <aside className="w-full lg:w-[280px] lg:shrink-0 lg:sticky lg:top-4">
+          {selectedStart !== null && selectedEnd !== null ? (
+            <div>
+              {/* Teacher context strip */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
-                  padding: '9px 20px',
-                  borderTop: '1px solid #f3f4f6',
+                  flexWrap: 'wrap',
+                  padding: '8px 16px',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #E0DFDC',
+                  borderRadius: '10px',
+                  marginBottom: '10px',
                 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                {selectedTeacher.photo_url ? (
+                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                    <Image
+                      src={selectedTeacher.photo_url}
+                      alt={selectedTeacher.full_name}
+                      width={36}
+                      height={36}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      backgroundColor: '#f3f4f6',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <User size={18} color="#9ca3af" />
+                  </div>
+                )}
+                <div style={{ flex: 1, minWidth: '120px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827' }}>
+                    {selectedTeacher.full_name}
+                  </p>
+                  {selectedTeacher.reviewCount > 0 && (
+                    <RatingLine avgRating={selectedTeacher.avgRating} reviewCount={selectedTeacher.reviewCount} starSize={12} />
+                  )}
+                </div>
+              </div>
+
+              {/* Details card — rows stacked vertically for the narrow column */}
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #E0DFDC',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                  marginBottom: '10px',
+                }}
+              >
+                {/* Date & time */}
+                <div style={{ padding: '9px 20px' }}>
+                  {renderCell(
+                    Calendar,
+                    'Date & time',
+                    `${longDateFormatter.format(selectedStart)} · ${timeFormatter.format(selectedStart)} – ${timeFormatter.format(selectedEnd)}`
+                  )}
+                </div>
+
+                {/* Duration */}
+                <div style={{ padding: '9px 20px', borderTop: '1px solid #f3f4f6' }}>
                   {renderCell(Clock, 'Duration', formatHours(selectedDuration / 60))}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+
+                {/* Hours deducted */}
+                <div style={{ padding: '9px 20px', borderTop: '1px solid #f3f4f6' }}>
                   {renderCell(Wallet, 'Hours deducted', formatHours(isReschedule ? 0 : hoursUsed))}
+                </div>
+
+                {/* Remaining after booking + the balance pill, stacked */}
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '8px',
+                    padding: '9px 20px',
+                    borderTop: '1px solid #f3f4f6',
+                  }}
+                >
+                  {renderCell(ChartNoAxesColumn, 'Remaining after booking', formatHours(hoursAfter))}
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      backgroundColor: '#FFF0DC',
+                      borderRadius: '999px',
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      color: '#FF8303',
+                    }}
+                  >
+                    {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
+                  </span>
+                </div>
+
+                {/* Cancellation footnote */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '9px 20px',
+                    backgroundColor: '#f9fafb',
+                    borderTop: '1px solid #f3f4f6',
+                  }}
+                >
+                  <Info size={16} color="#6b7280" style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: '13px', color: '#6b7280' }}>
+                    You can change or cancel up to 24 hours before your lesson.
+                  </span>
                 </div>
               </div>
 
-              {/* Remaining after booking — full-width row with the balance pill */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '9px 20px',
-                  borderTop: '1px solid #f3f4f6',
-                }}
-              >
-                {renderCell(ChartNoAxesColumn, 'Remaining after booking', formatHours(hoursAfter))}
-                <span
+              {hoursAfter < 2 && hoursAfter >= 0 && (
+                <div
                   style={{
-                    flexShrink: 0,
-                    backgroundColor: '#FFF0DC',
-                    borderRadius: '999px',
-                    padding: '4px 12px',
+                    padding: '12px 16px',
+                    backgroundColor: '#fffbeb',
+                    border: '1px solid #fde68a',
+                    borderRadius: '8px',
                     fontSize: '13px',
-                    fontWeight: '600',
-                    color: '#FF8303',
+                    color: '#92400e',
+                    marginBottom: '10px',
                   }}
                 >
-                  {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
-                </span>
-              </div>
+                  After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
+                </div>
+              )}
 
-              {/* Cancellation footnote */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '9px 20px',
-                  backgroundColor: '#f9fafb',
-                  borderTop: '1px solid #f3f4f6',
-                }}
-              >
-                <Info size={16} color="#6b7280" style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                  You can change or cancel up to 24 hours before your lesson.
-                </span>
-              </div>
-            </div>
+              {submitError && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    backgroundColor: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    color: '#FD5602',
+                    marginBottom: '10px',
+                  }}
+                >
+                  {submitError}
+                </div>
+              )}
 
-            {hoursAfter < 2 && hoursAfter >= 0 && (
-              <div
-                style={{
-                  padding: '12px 16px',
-                  backgroundColor: '#fffbeb',
-                  border: '1px solid #fde68a',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  color: '#92400e',
-                  marginBottom: '10px',
-                }}
-              >
-                After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
-              </div>
-            )}
-
-            {submitError && (
-              <div
-                style={{
-                  padding: '12px 16px',
-                  backgroundColor: '#fef2f2',
-                  border: '1px solid #fecaca',
-                  borderRadius: '8px',
-                  fontSize: '13px',
-                  color: '#FD5602',
-                  marginBottom: '10px',
-                }}
-              >
-                {submitError}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 onClick={handleConfirm}
                 disabled={isSubmitting}
                 onMouseEnter={() => setConfirmHover(true)}
                 onMouseLeave={() => setConfirmHover(false)}
                 style={{
+                  width: '100%',
                   padding: '12px 32px',
                   backgroundColor: confirmHover && !isSubmitting ? '#FD7000' : '#FF8303',
                   color: '#ffffff',
@@ -1453,23 +1457,23 @@ export default function BookingGridClient({
                 {isSubmitting ? 'Booking...' : 'Confirm Booking'}
               </button>
             </div>
-          </div>
-        ) : (
-          <div
-            style={{
-              minHeight: '260px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px dashed #E0DFDC',
-              borderRadius: '12px',
-            }}
-          >
-            <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', padding: '0 16px' }}>
-              {submitError ?? 'Select a time slot to review and confirm your booking.'}
-            </p>
-          </div>
-        )}
+          ) : (
+            <div
+              style={{
+                minHeight: '260px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px dashed #E0DFDC',
+                borderRadius: '12px',
+              }}
+            >
+              <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', padding: '0 16px' }}>
+                {submitError ?? 'Select a time slot to review and confirm your booking.'}
+              </p>
+            </div>
+          )}
+        </aside>
       </div>
 
       {profileTeacher && (
