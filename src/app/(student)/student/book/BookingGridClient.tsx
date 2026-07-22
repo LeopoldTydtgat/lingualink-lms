@@ -782,6 +782,15 @@ export default function BookingGridClient({
     { minutes: 90, label: '90 min', hours: 1.5 },
   ]
 
+  // Legend entries — swatch colours come from the cell colour consts so a
+  // palette swap up top re-skins the legend automatically. Decorative only.
+  const legendItems = [
+    { label: 'Available', bg: CELL_BOOKABLE_BG, border: 'none' },
+    { label: 'Unavailable', bg: CELL_GREY_BG, border: 'none' },
+    // Matches a real selected cell: selected bg + 1px #FF8303 border.
+    { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
+  ]
+
   // Shared icon+label+value cell used by every confirm-panel row.
   const renderCell = (Icon: LucideIcon, label: string, value: string) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
@@ -1073,23 +1082,30 @@ export default function BookingGridClient({
           <ChevronLeft size={16} color="#4b5563" />
         </button>
           <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>{weekLabel}</span>
-          {!isCurrentWeek && (
-            <button
-              onClick={goThisWeek}
-              style={{
-                padding: '4px 10px',
-                border: '1px solid #E0DFDC',
-                borderRadius: '999px',
-                backgroundColor: '#ffffff',
-                fontSize: '12px',
-                fontWeight: '500',
-                color: '#4b5563',
-                cursor: 'pointer',
-              }}
-            >
-              This week
-            </button>
-          )}
+          {/* Always mounted so the Week group's width never changes: on the
+              current week it goes visibility:hidden (still occupies layout,
+              so navigating weeks cannot rewrap the toolbar) and is made
+              unreachable (disabled, no tab stop, hidden from AT). Never
+              display:none / conditional mount — that gives the space back. */}
+          <button
+            onClick={goThisWeek}
+            disabled={isCurrentWeek}
+            tabIndex={isCurrentWeek ? -1 : undefined}
+            aria-hidden={isCurrentWeek}
+            style={{
+              padding: '4px 10px',
+              border: '1px solid #E0DFDC',
+              borderRadius: '999px',
+              backgroundColor: '#ffffff',
+              fontSize: '12px',
+              fontWeight: '500',
+              color: '#4b5563',
+              cursor: 'pointer',
+              visibility: isCurrentWeek ? 'hidden' : 'visible',
+            }}
+          >
+            This week
+          </button>
         <button
           onClick={goForward}
           aria-label="Next week"
@@ -1296,6 +1312,35 @@ export default function BookingGridClient({
                         })}
                       </div>
                     ))}
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Colour legend — single line under the grid, decorative ── */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  padding: '2px 12px 10px',
+                }}
+              >
+                {legendItems.map((item) => (
+                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '4px',
+                        backgroundColor: item.bg,
+                        border: item.border,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ fontSize: '12px', color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
                   </div>
                 ))}
               </div>
