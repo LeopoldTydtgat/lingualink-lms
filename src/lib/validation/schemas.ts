@@ -30,12 +30,6 @@ const ACCOUNT_TYPES = [
   'staff',
 ] as const
 
-// Transitional (ROLE-2): live profiles may still carry legacy 'hr_admin' /
-// 'school_admin' values until ROLE-3 cleans the data, so UpdateTeacherSchema
-// alone parses them (round-trip, no rejection, no silent rewrite). Collapse
-// to ACCOUNT_TYPES in ROLE-4 after ROLE-3 cleans live data.
-const LEGACY_ACCOUNT_TYPES = [...ACCOUNT_TYPES, 'hr_admin', 'school_admin'] as const
-
 const PROFILE_STATUS = ['current', 'former', 'on_hold'] as const
 
 const CANCELLATION_POLICY = ['24hr', '48hr'] as const
@@ -145,9 +139,8 @@ export type CreateStudentInput = z.infer<typeof CreateStudentSchema>
 export const UpdateTeacherSchema = z.object({
   full_name: z.string().min(1).max(100).optional(),
   timezone: z.string().min(1).max(100).optional(),
-  account_types: z.array(z.enum(LEGACY_ACCOUNT_TYPES)).min(1).optional(),
+  account_types: z.array(z.enum(ACCOUNT_TYPES)).min(1).optional(),
   status: z.enum(PROFILE_STATUS).optional(),
-  role: z.enum(['teacher', 'admin']).optional(),
   teacher_type: z.enum(['teacher', 'teacher_exam']).optional(),
   contract_start: dateString,
   orientation_date: dateString,

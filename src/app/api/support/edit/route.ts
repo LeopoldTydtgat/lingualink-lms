@@ -18,18 +18,22 @@ export async function POST(request: Request) {
     }
 
     // Security: authenticated has no UPDATE grant on support_messages.content, so the
-    // edit runs through the admin client after an explicit ownership check. A non-admin
-    // may edit only their own messages (participant_auth_id match, sender_role 'user');
-    // an admin may edit only admin replies they authored themselves (NEW336:
-    // sender_auth_id match) or legacy admin rows with no author recorded
-    // (sender_auth_id NULL — deliberately editable by any admin, no backfill).
+    // edit runs through the admin client after an explicit ownership check. A plain
+    // user may edit only their own messages (participant_auth_id match, sender_role
+    // 'user'); role='admin' (the school owner) may edit only admin replies they
+    // authored themselves (NEW336: sender_auth_id match) or legacy admin rows with
+    // no author recorded (sender_auth_id NULL — deliberately editable by the admin,
+    // no backfill); staff (ROLE-5a: account_types contains 'staff' AND
+    // status='current') may edit support replies they authored PLUS their own
+    // user messages (their own thread, where they act as a plain user) — never
+    // legacy-NULL rows, never other people's replies or messages.
     // Fail closed on any lookup error. The role lookup fails safe too: a query
-    // error returns 500 rather than silently demoting the sender to non-admin
+    // error returns 500 rather than silently demoting the sender to non-staff
     // (zero rows is normal — students have no profiles row).
     const admin = createAdminClient()
     const { data: senderProfile, error: senderProfileError } = await admin
       .from('profiles')
-      .select('role')
+      .select('role, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -39,6 +43,8 @@ export async function POST(request: Request) {
     }
 
     const isAdmin = senderProfile?.role === 'admin'
+    const isStaffOrAdmin = isAdmin ||
+      (senderProfile?.account_types?.includes('staff') && senderProfile?.status === 'current')
 
     const { data: target, error: fetchError } = await admin
       .from('support_messages')
@@ -57,7 +63,10 @@ export async function POST(request: Request) {
     const canEdit = isAdmin
       ? target.sender_role === 'admin' &&
         (target.sender_auth_id === null || target.sender_auth_id === user.id)
-      : target.participant_auth_id === user.id && target.sender_role === 'user'
+      : isStaffOrAdmin
+        ? (target.sender_role === 'admin' && target.sender_auth_id === user.id) ||
+          (target.participant_auth_id === user.id && target.sender_role === 'user')
+        : target.participant_auth_id === user.id && target.sender_role === 'user'
     if (!canEdit) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -101,9 +110,12 @@ export async function POST(request: Request) {
       ? updateQuery
           .eq('sender_role', 'admin')
           .or(`sender_auth_id.is.null,sender_auth_id.eq.${user.id}`)
-      : updateQuery
-          .eq('participant_auth_id', user.id)
-          .eq('sender_role', 'user')
+      : isStaffOrAdmin
+        ? updateQuery
+            .or(`and(sender_role.eq.admin,sender_auth_id.eq.${user.id}),and(sender_role.eq.user,participant_auth_id.eq.${user.id})`)
+        : updateQuery
+            .eq('participant_auth_id', user.id)
+            .eq('sender_role', 'user')
 
     const { data: updated, error } = await updateQuery
       .select('id, sender_role, content, attachments, created_at, read_at, edited_at')

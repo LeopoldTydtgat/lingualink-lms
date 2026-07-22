@@ -89,7 +89,7 @@ export async function GET(
     const ownerOk = sheet.owner_id === null || sheet.owner_id === user.id
 
     let access = false
-    if (profile?.role === 'admin' || accountTypes.includes('school_admin')) {
+    if (profile?.role === 'admin') {
       access = true
     } else if (accountTypes.includes('teacher_exam')) {
       access = (isStudentAudience || allowedRoles.includes('teacher') || allowedRoles.includes('teacher_exam')) && ownerOk

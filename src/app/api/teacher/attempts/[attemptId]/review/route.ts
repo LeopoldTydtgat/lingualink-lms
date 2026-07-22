@@ -39,7 +39,7 @@ export async function POST(
     // unauthenticated.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role, account_types')
+      .select('role')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -47,9 +47,7 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const isAdmin =
-      profile.role === 'admin' ||
-      (Array.isArray(profile.account_types) && profile.account_types.includes('school_admin'))
+    const isAdmin = profile.role === 'admin'
     if (profile.role !== 'teacher' && !isAdmin) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }

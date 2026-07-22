@@ -1,8 +1,10 @@
-﻿'use client'
-import TaskForm from '@/components/admin/TaskForm'
-import { use } from 'react'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
+import EditTaskPageClient from './EditTaskPageClient'
 
-export default function EditTaskPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
-  return <TaskForm mode="edit" taskId={id} />
+export default async function EditTaskPage({ params }: { params: Promise<{ id: string }> }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
+  return <EditTaskPageClient params={params} />
 }

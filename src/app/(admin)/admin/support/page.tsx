@@ -1,22 +1,15 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import { redirect } from 'next/navigation'
 import AdminSupportClient from './AdminSupportClient'
 
 export default async function AdminSupportPage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  // ROLE-5a: support inbox is staff-or-admin (requireStaff). Plain teachers
+  // land back on the teacher portal.
+  const user = await requireStaff()
+  if (!user) redirect('/dashboard')
 
   const admin = createAdminClient()
-
-  const { data: adminProfile } = await admin
-    .from('profiles')
-    .select('id, full_name, photo_url, role')
-    .eq('id', user.id)
-    .single()
-
-  if (adminProfile?.role !== 'admin') redirect('/admin')
 
   const { data: allMessages } = await admin
     .from('support_messages')
@@ -92,7 +85,9 @@ export default async function AdminSupportPage() {
 
   return (
     <AdminSupportClient
-      adminProfile={adminProfile}
+      // ROLE-5a: one service identity — replies display as "LinguaLink Support",
+      // never the staff member's personal name/photo.
+      adminProfile={{ id: user.id, full_name: 'LinguaLink Support', photo_url: null }}
       conversations={conversations}
       initialFaqs={faqs ?? []}
     />

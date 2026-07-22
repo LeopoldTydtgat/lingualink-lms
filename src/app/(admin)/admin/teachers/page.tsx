@@ -1,8 +1,13 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { TEACHER_PROFILE_FILTER } from '@/lib/auth/isTeacherProfile'
 import TeachersListClient from './TeachersListClient'
 
 export default async function TeachersPage() {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const supabase = createAdminClient()
 
   // Fetch all teachers — hourly_rate is admin-only and served via service role

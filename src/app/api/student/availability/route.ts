@@ -29,11 +29,11 @@ export async function GET(req: NextRequest) {
   // have no profiles row -> maybeSingle returns null -> isAdmin false.
   const { data: callerProfile } = await supabase
     .from('profiles')
-    .select('account_types')
+    .select('role, account_types')
     .eq('id', user.id)
     .maybeSingle()
   const isAdmin =
-    callerProfile?.account_types?.includes('school_admin') ||
+    callerProfile?.role === 'admin' ||
     callerProfile?.account_types?.includes('staff')
 
   const { searchParams } = new URL(req.url)

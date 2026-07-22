@@ -1,5 +1,6 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import EditTeacherClient from './EditTeacherClient'
 
 export default async function EditTeacherPage({
@@ -9,6 +10,9 @@ export default async function EditTeacherPage({
   params: Promise<{ id: string }>
   searchParams: Promise<{ section?: string }>
 }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const { id } = await params
   const { section } = await searchParams
   const supabase = createAdminClient()

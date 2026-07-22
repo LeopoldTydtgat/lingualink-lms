@@ -1,5 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import StudentsListClient from './StudentsListClient'
 
 export default async function StudentsPage({
@@ -7,6 +9,9 @@ export default async function StudentsPage({
 }: {
   searchParams: Promise<{ filter?: string }>
 }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   // Stat-card deep link (/admin/students?filter=low_hours) seeds the Low Hours
   // toggle. Any other value leaves the toggle off.
   const { filter } = await searchParams

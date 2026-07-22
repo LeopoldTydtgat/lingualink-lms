@@ -196,13 +196,6 @@ export default async function DashboardLayout({
     .eq('receiver_id', user.id)
     .is('read_at', null)
 
-  const { data: adminProfile } = await supabase
-    .from('profiles')
-    .select('id, full_name, photo_url')
-    .eq('role', 'admin')
-    .limit(1)
-    .maybeSingle()
-
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
@@ -279,8 +272,8 @@ export default async function DashboardLayout({
           participantId={profile?.id ?? ''}
           participantType="teacher"
           participantAuthId={user.id}
-          adminName={adminProfile?.full_name ?? 'Shannon'}
-          adminPhotoUrl={adminProfile?.photo_url ?? null}
+          adminName="LinguaLink Support"
+          adminPhotoUrl={null}
         />
       )}
 

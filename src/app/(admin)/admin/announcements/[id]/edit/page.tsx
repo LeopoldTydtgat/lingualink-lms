@@ -4,7 +4,8 @@
 
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import AnnouncementForm from '../../AnnouncementForm'
 
 export default async function EditAnnouncementPage({
@@ -12,6 +13,9 @@ export default async function EditAnnouncementPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   // Next.js 15 — params is a Promise
   const { id } = await params
 

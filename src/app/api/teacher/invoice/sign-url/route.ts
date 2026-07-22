@@ -32,17 +32,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invoice not found.' }, { status: 404 })
     }
 
-    // Owner can always view. Admins (role='admin' or account_types contains
-    // school_admin) can view any teacher's invoice.
+    // Owner can always view. The admin (role='admin') can view any teacher's
+    // invoice. Billing surface — staff account_types deliberately do NOT pass.
     let allowed = invoice.teacher_id === user.id
     if (!allowed) {
       const { data: profile } = await adminClient
         .from('profiles')
-        .select('role, account_types')
+        .select('role')
         .eq('id', user.id)
         .maybeSingle()
-      const accountTypes = Array.isArray(profile?.account_types) ? profile.account_types : []
-      allowed = profile?.role === 'admin' || accountTypes.includes('school_admin')
+      allowed = profile?.role === 'admin'
     }
 
     if (!allowed) {

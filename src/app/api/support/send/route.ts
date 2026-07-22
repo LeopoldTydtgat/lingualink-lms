@@ -29,14 +29,14 @@ export async function POST(request: Request) {
     }
     const safeAttachments = validation.attachments
 
-    // Security: non-admin users can only send for themselves. Fail safe on the
+    // Security: non-staff users can only send for themselves. Fail safe on the
     // role lookup: a query error returns 500 rather than silently demoting the
-    // sender to non-admin. Zero rows is NOT an error here (students have no
+    // sender to non-staff. Zero rows is NOT an error here (students have no
     // profiles row), so .maybeSingle() — a missing profile is a normal user send.
     const admin = createAdminClient()
     const { data: senderProfile, error: senderProfileError } = await admin
       .from('profiles')
-      .select('role, full_name, email')
+      .select('role, full_name, email, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -45,9 +45,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
     }
 
-    const isAdmin = senderProfile?.role === 'admin'
+    // ROLE-5a: support answering is staff-or-admin. role='admin' is the school
+    // owner; staff = account_types contains 'staff' AND status='current'.
+    const isStaffOrAdmin = senderProfile?.role === 'admin' ||
+      (senderProfile?.account_types?.includes('staff') && senderProfile?.status === 'current')
 
-    if (!isAdmin && user.id !== participantAuthId) {
+    // A staff/admin member sending into their OWN thread is a user asking for
+    // support, not support answering. Service identity applies only to replies
+    // in other participants' threads.
+    const isActingAsSupport = isStaffOrAdmin && user.id !== participantAuthId
+
+    if (!isStaffOrAdmin && user.id !== participantAuthId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -71,10 +79,12 @@ export async function POST(request: Request) {
         participant_id: participantId,
         participant_type: participantType,
         participant_auth_id: participantAuthId,
-        sender_role: isAdmin ? 'admin' : 'user',
-        // NEW336: attribute admin replies to the admin who wrote them (auth uid).
+        // ROLE-5a: one service identity ("LinguaLink Support") — staff replies
+        // carry sender_role 'admin' too; there is no 'staff' sender_role.
+        sender_role: isActingAsSupport ? 'admin' : 'user',
+        // NEW336: attribute admin/staff replies to the author (auth uid).
         // User rows stay NULL — participant_auth_id already identifies the sender.
-        sender_auth_id: isAdmin ? user.id : null,
+        sender_auth_id: isActingAsSupport ? user.id : null,
         content: safeContent,
         attachments: safeAttachments,
       })

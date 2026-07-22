@@ -28,7 +28,7 @@ export default async function WorksheetResponsesPage({
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, account_types')
+    .select('role')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -43,11 +43,9 @@ export default async function WorksheetResponsesPage({
     )
   }
 
-  // Mirror the assign route: role teacher OR admin/school_admin. This surface
-  // uses the admin client, so the gate must be explicit (no RLS backstop).
-  const isAdmin =
-    profile.role === 'admin' ||
-    (Array.isArray(profile.account_types) && profile.account_types.includes('school_admin'))
+  // Mirror the assign route: role teacher OR admin. This surface uses the
+  // admin client, so the gate must be explicit (no RLS backstop).
+  const isAdmin = profile.role === 'admin'
   const isAuthorized = profile.role === 'teacher' || isAdmin
   if (!isAuthorized) notFound()
 

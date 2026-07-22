@@ -82,7 +82,7 @@ export async function GET(
     // whichever one the row's *_type calls for.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, role, account_types')
+      .select('id, role, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -98,8 +98,13 @@ export async function GET(
       return forbidden()
     }
 
-    const accountTypes: string[] = Array.isArray(profile?.account_types) ? profile.account_types : []
-    const isAdmin = profile?.role === 'admin' || accountTypes.includes('school_admin')
+    const isAdmin = profile?.role === 'admin'
+    // ROLE-5a: staff (account_types contains 'staff' AND status='current') read
+    // support threads too, so they must be able to fetch support attachments.
+    // Used ONLY by the support branch below — the messages branch keeps its
+    // admin-or-participant gate.
+    const isStaffOrAdmin = isAdmin ||
+      (profile?.account_types?.includes('staff') && profile?.status === 'current')
 
     // --- Resolve the row ---
     // Service-role load: the auth gate above already ran, and the download below needs
@@ -126,9 +131,9 @@ export async function GET(
 
       // participant_auth_id holds the non-admin participant's AUTH uuid (never a table
       // PK), so it compares against user.id directly. A support thread carries no
-      // admin-side column: any admin may read every thread, which is exactly what the
-      // admin support console renders.
-      allowed = isAdmin || user.id === row.participant_auth_id
+      // admin-side column: any staff-or-admin may read every thread, which is exactly
+      // what the support console (staff-or-admin since ROLE-5a) renders.
+      allowed = isStaffOrAdmin || user.id === row.participant_auth_id
       attachments = Array.isArray(row.attachments) ? row.attachments : []
 
       isUploaderTheSender = async (uploaderUuid: string) => {
@@ -145,11 +150,9 @@ export async function GET(
           // produced it — typically a pre-NEW336 admin reply, but nothing in the schema
           // enforces that provenance, so this branch assumes nothing about the row's age.
           // With no author to bind to, accept only the two uuids that could own the object:
-          // the thread's participant, or a role='admin' profile. Anything else fails closed.
-          // account_types 'school_admin' is deliberately NOT accepted — api/support/send
-          // keys sender_role on role === 'admin' alone, so a school_admin without that role
-          // can never author an admin row, and admitting them would widen the loosest
-          // branch to a uuid class that is provably never a legitimate author.
+          // the thread's participant, or a role='admin' profile. Anything else fails closed
+          // — api/support/send keys sender_role on role === 'admin' alone, so no other
+          // account can ever author an admin row.
           //
           // The looseness is safe because planting a path means WRITING attachments on an
           // existing row, which no caller can do: the live-DB grant check (15 Jul 2026)

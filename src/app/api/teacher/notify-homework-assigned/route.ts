@@ -14,14 +14,13 @@ export async function POST(request: Request) {
   // display name must come from the session profile, never from the body.
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, role, account_types')
+    .select('full_name, role')
     .eq('id', user.id)
     .single()
 
   const isAuthorized =
     profile?.role === 'teacher' ||
-    profile?.role === 'admin' ||
-    (profile?.account_types ?? []).includes('school_admin')
+    profile?.role === 'admin'
 
   if (!profile || !isAuthorized) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
