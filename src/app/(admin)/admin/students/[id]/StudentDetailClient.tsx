@@ -108,6 +108,8 @@ type Props = {
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
   assignments: Assignment[]
+  /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
+  isStaffView?: boolean
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messages' | 'reviews'
@@ -380,6 +382,7 @@ export default function StudentDetailClient({
   conversations,
   purgeBlockedBy,
   assignments: initialAssignments,
+  isStaffView = false,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -548,7 +551,7 @@ export default function StudentDetailClient({
     }
   }
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
+  const allTabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'classes', label: 'Classes', count: lessons.length },
     { key: 'hours', label: 'Hours Log', count: hoursLog.length },
@@ -557,6 +560,9 @@ export default function StudentDetailClient({
     { key: 'messages', label: 'Messages', count: conversations.length },
     { key: 'reviews', label: 'Reviews', count: reviews.length },
   ]
+  const tabs = isStaffView
+    ? allTabs.filter((t) => t.key === 'overview' || t.key === 'classes')
+    : allTabs
 
   const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400'
 
@@ -619,7 +625,8 @@ export default function StudentDetailClient({
             </div>
           </div>
 
-          {/* Action buttons + purge block notice */}
+          {/* Action buttons + purge block notice — mutation entry points, admin only */}
+          {!isStaffView && (
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             <div className="flex gap-2 flex-wrap justify-end">
               <button
@@ -662,6 +669,7 @@ export default function StudentDetailClient({
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
 
@@ -709,11 +717,11 @@ export default function StudentDetailClient({
             <InfoRow label="Full Name" value={fullName} />
             <InfoRow label="Email" value={student.email as string} />
             <InfoRow label="Phone" value={student.phone as string} />
-            <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />
+            {!isStaffView && <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />}
             <InfoRow label="Timezone" value={student.timezone as string} />
             <InfoRow label="Language Preference" value={student.language_preference as string} />
-            <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />
-            <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />
+            {!isStaffView && <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />}
+            {!isStaffView && <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />}
           </div>
 
           {/* Learning info */}
@@ -778,6 +786,7 @@ export default function StudentDetailClient({
           </div>
 
           {/* Admin notes */}
+          {!isStaffView && (
           <div className="rounded-xl border p-5 space-y-2"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
@@ -787,8 +796,10 @@ export default function StudentDetailClient({
               {(student.admin_notes as string) || 'No admin notes.'}
             </p>
           </div>
+          )}
 
           {/* Password override — admin only, full width */}
+          {!isStaffView && (
           <div className="col-span-2 rounded-xl border p-5 space-y-3"
             style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
             <h2 className="font-semibold" style={{ color: '#92400e' }}>
@@ -844,6 +855,7 @@ export default function StudentDetailClient({
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 
