@@ -34,7 +34,7 @@ import {
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
 const CELL_BOOKABLE_BG = '#E8F5E9'
 const CELL_GREY_BG = '#F7F6F4'
-const CELL_SELECTED_BG = '#FFA95C'
+const CELL_SELECTED_BG = '#FFC58A'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -807,45 +807,20 @@ export default function BookingGridClient({
   )
 
   return (
-    <div>
-      {/* ── Header row: title + timezone line left, balance right ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: '16px',
-          marginBottom: '10px',
-        }}
-      >
-        <div>
-          <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
-            {isReschedule ? 'Reschedule Class' : 'Book a Class'}
-          </h1>
-          <p style={{ fontSize: '12px', color: '#9ca3af' }}>
-            Times shown in your timezone: {studentTimezone}
-          </p>
-        </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            flexShrink: 0,
-            backgroundColor: '#ffffff',
-            border: '1px solid #E0DFDC',
-            borderRadius: '10px',
-            padding: '6px 12px',
-          }}
-        >
-          <Clock size={18} color="#FF8303" style={{ flexShrink: 0 }} />
-          <div>
-            <p style={{ fontSize: '11px', color: '#9ca3af', lineHeight: '1.3' }}>Training balance</p>
-            <p style={{ fontSize: '14px', fontWeight: '700', color: '#111827', lineHeight: '1.3' }}>
-              {formatHours(hoursRemaining)}
-            </p>
-          </div>
-        </div>
+    // Two top-level columns: everything except the summary aside lives in the
+    // left column; the aside is the root's second child. Static Tailwind
+    // classes are LAYOUT ONLY — state-dependent colours all stay inline.
+    <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+      {/* ── Left column: header, strips, toolbar, grid ── */}
+      <div className="flex-1 min-w-0">
+      {/* ── Header row: title + timezone line ── */}
+      <div style={{ marginBottom: '10px' }}>
+        <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
+          {isReschedule ? 'Reschedule Class' : 'Book a Class'}
+        </h1>
+        <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+          Times shown in your timezone: {studentTimezone}
+        </p>
       </div>
 
       {/* ── Original-lesson context strip (reschedule mode only) ── */}
@@ -912,21 +887,31 @@ export default function BookingGridClient({
         </div>
       )}
 
-      {/* ── Toolbar: teacher pills · duration pills · week nav (right edge), one
+      {/* ── Toolbar card: labelled teacher · duration · week groups, one
           wrapping row ── */}
       <div
+        className="shadow-sm"
         style={{
           display: 'flex',
           flexWrap: 'wrap',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           rowGap: '8px',
-          columnGap: '16px',
+          columnGap: '20px',
           marginBottom: '10px',
+          backgroundColor: '#ffffff',
+          border: '1px solid #f3f4f6',
+          borderRadius: '12px',
+          padding: '10px 14px',
         }}
       >
-        {/* ── Teacher pills — hidden entirely for single-teacher trainings ── */}
+        {/* ── Teacher group — hidden entirely (label included) for
+            single-teacher trainings ── */}
         {teachers.length > 1 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+              Teacher
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {teachers.map((teacher) => {
             const isSelected = teacher.id === selectedTeacherId
             // On a reschedule the teacher is locked: non-selected pills render
@@ -1015,11 +1000,16 @@ export default function BookingGridClient({
               </div>
             )
           })}
+            </div>
           </div>
         )}
 
-        {/* ── Duration pills — local-only recompute, no refetch ── */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+        {/* ── Duration group — local-only recompute, no refetch ── */}
+        <div>
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+            Duration
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
         {durationOptions.map((option) => {
           const canBook = hoursRemaining >= option.hours
           const isSelected = selectedDuration === option.minutes
@@ -1030,37 +1020,33 @@ export default function BookingGridClient({
               key={option.minutes}
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
+              title={!canBook ? 'Not enough hours remaining' : undefined}
               style={{
-                padding: '6px 12px',
+                padding: '8px 14px',
                 borderRadius: '999px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
                 backgroundColor: isSelected ? '#FFF0DC' : '#ffffff',
                 cursor: disabled ? 'not-allowed' : 'pointer',
                 opacity: disabled && !isSelected ? 0.5 : 1,
-                textAlign: 'center',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#111827',
               }}
             >
-              <span style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-                {option.label}
-              </span>
-              <span
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  fontWeight: '500',
-                  color: canBook ? '#9ca3af' : '#FD5602',
-                }}
-              >
-                {canBook ? `Uses ${formatHours(option.hours)}` : 'Not enough hours'}
-              </span>
+              {option.label}
             </button>
           )
         })}
+          </div>
         </div>
 
-        {/* ── Week navigation — pushed to the toolbar's right edge ── */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+        {/* ── Week group — prev · label · This week · next ── */}
+        <div>
+          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+            Week
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button
           onClick={goBack}
           disabled={isPrevDisabled}
@@ -1107,15 +1093,11 @@ export default function BookingGridClient({
         >
           <ChevronRight size={16} color="#4b5563" />
         </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Grid + sticky summary: responsive two-column layout. Static Tailwind
-          classes are LAYOUT ONLY — the inline-style rule applies to
-          state-dependent colours, which all stay inline below. ── */}
-      <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-        {/* ── Grid area ── */}
-        <div className="flex-1 min-w-0">
+      {/* ── Grid area: loading / error / empty / grid ── */}
           {loading && (
             <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>
               Loading availability...
@@ -1289,10 +1271,12 @@ export default function BookingGridClient({
               </div>
             </div>
           )}
-        </div>
+      {/* ── end left column ── */}
+      </div>
 
         {/* ── Sticky summary column — the confirm panel, styled to read as the
-            page's right panel (shell-panel visual language, StudentRightPanel) ── */}
+            page's right panel (shell-panel visual language, StudentRightPanel);
+            second child of the root two-column flex ── */}
         <aside className="w-full lg:w-[288px] lg:shrink-0 lg:sticky lg:top-0">
           {/* Panel header — matches the shell panel's section-header style */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
@@ -1495,7 +1479,6 @@ export default function BookingGridClient({
             </div>
           )}
         </aside>
-      </div>
 
       {profileTeacher && (
         <TeacherProfileModal
