@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2 } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
@@ -32,6 +32,7 @@ type RightPanelProps = {
   minAvailableHours?: number | null
   whatsNewItems?: WhatsNewItem[]
   whatsNewSeenAt?: string | null
+  showStaffTools?: boolean
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,6 +109,7 @@ export default function RightPanel({
   minAvailableHours = null,
   whatsNewItems = [],
   whatsNewSeenAt = null,
+  showStaffTools = false,
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
@@ -306,6 +308,37 @@ export default function RightPanel({
             </>
           )}
         </section>
+
+        {/* ── STAFF TOOLS ── */}
+        {showStaffTools && (
+          <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <div className="flex items-center gap-2 mb-2">
+              <Wrench size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Staff Tools</p>
+            </div>
+            <PanelButton
+              className="w-full text-sm mb-2"
+              onClick={() => router.push('/admin/classes')}
+            >
+              <CalendarClock size={14} className="mr-2" />
+              Manage Classes
+            </PanelButton>
+            <PanelButton
+              className="w-full text-sm mb-2"
+              onClick={() => router.push('/admin/students')}
+            >
+              <BookOpen size={14} className="mr-2" />
+              Students
+            </PanelButton>
+            <PanelButton
+              className="w-full text-sm"
+              onClick={() => router.push('/admin/support')}
+            >
+              <ArrowRight size={14} className="mr-2" />
+              Support Inbox
+            </PanelButton>
+          </section>
+        )}
 
         {/* ── BILLING SUMMARY ── */}
         <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
