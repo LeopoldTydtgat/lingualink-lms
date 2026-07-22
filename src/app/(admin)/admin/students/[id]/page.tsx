@@ -155,6 +155,7 @@ export default async function StudentDetailPage({
         .order('created_at', { ascending: false })
 
   // Fetch reports via lesson IDs belonging to this student
+  // (staff see these read-only in the Reports tab)
   const lessonIds = flatLessons.map((l) => l.id)
   let reports: {
     id: string
@@ -166,7 +167,7 @@ export default async function StudentDetailPage({
     teacher_name: string | null
   }[] = []
 
-  if (!isStaffView && lessonIds.length > 0) {
+  if (lessonIds.length > 0) {
     const { data: rawReports } = await supabase
       .from('reports')
       .select(`
@@ -204,24 +205,23 @@ export default async function StudentDetailPage({
     })
   }
 
-  // Fetch reviews submitted by this student (admin only — staff view skips it)
-  const { data: reviews } = isStaffView
-    ? { data: null }
-    : await supabase
-        .from('student_reviews')
-        .select(`
-          id,
-          rating,
-          review_text,
-          submitted_at,
-          admin_edited_text,
-          moderated_by_admin,
-          profiles:teacher_id (
-            full_name
-          )
-        `)
-        .eq('student_id', id)
-        .order('submitted_at', { ascending: false })
+  // Fetch reviews submitted by this student
+  // (staff see these read-only in the Reviews tab)
+  const { data: reviews } = await supabase
+    .from('student_reviews')
+    .select(`
+      id,
+      rating,
+      review_text,
+      submitted_at,
+      admin_edited_text,
+      moderated_by_admin,
+      profiles:teacher_id (
+        full_name
+      )
+    `)
+    .eq('student_id', id)
+    .order('submitted_at', { ascending: false })
 
   const flatReviews = (reviews || []).map((r) => ({
     id: r.id,
