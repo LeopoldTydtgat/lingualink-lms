@@ -807,20 +807,26 @@ export default function BookingGridClient({
   )
 
   return (
-    // Two top-level columns: everything except the summary aside lives in the
-    // left column; the aside is the root's second child. Static Tailwind
-    // classes are LAYOUT ONLY — state-dependent colours all stay inline.
-    <div className="flex flex-col lg:flex-row lg:items-start gap-4">
-      {/* ── Left column: header, strips, toolbar, grid ── */}
-      <div className="flex-1 min-w-0">
-      {/* ── Header row: title + timezone line ── */}
-      <div style={{ marginBottom: '10px' }}>
-        <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
-          {isReschedule ? 'Reschedule Class' : 'Book a Class'}
-        </h1>
-        <p style={{ fontSize: '12px', color: '#9ca3af' }}>
-          Times shown in your timezone: {studentTimezone}
-        </p>
+    // Row 0 (title + desktop summary header) and the full-width strips sit
+    // above the two-column flex; the aside is the flex's second child. Static
+    // Tailwind classes are LAYOUT ONLY — state-dependent colours all stay inline.
+    <div>
+      {/* ── Row 0: title + timezone line, desktop summary header ── */}
+      <div className="flex lg:items-end gap-4" style={{ marginBottom: '10px' }}>
+        <div className="flex-1 min-w-0">
+          <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
+            {isReschedule ? 'Reschedule Class' : 'Book a Class'}
+          </h1>
+          <p style={{ fontSize: '12px', color: '#9ca3af' }}>
+            Times shown in your timezone: {studentTimezone}
+          </p>
+        </div>
+        {/* Desktop summary header — width mirrors the aside so their tops align
+            (display comes from the classes; never set it inline here) */}
+        <div className="hidden lg:flex lg:w-[288px] lg:shrink-0" style={{ alignItems: 'center', gap: '7px' }}>
+          <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
+        </div>
       </div>
 
       {/* ── Original-lesson context strip (reschedule mode only) ── */}
@@ -887,6 +893,10 @@ export default function BookingGridClient({
         </div>
       )}
 
+      {/* ── Two-column flex: toolbar + grid left, summary aside right ── */}
+      <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+      {/* ── Left column: toolbar, grid ── */}
+      <div className="flex-1 min-w-0">
       {/* ── Toolbar card: labelled teacher · duration · week groups, one
           wrapping row ── */}
       <div
@@ -1133,9 +1143,10 @@ export default function BookingGridClient({
           {!loading && !error && visibleColumns.length > 0 && (
             // Horizontally scrollable on mobile; the time column stays sticky.
             <div
+              className="shadow-[0_1px_2px_rgba(0,0,0,0.05),0_2px_6px_rgba(0,0,0,0.05),0_8px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.07),0_14px_32px_rgba(0,0,0,0.08)] hover:-translate-y-[3px] transition-[box-shadow,transform] duration-200"
               style={{
                 overflowX: 'auto',
-                border: '1px solid #E0DFDC',
+                border: '1px solid #f3f4f6',
                 borderRadius: '12px',
                 backgroundColor: '#ffffff',
               }}
@@ -1276,12 +1287,14 @@ export default function BookingGridClient({
 
         {/* ── Sticky summary column — the confirm panel, styled to read as the
             page's right panel (shell-panel visual language, StudentRightPanel);
-            second child of the root two-column flex ── */}
+            second child of the two-column flex ── */}
         <aside className="w-full lg:w-[288px] lg:shrink-0 lg:sticky lg:top-0">
-          {/* Panel header — matches the shell panel's section-header style */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
-            <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
-            <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
+          {/* Panel header — mobile-only copy; the desktop header lives in Row 0 */}
+          <div className="lg:hidden">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
+              <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
+            </div>
           </div>
           {selectedStart !== null && selectedEnd !== null ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1479,6 +1492,8 @@ export default function BookingGridClient({
             </div>
           )}
         </aside>
+      {/* ── end two-column flex ── */}
+      </div>
 
       {profileTeacher && (
         <TeacherProfileModal
