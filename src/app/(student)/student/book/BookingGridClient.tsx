@@ -41,6 +41,12 @@ const CELL_SELECTED_BG = '#FFDDB8'
 // same as the cell colours above.
 const TEACHER_SELECTED_BORDER = '#4CAF50'
 const TEACHER_SELECTED_BG = '#F1F8F2'
+// Legend "Available" dot — deeper tint of the cell green, same hue. Legend
+// tints are STRONGER than the cell fills because small swatches need more
+// saturation to read as the same colour; at 10px the pale cell fill reads
+// grey. Solid stronger fill chosen over pale-fill + green border: a 10px
+// bordered pale dot reads as a grey ring, not as green.
+const LEGEND_AVAILABLE_DOT = '#A5D6A7'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -852,11 +858,14 @@ export default function BookingGridClient({
     { minutes: 90, label: '90', hours: 1.5 },
   ]
 
-  // Legend entries — swatch colours come from the cell colour consts so a
-  // palette swap up top re-skins the legend automatically. Decorative only.
+  // Legend entries. Legend tints are STRONGER than the cell fills because
+  // small swatches need more saturation to read as the same colour: at 10px
+  // the pale Available cell fill reads grey (see LEGEND_AVAILABLE_DOT), and
+  // the Unavailable fill gets a palette-grey edge so it doesn't vanish on
+  // white. Cell colours themselves are unchanged. Decorative only.
   const legendItems = [
-    { label: 'Available', bg: CELL_BOOKABLE_BG, border: 'none' },
-    { label: 'Unavailable', bg: CELL_GREY_BG, border: 'none' },
+    { label: 'Available', bg: LEGEND_AVAILABLE_DOT, border: 'none' },
+    { label: 'Unavailable', bg: CELL_GREY_BG, border: '1px solid #E0DFDC' },
     // Matches a real selected cell: selected bg + 1px #FF8303 border.
     { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
   ]
