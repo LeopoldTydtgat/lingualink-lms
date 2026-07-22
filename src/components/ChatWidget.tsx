@@ -124,7 +124,7 @@ export default function ChatWidget({
   participantId,
   participantType,
   participantAuthId,
-  adminName = 'Shannon',
+  adminName = 'LinguaLink Support',
   adminPhotoUrl = null,
 }: ChatWidgetProps) {
   const supabase = useMemo(() => createClient(), [])

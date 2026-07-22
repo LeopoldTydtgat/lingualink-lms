@@ -82,7 +82,7 @@ export async function GET(
     // whichever one the row's *_type calls for.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('id, role')
+      .select('id, role, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -99,6 +99,12 @@ export async function GET(
     }
 
     const isAdmin = profile?.role === 'admin'
+    // ROLE-5a: staff (account_types contains 'staff' AND status='current') read
+    // support threads too, so they must be able to fetch support attachments.
+    // Used ONLY by the support branch below — the messages branch keeps its
+    // admin-or-participant gate.
+    const isStaffOrAdmin = isAdmin ||
+      (profile?.account_types?.includes('staff') && profile?.status === 'current')
 
     // --- Resolve the row ---
     // Service-role load: the auth gate above already ran, and the download below needs
@@ -125,9 +131,9 @@ export async function GET(
 
       // participant_auth_id holds the non-admin participant's AUTH uuid (never a table
       // PK), so it compares against user.id directly. A support thread carries no
-      // admin-side column: any admin may read every thread, which is exactly what the
-      // admin support console renders.
-      allowed = isAdmin || user.id === row.participant_auth_id
+      // admin-side column: any staff-or-admin may read every thread, which is exactly
+      // what the support console (staff-or-admin since ROLE-5a) renders.
+      allowed = isStaffOrAdmin || user.id === row.participant_auth_id
       attachments = Array.isArray(row.attachments) ? row.attachments : []
 
       isUploaderTheSender = async (uploaderUuid: string) => {
