@@ -1,9 +1,11 @@
 'use client'
 
-// BOOK-1 Stage B: single-page booking grid client. Not wired up yet — page.tsx
-// still renders BookingClient; Stage D swaps the import. Reschedule renders the
-// current flow degraded gracefully (teacher and duration locked, grid + confirm
-// still work); full reschedule messaging polish is Stage C.
+// BOOK-1 Stages B+C: single-page booking grid client. Not wired up yet —
+// page.tsx still renders BookingClient; Stage D swaps the import. Reschedule
+// locks teacher and duration to the original lesson and shows an
+// original-lesson context strip; error display (`data.message ?? data.error`),
+// confirm label, success redirect and the 24hr footnote are byte-identical to
+// the old wizard's, which special-cases none of them for reschedule.
 
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
@@ -746,6 +748,21 @@ export default function BookingGridClient({
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + selectedDuration * 60000) : null
 
+  // Original lesson being moved (reschedule mode): instants for the context
+  // strip. The teacher is resolved against the assigned list independently of
+  // the locked selection, so the strip always names the ORIGINAL teacher even
+  // if the selection lock fell back to teachers[0]; an unresolvable teacher
+  // just drops the name from the strip.
+  const originalStart = rescheduleLesson !== null ? new Date(rescheduleLesson.scheduled_at) : null
+  const originalEnd =
+    originalStart !== null && rescheduleLesson !== null
+      ? new Date(originalStart.getTime() + rescheduleLesson.duration_minutes * 60000)
+      : null
+  const originalTeacher =
+    rescheduleLesson !== null
+      ? teachers.find((t) => t.id === rescheduleLesson.teacher_id) ?? null
+      : null
+
   const durationOptions = [
     { minutes: 30, label: '30 min', hours: 0.5 },
     { minutes: 60, label: '60 min', hours: 1 },
@@ -817,6 +834,54 @@ export default function BookingGridClient({
           </div>
         </div>
       </div>
+
+      {/* ── Original-lesson context strip (reschedule mode only) ── */}
+      {rescheduleLesson !== null && originalStart !== null && originalEnd !== null && (
+        <div
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #E0DFDC',
+            borderRadius: '10px',
+            padding: '10px 16px',
+            marginBottom: '12px',
+          }}
+        >
+          <p
+            style={{
+              fontSize: '11px',
+              fontWeight: '700',
+              color: '#9ca3af',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              marginBottom: '8px',
+            }}
+          >
+            Rescheduling this class:
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            {originalTeacher !== null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <User size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
+                  {originalTeacher.full_name}
+                </span>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '13px', color: '#374151' }}>
+                {longDateFormatter.format(originalStart)} · {timeFormatter.format(originalStart)} – {timeFormatter.format(originalEnd)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <span style={{ fontSize: '13px', color: '#374151' }}>
+                {formatHours(rescheduleLesson.duration_minutes / 60)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Teacher pills — hidden entirely for single-teacher trainings ── */}
       {teachers.length > 1 && (
