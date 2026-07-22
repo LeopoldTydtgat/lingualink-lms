@@ -34,7 +34,13 @@ import {
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
 const CELL_BOOKABLE_BG = '#E8F5E9'
 const CELL_GREY_BG = '#F7F6F4'
-const CELL_SELECTED_BG = '#FFC58A'
+const CELL_SELECTED_BG = '#FFDDB8'
+// Selected-teacher pill ring — green family derived from CELL_BOOKABLE_BG
+// (border a stronger green of the same hue, bg a slightly lighter tint).
+// PLACEHOLDER pending the client's portal-wide green-vs-orange decision,
+// same as the cell colours above.
+const TEACHER_SELECTED_BORDER = '#4CAF50'
+const TEACHER_SELECTED_BG = '#F1F8F2'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -704,9 +710,19 @@ export default function BookingGridClient({
     timeZone: studentTimezone,
   })
 
-  // Week label e.g. "31 Mar – 6 Apr 2026" — formatted off the noon-anchored
-  // column Dates, pinned to the student tz like every other label on the page.
-  const weekLabel = `${dayMonthFormatter.format(columnDate(columnKeys[0]))} – ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone }).format(columnDate(columnKeys[6]))}`
+  // Week label off the noon-anchored column Dates, pinned to the student tz
+  // like every other label on the page — Intl formatters only, never
+  // toLocaleDateString / Date getters. Compact same-month form "20 – 26 Jul
+  // 2026" (month named once); cross-month keeps "27 Jul – 2 Aug 2026".
+  const weekEndFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone })
+  const dayOnlyFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone })
+  const monthYearKeyFormatter = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: studentTimezone })
+  const weekStartDay = columnDate(columnKeys[0])
+  const weekEndDay = columnDate(columnKeys[6])
+  const weekLabel =
+    monthYearKeyFormatter.format(weekStartDay) === monthYearKeyFormatter.format(weekEndDay)
+      ? `${dayOnlyFormatter.format(weekStartDay)} – ${weekEndFormatter.format(weekEndDay)}`
+      : `${dayMonthFormatter.format(weekStartDay)} – ${weekEndFormatter.format(weekEndDay)}`
 
   const currentWeekKey = getWeekStartKey(studentTimezone)
   const isPrevDisabled = weekStartKey <= currentWeekKey
@@ -828,10 +844,12 @@ export default function BookingGridClient({
       ? teachers.find((t) => t.id === rescheduleLesson.teacher_id) ?? null
       : null
 
+  // Compact pills — bare minutes; the group label carries the unit and the
+  // aria-label stays descriptive ("30 minutes").
   const durationOptions = [
-    { minutes: 30, label: '30 min', hours: 0.5 },
-    { minutes: 60, label: '60 min', hours: 1 },
-    { minutes: 90, label: '90 min', hours: 1.5 },
+    { minutes: 30, label: '30', hours: 0.5 },
+    { minutes: 60, label: '60', hours: 1 },
+    { minutes: 90, label: '90', hours: 1.5 },
   ]
 
   // Legend entries — swatch colours come from the cell colour consts so a
@@ -958,16 +976,17 @@ export default function BookingGridClient({
       <div className="flex flex-col lg:flex-row lg:items-start gap-4">
       {/* ── Left column: toolbar, grid ── */}
       <div className="flex-1 min-w-0">
-      {/* ── Toolbar card: labelled teacher · duration · week groups, one
-          wrapping row ── */}
+      {/* ── Toolbar card: teacher · duration · week groups on ONE nowrap row.
+          The Teacher group NEVER scrolls, clips, or truncates — the space is
+          freed by compact Duration ("30/60/90" pills) and a compact Week
+          group instead. ── */}
       <div
         className="shadow-sm"
         style={{
           display: 'flex',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap',
           alignItems: 'flex-start',
-          rowGap: '8px',
-          columnGap: '20px',
+          columnGap: '14px',
           marginBottom: '10px',
           backgroundColor: '#ffffff',
           border: '1px solid #f3f4f6',
@@ -976,13 +995,13 @@ export default function BookingGridClient({
         }}
       >
         {/* ── Teacher group — hidden entirely (label included) for
-            single-teacher trainings ── */}
+            single-teacher trainings; full names, no squeeze ── */}
         {teachers.length > 1 && (
-          <div>
+          <div style={{ flexShrink: 0 }}>
             <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
               Teacher
             </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
           {teachers.map((teacher) => {
             const isSelected = teacher.id === selectedTeacherId
             // On a reschedule the teacher is locked: non-selected pills render
@@ -1011,10 +1030,11 @@ export default function BookingGridClient({
                   padding: '6px 12px 6px 6px',
                   borderRadius: '999px',
                   border: '2px solid',
-                  borderColor: isSelected ? '#FF8303' : '#E0DFDC',
-                  backgroundColor: isSelected ? '#FFF0DC' : '#ffffff',
+                  borderColor: isSelected ? TEACHER_SELECTED_BORDER : '#E0DFDC',
+                  backgroundColor: isSelected ? TEACHER_SELECTED_BG : '#ffffff',
                   cursor: interactive ? 'pointer' : 'default',
                   opacity: interactive || isSelected ? 1 : 0.5,
+                  flexShrink: 0,
                 }}
               >
                 {teacher.photo_url ? (
@@ -1075,12 +1095,13 @@ export default function BookingGridClient({
           </div>
         )}
 
-        {/* ── Duration group — local-only recompute, no refetch ── */}
-        <div>
+        {/* ── Duration group — compact "30/60/90" pills; local-only
+            recompute, no refetch ── */}
+        <div style={{ flexShrink: 0 }}>
           <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
-            Duration
+            Duration (min)
           </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '10px' }}>
         {durationOptions.map((option) => {
           const canBook = hoursRemaining >= option.hours
           const isSelected = selectedDuration === option.minutes
@@ -1091,9 +1112,10 @@ export default function BookingGridClient({
               key={option.minutes}
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
+              aria-label={`${option.minutes} minutes`}
               title={!canBook ? 'Not enough hours remaining' : undefined}
               style={{
-                padding: '8px 14px',
+                padding: '6px 12px',
                 borderRadius: '999px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
@@ -1112,8 +1134,9 @@ export default function BookingGridClient({
           </div>
         </div>
 
-        {/* ── Week group — prev · label · This week · next ── */}
-        <div>
+        {/* ── Week group — prev · label · Today · next; fixed width, nothing
+            shifts or appears/disappears on navigation ── */}
+        <div style={{ flexShrink: 0 }}>
           <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
             Week
           </p>
@@ -1133,17 +1156,27 @@ export default function BookingGridClient({
         >
           <ChevronLeft size={16} color="#4b5563" />
         </button>
-          <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>{weekLabel}</span>
-          {/* Always mounted so the Week group's width never changes: on the
-              current week it goes visibility:hidden (still occupies layout,
-              so navigating weeks cannot rewrap the toolbar) and is made
-              unreachable (disabled, no tab stop, hidden from AT). Never
-              display:none / conditional mount — that gives the space back. */}
+          {/* Fixed min-width sized to the widest realistic cross-month label
+              ("28 Sept – 4 Oct 2026") at 12px, text centred, so week
+              navigation never shifts the arrows or the Today button. */}
+          <span
+            style={{
+              fontSize: '12px',
+              fontWeight: '600',
+              color: '#111827',
+              display: 'inline-block',
+              minWidth: '120px',
+              textAlign: 'center',
+            }}
+          >
+            {weekLabel}
+          </span>
+          {/* Always rendered at constant width ("Today" matches the teacher
+              calendar); on the current week it dims and disables but stays
+              mounted, so the Week group never changes size. */}
           <button
             onClick={goThisWeek}
             disabled={isCurrentWeek}
-            tabIndex={isCurrentWeek ? -1 : undefined}
-            aria-hidden={isCurrentWeek}
             style={{
               padding: '4px 10px',
               border: '1px solid #E0DFDC',
@@ -1152,11 +1185,11 @@ export default function BookingGridClient({
               fontSize: '12px',
               fontWeight: '500',
               color: '#4b5563',
-              cursor: 'pointer',
-              visibility: isCurrentWeek ? 'hidden' : 'visible',
+              cursor: isCurrentWeek ? 'default' : 'pointer',
+              opacity: isCurrentWeek ? 0.5 : 1,
             }}
           >
-            This week
+            Today
           </button>
         <button
           onClick={goForward}
@@ -1219,6 +1252,36 @@ export default function BookingGridClient({
                 backgroundColor: '#ffffff',
               }}
             >
+              {/* ── Colour legend — Day-to-Day-style dots, one line, top-left
+                  above the day headers; swatch colours follow the consts ── */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 12px 0',
+                }}
+              >
+                {legendItems.map((item) => (
+                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: item.bg,
+                        border: item.border,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                      {item.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
               <div
                 style={{
                   display: 'grid',
@@ -1281,26 +1344,31 @@ export default function BookingGridClient({
                     )}
                     {band.map((minutes) => (
                       <div key={minutes} style={{ display: 'contents' }}>
-                        {/* Sticky time column. Cause of the old visual offset:
-                            the label was centred on the bare 22px cell box,
-                            but a visual row reads as cell + the 2px grid row
-                            gap below it (24px pitch), so every label sat
-                            slightly high. Fix via line-height: top-align the
-                            flex item and give the text a line box equal to
-                            the pitch (22px row + 2px gap), which centres the
-                            glyphs on the row as the eye reads it. */}
+                        {/* Sticky time column. Root cause of the drifting
+                            labels (previous attempt): lineHeight 24px made
+                            this cell's line box TALLER than the 22px slot
+                            cells, so the label cell — not the slot cells —
+                            sized each row track, and the top-anchored
+                            (flex-start) line box tied the glyphs to the row
+                            top instead of the cell box. Fix: collapse the
+                            line box (lineHeight 1), pin the cell to the slot
+                            height (minHeight 22px) so it never competes in
+                            track sizing, and flex-centre — every label now
+                            centres identically on its own 22px cell,
+                            first/middle/last rows of a band alike. */}
                         <div
                           style={{
                             position: 'sticky',
                             left: 0,
                             zIndex: 2,
                             backgroundColor: '#ffffff',
+                            minHeight: '22px',
                             display: 'flex',
-                            alignItems: 'flex-start',
+                            alignItems: 'center',
                             justifyContent: 'flex-end',
                             paddingRight: '8px',
                             fontSize: '11px',
-                            lineHeight: '24px',
+                            lineHeight: 1,
                             fontWeight: '500',
                             color: '#6b7280',
                           }}
@@ -1404,35 +1472,6 @@ export default function BookingGridClient({
                         })}
                       </div>
                     ))}
-                  </div>
-                ))}
-              </div>
-
-              {/* ── Colour legend — single line under the grid, decorative ── */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  padding: '2px 12px 10px',
-                }}
-              >
-                {legendItems.map((item) => (
-                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: '12px',
-                        height: '12px',
-                        borderRadius: '4px',
-                        backgroundColor: item.bg,
-                        border: item.border,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span style={{ fontSize: '12px', color: '#9ca3af', whiteSpace: 'nowrap' }}>
-                      {item.label}
-                    </span>
                   </div>
                 ))}
               </div>
