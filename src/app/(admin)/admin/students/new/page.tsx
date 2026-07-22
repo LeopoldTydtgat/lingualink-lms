@@ -1,8 +1,13 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import CreateStudentClient from './CreateStudentClient'
 
 export default async function NewStudentPage() {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

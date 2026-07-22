@@ -1,5 +1,6 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import StudentDetailClient from './StudentDetailClient'
 import type { AdminConversation, Assignment } from './StudentDetailClient'
 
@@ -8,6 +9,9 @@ export default async function StudentDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const { id } = await params
   const supabase = createAdminClient()
 

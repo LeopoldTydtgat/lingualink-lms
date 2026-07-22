@@ -1,6 +1,7 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import TeacherDetailClient from './TeacherDetailClient'
 import type { AdminConversation } from './TeacherDetailClient'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
@@ -11,6 +12,9 @@ export default async function TeacherDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const { id } = await params
   const supabase = createAdminClient()
 

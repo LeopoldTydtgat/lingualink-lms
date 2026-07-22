@@ -4,9 +4,14 @@
 
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 import AnnouncementForm from '../AnnouncementForm'
 
 export default async function NewAnnouncementPage() {
+  const adminUser = await requireAdmin()
+  if (!adminUser) redirect('/dashboard')
+
   const cookieStore = await cookies()
 
   const supabase = createServerClient(

@@ -37,7 +37,7 @@ export default async function AdminMessagesPage() {
   // system. A null profile fails this check too (undefined !== 'admin'), so a
   // missing or unreadable profile row is denied here rather than redirected to
   // /login — profile-null does not mean unauthenticated.
-  if (adminProfile?.role !== 'admin') redirect('/admin')
+  if (adminProfile?.role !== 'admin') redirect('/dashboard')
 
   // Fetch all messages newest-first — service role bypasses RLS
   const { data: allMessages } = await adminDb

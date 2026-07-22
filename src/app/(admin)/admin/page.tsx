@@ -1,5 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import DashboardClient from './DashboardClient'
 import { isCancelledStatus, CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { getDayRangeInTz } from '@/lib/billing/monthRange'
@@ -80,6 +83,15 @@ export const dynamic = 'force-dynamic'
 
 // ── page ──────────────────────────────────────────────────────────────────────
 export default async function AdminDashboardPage() {
+  // Dashboard is admin-only. Staff (non-admin) land on /admin/classes instead —
+  // dead code while the (admin) layout is still admin-only, live once it widens
+  // to requireStaff.
+  const adminUser = await requireAdmin()
+  if (!adminUser) {
+    const staffUser = await requireStaff()
+    redirect(staffUser ? '/admin/classes' : '/dashboard')
+  }
+
   // Identify the logged-in admin (the admin layout has already gated access) and read their
   // timezone, so every date/time below renders in the admin's own zone, not a hardcoded SAST
   // offset. The service-role client below is for data; this cookie client only learns who is
