@@ -631,6 +631,13 @@ export default function BookingGridClient({
     }
   }, [slots, selectedDuration, selectedStartIso])
 
+  // Selected-run bounds in epoch ms, computed once per render: a bookable cell
+  // renders selected when its instant falls inside [runStartMs, runEndMs).
+  // Instants compare via getTime() — never string-compare ISO values. Selection
+  // STATE stays selectedStartIso only; this is render-only.
+  const runStartMs = selectedStartIso !== null ? new Date(selectedStartIso).getTime() : null
+  const runEndMs = runStartMs !== null ? runStartMs + selectedDuration * 60000 : null
+
   // The column header / week label Dates are anchored at NOON student-local
   // time purely for the Intl labels (all pinned to studentTimezone): noon
   // sidesteps DST-shifted midnights, and getLocalDateKey(date, studentTimezone)
@@ -1154,8 +1161,8 @@ export default function BookingGridClient({
                   // Fixed 7-day Mon–Sun frame: every column renders every week,
                   // all at identical widths — empty days are all-grey columns.
                   gridTemplateColumns: '56px repeat(7, minmax(88px, 1fr))',
-                  gap: '3px',
-                  padding: '10px',
+                  gap: '2px',
+                  padding: '8px',
                 }}
               >
                 {/* Header row: sticky corner + one label per day column */}
@@ -1170,7 +1177,7 @@ export default function BookingGridClient({
                 {columnKeys.map((key) => {
                   const day = columnDate(key)
                   return (
-                    <div key={key} style={{ textAlign: 'center', padding: '4px 2px' }}>
+                    <div key={key} style={{ textAlign: 'center', padding: '2px' }}>
                       <p
                         style={{
                           fontSize: '10px',
@@ -1182,7 +1189,7 @@ export default function BookingGridClient({
                       >
                         {weekdayFormatter.format(day)}
                       </p>
-                      <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
+                      <p style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
                         {dayMonthFormatter.format(day)}
                       </p>
                     </div>
@@ -1197,7 +1204,7 @@ export default function BookingGridClient({
                         style={{
                           gridColumn: '1 / -1',
                           textAlign: 'center',
-                          padding: '3px 0',
+                          padding: '2px 0',
                           fontSize: '10px',
                           letterSpacing: '3px',
                           color: '#d1d5db',
@@ -1221,7 +1228,7 @@ export default function BookingGridClient({
                             alignItems: 'center',
                             justifyContent: 'flex-end',
                             paddingRight: '8px',
-                            fontSize: '12px',
+                            fontSize: '11px',
                             fontWeight: '500',
                             color: '#6b7280',
                           }}
@@ -1241,14 +1248,19 @@ export default function BookingGridClient({
                                 key={key}
                                 aria-hidden="true"
                                 style={{
-                                  minHeight: '28px',
+                                  minHeight: '22px',
                                   borderRadius: '6px',
                                   backgroundColor: CELL_GREY_BG,
                                 }}
                               />
                             )
                           }
+                          // Exact start cell only — the run's other cells keep
+                          // aria-pressed false while still painting selected.
                           const isSelected = slot.startIso === selectedStartIso
+                          const t = new Date(slot.startIso).getTime()
+                          const inSelectedRun =
+                            runStartMs !== null && runEndMs !== null && t >= runStartMs && t < runEndMs
                           // Text-less cell: the slot time lives in the aria-label
                           // (and in the summary column once selected).
                           return (
@@ -1258,11 +1270,11 @@ export default function BookingGridClient({
                               aria-pressed={isSelected}
                               aria-label={`Book ${formatSlotTime(slot.startIso, studentTimezone)}`}
                               style={{
-                                minHeight: '28px',
+                                minHeight: '22px',
                                 borderRadius: '6px',
                                 border: 'none',
                                 cursor: 'pointer',
-                                backgroundColor: isSelected ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
+                                backgroundColor: inSelectedRun ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
                               }}
                             />
                           )
