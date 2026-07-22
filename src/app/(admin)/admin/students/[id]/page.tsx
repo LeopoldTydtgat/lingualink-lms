@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { requireStaff } from '@/lib/auth/requireStaff'
 import StudentDetailClient from './StudentDetailClient'
 import type { AdminConversation, Assignment } from './StudentDetailClient'
 
@@ -10,15 +11,53 @@ export default async function StudentDetailPage({
   params: Promise<{ id: string }>
 }) {
   const adminUser = await requireAdmin()
-  if (!adminUser) redirect('/dashboard')
+  let isStaffView = false
+  if (!adminUser) {
+    const staffUser = await requireStaff()
+    if (!staffUser) redirect('/dashboard')
+    isStaffView = true
+  }
 
   const { id } = await params
   const supabase = createAdminClient()
 
-  // Fetch student with company and active training + assigned teachers
-  const { data: student, error } = await supabase
-    .from('students')
-    .select(`
+  // Fetch student with company and active training + assigned teachers.
+  // Staff must never receive the full row — explicit column list excluding
+  // admin-only fields (admin_notes, cancellation_policy, customer_number,
+  // date_of_birth, follow-up and billing fields). Two literal selects (not an
+  // interpolated column list) so the typed client can parse each query.
+  const { data: student, error } = isStaffView
+    ? await supabase
+        .from('students')
+        .select(`
+          id, full_name, email, phone, photo_url, status, timezone, language_preference, native_language, learning_language, current_fluency_level, self_assessed_level, learning_goals, interests, teacher_notes, email_bounced_at, email_bounce_reason,
+          companies (
+            id,
+            name
+          ),
+          trainings (
+            id,
+            package_name,
+            package_type,
+            total_hours,
+            hours_consumed,
+            end_date,
+            status,
+            created_at,
+            training_teachers (
+              teacher_id,
+              profiles:teacher_id (
+                id,
+                full_name
+              )
+            )
+          )
+        `)
+        .eq('id', id)
+        .single()
+    : await supabase
+        .from('students')
+        .select(`
       *,
       companies (
         id,
@@ -42,8 +81,8 @@ export default async function StudentDetailPage({
         )
       )
     `)
-    .eq('id', id)
-    .single()
+        .eq('id', id)
+        .single()
 
   if (error || !student) notFound()
 
@@ -106,12 +145,14 @@ export default async function StudentDetailPage({
       : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
   }))
 
-  // Fetch hours log for this student
-  const { data: hoursLog } = await supabase
-    .from('hours_log')
-    .select('*')
-    .eq('student_id', id)
-    .order('created_at', { ascending: false })
+  // Fetch hours log for this student (admin only — staff view skips it)
+  const { data: hoursLog } = isStaffView
+    ? { data: null }
+    : await supabase
+        .from('hours_log')
+        .select('*')
+        .eq('student_id', id)
+        .order('created_at', { ascending: false })
 
   // Fetch reports via lesson IDs belonging to this student
   const lessonIds = flatLessons.map((l) => l.id)
@@ -125,7 +166,7 @@ export default async function StudentDetailPage({
     teacher_name: string | null
   }[] = []
 
-  if (lessonIds.length > 0) {
+  if (!isStaffView && lessonIds.length > 0) {
     const { data: rawReports } = await supabase
       .from('reports')
       .select(`
@@ -163,22 +204,24 @@ export default async function StudentDetailPage({
     })
   }
 
-  // Fetch reviews submitted by this student
-  const { data: reviews } = await supabase
-    .from('student_reviews')
-    .select(`
-      id,
-      rating,
-      review_text,
-      submitted_at,
-      admin_edited_text,
-      moderated_by_admin,
-      profiles:teacher_id (
-        full_name
-      )
-    `)
-    .eq('student_id', id)
-    .order('submitted_at', { ascending: false })
+  // Fetch reviews submitted by this student (admin only — staff view skips it)
+  const { data: reviews } = isStaffView
+    ? { data: null }
+    : await supabase
+        .from('student_reviews')
+        .select(`
+          id,
+          rating,
+          review_text,
+          submitted_at,
+          admin_edited_text,
+          moderated_by_admin,
+          profiles:teacher_id (
+            full_name
+          )
+        `)
+        .eq('student_id', id)
+        .order('submitted_at', { ascending: false })
 
   const flatReviews = (reviews || []).map((r) => ({
     id: r.id,
@@ -193,11 +236,14 @@ export default async function StudentDetailPage({
   }))
 
   // Fetch assignments for this student joined to study sheet metadata
-  const { data: rawAssignments } = await supabase
-    .from('assignments')
-    .select('id, assigned_at, lesson_id, study_sheets!assignments_study_sheet_id_fkey(title, category, level)')
-    .eq('student_id', id)
-    .order('assigned_at', { ascending: false })
+  // (admin only — staff view skips it)
+  const { data: rawAssignments } = isStaffView
+    ? { data: null }
+    : await supabase
+        .from('assignments')
+        .select('id, assigned_at, lesson_id, study_sheets!assignments_study_sheet_id_fkey(title, category, level)')
+        .eq('student_id', id)
+        .order('assigned_at', { ascending: false })
 
   type RawSheetJoin = { title: string; category: string; level: string } | null
 
@@ -217,11 +263,14 @@ export default async function StudentDetailPage({
   })
 
   // ── Purge eligibility: check all linked teachers are 'former' ───────────────
-  const { data: linkedLessonRows } = await supabase
-    .from('lessons')
-    .select('teacher_id')
-    .eq('student_id', id)
-    .not('teacher_id', 'is', null)
+  // (admin only — staff view skips it, purge controls are hidden)
+  const { data: linkedLessonRows } = isStaffView
+    ? { data: null }
+    : await supabase
+        .from('lessons')
+        .select('teacher_id')
+        .eq('student_id', id)
+        .not('teacher_id', 'is', null)
 
   const linkedTeacherIds = [
     ...new Set(
@@ -239,14 +288,16 @@ export default async function StudentDetailPage({
     purgeBlockedBy = (nonFormerTeachers || []).map((t: { full_name: string }) => t.full_name)
   }
 
-  // ── Messages: fetch all student conversations ──────────────────────────────
+  // ── Messages: fetch all student conversations (admin only — staff skips) ───
   // Only select explicit columns — never select('*') on messages
-  const { data: rawMessages } = await supabase
-    .from('messages')
-    .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
-    .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
-    .order('created_at', { ascending: true })
-    .limit(500)
+  const { data: rawMessages } = isStaffView
+    ? { data: null }
+    : await supabase
+        .from('messages')
+        .select('id, sender_id, sender_type, receiver_id, receiver_type, content, attachments, read_at, created_at')
+        .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
+        .order('created_at', { ascending: true })
+        .limit(500)
 
   const msgs = rawMessages ?? []
 
@@ -317,6 +368,7 @@ export default async function StudentDetailPage({
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}
       assignments={assignments}
+      isStaffView={isStaffView}
     />
   )
 }
