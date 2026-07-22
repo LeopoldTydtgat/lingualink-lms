@@ -34,7 +34,7 @@ import {
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
 const CELL_BOOKABLE_BG = '#E8F5E9'
 const CELL_GREY_BG = '#F7F6F4'
-const CELL_SELECTED_BG = '#FF8303'
+const CELL_SELECTED_BG = '#FFA95C'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -815,14 +815,14 @@ export default function BookingGridClient({
           alignItems: 'flex-start',
           justifyContent: 'space-between',
           gap: '16px',
-          marginBottom: '16px',
+          marginBottom: '10px',
         }}
       >
         <div>
-          <h1 style={{ fontSize: '18px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
+          <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
             {isReschedule ? 'Reschedule Class' : 'Book a Class'}
           </h1>
-          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+          <p style={{ fontSize: '12px', color: '#9ca3af' }}>
             Times shown in your timezone: {studentTimezone}
           </p>
         </div>
@@ -835,7 +835,7 @@ export default function BookingGridClient({
             backgroundColor: '#ffffff',
             border: '1px solid #E0DFDC',
             borderRadius: '10px',
-            padding: '8px 14px',
+            padding: '6px 12px',
           }}
         >
           <Clock size={18} color="#FF8303" style={{ flexShrink: 0 }} />
@@ -896,9 +896,37 @@ export default function BookingGridClient({
         </div>
       )}
 
-      {/* ── Teacher pills — hidden entirely for single-teacher trainings ── */}
-      {teachers.length > 1 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+      {hoursRemaining < 0.5 && (
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '14px 16px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+          }}
+        >
+          <p style={{ fontSize: '13px', color: '#FD5602' }}>
+            You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
+          </p>
+        </div>
+      )}
+
+      {/* ── Toolbar: teacher pills · duration pills · week nav (right edge), one
+          wrapping row ── */}
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          rowGap: '8px',
+          columnGap: '16px',
+          marginBottom: '10px',
+        }}
+      >
+        {/* ── Teacher pills — hidden entirely for single-teacher trainings ── */}
+        {teachers.length > 1 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
           {teachers.map((teacher) => {
             const isSelected = teacher.id === selectedTeacherId
             // On a reschedule the teacher is locked: non-selected pills render
@@ -987,11 +1015,11 @@ export default function BookingGridClient({
               </div>
             )
           })}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* ── Duration pills — local-only recompute, no refetch ── */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+        {/* ── Duration pills — local-only recompute, no refetch ── */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
         {durationOptions.map((option) => {
           const canBook = hoursRemaining >= option.hours
           const isSelected = selectedDuration === option.minutes
@@ -1003,7 +1031,7 @@ export default function BookingGridClient({
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
               style={{
-                padding: '8px 16px',
+                padding: '6px 12px',
                 borderRadius: '999px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
@@ -1029,34 +1057,10 @@ export default function BookingGridClient({
             </button>
           )
         })}
-      </div>
-
-      {hoursRemaining < 0.5 && (
-        <div
-          style={{
-            marginBottom: '14px',
-            padding: '14px 16px',
-            backgroundColor: '#fef2f2',
-            border: '1px solid #fecaca',
-            borderRadius: '8px',
-          }}
-        >
-          <p style={{ fontSize: '13px', color: '#FD5602' }}>
-            You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
-          </p>
         </div>
-      )}
 
-      {/* ── Week navigation ── */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          marginBottom: '10px',
-        }}
-      >
+        {/* ── Week navigation — pushed to the toolbar's right edge ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
         <button
           onClick={goBack}
           disabled={isPrevDisabled}
@@ -1072,8 +1076,7 @@ export default function BookingGridClient({
         >
           <ChevronLeft size={16} color="#4b5563" />
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>{weekLabel}</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>{weekLabel}</span>
           {!isCurrentWeek && (
             <button
               onClick={goThisWeek}
@@ -1091,7 +1094,6 @@ export default function BookingGridClient({
               This week
             </button>
           )}
-        </div>
         <button
           onClick={goForward}
           aria-label="Next week"
@@ -1105,6 +1107,7 @@ export default function BookingGridClient({
         >
           <ChevronRight size={16} color="#4b5563" />
         </button>
+        </div>
       </div>
 
       {/* ── Grid + sticky summary: responsive two-column layout. Static Tailwind
@@ -1272,7 +1275,7 @@ export default function BookingGridClient({
                               style={{
                                 minHeight: '22px',
                                 borderRadius: '6px',
-                                border: 'none',
+                                border: inSelectedRun ? '1px solid #FF8303' : 'none',
                                 cursor: 'pointer',
                                 backgroundColor: inSelectedRun ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
                               }}
