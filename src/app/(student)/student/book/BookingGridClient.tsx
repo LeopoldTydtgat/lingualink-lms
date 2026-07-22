@@ -601,7 +601,7 @@ export default function BookingGridClient({
   // Only used for the whole-week-empty check: the grid always renders all 7
   // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
-  const bands = collapseEmptyBands(validStartsByColumn, studentTimezone)
+  const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
@@ -1239,6 +1239,24 @@ export default function BookingGridClient({
                           // Stage A, so both render as the same grey cell. A cell
                           // with no slot at all on this row renders grey too.
                           if (slot === undefined || !slot.bookable) {
+                            // A grey cell can still sit INSIDE the selected run:
+                            // mid-run continuation slots are free but not valid
+                            // starts themselves (bookable:false), and the highlight
+                            // must span the full duration. Paint by the same
+                            // epoch-ms range as the bookable branch; the cell stays
+                            // inert (no handler, aria-hidden) — only a start cell
+                            // is ever selectable. Any slot instant inside a VALID
+                            // selected run is necessarily available (that is what
+                            // made the start bookable), so this never paints over
+                            // a booked/blocked cell. Slot-less cells have no
+                            // instant and are never in-run.
+                            const cellMs = slot !== undefined ? new Date(slot.startIso).getTime() : null
+                            const inSelectedRun =
+                              cellMs !== null &&
+                              runStartMs !== null &&
+                              runEndMs !== null &&
+                              cellMs >= runStartMs &&
+                              cellMs < runEndMs
                             return (
                               <div
                                 key={key}
@@ -1246,7 +1264,8 @@ export default function BookingGridClient({
                                 style={{
                                   minHeight: '22px',
                                   borderRadius: '6px',
-                                  backgroundColor: CELL_GREY_BG,
+                                  border: inSelectedRun ? '1px solid #FF8303' : 'none',
+                                  backgroundColor: inSelectedRun ? CELL_SELECTED_BG : CELL_GREY_BG,
                                 }}
                               />
                             )

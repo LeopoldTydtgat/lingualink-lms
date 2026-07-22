@@ -113,24 +113,37 @@ export function getValidStartsByColumn(
  * Date.getHours() is browser-local and wrong for a student elsewhere.
  *
  * A row exists iff at least one column has a BOOKABLE start at that wall
- * time; rows whose slots are all non-bookable are collapsed away with the
- * empty ones. Rows 30 minutes apart are contiguous and share a band; each
- * gap starts a new band, so the UI can render a gap marker between bands.
- * Bands are sorted ascending by minutes — early-morning continuation rows
- * (e.g. 00:00 after a cross-midnight run) sort first, matching a top-down
- * time axis; midnight adjacency (23:30 → 00:00) is deliberately NOT treated
- * as contiguous, since grid rows are a single day's vertical axis.
+ * time, OR that wall time is a 30-min step inside some bookable run: every
+ * bookable start contributes the wall-clock rows of all durationMinutes / 30
+ * steps of its run (each step instant is start epoch-ms + k * SLOT_MS,
+ * converted back to the student wall clock via utcInstantToTzParts — never
+ * Date getters or ISO-string math). Without the continuation rows, wall times
+ * that are valid inside a run but a valid START nowhere in the week were
+ * collapsed away, and a selected run's highlight was swallowed by the gap
+ * band. Rows that neither host a bookable start nor continue any bookable
+ * run are collapsed away with the empty ones. Rows 30 minutes apart are
+ * contiguous and share a band; each gap starts a new band, so the UI can
+ * render a gap marker between bands. Bands are sorted ascending by minutes —
+ * early-morning continuation rows (e.g. 00:00 after a cross-midnight run)
+ * sort first, matching a top-down time axis; midnight adjacency (23:30 →
+ * 00:00) is deliberately NOT treated as contiguous, since grid rows are a
+ * single day's vertical axis.
  */
 export function collapseEmptyBands(
   validStartsByColumn: Record<string, GridStartSlot[]>,
   studentTimezone: string,
+  durationMinutes: number,
 ): number[][] {
+  const slotsNeeded = durationMinutes / SLOT_MINUTES
   const rowMinutes = new Set<number>()
   for (const columnSlots of Object.values(validStartsByColumn)) {
     for (const slot of columnSlots) {
       if (!slot.bookable) continue
-      const parts = utcInstantToTzParts(slot.startIso, studentTimezone)
-      rowMinutes.add(parts.hour * 60 + parts.minute)
+      const startMs = new Date(slot.startIso).getTime()
+      for (let step = 0; step < slotsNeeded; step++) {
+        const parts = utcInstantToTzParts(new Date(startMs + step * SLOT_MS), studentTimezone)
+        rowMinutes.add(parts.hour * 60 + parts.minute)
+      }
     }
   }
 
