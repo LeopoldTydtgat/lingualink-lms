@@ -11,7 +11,7 @@
 // hidden), text-less slot cells (time lives in the aria-label), and a sticky
 // summary column beside the grid replacing the old bottom confirm panel.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, type LucideIcon } from 'lucide-react'
@@ -638,6 +638,50 @@ export default function BookingGridClient({
   const runStartMs = selectedStartIso !== null ? new Date(selectedStartIso).getTime() : null
   const runEndMs = runStartMs !== null ? runStartMs + selectedDuration * 60000 : null
 
+  // Chrome shared by BOTH cell branches (bookable button + inert grey div) for
+  // a cell inside the selected run, so the run reads as ONE continuous event
+  // block: a single 1px #FF8303 outline around the block (top edge only on the
+  // first cell, bottom edge only on the last, right edge on all), a 3px solid
+  // #FF8303 left accent on every run cell (teacher Day-to-Day event style),
+  // and corner rounding only at the block's ends. Non-first cells take a -2px
+  // top margin — equal to the grid's 2px row gap — chosen over taller cells
+  // because a negative margin overlaps the gap without changing the grid's
+  // row-track sizing. First/last derive PURELY from the cell instant vs
+  // runStartMs/runEndMs (epoch-ms only). Known caveat: a cross-midnight run
+  // (NEW324) splits across two day columns and its second-day segment renders
+  // without a top cap — accepted, mirrors the NEW324 last-day-of-week limit.
+  const runCellChrome = (isFirst: boolean, isLast: boolean): CSSProperties => ({
+    backgroundColor: CELL_SELECTED_BG,
+    borderStyle: 'solid',
+    borderColor: '#FF8303',
+    // top right bottom left — internal horizontal borders stay 0.
+    borderWidth: `${isFirst ? 1 : 0}px 1px ${isLast ? 1 : 0}px 3px`,
+    borderRadius:
+      isFirst && isLast ? '6px' : isFirst ? '6px 6px 0 0' : isLast ? '0 0 6px 6px' : '0',
+    marginTop: isFirst ? '0' : '-2px',
+  })
+
+  // Time-range text painted on the run's FIRST cell only. Dark amber for
+  // contrast on CELL_SELECTED_BG; aria-hidden where rendered — the start
+  // cell's aria-label already announces the slot.
+  const runLabelStyle: CSSProperties = {
+    fontSize: '11px',
+    fontWeight: '600',
+    lineHeight: 1,
+    color: '#92400e',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  }
+  // Layout added to the first run cell so the label sits left-aligned and
+  // vertically centred on a single clipped line.
+  const runFirstCellLayout: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    padding: '0 4px 0 5px',
+    overflow: 'hidden',
+  }
+
   // The column header / week label Dates are anchored at NOON student-local
   // time purely for the Intl labels (all pinned to studentTimezone): noon
   // sidesteps DST-shifted midnights, and getLocalDateKey(date, studentTimezone)
@@ -760,6 +804,14 @@ export default function BookingGridClient({
   const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + selectedDuration * 60000) : null
+
+  // Range text for the run's first cell, e.g. "15:30 – 17:00" — built with the
+  // studentTimezone-pinned Intl formatter (never toLocaleTimeString, never
+  // Date getters).
+  const selectedRangeLabel =
+    selectedStart !== null && selectedEnd !== null
+      ? `${timeFormatter.format(selectedStart)} – ${timeFormatter.format(selectedEnd)}`
+      : null
 
   // Original lesson being moved (reschedule mode): instants for the context
   // strip. The teacher is resolved against the assigned list independently of
@@ -1229,7 +1281,14 @@ export default function BookingGridClient({
                     )}
                     {band.map((minutes) => (
                       <div key={minutes} style={{ display: 'contents' }}>
-                        {/* Sticky time column */}
+                        {/* Sticky time column. Cause of the old visual offset:
+                            the label was centred on the bare 22px cell box,
+                            but a visual row reads as cell + the 2px grid row
+                            gap below it (24px pitch), so every label sat
+                            slightly high. Fix via line-height: top-align the
+                            flex item and give the text a line box equal to
+                            the pitch (22px row + 2px gap), which centres the
+                            glyphs on the row as the eye reads it. */}
                         <div
                           style={{
                             position: 'sticky',
@@ -1237,10 +1296,11 @@ export default function BookingGridClient({
                             zIndex: 2,
                             backgroundColor: '#ffffff',
                             display: 'flex',
-                            alignItems: 'center',
+                            alignItems: 'flex-start',
                             justifyContent: 'flex-end',
                             paddingRight: '8px',
                             fontSize: '11px',
+                            lineHeight: '24px',
                             fontWeight: '500',
                             color: '#6b7280',
                           }}
@@ -1273,17 +1333,33 @@ export default function BookingGridClient({
                               runEndMs !== null &&
                               cellMs >= runStartMs &&
                               cellMs < runEndMs
+                            // Block position from epoch-ms only (see runCellChrome).
+                            const isRunFirst = inSelectedRun && cellMs === runStartMs
+                            const isRunLast =
+                              inSelectedRun &&
+                              cellMs !== null &&
+                              runEndMs !== null &&
+                              cellMs + SLOT_MINUTES * 60000 === runEndMs
                             return (
                               <div
                                 key={key}
                                 aria-hidden="true"
                                 style={{
                                   minHeight: '22px',
-                                  borderRadius: '6px',
-                                  border: inSelectedRun ? '1px solid #FF8303' : 'none',
-                                  backgroundColor: inSelectedRun ? CELL_SELECTED_BG : CELL_GREY_BG,
+                                  ...(inSelectedRun
+                                    ? runCellChrome(isRunFirst, isRunLast)
+                                    : {
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        backgroundColor: CELL_GREY_BG,
+                                      }),
+                                  ...(isRunFirst ? runFirstCellLayout : {}),
                                 }}
-                              />
+                              >
+                                {isRunFirst && selectedRangeLabel !== null && (
+                                  <span style={runLabelStyle}>{selectedRangeLabel}</span>
+                                )}
+                              </div>
                             )
                           }
                           // Exact start cell only — the run's other cells keep
@@ -1292,8 +1368,13 @@ export default function BookingGridClient({
                           const t = new Date(slot.startIso).getTime()
                           const inSelectedRun =
                             runStartMs !== null && runEndMs !== null && t >= runStartMs && t < runEndMs
-                          // Text-less cell: the slot time lives in the aria-label
-                          // (and in the summary column once selected).
+                          // Block position from epoch-ms only (see runCellChrome).
+                          const isRunFirst = inSelectedRun && t === runStartMs
+                          const isRunLast =
+                            inSelectedRun && runEndMs !== null && t + SLOT_MINUTES * 60000 === runEndMs
+                          // Text-less cell except the run's FIRST cell, which
+                          // paints the selected range; the slot time lives in
+                          // the aria-label (and in the summary column).
                           return (
                             <button
                               key={key}
@@ -1302,12 +1383,23 @@ export default function BookingGridClient({
                               aria-label={`Book ${formatSlotTime(slot.startIso, studentTimezone)}`}
                               style={{
                                 minHeight: '22px',
-                                borderRadius: '6px',
-                                border: inSelectedRun ? '1px solid #FF8303' : 'none',
                                 cursor: 'pointer',
-                                backgroundColor: inSelectedRun ? CELL_SELECTED_BG : CELL_BOOKABLE_BG,
+                                ...(inSelectedRun
+                                  ? runCellChrome(isRunFirst, isRunLast)
+                                  : {
+                                      borderRadius: '6px',
+                                      border: 'none',
+                                      backgroundColor: CELL_BOOKABLE_BG,
+                                    }),
+                                ...(isRunFirst ? runFirstCellLayout : {}),
                               }}
-                            />
+                            >
+                              {isRunFirst && selectedRangeLabel !== null && (
+                                <span aria-hidden="true" style={runLabelStyle}>
+                                  {selectedRangeLabel}
+                                </span>
+                              )}
+                            </button>
                           )
                         })}
                       </div>
