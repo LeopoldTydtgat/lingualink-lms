@@ -1276,22 +1276,28 @@ export default function BookingGridClient({
           )}
         </div>
 
-        {/* ── Sticky summary column — the confirm panel, restacked for 280px ── */}
-        <aside className="w-full lg:w-[280px] lg:shrink-0 lg:sticky lg:top-4">
+        {/* ── Sticky summary column — the confirm panel, styled to read as the
+            page's right panel (shell-panel visual language, StudentRightPanel) ── */}
+        <aside className="w-full lg:w-[288px] lg:shrink-0 lg:sticky lg:top-0">
+          {/* Panel header — matches the shell panel's section-header style */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
+            <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
+          </div>
           {selectedStart !== null && selectedEnd !== null ? (
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {/* Teacher context strip */}
               <div
+                className="shadow-sm"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
                   flexWrap: 'wrap',
-                  padding: '8px 16px',
+                  padding: '14px 16px',
                   backgroundColor: '#ffffff',
-                  border: '1px solid #E0DFDC',
-                  borderRadius: '10px',
-                  marginBottom: '10px',
+                  border: '1px solid #f3f4f6',
+                  borderRadius: '12px',
                 }}
               >
                 {selectedTeacher.photo_url ? (
@@ -1332,16 +1338,16 @@ export default function BookingGridClient({
 
               {/* Details card — rows stacked vertically for the narrow column */}
               <div
+                className="shadow-sm"
                 style={{
                   backgroundColor: '#ffffff',
-                  border: '1px solid #E0DFDC',
+                  border: '1px solid #f3f4f6',
                   borderRadius: '12px',
-                  overflow: 'hidden',
-                  marginBottom: '10px',
+                  padding: '14px 16px',
                 }}
               >
                 {/* Date & time */}
-                <div style={{ padding: '9px 20px' }}>
+                <div style={{ paddingBottom: '9px' }}>
                   {renderCell(
                     Calendar,
                     'Date & time',
@@ -1350,12 +1356,12 @@ export default function BookingGridClient({
                 </div>
 
                 {/* Duration */}
-                <div style={{ padding: '9px 20px', borderTop: '1px solid #f3f4f6' }}>
+                <div style={{ padding: '9px 0', borderTop: '1px solid #f3f4f6' }}>
                   {renderCell(Clock, 'Duration', formatHours(selectedDuration / 60))}
                 </div>
 
                 {/* Hours deducted */}
-                <div style={{ padding: '9px 20px', borderTop: '1px solid #f3f4f6' }}>
+                <div style={{ padding: '9px 0', borderTop: '1px solid #f3f4f6' }}>
                   {renderCell(Wallet, 'Hours deducted', formatHours(isReschedule ? 0 : hoursUsed))}
                 </div>
 
@@ -1366,7 +1372,7 @@ export default function BookingGridClient({
                     flexDirection: 'column',
                     alignItems: 'flex-start',
                     gap: '8px',
-                    padding: '9px 20px',
+                    padding: '9px 0',
                     borderTop: '1px solid #f3f4f6',
                   }}
                 >
@@ -1392,8 +1398,7 @@ export default function BookingGridClient({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    padding: '9px 20px',
-                    backgroundColor: '#f9fafb',
+                    paddingTop: '9px',
                     borderTop: '1px solid #f3f4f6',
                   }}
                 >
@@ -1413,7 +1418,6 @@ export default function BookingGridClient({
                     borderRadius: '8px',
                     fontSize: '13px',
                     color: '#92400e',
-                    marginBottom: '10px',
                   }}
                 >
                   After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
@@ -1429,7 +1433,6 @@ export default function BookingGridClient({
                     borderRadius: '8px',
                     fontSize: '13px',
                     color: '#FD5602',
-                    marginBottom: '10px',
                   }}
                 >
                   {submitError}
@@ -1459,13 +1462,16 @@ export default function BookingGridClient({
             </div>
           ) : (
             <div
+              className="shadow-sm"
               style={{
                 minHeight: '260px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                border: '1px dashed #E0DFDC',
+                backgroundColor: '#ffffff',
+                border: '1px solid #f3f4f6',
                 borderRadius: '12px',
+                padding: '14px 16px',
               }}
             >
               <p style={{ fontSize: '13px', color: '#9ca3af', textAlign: 'center', padding: '0 16px' }}>

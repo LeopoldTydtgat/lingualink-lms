@@ -9,6 +9,7 @@ import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
+import HideOnRoutes from '@/components/student/layout/HideOnRoutes'
 import AnnouncementBanner from '@/components/AnnouncementBanner'
 import type { AnnouncementItem } from '@/components/AnnouncementBanner'
 import ClassReminderModal from '@/components/student/ClassReminderModal'
@@ -221,18 +222,20 @@ export default async function StudentDashboardLayout({
                 {children}
               </div>
             </main>
-            <StudentRightPanel
-              studentId={student.id}
-              studentTimezone={studentTimezone}
-              nextLesson={nextLesson ?? null}
-              teacherName={nextLessonTeacherName}
-              hoursRemaining={hoursRemaining}
-              totalHours={training?.total_hours ?? 0}
-              trainingEndDate={training?.end_date ?? null}
-              assignedExercises={assignedCount}
-              completedExercises={completedCount}
-              streakWeeks={streakWeeks}
-            />
+            <HideOnRoutes hideOn={['/student/book']}>
+              <StudentRightPanel
+                studentId={student.id}
+                studentTimezone={studentTimezone}
+                nextLesson={nextLesson ?? null}
+                teacherName={nextLessonTeacherName}
+                hoursRemaining={hoursRemaining}
+                totalHours={training?.total_hours ?? 0}
+                trainingEndDate={training?.end_date ?? null}
+                assignedExercises={assignedCount}
+                completedExercises={completedCount}
+                streakWeeks={streakWeeks}
+              />
+            </HideOnRoutes>
           </div>
         </div>
       </div>
