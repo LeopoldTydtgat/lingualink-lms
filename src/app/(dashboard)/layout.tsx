@@ -28,13 +28,20 @@ export default async function DashboardLayout({
   const admin = createAdminClient()
   const { data: profile } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at')
+    .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at, account_types, status')
     .eq('id', user.id)
     .single()
 
   // Defense-in-depth — proxy already gates by role, but if a teacher/admin
   // user somehow has no profiles row, fail safe.
   if (!profile) redirect('/login')
+
+  // mirrors requireStaff() — display-only; the /admin routes are server-gated,
+  // so this flag only controls whether the shortcut card renders.
+  const showStaffTools =
+    profile.status === 'current' &&
+    (profile.role === 'admin' ||
+      (Array.isArray(profile.account_types) && profile.account_types.includes('staff')))
 
   // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
   // pay-withholding model, so a single-row fetch would let it shadow the real next
@@ -262,6 +269,7 @@ export default async function DashboardLayout({
               minAvailableHours={minAvailableHours}
               whatsNewItems={whatsNewItems}
               whatsNewSeenAt={profile.whats_new_seen_at ?? null}
+              showStaffTools={showStaffTools}
             />
           </div>
         </div>

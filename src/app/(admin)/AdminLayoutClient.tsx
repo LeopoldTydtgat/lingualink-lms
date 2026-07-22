@@ -48,6 +48,7 @@ interface AdminLayoutClientProps {
   unreadMessagesCount: number
   unreadSupportCount: number
   protectedLesson: ProtectedLesson | null
+  isStaffView?: boolean
   children: React.ReactNode
 }
 
@@ -104,6 +105,13 @@ const navGroups: NavGroup[] = [
     ],
   },
 ]
+
+// Staff (ROLE-5b-3) see a trimmed shell: only these nav hrefs survive the
+// filter below, and groups left empty disappear entirely.
+const staffNavHrefs = new Set(['/admin/students', '/admin/classes', '/admin/support'])
+
+// Staff right-panel allowlist — must match the labels in panelWidgets below.
+const staffPanelLabels = new Set(['Classes Today', 'Low Hours Students'])
 
 // Rendered INSIDE the <Link> so useLinkStatus() reports that link's pending
 // state. While the clicked route loads, dim the row and swap the icon for a
@@ -216,6 +224,7 @@ export default function AdminLayoutClient({
   unreadMessagesCount,
   unreadSupportCount,
   protectedLesson,
+  isStaffView = false,
   children,
 }: AdminLayoutClientProps) {
   const pathname = usePathname()
@@ -265,29 +274,38 @@ export default function AdminLayoutClient({
       }, 300)
     }
 
-    const channel = supabase
-      .channel('admin-nav-unread')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'messages',
-      }, (payload) => {
-        if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
-          refetchUnreadMessages()
-        }
-      })
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-      }, (payload) => {
-        if (
-          payload.new.sender_type !== 'admin' &&
-          (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
-        ) {
-          setLiveUnreadMessages(prev => prev + 1)
-        }
-      })
+    let channel = supabase.channel('admin-nav-unread')
+
+    // Staff have no Messages nav item and getUnreadAdminMessagesCount is
+    // admin-scoped, so the two `messages` listeners are admin-only. The
+    // `support_messages` listeners below run for everyone — staff see the
+    // Support badge.
+    if (!isStaffView) {
+      channel = channel
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+        }, (payload) => {
+          if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+            refetchUnreadMessages()
+          }
+        })
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+        }, (payload) => {
+          if (
+            payload.new.sender_type !== 'admin' &&
+            (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
+          ) {
+            setLiveUnreadMessages(prev => prev + 1)
+          }
+        })
+    }
+
+    channel = channel
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -306,13 +324,14 @@ export default function AdminLayoutClient({
           setLiveUnreadSupport(prev => prev + 1)
         }
       })
-      .subscribe()
+
+    channel.subscribe()
 
     return () => {
       supabase.removeChannel(channel)
       if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
     }
-  }, [])
+  }, [isStaffView])
 
   useEffect(() => {
     if (!profileMenuOpen) return
@@ -372,6 +391,17 @@ export default function AdminLayoutClient({
     return pathname.startsWith(href)
   }
 
+  // Staff see only the allowlisted items; groups emptied by the filter (including
+  // Overview/Dashboard) drop out entirely. Admin sees navGroups untouched.
+  const visibleNavGroups = isStaffView
+    ? navGroups
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => staffNavHrefs.has(item.href)),
+        }))
+        .filter((group) => group.items.length > 0)
+    : navGroups
+
   // Single source for both sidebars (desktop column + mobile overlay): grouped nav
   // plus the footer. A plain JSX element, like logoutErrorCard above — sharing one
   // immutable descriptor across both trees keeps them in lockstep without a new
@@ -379,7 +409,7 @@ export default function AdminLayoutClient({
   const sidebarInner = (
     <>
       <nav className="flex-1 px-3 pt-4 overflow-y-auto thin-scroll">
-        {navGroups.map((group, groupIndex) => (
+        {visibleNavGroups.map((group, groupIndex) => (
           <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : '18px' }}>
             <p
               style={{
@@ -434,13 +464,17 @@ export default function AdminLayoutClient({
     </>
   )
 
-  const panelWidgets = [
+  const allPanelWidgets = [
     { label: 'Classes Today', value: rightPanelStats.classesTodayCount, href: rightPanelStats.classesTodayCount === null ? '/admin/settings' : '/admin/classes', alert: false },
     { label: 'Pending Reports', value: rightPanelStats.pendingCount, href: '/admin/reports?filter=pending', alert: false },
     { label: 'Flagged Reports', value: rightPanelStats.flaggedCount, href: '/admin/reports?filter=flagged', alert: rightPanelStats.flaggedCount > 0 },
     { label: 'Low Hours Students', value: rightPanelStats.lowHoursCount, href: '/admin/students?filter=low_hours', alert: false },
     { label: 'Invoices to Review', value: rightPanelStats.invoicesToReviewCount, href: '/admin/billing', alert: false },
   ]
+
+  const panelWidgets = isStaffView
+    ? allPanelWidgets.filter((w) => staffPanelLabels.has(w.label))
+    : allPanelWidgets
 
   return (
     <div className="flex flex-col h-screen overflow-hidden">
@@ -496,7 +530,7 @@ export default function AdminLayoutClient({
                   {profile.full_name?.split(' ')[0]}
                 </span>
                 <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.85)' }}>
-                  Administrator
+                  {isStaffView ? 'Staff' : 'Administrator'}
                 </span>
               </span>
               <ChevronDown size={16} style={{ color: '#ffffff' }} />
@@ -515,15 +549,17 @@ export default function AdminLayoutClient({
                   overflow: 'hidden',
                 }}
               >
-                <Link
-                  href="/admin/settings"
-                  prefetch={false}
-                  onClick={() => setProfileMenuOpen(false)}
-                  className="block px-4 py-2.5 hover:bg-gray-50"
-                  style={{ fontSize: '14px', color: '#4b5563' }}
-                >
-                  Settings
-                </Link>
+                {!isStaffView && (
+                  <Link
+                    href="/admin/settings"
+                    prefetch={false}
+                    onClick={() => setProfileMenuOpen(false)}
+                    className="block px-4 py-2.5 hover:bg-gray-50"
+                    style={{ fontSize: '14px', color: '#4b5563' }}
+                  >
+                    Settings
+                  </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => {

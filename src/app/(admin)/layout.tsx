@@ -45,6 +45,11 @@ export default async function AdminLayout({
   const staffUser = await requireStaff()
   if (!staffUser) redirect('/dashboard')
 
+  // requireStaff already admitted the user; anyone here who is not role 'admin'
+  // is staff. Staff get a trimmed shell: fewer nav items, fewer panel widgets,
+  // so the stats those widgets would show are skipped server-side below.
+  const isStaffView = profile.role !== 'admin'
+
   // The viewing admin's own timezone, used for all "today" bucketing; null/empty means unset.
   const adminTimezone = profile.timezone ?? 'UTC'
   const timezoneMissing = !profile.timezone
@@ -74,17 +79,21 @@ export default async function AdminLayout({
           .lt('scheduled_at', todayRange.endUtc)
       : Promise.resolve(null),
 
-    // Pending reports
-    adminDb
-      .from('reports')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ['pending', 'reopened']),
+    // Pending reports — admin-only widget, skipped for staff
+    isStaffView
+      ? Promise.resolve(null)
+      : adminDb
+          .from('reports')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['pending', 'reopened']),
 
-    // Flagged reports
-    adminDb
-      .from('reports')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'flagged'),
+    // Flagged reports — admin-only widget, skipped for staff
+    isStaffView
+      ? Promise.resolve(null)
+      : adminDb
+          .from('reports')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'flagged'),
 
     // Active trainings — for low hours count (balance < 2h)
     adminDb
@@ -92,27 +101,34 @@ export default async function AdminLayout({
       .select('total_hours, hours_consumed')
       .eq('status', 'active'),
 
-    // Invoices uploaded but not yet marked paid
-    adminDb
-      .from('invoices')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'uploaded'),
+    // Invoices uploaded but not yet marked paid — admin-only widget, skipped for staff
+    isStaffView
+      ? Promise.resolve(null)
+      : adminDb
+          .from('invoices')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'uploaded'),
 
-    // First active announcement text (if any)
-    adminDb
-      .from('announcements')
-      .select('message')
-      .eq('is_active', true)
-      .limit(1)
-      .maybeSingle(),
+    // First active announcement text (if any) — admin-only panel card, skipped for staff
+    isStaffView
+      ? Promise.resolve(null)
+      : adminDb
+          .from('announcements')
+          .select('message')
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle(),
 
     // Unread message count for the nav badge — student-involving conversations only,
-    // mirroring the admin Messages page's own unread computation
-    adminDb
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .is('admin_read_at', null)
-      .or('sender_type.eq.student,receiver_type.eq.student'),
+    // mirroring the admin Messages page's own unread computation. Staff have no
+    // Messages nav item, so skipped for staff.
+    isStaffView
+      ? Promise.resolve(null)
+      : adminDb
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .is('admin_read_at', null)
+          .or('sender_type.eq.student,receiver_type.eq.student'),
 
     // Unread support messages count for the Support nav badge
     adminDb
@@ -134,14 +150,14 @@ export default async function AdminLayout({
 
   const rightPanelStats: RightPanelStats = {
     classesTodayCount,
-    pendingCount:          pendingRes.count  ?? 0,
-    flaggedCount:          flaggedRes.count  ?? 0,
+    pendingCount:          pendingRes?.count  ?? 0,
+    flaggedCount:          flaggedRes?.count  ?? 0,
     lowHoursCount,
-    invoicesToReviewCount: invoicesRes.count ?? 0,
-    activeAnnouncementText: announcementRes.data?.message ?? null,
+    invoicesToReviewCount: invoicesRes?.count ?? 0,
+    activeAnnouncementText: announcementRes?.data?.message ?? null,
   }
 
-  const unreadMessagesCount = unreadMessagesRes.count ?? 0
+  const unreadMessagesCount = unreadMessagesRes?.count ?? 0
   const unreadSupportCount = unreadSupportRes.count ?? 0
 
   // ── protected lesson for idle timeout — 90-min lookback catches in-progress classes ─
@@ -162,6 +178,7 @@ export default async function AdminLayout({
       unreadMessagesCount={unreadMessagesCount}
       unreadSupportCount={unreadSupportCount}
       protectedLesson={protectedLesson ?? null}
+      isStaffView={isStaffView}
     >
       {children}
     </AdminLayoutClient>
