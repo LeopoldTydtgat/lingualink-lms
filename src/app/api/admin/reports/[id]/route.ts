@@ -140,21 +140,29 @@ export async function PATCH(
     .from('reports')
     .select('id, status')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
   if (!existing) return NextResponse.json({ error: 'Report not found' }, { status: 404 });
   if (existing.status !== 'flagged') {
     return NextResponse.json({ error: 'Only flagged reports can be reopened' }, { status: 400 });
   }
 
-  const { error } = await supabase
+  // The status predicate guards the race between the check above and this
+  // write; .select confirms a row was actually touched — zero rows means the
+  // status changed underneath us (or the write silently matched nothing).
+  const { data: updatedRows, error } = await supabase
     .from('reports')
     .update({ status: 'reopened', flagged_at: null, updated_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('status', 'flagged')
+    .select('id');
 
   if (error) {
     console.error('Report reopen PATCH error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!updatedRows || updatedRows.length === 0) {
+    return NextResponse.json({ error: 'Report is no longer flagged. Refresh and try again.' }, { status: 409 });
   }
 
   return NextResponse.json({ success: true });
