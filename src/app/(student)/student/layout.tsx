@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireTz } from '@/lib/time/requireTz'
 import { computeStreakWeeks } from '@/lib/lessons/streak'
 import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
+import { fetchStudentWhatsNew } from '@/lib/studentWhatsNew'
 import StudentLeftNav from '@/components/student/layout/StudentLeftNav'
 import StudentTopHeader from '@/components/student/layout/StudentTopHeader'
 import StudentRightPanel from '@/components/student/layout/StudentRightPanel'
@@ -34,7 +35,7 @@ export default async function StudentDashboardLayout({
 
   const { data: student } = await admin
     .from('students')
-    .select('id, full_name, email, photo_url, status, timezone')
+    .select('id, full_name, email, photo_url, status, timezone, whats_new_seen_at')
     .eq('auth_user_id', user.id)
     .maybeSingle()
 
@@ -172,6 +173,11 @@ export default async function StudentDashboardLayout({
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
 
+  // What's New feed — student-scoped, uses the same anon server client the
+  // lessons/assignments lookups above use. students.id scopes the feed queries;
+  // user.id (auth uid) scopes the dismissals — see studentWhatsNew.ts.
+  const whatsNewItems = await fetchStudentWhatsNew(supabase, student.id, user.id)
+
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
@@ -210,6 +216,9 @@ export default async function StudentDashboardLayout({
             studentName={student.full_name}
             photoUrl={student.photo_url ?? null}
             unreadMessageCount={unreadMessageCount ?? 0}
+            whatsNewItems={whatsNewItems}
+            whatsNewSeenAt={student.whats_new_seen_at ?? null}
+            studentId={student.id}
           />
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
             <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
