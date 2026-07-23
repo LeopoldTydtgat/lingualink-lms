@@ -143,9 +143,7 @@ export default function TaskForm({
         const res = await fetch(`/api/admin/tasks?id=${taskId}`)
         if (!res.ok) throw new Error('Failed to load task')
         const data = await res.json()
-        // The list endpoint doesn't support fetch by id directly —
-        // we load all and find the one we need. For a small dataset this is fine.
-        // Alternatively add a GET /api/admin/tasks/[id] endpoint if the list grows large.
+        // The route filters by ?id server-side, so tasks[0] is the requested task.
         const task = data.tasks?.[0]
         if (!task) throw new Error('Task not found')
 

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -13,11 +14,16 @@ export async function GET(request: NextRequest) {
   if (!adminUser) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(request.url)
+  const id = searchParams.get('id')                   // uuid — used when fetching a single task
   const assignee = searchParams.get('assignee')       // profile id
   const status = searchParams.get('status')           // 'open' | 'completed'
   const priority = searchParams.get('priority')       // 'low' | 'medium' | 'high'
   const linkedType = searchParams.get('linkedType')   // 'teacher' | 'student'
   const linkedId = searchParams.get('linkedId')       // uuid — used when fetching from detail pages
+
+  if (id && !z.string().uuid().safeParse(id).success) {
+    return NextResponse.json({ error: 'Invalid task id' }, { status: 400 })
+  }
 
   let query = supabase
     .from('admin_tasks')
@@ -38,6 +44,7 @@ export async function GET(request: NextRequest) {
     `)
     .order('created_at', { ascending: false })
 
+  if (id) query = query.eq('id', id)
   if (assignee) query = query.eq('assigned_to', assignee)
   if (status) query = query.eq('status', status)
   if (priority) query = query.eq('priority', priority)
