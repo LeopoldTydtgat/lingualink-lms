@@ -190,6 +190,11 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   }
 
   const timeSlots = generateTimeSlots()
+  // A teacher swap re-renders time into the new teacher's timezone, which can
+  // produce a value outside the 06:00-22:00 grid (or off the 30-min grid, e.g.
+  // +5:30 offsets). Inject it as an extra option so the select never renders blank.
+  const outOfGridTime = time !== '' && !timeSlots.includes(time) ? time : null
+  const displayTimeSlots = outOfGridTime ? [...timeSlots, outOfGridTime].sort() : timeSlots
   const today = new Date()
   const todayString = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
 
@@ -378,7 +383,14 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
               backgroundColor: 'white', boxSizing: 'border-box',
             }}
           >
-            {timeSlots.map((slot) => {
+            {displayTimeSlots.map((slot) => {
+              if (slot === outOfGridTime) {
+                return (
+                  <option key={slot} value={slot}>
+                    {slot} (outside slot hours)
+                  </option>
+                )
+              }
               const isUnavailable = availableTimes !== null && !availableTimes.has(slot)
               return (
                 <option key={slot} value={slot} style={isUnavailable ? { color: '#888888' } : undefined}>
