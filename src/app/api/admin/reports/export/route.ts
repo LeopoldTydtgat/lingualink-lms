@@ -201,10 +201,12 @@ export async function GET(request: NextRequest) {
 
       // Teacher billable: a flagged report withholds pay; teacher pay is ALWAYS the 24hr rule,
       // never the 48hr company policy.
+      // 'Cancelled by student' (lowercase actor) is getCancellationLabel's exact
+      // admin-viewer output — statusLabel.ts is the source of truth for casing.
       let teacherBillable = '';
       if (report?.status === 'flagged') teacherBillable = 'No';
       else if (outcome === 'Taken' || outcome === 'Student No-Show') teacherBillable = 'Yes';
-      else if (outcome === 'Cancelled by Student' && cancellationWindow === '<24hr') teacherBillable = 'Yes';
+      else if (outcome === 'Cancelled by student' && cancellationWindow === '<24hr') teacherBillable = 'Yes';
       else if (outcome === 'Scheduled') teacherBillable = '';
       else teacherBillable = 'No';
 

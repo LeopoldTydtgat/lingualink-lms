@@ -678,9 +678,12 @@ export default function ReportsClient({ initialReports, teachers, students, init
                   <option value="Taken">Taken</option>
                   <option value="Student No-Show">Student No-Show</option>
                   <option value="Teacher No-Show">Teacher No-Show</option>
-                  <option value="Cancelled by Student">Cancelled by Student</option>
-                  <option value="Cancelled by Teacher">Cancelled by Teacher</option>
-                  <option value="Cancelled by Admin">Cancelled by Admin</option>
+                  {/* Option VALUES must byte-match getCancellationLabel's admin output
+                      (statusLabel.ts, lowercase actor) — the export route filters rows
+                      by exact string equality. Display text stays capitalised. */}
+                  <option value="Cancelled by student">Cancelled by Student</option>
+                  <option value="Cancelled by teacher">Cancelled by Teacher</option>
+                  <option value="Cancelled by admin">Cancelled by Admin</option>
                   <option value="Scheduled">Scheduled</option>
                 </select>
               </div>
