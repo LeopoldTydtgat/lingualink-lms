@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
 
     let lessonsQuery = adminClient
       .from('lessons')
-      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
+      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
 
     if (dateGteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', dateGteIso)
@@ -197,6 +197,8 @@ export async function GET(req: NextRequest) {
             cancellationPolicy: student.cancellation_policy as '24hr' | '48hr' | null,
             hourlyRate: resolveLessonRate(rateMap, lesson.id, teacher?.hourly_rate ?? 0),
             durationMinutes: lesson.duration_minutes,
+            cancelledBy: lesson.cancelled_by ?? null,
+            rescheduledBy: lesson.rescheduled_by ?? null,
           })
 
           // Skip lessons that are neither billable in any way

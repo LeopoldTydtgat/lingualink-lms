@@ -7,7 +7,7 @@ import { getExportTimezone, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/expo
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
-import { getBillability, isCancelledStatus } from '@/lib/billing/billability';
+import { getBillability } from '@/lib/billing/billability';
 
 export const runtime = 'nodejs';
 
@@ -25,8 +25,10 @@ export const runtime = 'nodejs';
 // Billable Under Policy — derive from getBillability in
 // src/lib/billing/billability.ts (the same single source of truth the invoice
 // recompute uses), replacing the previous ad-hoc outcome-string and
-// window-arithmetic rules. Reschedule legs and 'scheduled' rows are the only
-// special cases; see the derive block below.
+// window-arithmetic rules. cancelled_by / rescheduled_by are threaded into the
+// call, so the reschedule-leg zeroing and cancellation-actor precedence now live
+// INSIDE getBillability (no local reschedule-leg branch here). 'scheduled' rows
+// are the only special case; see the derive block below.
 
 // Flatten a Supabase nested join result to its first element (project rule).
 function firstOf<T>(v: T | T[] | null | undefined): T | null {
@@ -207,25 +209,20 @@ export async function GET(request: NextRequest) {
 
       // Teacher Billable / Amount Owed / Billable Under Policy all derive from
       // getBillability (single source of truth, shared with the invoice
-      // recompute). Three legs:
-      //  A. Reschedule leg — cancel-family status + rescheduled_by
-      //     'student'/'admin', mirroring getCancellationLabel's reschedule
-      //     condition in statusLabel.ts: dead row, nothing owed anywhere.
-      //  B. 'scheduled' — outcome not settled yet; all three stay blank/null.
-      //  C. Everything else — one getBillability call. Teacher pay is ALWAYS
-      //     the 24hr rule inside getBillability; billable48hr carries the
-      //     48hr company-policy leg for Billable Under Policy.
+      // recompute). Two legs:
+      //  A. 'scheduled' — outcome not settled yet; all three stay blank/null.
+      //  B. Everything else — one getBillability call with cancelled_by /
+      //     rescheduled_by threaded in, so reschedule legs (cancel-family
+      //     status + rescheduled_by student/admin) and the cancellation-actor
+      //     precedence are handled INSIDE getBillability: a reschedule leg
+      //     comes back billableToTeacher=false, billable48hr=false — nothing
+      //     owed anywhere. Teacher pay is ALWAYS the 24hr rule inside
+      //     getBillability; billable48hr carries the 48hr company-policy leg
+      //     for Billable Under Policy.
       let teacherBillable = '';
       let amountOwed: number | null = null;
       let billableUnderPolicy = '';
-      const isRescheduleLeg =
-        isCancelledStatus(st) &&
-        (l.rescheduled_by === 'student' || l.rescheduled_by === 'admin');
-      if (isRescheduleLeg) {
-        teacherBillable = 'No';
-        amountOwed = 0;
-        billableUnderPolicy = 'No';
-      } else if (st !== 'scheduled') {
+      if (st !== 'scheduled') {
         const bill = getBillability({
           status: l.status,
           scheduledAt: l.scheduled_at,
@@ -233,6 +230,8 @@ export async function GET(request: NextRequest) {
           cancellationPolicy: policyApplied === '48hr' ? '48hr' : '24hr',
           hourlyRate: rate ?? 0,
           durationMinutes: l.duration_minutes,
+          cancelledBy: l.cancelled_by ?? null,
+          rescheduledBy: l.rescheduled_by ?? null,
         });
         teacherBillable = bill.billableToTeacher ? 'Yes' : 'No';
         if (!bill.billableToTeacher) amountOwed = 0;

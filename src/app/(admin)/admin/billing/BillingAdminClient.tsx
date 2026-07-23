@@ -772,6 +772,8 @@ export default function BillingAdminClient({
         cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
         hourlyRate: l.hourlyRate,
         durationMinutes: l.duration_minutes,
+        cancelledBy: l.cancelled_by ?? null,
+        rescheduledBy: l.rescheduled_by ?? null,
       })
       return [
         l.studentName,
@@ -834,6 +836,8 @@ export default function BillingAdminClient({
       cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
       hourlyRate: l.hourlyRate,
       durationMinutes: l.duration_minutes,
+      cancelledBy: l.cancelled_by ?? null,
+      rescheduledBy: l.rescheduled_by ?? null,
     })
     if (bill.billableToTeacher) {
       const cur = l.teacherCurrency ?? 'EUR'
@@ -1183,6 +1187,8 @@ export default function BillingAdminClient({
                                   cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                                   hourlyRate: l.hourlyRate,
                                   durationMinutes: l.duration_minutes,
+                                  cancelledBy: l.cancelled_by ?? null,
+                                  rescheduledBy: l.rescheduled_by ?? null,
                                 })
                                 return (
                                   <div key={l.id} className="grid grid-cols-7 gap-3 text-sm py-1.5 border-b border-gray-100 last:border-0">
@@ -1207,6 +1213,8 @@ export default function BillingAdminClient({
                                       cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                                       hourlyRate: l.hourlyRate,
                                       durationMinutes: l.duration_minutes,
+                                      cancelledBy: l.cancelled_by ?? null,
+                                      rescheduledBy: l.rescheduled_by ?? null,
                                     })
                                     return bill.billableToTeacher ? sum + bill.amount : sum
                                   }, 0).toFixed(2)}
@@ -1319,6 +1327,8 @@ export default function BillingAdminClient({
                       cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                       hourlyRate: l.hourlyRate,
                       durationMinutes: l.duration_minutes,
+                      cancelledBy: l.cancelled_by ?? null,
+                      rescheduledBy: l.rescheduled_by ?? null,
                     })
                     return (
                       <div key={l.id} className="grid grid-cols-6 gap-3 px-5 py-3 text-sm">
@@ -1421,6 +1431,8 @@ export default function BillingAdminClient({
                     cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                     hourlyRate: l.hourlyRate,
                     durationMinutes: l.duration_minutes,
+                    cancelledBy: l.cancelled_by ?? null,
+                    rescheduledBy: l.rescheduled_by ?? null,
                   })
                   return bill.billable48hr
                 })
@@ -1438,6 +1450,8 @@ export default function BillingAdminClient({
                     cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                     hourlyRate: l.hourlyRate,
                     durationMinutes: l.duration_minutes,
+                    cancelledBy: l.cancelled_by ?? null,
+                    rescheduledBy: l.rescheduled_by ?? null,
                   })
                   const cur = l.teacherCurrency ?? 'EUR'
                   companyOwedByCurrency[cur] = (companyOwedByCurrency[cur] ?? 0) + bill.companyAmount
@@ -1454,6 +1468,8 @@ export default function BillingAdminClient({
                     cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                     hourlyRate: l.hourlyRate,
                     durationMinutes: l.duration_minutes,
+                    cancelledBy: l.cancelled_by ?? null,
+                    rescheduledBy: l.rescheduled_by ?? null,
                   })
                   return bill.billableToTeacher
                 })
@@ -1489,6 +1505,8 @@ export default function BillingAdminClient({
                               cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                               hourlyRate: l.hourlyRate,
                               durationMinutes: l.duration_minutes,
+                              cancelledBy: l.cancelled_by ?? null,
+                              rescheduledBy: l.rescheduled_by ?? null,
                             })
                             return (
                               <div key={l.id} className="flex items-center gap-4 text-xs text-gray-600">
@@ -1520,6 +1538,8 @@ export default function BillingAdminClient({
                           cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
                           hourlyRate: l.hourlyRate,
                           durationMinutes: l.duration_minutes,
+                          cancelledBy: l.cancelled_by ?? null,
+                          rescheduledBy: l.rescheduled_by ?? null,
                         })
                         return (
                           <div key={l.id} className="grid grid-cols-6 gap-3 px-5 py-3 text-sm">

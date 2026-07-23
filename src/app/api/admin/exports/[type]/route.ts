@@ -142,6 +142,8 @@ export async function GET(
             cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
             hourlyRate: 0,            // amount unused here — this export only shows Yes/No
             durationMinutes: l.duration_minutes ?? 0,
+            cancelledBy: l.cancelled_by ?? null,
+            rescheduledBy: l.rescheduled_by ?? null,
           }).billableToTeacher
 
           // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
@@ -185,7 +187,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, teacher_id')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, teacher_id')
           .neq('status', 'scheduled') // only settled lessons
           .order('scheduled_at', { ascending: false })
 
@@ -256,6 +258,8 @@ export async function GET(
             cancellationPolicy: null, // teacher pay is independent of the 48hr company policy (brief 9.4)
             hourlyRate: resolvedRate,
             durationMinutes: lesson.duration_minutes ?? 0,
+            cancelledBy: lesson.cancelled_by ?? null,
+            rescheduledBy: lesson.rescheduled_by ?? null,
           })
           if (!bill.billableToTeacher) continue
 
@@ -452,6 +456,8 @@ export async function GET(
             cancellationPolicy: student?.cancellation_policy as '24hr' | '48hr' | null,
             hourlyRate: resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
             durationMinutes: l.duration_minutes ?? 0,
+            cancelledBy: l.cancelled_by ?? null,
+            rescheduledBy: l.rescheduled_by ?? null,
           })
           const billable24 = bill.billableToTeacher
           const billable48 = bill.billable48hr

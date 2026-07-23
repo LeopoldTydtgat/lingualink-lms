@@ -448,6 +448,8 @@ export default function BillingClient({
                           // in billing/page.tsx (snapshot ?? live profiles.hourly_rate).
                           hourlyRate: lesson.rate,
                           durationMinutes: lesson.duration_minutes,
+                          cancelledBy: lesson.cancelled_by ?? null,
+                          rescheduledBy: lesson.rescheduled_by ?? null,
                         }),
                       }))
                       const total = rows.reduce((s, { bill }) => bill.billableToTeacher ? s + bill.amount : s, 0)
