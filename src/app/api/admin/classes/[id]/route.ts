@@ -388,16 +388,28 @@ export async function PATCH(
     }
   }
 
-  // Duration change is owned by the change_duration_atomic RPC — it locks the
-  // training row, re-checks balance, writes hours_consumed and lessons.duration_minutes
-  // in a single transaction.
-  if (durationChanged) {
-    const newDurationMinutes = fields.duration_minutes as number
-    const { error: rpcError } = await adminClient.rpc('change_duration_atomic', {
+  // timeChanged gates the reschedule emails below and (with durationChanged /
+  // teacherChanged) the atomic RPC call.
+  const timeChanged =
+    scheduledAtUtc !== undefined &&
+    new Date(scheduledAtUtc).getTime() !== new Date(existing.scheduled_at).getTime()
+
+  // The admin_edit_lesson_atomic RPC owns ALL lesson field writes — it locks the
+  // training row, re-checks balance, and applies duration_minutes, scheduled_at,
+  // teacher_id, the reminder_24_sent/reminder_1h_sent resets, and the NEW341
+  // rescheduled_by/rescheduled_at stamps in ONE transaction. Hours movement +
+  // hours_log write fire only when the duration actually changed; reminder resets
+  // and reschedule stamps only when the time actually moved (IS DISTINCT FROM
+  // inside the function). Nothing below re-applies any of those fields.
+  if (durationChanged || timeChanged || teacherChanged) {
+    const newDurationMinutes = fields.duration_minutes ?? existing.duration_minutes
+    const { error: rpcError } = await adminClient.rpc('admin_edit_lesson_atomic', {
       p_lesson_id: id,
       p_old_duration_minutes: existing.duration_minutes,
       p_new_duration_minutes: newDurationMinutes,
       p_created_by: user.id,
+      p_new_scheduled_at: scheduledAtUtc ?? null,
+      p_new_teacher_id: teacherChanged ? fields.teacher_id : null,
     })
 
     if (rpcError) {
@@ -433,50 +445,8 @@ export async function PATCH(
           { status: 409 }
         )
       }
-      console.error('change_duration_atomic failed:', rpcError)
+      console.error('admin_edit_lesson_atomic failed:', rpcError)
       return NextResponse.json({ error: 'Failed to change duration' }, { status: 500 })
-    }
-  }
-
-  // Apply remaining lesson changes (scheduled_at, teacher_id) via adminClient.
-  // duration_minutes is owned by the RPC above.
-  const timeChanged =
-    scheduledAtUtc !== undefined &&
-    new Date(scheduledAtUtc).getTime() !== new Date(existing.scheduled_at).getTime()
-
-  const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() }
-  if (scheduledAtUtc !== undefined) updatePayload.scheduled_at = scheduledAtUtc
-  if (fields.teacher_id) updatePayload.teacher_id = fields.teacher_id
-  if (timeChanged) {
-    updatePayload.reminder_24_sent = false
-    updatePayload.reminder_1h_sent = false
-    // NEW341: stamp the actor who moved this lesson. Gated on timeChanged (NOT on
-    // teacherChanged or durationChanged) so it means exactly what the reschedule
-    // emails below mean: the class time actually moved. A teacher swap or a
-    // duration edit is not a reschedule and must not be attributed as one.
-    updatePayload.rescheduled_by = 'admin'
-    updatePayload.rescheduled_at = new Date().toISOString()
-  }
-
-  if (Object.keys(updatePayload).length > 1) {
-    const { data: updatedRows, error: updateError } = await adminClient
-      .from('lessons')
-      .update(updatePayload)
-      .eq('id', id)
-      .select('id')
-
-    if (updateError) {
-      if (updateError.code === '23P01') {
-        return NextResponse.json(
-          { error: 'SLOT_NOT_AVAILABLE', message: 'This slot is no longer available.' },
-          { status: 409 }
-        )
-      }
-      return NextResponse.json({ error: updateError.message }, { status: 500 })
-    }
-    if (!updatedRows || updatedRows.length === 0) {
-      console.error('CRITICAL: lesson UPDATE affected 0 rows:', { lesson_id: id })
-      return NextResponse.json({ error: 'Lesson update failed' }, { status: 500 })
     }
   }
 
