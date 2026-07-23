@@ -47,31 +47,27 @@ export async function PATCH(
       end_date,
     } = parsed.data
 
-    // Explicit allowlist — never spread the body. Excludes id, auth_user_id,
-    // created_at, profile_completed and anything else the client
-    // is not allowed to set.
-    const studentUpdate: Record<string, unknown> = {
-      full_name:             parsed.data.full_name,
-      timezone:              parsed.data.timezone,
-      status:                parsed.data.status,
-      date_of_birth:         parsed.data.date_of_birth         ?? null,
-      phone:                 parsed.data.phone                 ?? null,
-      language_preference:   parsed.data.language_preference   ?? null,
-      customer_number:       parsed.data.customer_number       ?? null,
-      is_private:            parsed.data.is_private            ?? true,
-      company_id:            parsed.data.company_id            ?? null,
-      academic_advisor_id:   parsed.data.academic_advisor_id   ?? null,
-      native_language:       parsed.data.native_language       ?? null,
-      learning_language:     parsed.data.learning_language     ?? null,
-      current_fluency_level: parsed.data.current_fluency_level ?? null,
-      self_assessed_level:   parsed.data.self_assessed_level   ?? null,
-      learning_goals:        parsed.data.learning_goals        ?? null,
-      interests:             parsed.data.interests             ?? null,
-      cancellation_policy:   parsed.data.cancellation_policy,
-      admin_notes:           parsed.data.admin_notes           ?? null,
-      teacher_notes:         parsed.data.teacher_notes         ?? null,
-      updated_at:            new Date().toISOString(),
+    // Build the payload from ONLY the fields present in the request. The
+    // schema is all-optional, so a partial request (e.g. Archive sending just
+    // { status }) must never touch the other columns — defaulting absent
+    // fields to null wipes the rest of the profile. Zod 4 omits absent
+    // optional keys from parsed.data and keeps explicit nulls, so `in` is the
+    // correct presence check: absent → not written, null → cleared. The
+    // explicit allowlist also excludes id, auth_user_id, created_at,
+    // profile_completed and anything else the client is not allowed to set.
+    const UPDATABLE_FIELDS = [
+      'full_name', 'timezone', 'status', 'date_of_birth', 'phone',
+      'language_preference', 'customer_number', 'is_private', 'company_id',
+      'academic_advisor_id', 'native_language', 'learning_language',
+      'current_fluency_level', 'self_assessed_level', 'learning_goals',
+      'interests', 'cancellation_policy', 'admin_notes', 'teacher_notes',
+    ] as const
+
+    const studentUpdate: Record<string, unknown> = {}
+    for (const key of UPDATABLE_FIELDS) {
+      if (key in parsed.data) studentUpdate[key] = parsed.data[key]
     }
+    studentUpdate.updated_at = new Date().toISOString()
 
     const { error: studentError } = await adminClient
       .from('students')
