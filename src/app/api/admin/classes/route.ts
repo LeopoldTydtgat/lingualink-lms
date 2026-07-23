@@ -190,11 +190,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = body
-
-  if (!teacher_id || !student_id || !training_id || !scheduled_at || !duration_minutes) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-  }
+  const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = parsed.data
 
   const durationCheck = z.union(
     [z.literal(30), z.literal(60), z.literal(90)],
@@ -237,12 +233,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Cannot book a class in the past. Please select a future date and time.' }, { status: 400 })
   }
 
-  // Verify the training exists and has enough hours remaining
+  // Verify the training exists, belongs to the submitted student, and has enough
+  // hours remaining. The student_id filter mirrors student/book/route.ts — without
+  // it a mismatched training_id deducts hours from another student's training.
+  // Same 'Training not found' on wrong owner, so existence is not leaked.
+  // .maybeSingle(): zero rows (wrong owner) is an expected case, not a throw.
   const { data: training, error: trainingError } = await supabase
     .from('trainings')
-    .select('id, total_hours, hours_consumed, status')
+    .select('id, student_id, total_hours, hours_consumed, status')
     .eq('id', training_id)
-    .single()
+    .eq('student_id', student_id)
+    .maybeSingle()
 
   if (trainingError || !training) {
     return NextResponse.json({ error: 'Training not found' }, { status: 404 })

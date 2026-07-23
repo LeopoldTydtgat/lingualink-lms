@@ -369,6 +369,7 @@ export const adminClassesPatchSchema = z.discriminatedUnion('action', [
 export const adminClassesPostSchema = z.object({
   teacher_id: z.string().uuid(),
   student_id: z.string().uuid(),
+  training_id: z.string().uuid(),
   duration_minutes: z.union([z.literal(30), z.literal(60), z.literal(90)]),
   scheduled_at: z.string()
     .regex(
