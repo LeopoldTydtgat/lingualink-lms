@@ -20,6 +20,10 @@ import { getBillability, getProjectedAmount, projectedContribution, isCancelledS
  *   - cancelled 24-48hr, policy=48hr → teacher NOT paid, billable48hr=true
  *     (Lingualink bills the company; teacher pay is unaffected — the
  *     teacher-pay vs company-bill distinction is absolute)
+ *   - reschedule leg (cancel-family status + rescheduledBy student/admin)
+ *     → billable to NO ONE (the new booking carries the money)
+ *   - cancelledBy actor beats the status suffix (mirrors statusLabel.ts);
+ *     actor teacher → never paid, whatever the status string says
  */
 
 const ONE_HOUR_MS = 60 * 60 * 1000
@@ -257,6 +261,170 @@ describe('getBillability — unknown status', () => {
     const r = getBillability(input({ status: 'scheduled' }))
     expect(r.billableToTeacher).toBe(false)
     expect(r.amount).toBe(0)
+  })
+})
+
+describe('getBillability — reschedule leg (cancel-family + rescheduledBy)', () => {
+  // A reschedule cancels the old row ('cancelled' + rescheduled_by) and books a
+  // new one. The dead leg is billable to NO ONE — even inside the <24hr window
+  // that would otherwise pay the teacher. The new booking carries the money.
+
+  it("status 'cancelled' + rescheduledBy 'student', <24hr notice: NOT billable, amount 0, companyAmount 0", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled',
+      scheduledAt,
+      cancelledAt,
+      rescheduledBy: 'student',
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.billable48hr).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(0)
+  })
+
+  it("status 'cancelled' + rescheduledBy 'admin', <24hr notice: NOT billable, amount 0, companyAmount 0", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled',
+      scheduledAt,
+      cancelledAt,
+      rescheduledBy: 'admin',
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.billable48hr).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(0)
+  })
+
+  it("'scheduled' + rescheduledBy 'admin' (in-place admin time edit): leg gate does NOT fire", () => {
+    // A live scheduled row can legitimately carry rescheduled_by='admin'. It must
+    // reach the same final not-billable branch as any 'scheduled' row (not the
+    // rescheduled leg gate), and projectedContribution must still project it.
+    const r = getBillability(input({ status: 'scheduled', rescheduledBy: 'admin' }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.label).toBe('Not billable')
+
+    const nowMs = new Date('2026-06-16T12:00:00Z').getTime()
+    const amt = projectedContribution(
+      input({ status: 'scheduled', rescheduledBy: 'admin', durationMinutes: 60, hourlyRate: 20 }),
+      nowMs
+    )
+    expect(amt).toBe(20)
+  })
+
+  it("status 'cancelled' + rescheduledBy 'student', 30h notice (24-48hr window), 48hr policy: leg gate wins, NOT company-billable", () => {
+    // Without the gate this row would fall into the 48hr-policy branch and
+    // wrongly invoice the company for a dead reschedule leg.
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 30 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled',
+      scheduledAt,
+      cancelledAt,
+      rescheduledBy: 'student',
+      cancellationPolicy: '48hr',
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.billable48hr).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(0)
+  })
+})
+
+describe('getBillability — cancellation actor (cancelledBy beats status suffix)', () => {
+  // Mirrors statusLabel.ts getCancellationLabel precedence: cancelled_by is
+  // preferred over the status suffix; the suffix only decides when cancelled_by
+  // is absent/invalid.
+
+  it("status 'cancelled', cancelledBy 'teacher', <24hr: NOT billable (teacher never paid for own cancel)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled',
+      scheduledAt,
+      cancelledAt,
+      cancelledBy: 'teacher',
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.amount).toBe(0)
+  })
+
+  it("status 'cancelled_by_student', cancelledBy 'teacher', <24hr: NOT billable (actor beats suffix)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled_by_student',
+      scheduledAt,
+      cancelledAt,
+      cancelledBy: 'teacher',
+    }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.amount).toBe(0)
+  })
+
+  it("status 'cancelled_by_teacher', cancelledBy 'student', <24hr: billable (actor beats suffix)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled_by_teacher',
+      scheduledAt,
+      cancelledAt,
+      cancelledBy: 'student',
+    }))
+    expect(r.billableToTeacher).toBe(true)
+    expect(r.amount).toBe(20)
+  })
+
+  it("status 'cancelled', cancelledBy 'admin', <24hr: billable (PENDING client decision)", () => {
+    // OPEN QUESTION: admin cancellations currently run the same student notice
+    // window, so an admin <24hr cancel pays the teacher. Whether admin cancels
+    // should always/never pay is an unresolved client decision — this test locks
+    // the CURRENT behaviour only; update it when the decision lands.
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({
+      status: 'cancelled',
+      scheduledAt,
+      cancelledAt,
+      cancelledBy: 'admin',
+    }))
+    expect(r.billableToTeacher).toBe(true)
+    expect(r.amount).toBe(20)
+  })
+})
+
+describe('getBillability — actor fields absent: pre-attribution behaviour preserved', () => {
+  // cancelledBy/rescheduledBy are OPTIONAL. Call sites that don't pass them
+  // (all current consumers) must get byte-identical results to before the
+  // fields existed: suffix decides the actor; bare 'cancelled' runs the window.
+
+  it("'cancelled' <24hr, no actor fields: billable (window rules, as before)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({ status: 'cancelled', scheduledAt, cancelledAt }))
+    expect(r.billableToTeacher).toBe(true)
+    expect(r.amount).toBe(20)
+  })
+
+  it("'cancelled_by_student' <24hr, no actor fields: billable (as before)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({ status: 'cancelled_by_student', scheduledAt, cancelledAt }))
+    expect(r.billableToTeacher).toBe(true)
+    expect(r.amount).toBe(20)
+  })
+
+  it("'cancelled_by_teacher' <24hr, no actor fields: NOT billable (as before)", () => {
+    const scheduledAt = '2026-07-15T14:00:00.000Z'
+    const cancelledAt = new Date(new Date(scheduledAt).getTime() - 23 * ONE_HOUR_MS).toISOString()
+    const r = getBillability(input({ status: 'cancelled_by_teacher', scheduledAt, cancelledAt }))
+    expect(r.billableToTeacher).toBe(false)
+    expect(r.amount).toBe(0)
+    expect(r.companyAmount).toBe(0)
   })
 })
 
