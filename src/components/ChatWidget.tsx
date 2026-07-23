@@ -59,18 +59,27 @@ function formatTime(dateStr: string): string {
   return `${h}:${m}`
 }
 
+// Brand icon used as the default support avatar. Avatar gates its special
+// contain/padding treatment on this exact path so real photos keep object-cover.
+const BRAND_CHAT_ICON = '/lingualink-chat-icon.svg'
+
 function Avatar({ name, photoUrl, size = 10 }: {
   name: string
   photoUrl?: string | null
   size?: number
 }) {
   if (photoUrl) {
+    const isBrandIcon = photoUrl === BRAND_CHAT_ICON
     return (
       <img
         src={photoUrl}
         alt={name}
-        className="rounded-full object-cover flex-shrink-0"
-        style={{ width: size * 4, height: size * 4 }}
+        className={`rounded-full flex-shrink-0 ${isBrandIcon ? 'object-contain' : 'object-cover'}`}
+        style={{
+          width: size * 4,
+          height: size * 4,
+          ...(isBrandIcon ? { padding: size <= 8 ? 3 : 4, backgroundColor: '#FF8303' } : {}),
+        }}
       />
     )
   }
@@ -125,7 +134,7 @@ export default function ChatWidget({
   participantType,
   participantAuthId,
   adminName = 'LinguaLink Support',
-  adminPhotoUrl = null,
+  adminPhotoUrl = BRAND_CHAT_ICON,
 }: ChatWidgetProps) {
   const supabase = useMemo(() => createClient(), [])
 
