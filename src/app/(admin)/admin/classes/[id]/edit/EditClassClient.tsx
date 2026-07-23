@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { isBookableStart } from '@/lib/bookingGrid'
+import { localToUtc } from '@/lib/utils/timezone'
 
 interface Teacher {
   id: string
@@ -307,16 +308,42 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
           </label>
           <select
             value={teacherId}
-            onChange={(e) => { setTeacherId(e.target.value); setAvailabilityWarning(false) }}
+            onChange={(e) => {
+              const newTeacherId = e.target.value
+              const newTz = teachers.find((t) => t.id === newTeacherId)?.timezone ?? null
+              // The form's date/time are wall-clock in the CURRENT teacher's tz, but
+              // the server interprets the submitted value in the NEW teacher's tz.
+              // Re-render the same real-world instant into the new tz so a swap-only
+              // edit never shifts the class time. Skip (keep state untouched) if
+              // either tz is unknown or the form is incomplete.
+              if (newTz && selectedTeacherTz && date && time) {
+                const [year, month, day] = date.split('-').map(Number)
+                const [hour, minute] = time.split(':').map(Number)
+                const utcIso = localToUtc(buildLocalISOString(year, month, day, hour, minute), selectedTeacherTz)
+                const rerendered = parseScheduledAt(utcIso, newTz)
+                setDate(rerendered.date)
+                setTime(rerendered.time)
+              }
+              setTeacherId(newTeacherId)
+              setAvailabilityWarning(false)
+            }}
             style={{
               width: '100%', border: '1px solid #D1D5DB', borderRadius: '6px',
               padding: '10px 12px', fontSize: '14px', outline: 'none',
               backgroundColor: 'white', boxSizing: 'border-box',
             }}
           >
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.full_name}</option>
-            ))}
+            {teachers.map((t) => {
+              // A tz-less target teacher would dead-end the form on the blocked
+              // screen; only the currently assigned teacher stays selectable
+              // (that case is already handled by the early-return screen).
+              const tzMissing = !t.timezone
+              return (
+                <option key={t.id} value={t.id} disabled={tzMissing && t.id !== lesson.teacher_id}>
+                  {t.full_name}{tzMissing ? ' (no timezone set)' : ''}
+                </option>
+              )
+            })}
           </select>
         </div>
 
