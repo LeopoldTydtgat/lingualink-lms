@@ -16,6 +16,17 @@ export async function proxy(request: NextRequest) {
 
   let response = NextResponse.next({ request })
 
+  // Copy the auth cookies Supabase wrote onto the tracked `response` (via the
+  // setAll callback below) onto a redirect/rewrite response, so short-circuit
+  // returns don't drop refreshed session tokens. Reads `response` at call time
+  // because setAll reassigns it.
+  const withAuthCookies = <T extends NextResponse>(res: T): T => {
+    response.cookies.getAll().forEach((cookie) => {
+      res.cookies.set(cookie.name, cookie.value, cookie)
+    })
+    return res
+  }
+
   // ── Legacy host-only sb-cookie cleanup ──────────────────────────────────────
   // Pre-7b7ffba code wrote sb-* auth cookies host-only on production subdomains.
   // Those legacy cookies coexist with the current domain-scoped writes and
@@ -99,14 +110,16 @@ export async function proxy(request: NextRequest) {
 
   // Student subdomain serves the student login form at /login
   if (pathname === '/login' && portal === 'student') {
-    return NextResponse.rewrite(new URL('/student/login', request.url))
+    return withAuthCookies(NextResponse.rewrite(new URL('/student/login', request.url)))
   }
 
   const expected = expectedPortal(pathname)
   if (portal !== 'any' && expected !== 'any' && portal !== expected) {
     const target = portalUrl(expected)
     if (target) {
-      return NextResponse.redirect(`${target}${pathname}${request.nextUrl.search}`)
+      return withAuthCookies(
+        NextResponse.redirect(`${target}${pathname}${request.nextUrl.search}`)
+      )
     }
   }
 
@@ -139,7 +152,7 @@ export async function proxy(request: NextRequest) {
   if (!isPublicPath && !user) {
     const loginUrl = new URL(loginUrlForPath(pathname))
     loginUrl.searchParams.set('returnUrl', pathname)
-    return NextResponse.redirect(loginUrl)
+    return withAuthCookies(NextResponse.redirect(loginUrl))
   }
 
   // ── Per-request status check with 60-second cookie cache ─────────────────────
@@ -189,12 +202,9 @@ export async function proxy(request: NextRequest) {
         const loginUrl = new URL(loginUrlForPath(pathname))
         loginUrl.searchParams.set('error', 'account_inactive')
 
-        // Build the redirect, but preserve the cookie state Supabase wrote onto `response`
-        const redirectResponse = NextResponse.redirect(loginUrl)
-        // Copy all Set-Cookie headers from `response` (where Supabase wrote auth-cookie clears)
-        response.cookies.getAll().forEach((cookie) => {
-          redirectResponse.cookies.set(cookie.name, cookie.value, cookie)
-        })
+        // Build the redirect, but preserve the cookie state Supabase wrote onto
+        // `response` (where Supabase wrote auth-cookie clears)
+        const redirectResponse = withAuthCookies(NextResponse.redirect(loginUrl))
         // Delete our own cache cookie on top of whatever Supabase set — must
         // include `domain` so the browser clears the domain-scoped cookie, not
         // a phantom host-only one.
@@ -220,14 +230,14 @@ export async function proxy(request: NextRequest) {
           const target = isProductionHost(host) && teacherBase
             ? `${teacherBase}/upcoming-classes`
             : new URL('/upcoming-classes', request.url)
-          return NextResponse.redirect(target)
+          return withAuthCookies(NextResponse.redirect(target))
         }
         if (hasStudent && !hasProfile && !pathname.startsWith('/student/')) {
           const studentBase = portalUrl('student')
           const target = isProductionHost(host) && studentBase
             ? `${studentBase}/student/my-classes`
             : new URL('/student/my-classes', request.url)
-          return NextResponse.redirect(target)
+          return withAuthCookies(NextResponse.redirect(target))
         }
       }
 

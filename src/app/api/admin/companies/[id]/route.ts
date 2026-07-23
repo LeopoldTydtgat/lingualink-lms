@@ -17,28 +17,41 @@ export async function PATCH(
     }
 
     // --- 2. Validate ---
-    if (!body.name?.trim()) {
+    // name is only required when the request tries to set it — a partial
+    // PATCH (e.g. { status }) must not demand (or touch) the name.
+    if ('name' in body && !body.name?.trim()) {
       return NextResponse.json({ error: 'Company name is required.' }, { status: 400 })
     }
 
     // --- 3. Update ---
+    // Write ONLY the fields present in the request body: absent → untouched,
+    // present → written with the same per-field transform as before (empty
+    // string still clears a text field). Defaulting absent fields would wipe
+    // the rest of the row on a partial PATCH.
+    const updatePayload: Record<string, unknown> = {}
+    if ('name' in body) updatePayload.name = body.name.trim()
+    if ('type' in body) updatePayload.type = body.type || null
+    if ('contact_name' in body) updatePayload.contact_name = body.contact_name || null
+    if ('contact_email' in body) updatePayload.contact_email = body.contact_email || null
+    if ('contact_phone' in body) updatePayload.contact_phone = body.contact_phone || null
+    if ('country' in body) updatePayload.country = body.country || null
+    if ('billing_email' in body) updatePayload.billing_email = body.billing_email || null
+    if ('cancellation_policy' in body) updatePayload.cancellation_policy = body.cancellation_policy ?? '24hr'
+    if ('tags' in body) updatePayload.tags = body.tags ?? []
+    if ('notes' in body) updatePayload.notes = body.notes || null
+    if ('status' in body) updatePayload.status = body.status ?? 'active'
+
+    // Nothing recognised in the body → nothing to write. PostgREST rejects an
+    // empty update, so no-op instead. (companies has no updated_at column.)
+    if (Object.keys(updatePayload).length === 0) {
+      return NextResponse.json({ success: true })
+    }
+
     const adminClient = createAdminClient()
 
     const { error: updateError } = await adminClient
       .from('companies')
-      .update({
-        name: body.name.trim(),
-        type: body.type || null,
-        contact_name: body.contact_name || null,
-        contact_email: body.contact_email || null,
-        contact_phone: body.contact_phone || null,
-        country: body.country || null,
-        billing_email: body.billing_email || null,
-        cancellation_policy: body.cancellation_policy ?? '24hr',
-        tags: body.tags ?? [],
-        notes: body.notes || null,
-        status: body.status ?? 'active',
-      })
+      .update(updatePayload)
       .eq('id', id)
 
     if (updateError) {

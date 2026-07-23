@@ -283,6 +283,87 @@ function computeWashLabel(
   return null
 }
 
+// A visible piece of a green/red availability run after same-day booked-class
+// intervals are subtracted from it. Edges at the run's true start/end keep
+// their 8px rounded corner; edges created by a booking cut render square.
+// runStartMin/runEndMin carry the record's full range for the label, and
+// labelHost marks the largest segment of its run - the label renders there so
+// it never sits under a booking.
+interface BlockSegment {
+  recordId: string
+  dayIdx: number
+  startMin: number
+  endMin: number
+  runStartMin: number
+  runEndMin: number
+  roundTop: boolean
+  roundBottom: boolean
+  labelHost: boolean
+}
+
+// Subtract booked-class intervals from an availability run, yielding its
+// visible segments. Same clamp-merge-gap walk as computeWashLabel above.
+// Slivers under 4 min (~4px at 1px/min) are dropped. An empty result means
+// the booking(s) cover the whole run - the class card is the whole visual.
+function subtractClassIntervals(
+  run: SpecificBlock,
+  dayClasses: Array<{ startMin: number; endMin: number }>
+): BlockSegment[] {
+  const clamped = dayClasses
+    .map(c => ({ start: Math.max(c.startMin, run.startMin), end: Math.min(c.endMin, run.endMin) }))
+    .filter(c => c.end > c.start)
+    .sort((a, b) => a.start - b.start)
+
+  const merged: Array<{ start: number; end: number }> = []
+  for (const c of clamped) {
+    const last = merged[merged.length - 1]
+    if (last && c.start <= last.end) {
+      last.end = Math.max(last.end, c.end)
+    } else {
+      merged.push({ start: c.start, end: c.end })
+    }
+  }
+
+  const gaps: Array<{ start: number; end: number }> = []
+  let cursor = run.startMin
+  for (const c of merged) {
+    if (c.start > cursor) gaps.push({ start: cursor, end: c.start })
+    cursor = c.end
+  }
+  if (cursor < run.endMin) gaps.push({ start: cursor, end: run.endMin })
+
+  const segments = gaps
+    .filter(g => g.end - g.start >= 4)
+    .map(g => ({
+      recordId: run.recordId,
+      dayIdx: run.dayIdx,
+      startMin: g.start,
+      endMin: g.end,
+      runStartMin: run.startMin,
+      runEndMin: run.endMin,
+      roundTop: g.start === run.startMin,
+      roundBottom: g.end === run.endMin,
+      labelHost: false,
+    }))
+
+  if (segments.length > 0) {
+    let largest = segments[0]
+    for (const s of segments) {
+      if (s.endMin - s.startMin > largest.endMin - largest.startMin) largest = s
+    }
+    largest.labelHost = true
+  }
+  return segments
+}
+
+// Corner rule per segment: true-run edges stay rounded, booking cuts are square.
+function segmentRadius(s: BlockSegment): string {
+  if (s.roundTop && s.roundBottom) return '8px'
+  if (s.roundTop) return '8px 8px 0 0'
+  if (s.roundBottom) return '0 0 8px 8px'
+  return '0'
+}
+
 export default function DayToDay({ profile, availability, onAvailabilityChange }: Props) {
   const supabase = createClient()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -487,6 +568,18 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     () => expandClassBlocks(classes, weekStart, displayTz),
     [classes, weekStart, displayTz]
   )
+
+  // Booked classes visually punch through availability: subtract each day's
+  // class intervals from every green/red run and render only the remaining
+  // segments. greenBlocks/redBlocks themselves stay untouched - washLabels
+  // and earliestEventMin keep reading the full runs.
+  const availabilitySegments = useMemo(() => {
+    const split = (blocks: SpecificBlock[]): BlockSegment[] =>
+      blocks.flatMap(b =>
+        subtractClassIntervals(b, classBlocksList.filter(c => c.dayIdx === b.dayIdx))
+      )
+    return { green: split(greenBlocks), red: split(redBlocks) }
+  }, [greenBlocks, redBlocks, classBlocksList])
 
   // NEW282: earliest event minute (since local midnight) in the visible week — the smallest
   // start among booked classes and every availability/unavailability block. Holiday and
@@ -1170,14 +1263,14 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   )
                 })}
 
-                {/* Layer 1: specific available (green) */}
-                {greenBlocks.filter(b => b.dayIdx === dayIdx).map(b => {
+                {/* Layer 1: specific available (green) - split around booked classes */}
+                {availabilitySegments.green.filter(b => b.dayIdx === dayIdx).map((b, i) => {
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
                   return (
                     <div
-                      key={`av-${b.recordId}`}
+                      key={`av-${b.recordId}-${i}`}
                       onClick={() => { setActionError(''); setPendingDelete(b.recordId) }}
                       style={{
                         position: 'absolute',
@@ -1185,7 +1278,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         backgroundColor: '#F0FDF4',
                         border: '1px solid #BBF7D0',
                         borderLeft: '3px solid #16A34A',
-                        borderRadius: '8px',
+                        borderRadius: segmentRadius(b),
                         boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
                         padding: '3px 6px',
                         cursor: 'pointer',
@@ -1193,33 +1286,33 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         overflow: 'hidden',
                       }}
                     >
-                      {height >= 44 ? (
+                      {b.labelHost && (height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
                             <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#374151' }}>Available</span>
                           </div>
-                          <div style={{ fontSize: '11px', color: '#6B7280' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ fontSize: '11px', color: '#6B7280' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</div>
                           {height >= 68 && (
                             <div style={{ fontSize: '10.5px', color: '#9CA3AF', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Available for bookings</div>
                           )}
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                          <span style={{ fontSize: '11px', color: '#4B5563', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</span>
                         </div>
-                      )}
+                      ))}
                     </div>
                   )
                 })}
 
-                {/* Layer 1: specific unavailable + holiday (red) */}
-                {redBlocks.filter(b => b.dayIdx === dayIdx).map(b => {
+                {/* Layer 1: specific unavailable + holiday (red) - split around booked classes */}
+                {availabilitySegments.red.filter(b => b.dayIdx === dayIdx).map((b, i) => {
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
                   return (
                     <div
-                      key={`un-${b.recordId}`}
+                      key={`un-${b.recordId}-${i}`}
                       onClick={() => { setActionError(''); setPendingDelete(b.recordId) }}
                       style={{
                         position: 'absolute',
@@ -1227,25 +1320,25 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         backgroundColor: '#FEF2F2',
                         border: '1px solid #FECACA',
                         borderLeft: '3px solid #DC2626',
-                        borderRadius: '8px',
+                        borderRadius: segmentRadius(b),
                         padding: '3px 6px',
                         cursor: 'pointer',
                         zIndex: 2,
                         overflow: 'hidden',
                       }}
                     >
-                      {height >= 44 ? (
+                      {b.labelHost && (height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
                             <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#B91C1C' }}>Unavailable</span>
                           </div>
-                          <div style={{ fontSize: '11px', color: '#B91C1C' }}>{timeRangeLabel(b.startMin, b.endMin)}</div>
+                          <div style={{ fontSize: '11px', color: '#B91C1C' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</div>
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: '#B91C1C', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.startMin, b.endMin)}</span>
+                          <span style={{ fontSize: '11px', color: '#B91C1C', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</span>
                         </div>
-                      )}
+                      ))}
                     </div>
                   )
                 })}

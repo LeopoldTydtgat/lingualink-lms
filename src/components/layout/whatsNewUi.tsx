@@ -23,13 +23,29 @@ export function relativeTime(iso: string): string {
   return `${d}d ago`
 }
 
-// A single What's New row. Attention items get an orange dot; normal items grey.
-// Colours are inline style props only (Tailwind v4 can't apply dynamic colours).
-// The relative-time line renders only when mounted (hydration-safe) and the item
-// carries a real timestamp (showTime !== false).
+// Severity colour per item kind (kinds emitted by lib/whatsNew.ts and
+// lib/studentWhatsNew.ts). Red for pay/access-impacting items, yellow for
+// action-needed items; any kind not listed (including future ones) falls back
+// to the grey default below.
+const DOT_COLOURS: Record<string, string> = {
+  report_missed: '#FD5602',
+  hours_low: '#FD5602',
+  training_ending: '#FD5602',
+  report_reopened: '#FFB942',
+  invoice_reminder: '#FFB942',
+  homework_assigned: '#FFB942',
+}
+const DOT_DEFAULT = '#E0DFDC'
+
+// A single What's New row. Dot colour comes from DOT_COLOURS by item kind
+// (grey default for unmapped kinds). Colours are inline style props only
+// (Tailwind v4 can't apply dynamic colours). The relative-time line renders
+// only when mounted (hydration-safe) and the item carries a real timestamp
+// (showTime !== false).
 //
-// Seen styling: seen rows dim their text; a seen normal dot goes hollow, but a
-// seen attention dot stays solid (unresolved urgency keeps its dot).
+// Seen styling: seen rows dim their text; a seen default-grey dot goes hollow,
+// but any severity-coloured dot (kind in DOT_COLOURS) stays solid until
+// dismissed (unresolved urgency keeps its dot).
 //
 // Dismiss: when `onDismiss` is passed the row wraps in a relative container and
 // renders an X button over its right edge — hidden until row hover on pointer
@@ -39,7 +55,7 @@ export function relativeTime(iso: string): string {
 export function WhatsNewRow({ item, mounted, seen, onClick, onDismiss }: { item: WhatsNewItem; mounted: boolean; seen: boolean; onClick: () => void; onDismiss?: () => void }) {
   const [hovered, setHovered] = useState(false)
   const [dismissHovered, setDismissHovered] = useState(false)
-  const hollowDot = seen && !item.attention
+  const hollowDot = seen && !(item.kind in DOT_COLOURS)
   return (
     <div
       className="group"
@@ -72,7 +88,7 @@ export function WhatsNewRow({ item, mounted, seen, onClick, onDismiss }: { item:
             marginTop: '6px',
             flexShrink: 0,
             boxSizing: 'border-box',
-            backgroundColor: item.attention ? '#FF8303' : hollowDot ? 'transparent' : '#E0DFDC',
+            backgroundColor: hollowDot ? 'transparent' : (DOT_COLOURS[item.kind] ?? DOT_DEFAULT),
             border: hollowDot ? '1px solid #E0DFDC' : 'none',
           }}
         />

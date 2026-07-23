@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import BookingClient from './BookingClient'
+import BookingGridClient from './BookingGridClient'
 import { requireTz } from '@/lib/time/requireTz'
 
 // One row from the get_teacher_reviews_summary RPC. Postgres numeric can arrive as
@@ -152,7 +152,7 @@ export default async function BookPage({
   })
 
   return (
-    <BookingClient
+    <BookingGridClient
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'book:student')}
       trainingId={training.id}

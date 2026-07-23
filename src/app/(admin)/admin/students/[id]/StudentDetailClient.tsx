@@ -561,7 +561,13 @@ export default function StudentDetailClient({
     { key: 'reviews', label: 'Reviews', count: reviews.length },
   ]
   const tabs = isStaffView
-    ? allTabs.filter((t) => t.key === 'overview' || t.key === 'classes')
+    ? allTabs.filter(
+        (t) =>
+          t.key === 'overview' ||
+          t.key === 'classes' ||
+          t.key === 'reports' ||
+          t.key === 'reviews'
+      )
     : allTabs
 
   const inputClass = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400'

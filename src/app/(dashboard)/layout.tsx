@@ -281,7 +281,6 @@ export default async function DashboardLayout({
           participantType="teacher"
           participantAuthId={user.id}
           adminName="LinguaLink Support"
-          adminPhotoUrl={null}
         />
       )}
 

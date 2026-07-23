@@ -1,18 +1,26 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { UserCircle, CalendarDays, ChevronDown, MessageSquare } from 'lucide-react'
+import { UserCircle, CalendarPlus, ChevronDown, MessageSquare } from 'lucide-react'
 import HeaderShortcut from '@/components/layout/HeaderShortcut'
+import StudentNotificationsBell from '@/components/student/layout/StudentNotificationsBell'
+import type { WhatsNewItem } from '@/lib/whatsNew'
 
 interface StudentTopHeaderProps {
   studentName: string
   photoUrl: string | null
   unreadMessageCount?: number
+  whatsNewItems: WhatsNewItem[]
+  whatsNewSeenAt: string | null
+  studentId: string
 }
 
 export default function StudentTopHeader({
   studentName,
   photoUrl,
   unreadMessageCount = 0,
+  whatsNewItems,
+  whatsNewSeenAt,
+  studentId,
 }: StudentTopHeaderProps) {
   return (
     <header
@@ -33,12 +41,10 @@ export default function StudentTopHeader({
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         {/* Calendar shortcut */}
         <HeaderShortcut href="/student/book" ariaLabel="Book a class" title="Book a class">
-          <CalendarDays size={20} color="#4b5563" />
+          <CalendarPlus size={20} color="#4b5563" />
         </HeaderShortcut>
 
-        {/* Messages shortcut — Calendar now exists (book a class); the
-            notifications bell remains intentionally omitted (no student
-            notification feed yet). */}
+        {/* Messages shortcut */}
         <HeaderShortcut href="/student/messages" ariaLabel="Messages" title="Messages">
           <MessageSquare size={20} color="#4b5563" />
           {unreadMessageCount > 0 && (
@@ -47,6 +53,9 @@ export default function StudentTopHeader({
             </span>
           )}
         </HeaderShortcut>
+
+        {/* Notifications bell — client island, same position as the teacher header */}
+        <StudentNotificationsBell items={whatsNewItems} seenAt={whatsNewSeenAt} studentId={studentId} />
 
         {/* Vertical divider */}
         <div style={{ width: '1px', height: '24px', backgroundColor: '#E0DFDC' }} />

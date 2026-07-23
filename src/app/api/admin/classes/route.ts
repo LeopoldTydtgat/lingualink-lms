@@ -47,6 +47,46 @@ export async function GET(request: NextRequest) {
   const page = parseInt(searchParams.get('page') ?? '1')
   const pageSize = 50
 
+  // Pre-resolve the free-text search into teacher/student id lists BEFORE the
+  // lessons query runs, so the filter composes with .range() and the exact count.
+  // The previous approach filtered in JS after the page was sliced: pages came
+  // back under-filled and `total` was the unfiltered count. full_name lives on
+  // the joined profiles/students tables, not on lessons, so a direct .ilike on
+  // the lessons query is impossible - mirror the batch-fetch-ids pattern in
+  // api/admin/exports/[type]/route.ts instead.
+  let searchTeacherIds: string[] = []
+  let searchStudentIds: string[] = []
+  let applySearch = false
+  if (search) {
+    // Sanitise for PostgREST: strip characters that would break .or()/.ilike()
+    // filter syntax (commas, parentheses), then escape the ilike wildcards
+    // (% and _) and the escape character itself so the term matches literally.
+    const cleaned = search.replace(/[,()]/g, '').replace(/([\\%_])/g, '\\$1').trim()
+    if (!cleaned) {
+      // Term reduced to nothing (only stripped punctuation) - matches no name,
+      // the same outcome the old post-fetch includes() filter produced.
+      return NextResponse.json({ lessons: [], total: 0, page, pageSize })
+    }
+    const pattern = `%${cleaned}%`
+    // .limit(500) is a defensive cap on each resolved id list - keeps the
+    // .or() in-list bounded; far above any realistic roster size.
+    const [teacherRes, studentRes] = await Promise.all([
+      supabase.from('profiles').select('id').ilike('full_name', pattern).limit(500),
+      supabase.from('students').select('id').ilike('full_name', pattern).limit(500),
+    ])
+    if (teacherRes.error || studentRes.error) {
+      console.error('Classes search name lookup error:', teacherRes.error ?? studentRes.error)
+      return NextResponse.json({ error: 'Search failed' }, { status: 500 })
+    }
+    searchTeacherIds = (teacherRes.data ?? []).map((p) => p.id)
+    searchStudentIds = (studentRes.data ?? []).map((s) => s.id)
+    // No name matched on either side: nothing can match the lessons query.
+    if (searchTeacherIds.length === 0 && searchStudentIds.length === 0) {
+      return NextResponse.json({ lessons: [], total: 0, page, pageSize })
+    }
+    applySearch = true
+  }
+
   // Build query — join profiles (teacher) and students
   let query = supabase
     .from('lessons')
@@ -77,6 +117,23 @@ export async function GET(request: NextRequest) {
 
   if (teacherId) query = query.eq('teacher_id', teacherId)
   if (studentId) query = query.eq('student_id', studentId)
+
+  // Free-text search: filter by the pre-resolved id lists (never the raw term).
+  // Both sides matched -> OR across the two columns; one side empty -> plain
+  // .in() on the other. Runs before .order()/.range(), so pagination and the
+  // exact count reflect the filtered set, and it ANDs with the date/status
+  // filters below like any other filter.
+  if (applySearch) {
+    if (searchTeacherIds.length > 0 && searchStudentIds.length > 0) {
+      query = query.or(
+        `teacher_id.in.(${searchTeacherIds.join(',')}),student_id.in.(${searchStudentIds.join(',')})`
+      )
+    } else if (searchTeacherIds.length > 0) {
+      query = query.in('teacher_id', searchTeacherIds)
+    } else {
+      query = query.in('student_id', searchStudentIds)
+    }
+  }
 
   // The date filters name calendar DAYS in the admin's own timezone, but scheduled_at is
   // a UTC instant. Resolve each edge through localMidnightToUtc — the same helper
@@ -153,19 +210,7 @@ export async function GET(request: NextRequest) {
     students: undefined,
   }))
 
-  // Client-side search filter on teacher/student name (Supabase doesn't support
-  // cross-table ilike easily without a view, so we filter after fetch for now)
-  const results = search
-    ? flattened.filter((l) => {
-        const q = search.toLowerCase()
-        return (
-          l.teacher?.full_name?.toLowerCase().includes(q) ||
-          l.student?.full_name?.toLowerCase().includes(q)
-        )
-      })
-    : flattened
-
-  return NextResponse.json({ lessons: results, total: count ?? 0, page, pageSize })
+  return NextResponse.json({ lessons: flattened, total: count ?? 0, page, pageSize })
 }
 
 // POST /api/admin/classes
@@ -190,11 +235,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = body
-
-  if (!teacher_id || !student_id || !training_id || !scheduled_at || !duration_minutes) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-  }
+  const { teacher_id, student_id, training_id, scheduled_at, duration_minutes } = parsed.data
 
   const durationCheck = z.union(
     [z.literal(30), z.literal(60), z.literal(90)],
@@ -237,12 +278,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Cannot book a class in the past. Please select a future date and time.' }, { status: 400 })
   }
 
-  // Verify the training exists and has enough hours remaining
+  // Verify the training exists, belongs to the submitted student, and has enough
+  // hours remaining. The student_id filter mirrors student/book/route.ts — without
+  // it a mismatched training_id deducts hours from another student's training.
+  // Same 'Training not found' on wrong owner, so existence is not leaked.
+  // .maybeSingle(): zero rows (wrong owner) is an expected case, not a throw.
   const { data: training, error: trainingError } = await supabase
     .from('trainings')
-    .select('id, total_hours, hours_consumed, status')
+    .select('id, student_id, total_hours, hours_consumed, status')
     .eq('id', training_id)
-    .single()
+    .eq('student_id', student_id)
+    .maybeSingle()
 
   if (trainingError || !training) {
     return NextResponse.json({ error: 'Training not found' }, { status: 404 })
