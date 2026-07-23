@@ -117,7 +117,7 @@ export default async function DashboardLayout({
 
     const { data: monthLessons } = await supabase
       .from('lessons')
-      .select('id, duration_minutes, status, cancelled_at, scheduled_at')
+      .select('id, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, scheduled_at')
       .eq('teacher_id', profile.id)
       .gte('scheduled_at', startUtc)
       .lt('scheduled_at', endUtc)
@@ -144,6 +144,8 @@ export default async function DashboardLayout({
           cancellationPolicy: null,
           hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
+          cancelledBy: lesson.cancelled_by ?? null,
+          rescheduledBy: lesson.rescheduled_by ?? null,
         })
         if (bill.billableToTeacher) currentAmount += bill.amount
       }
@@ -162,6 +164,8 @@ export default async function DashboardLayout({
           cancellationPolicy: null,
           hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
           durationMinutes: lesson.duration_minutes,
+          cancelledBy: lesson.cancelled_by ?? null,
+          rescheduledBy: lesson.rescheduled_by ?? null,
         },
         nowMs
       )

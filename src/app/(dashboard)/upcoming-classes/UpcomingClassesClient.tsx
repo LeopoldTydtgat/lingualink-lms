@@ -261,6 +261,8 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
           cancellationPolicy: '24hr',
           hourlyRate: 0,
           durationMinutes: durationMin,
+          cancelledBy: cls.cancelled_by ?? null,
+          rescheduledBy: cls.rescheduled_by ?? null,
         })
       : null
 

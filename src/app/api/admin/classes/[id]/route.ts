@@ -620,7 +620,7 @@ export async function DELETE(
 
   const { data: lesson, error: fetchError } = await adminClient
     .from('lessons')
-    .select('id, status, scheduled_at, cancelled_at, student_id')
+    .select('id, status, scheduled_at, cancelled_at, cancelled_by, rescheduled_by, student_id')
     .eq('id', id)
     .single()
 
@@ -636,9 +636,9 @@ export async function DELETE(
   // or a 24-48h cancellation under a 48hr-policy student). The company-billing CSV export reads
   // these exact rows to invoice the company, so hard-deleting one silently drops a billable line
   // item. We block deletion using getBillability(), whose billable predicate for the cancelled
-  // statuses reachable here equals the company-billing export's inline 24h/48h computation, so this
-  // guard blocks precisely the rows the export would bill. (That export case inlines the same math
-  // rather than calling getBillability — keep the two in sync.) Clean >24h cancellations and
+  // statuses reachable here equals the company-billing export's computation, so this guard blocks
+  // precisely the rows the export would bill. (This guard and both company-billing exports all call
+  // the same threaded getBillability — no inline copy exists.) Clean >24h cancellations and
   // teacher-cancellations are not billable to the company and remain deletable.
   const { data: student } = await adminClient
     .from('students')
@@ -653,6 +653,8 @@ export async function DELETE(
     cancellationPolicy: policy,
     hourlyRate: 0,        // irrelevant: the billable booleans do not depend on rate/duration
     durationMinutes: 0,
+    cancelledBy: lesson.cancelled_by ?? null,
+    rescheduledBy: lesson.rescheduled_by ?? null,
   })
   if (billableToTeacher || billable48hr) {
     return NextResponse.json(

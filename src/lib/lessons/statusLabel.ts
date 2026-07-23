@@ -1,3 +1,7 @@
+// Cancel-family membership is owned by billability.ts (CANCELLED_STATUSES) —
+// one source of truth for outcome labels AND billing derivation.
+import { isCancelledStatus } from '@/lib/billing/billability'
+
 export type LessonViewer = 'admin' | 'teacher' | 'student'
 
 export interface CancellationLabelInput {
@@ -6,10 +10,9 @@ export interface CancellationLabelInput {
   rescheduled_by?: string | null
 }
 
-// The three DB statuses that constitute the cancelled family. A reschedule's dead
-// old leg also lands here (status 'cancelled' + rescheduled_by set), which is the
-// whole reason this helper distinguishes cancellation from reschedule.
-const CANCELLED_FAMILY = new Set(['cancelled', 'cancelled_by_student', 'cancelled_by_teacher'])
+// A reschedule's dead old leg also lands in the cancelled family (status
+// 'cancelled' + rescheduled_by set), which is the whole reason this helper
+// distinguishes cancellation from reschedule.
 
 /**
  * Returns the cancellation-family label for a lesson, or null if the lesson is
@@ -28,7 +31,7 @@ export function getCancellationLabel(
   input: CancellationLabelInput,
   viewer: LessonViewer
 ): string | null {
-  if (!CANCELLED_FAMILY.has(input.status)) return null
+  if (!isCancelledStatus(input.status)) return null
 
   // Reschedule leg: rescheduled_by is only ever set on a row that was cancelled to
   // make way for a new booking. It is 'student' | 'admin' | null; the verb becomes

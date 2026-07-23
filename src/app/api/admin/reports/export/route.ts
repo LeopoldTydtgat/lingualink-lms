@@ -7,6 +7,7 @@ import { getExportTimezone, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/expo
 import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
+import { getBillability } from '@/lib/billing/billability';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,15 @@ export const runtime = 'nodejs';
 // while rendering them in another zone, so boundary-day rows (each carrying an
 // Amount Owed to Teacher) could sit outside, or drop out of, the requested
 // window. At the SAST default the row set is unchanged.
+//
+// The three billing-derived columns — Teacher Billable, Amount Owed to Teacher,
+// Billable Under Policy — derive from getBillability in
+// src/lib/billing/billability.ts (the same single source of truth the invoice
+// recompute uses), replacing the previous ad-hoc outcome-string and
+// window-arithmetic rules. cancelled_by / rescheduled_by are threaded into the
+// call, so the reschedule-leg zeroing and cancellation-actor precedence now live
+// INSIDE getBillability (no local reschedule-leg branch here). 'scheduled' rows
+// are the only special case; see the derive block below.
 
 // Flatten a Supabase nested join result to its first element (project rule).
 function firstOf<T>(v: T | T[] | null | undefined): T | null {
@@ -191,36 +201,46 @@ export async function GET(request: NextRequest) {
       const policyApplied: string =
         student?.cancellation_policy || company?.cancellation_policy || '24hr';
 
-      // Billable under company policy (cancelled rows only).
-      let billableUnderPolicy = '';
-      if (l.cancelled_at && windowHours !== null) {
-        if (policyApplied === '48hr') billableUnderPolicy = windowHours < 48 ? 'Yes' : 'No';
-        else if (policyApplied === '24hr') billableUnderPolicy = windowHours < 24 ? 'Yes' : 'No';
-        else billableUnderPolicy = 'No';
-      }
-
-      // Teacher billable: a flagged report withholds pay; teacher pay is ALWAYS the 24hr rule,
-      // never the 48hr company policy.
-      // 'Cancelled by student' (lowercase actor) is getCancellationLabel's exact
-      // admin-viewer output — statusLabel.ts is the source of truth for casing.
-      let teacherBillable = '';
-      if (report?.status === 'flagged') teacherBillable = 'No';
-      else if (outcome === 'Taken' || outcome === 'Student No-Show') teacherBillable = 'Yes';
-      else if (outcome === 'Cancelled by student' && cancellationWindow === '<24hr') teacherBillable = 'Yes';
-      else if (outcome === 'Scheduled') teacherBillable = '';
-      else teacherBillable = 'No';
-
       // Rate: per-lesson snapshot only; never substitute another number.
       const rate: number | null =
         rateSnap && rateSnap.hourly_rate !== null && rateSnap.hourly_rate !== undefined
           ? Number(rateSnap.hourly_rate)
           : null;
 
-      // Amount owed to teacher.
+      // Teacher Billable / Amount Owed / Billable Under Policy all derive from
+      // getBillability (single source of truth, shared with the invoice
+      // recompute). Two legs:
+      //  A. 'scheduled' — outcome not settled yet; all three stay blank/null.
+      //  B. Everything else — one getBillability call with cancelled_by /
+      //     rescheduled_by threaded in, so reschedule legs (cancel-family
+      //     status + rescheduled_by student/admin) and the cancellation-actor
+      //     precedence are handled INSIDE getBillability: a reschedule leg
+      //     comes back billableToTeacher=false, billable48hr=false — nothing
+      //     owed anywhere. Teacher pay is ALWAYS the 24hr rule inside
+      //     getBillability; billable48hr carries the 48hr company-policy leg
+      //     for Billable Under Policy.
+      let teacherBillable = '';
       let amountOwed: number | null = null;
-      if (teacherBillable === 'No') amountOwed = 0;
-      else if (teacherBillable === 'Yes' && rate !== null) {
-        amountOwed = Math.round((l.duration_minutes / 60) * rate * 100) / 100;
+      let billableUnderPolicy = '';
+      if (st !== 'scheduled') {
+        const bill = getBillability({
+          status: l.status,
+          scheduledAt: l.scheduled_at,
+          cancelledAt: l.cancelled_at ?? null,
+          cancellationPolicy: policyApplied === '48hr' ? '48hr' : '24hr',
+          hourlyRate: rate ?? 0,
+          durationMinutes: l.duration_minutes,
+          cancelledBy: l.cancelled_by ?? null,
+          rescheduledBy: l.rescheduled_by ?? null,
+        });
+        teacherBillable = bill.billableToTeacher ? 'Yes' : 'No';
+        if (!bill.billableToTeacher) amountOwed = 0;
+        else if (rate !== null) amountOwed = bill.amount;
+        // billable with no snapshot rate: amountOwed stays null — never
+        // substitute another number.
+        if (l.cancelled_at) {
+          billableUnderPolicy = bill.billableToTeacher || bill.billable48hr ? 'Yes' : 'No';
+        }
       }
 
       // Earliest join click per user_type.

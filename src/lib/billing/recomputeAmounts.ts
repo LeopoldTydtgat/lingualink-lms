@@ -42,7 +42,7 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
 
   const { data: lessons } = await admin
     .from('lessons')
-    .select('id, scheduled_at, duration_minutes, status, cancelled_at')
+    .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by')
     .eq('teacher_id', teacherId)
     .in('status', MONTH_BILLING_PREFILTER_STATUSES)
 
@@ -62,6 +62,8 @@ export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Prom
       cancellationPolicy: null,
       hourlyRate: resolveLessonRate(rateMap, lesson.id, hourlyRate),
       durationMinutes: lesson.duration_minutes,
+      cancelledBy: lesson.cancelled_by ?? null,
+      rescheduledBy: lesson.rescheduled_by ?? null,
     })
     if (bill.billableToTeacher) {
       sumByMonth[key] = (sumByMonth[key] ?? 0) + bill.amount

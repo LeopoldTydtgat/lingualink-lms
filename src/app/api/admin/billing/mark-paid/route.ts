@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { NextRequest, NextResponse } from 'next/server'
@@ -12,27 +11,34 @@ function formatMonthName(dateStr: string): string {
 }
 
 export async function PATCH(req: NextRequest) {
-  const supabase = await createClient()
-
-  // Auth + admin check via the shared canonical rule; `supabase` stays for the
-  // RLS-bound invoice update below.
+  // Auth + admin check via the shared canonical rule.
   const user = await requireAdmin()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { invoiceId } = await req.json()
   if (!invoiceId) return NextResponse.json({ error: 'invoiceId required' }, { status: 400 })
 
+  const adminClient = createAdminClient()
+
   // Recompute amount_eur BEFORE flipping status to 'paid'. The recompute helper
   // skips paid invoices to preserve historical figures, so once status='paid' is
   // set the amount is frozen. We need the latest billable-lesson total locked
   // in for both the historical record and the email body below.
-  const lookupClient = createAdminClient()
-  const { data: invoiceForTeacherLookup } = await lookupClient
+  const { data: invoiceForTeacherLookup } = await adminClient
     .from('invoices')
-    .select('teacher_id')
+    .select('teacher_id, status')
     .eq('id', invoiceId)
-    .single()
-  if (invoiceForTeacherLookup?.teacher_id) {
+    .maybeSingle()
+
+  if (!invoiceForTeacherLookup) {
+    return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+  }
+  if (invoiceForTeacherLookup.status === 'paid') {
+    // Already paid: never overwrite paid_at or re-send the payment email.
+    return NextResponse.json({ error: 'Invoice is already marked as paid' }, { status: 409 })
+  }
+
+  if (invoiceForTeacherLookup.teacher_id) {
     try {
       await recomputeInvoiceAmountsForTeacher(invoiceForTeacherLookup.teacher_id)
     } catch (err) {
@@ -46,16 +52,24 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  const { error } = await supabase
+  // .neq guards the race between the status check above and this write; the
+  // .select confirms exactly which rows were touched — zero rows means someone
+  // else marked it paid first, so we must not send a duplicate payment email.
+  const { data: updatedRows, error } = await adminClient
     .from('invoices')
     .update({ status: 'paid', paid_at: new Date().toISOString() })
     .eq('id', invoiceId)
+    .neq('status', 'paid')
+    .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!updatedRows || updatedRows.length === 0) {
+    return NextResponse.json({ error: 'Invoice is already marked as paid' }, { status: 409 })
+  }
 
+  // Email runs only after a confirmed one-row update. Email failure must not
+  // fail the request — the invoice is already paid at this point.
   try {
-    const adminClient = createAdminClient()
-
     const { data: invoice } = await adminClient
       .from('invoices')
       .select('teacher_id, billing_month, amount_eur')

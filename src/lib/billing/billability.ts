@@ -28,6 +28,11 @@ export interface BillabilityInput {
   cancellationPolicy: CancellationPolicy
   hourlyRate: number
   durationMinutes: number
+  // Optional actor attribution (lessons.cancelled_by / lessons.rescheduled_by).
+  // Both OPTIONAL: absent/undefined reproduces the pre-attribution behaviour
+  // exactly, so existing call sites that don't pass them are unchanged.
+  cancelledBy?: string | null // 'student' | 'teacher' | 'admin' | null
+  rescheduledBy?: string | null // 'student' | 'admin' | null
 }
 
 export interface BillabilityResult {
@@ -43,8 +48,23 @@ export interface BillabilityResult {
   labelColor: string
 }
 
+// Billability rules, in evaluation order:
+//   1. Reschedule leg (cancel-family status + rescheduled_by student/admin):
+//      never billable to anyone — the dead old leg of a reschedule; the new
+//      booking carries the money.
+//   2. Settled non-cancel statuses: completed / student_no_show billable;
+//      teacher_no_show / missed / legacy teacher_cancelled not billable.
+//   3. Cancel family: resolve the ACTOR first (cancelled_by preferred over the
+//      status suffix, mirroring statusLabel.ts getCancellationLabel).
+//      Actor teacher -> never billable, whatever the status string says.
+//      Actor student / admin / unknown -> the notice-window rules (<24hr paid,
+//      24-48hr company-billed under a 48hr policy, otherwise nothing).
+//      OPEN QUESTION (client decision pending): admin cancellations currently
+//      run the same student notice window, so an admin <24hr cancel pays the
+//      teacher. Whether admin cancels should always/never pay is unresolved —
+//      behaviour deliberately left as the legacy bare-'cancelled' path.
 export function getBillability(input: BillabilityInput): BillabilityResult {
-  const { status, scheduledAt, cancelledAt, cancellationPolicy, hourlyRate, durationMinutes } = input
+  const { status, scheduledAt, cancelledAt, cancellationPolicy, hourlyRate, durationMinutes, cancelledBy, rescheduledBy } = input
 
   const notBillable = (label: string, labelColor = '#6b7280'): BillabilityResult => ({
     billableToTeacher: false,
@@ -64,6 +84,15 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     labelColor: '#16a34a',
   })
 
+  // Reschedule leg, checked before every status branch: a reschedule cancels
+  // the old row (cancel-family status + rescheduled_by) and books a new one;
+  // the dead leg is billable to no one. MUST require cancel-family status: a
+  // live 'scheduled' row can legitimately carry rescheduled_by='admin' after
+  // an in-place admin time edit and must NOT be zeroed here.
+  if (isCancelledStatus(status) && (rescheduledBy === 'student' || rescheduledBy === 'admin')) {
+    return notBillable('Not billable (rescheduled)')
+  }
+
   if (status === 'completed') return billable('Billable')
   if (status === 'student_no_show') return billable('Billable (no-show)')
   if (status === 'teacher_no_show') return notBillable('Not billable')
@@ -73,9 +102,36 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
   // zeroes the TEACHER side. Settled (not 'scheduled'), so projectedContribution
   // routes here too (-> 0) for both past and future scheduledAt.
   if (status === 'missed') return notBillable('Not billable (missed)')
-  if (status === 'cancelled_by_teacher' || status === 'teacher_cancelled') return notBillable('Not billable')
+  // Legacy alias — not in CANCELLED_STATUSES, so it bypasses the actor logic
+  // below and is settled here (never billable), exactly as before.
+  if (status === 'teacher_cancelled') return notBillable('Not billable')
 
-  if (status === 'cancelled' || status === 'cancelled_by_student') {
+  if (isCancelledStatus(status)) {
+    // Resolve the cancellation actor, mirroring statusLabel.ts
+    // getCancellationLabel precedence: prefer cancelled_by; if absent/invalid,
+    // derive from the status suffix; bare 'cancelled' with no attribution is
+    // unknown. With no cancelledBy passed this reproduces the pre-attribution
+    // branches exactly (suffix decides; bare 'cancelled' -> notice window).
+    let actor: 'student' | 'teacher' | 'admin' | 'unknown'
+    if (cancelledBy === 'student' || cancelledBy === 'teacher' || cancelledBy === 'admin') {
+      actor = cancelledBy
+    } else if (status === 'cancelled_by_student') {
+      actor = 'student'
+    } else if (status === 'cancelled_by_teacher') {
+      actor = 'teacher'
+    } else {
+      actor = 'unknown'
+    }
+
+    // Teacher is never paid for their own cancellation, even when the status
+    // string is bare 'cancelled' or (mislabelled) 'cancelled_by_student'.
+    if (actor === 'teacher') return notBillable('Not billable')
+
+    // Actor student -> the notice-window rules. Actor admin/unknown -> same
+    // window rules, i.e. the legacy bare-'cancelled' behaviour. OPEN QUESTION
+    // (pending client decision): whether admin cancellations should bypass the
+    // window (always or never pay the teacher) — until decided, admin follows
+    // the student window, so an admin <24hr cancel pays the teacher.
     if (!cancelledAt) return notBillable('Not billable')
 
     const hoursNotice =
