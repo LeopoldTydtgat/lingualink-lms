@@ -6,7 +6,20 @@ import { toast } from 'sonner'
 import { DatePartInput } from '../../../_components/DatePartInput'
 
 type Company = { id: string; name: string }
-type Teacher = { id: string; full_name: string }
+/**
+ * statusLabel is set only on profiles the strict teacher/admin + status='current'
+ * filter excludes, which the server backfills into a single control because this
+ * student already references them there. It carries the real reason — '(former)',
+ * '(on hold)', '(inactive)' — so the label never invites an admin to unassign a
+ * merely paused teacher. Such an entry stays selectable: the id is already in
+ * form state and re-sent on every save, so hiding or disabling it would trap a
+ * value the admin cannot clear.
+ */
+type Teacher = { id: string; full_name: string; statusLabel?: string }
+
+function teacherLabel(t: Teacher) {
+  return t.statusLabel ? `${t.full_name} ${t.statusLabel}` : t.full_name
+}
 
 type ActiveTrain = {
   id: string
@@ -21,7 +34,36 @@ type Props = {
   activeTrain: ActiveTrain
   assignedTeacherIds: string[]
   companies: Company[]
-  teachers: Teacher[]
+  /**
+   * Academic-advisor picks: current teachers/admins, plus this student's own
+   * advisor if the strict filter excludes them. Deliberately NOT the same list
+   * as assignmentOptions — a profile only visible here must not become newly
+   * assignable to the training.
+   */
+  advisorOptions: Teacher[]
+  /**
+   * Assigned-teacher picks: current teachers/admins, plus this training's own
+   * assigned teachers if the strict filter excludes them. training_teachers is
+   * the messaging/access junction, so nothing reaches this list that the
+   * training does not already reference.
+   */
+  assignmentOptions: Teacher[]
+  /**
+   * True when the server-side trainings read errored. activeTrain is null in
+   * that case for the same reason it is null when the student genuinely has no
+   * training, so this flag is the only thing separating the two: the training
+   * fields stay hidden and omitted from the PATCH either way, but the copy must
+   * not claim there is no training when it simply could not be read.
+   */
+  trainingsLoadFailed: boolean
+  /**
+   * True when any list this form picks from could not be trusted: the companies
+   * or teachers read errored or returned no payload, or the backfill of the
+   * profiles this student already references failed. All of those fail to an
+   * empty or incomplete dropdown, which reads as "none exist", so saving is
+   * blocked rather than letting an admin blank a field by accident.
+   */
+  lookupsLoadFailed: boolean
 }
 
 const TIMEZONES = [
@@ -97,6 +139,20 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// Amber load-failure banner — same treatment as the purge-preflight notice on
+// the student detail page. Used only for reads that failed, never for reads
+// that legitimately returned nothing.
+function LoadErrorBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="text-xs rounded-lg px-3 py-2"
+      style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+    >
+      <p className="font-medium">{children}</p>
+    </div>
+  )
+}
+
 const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
@@ -105,7 +161,10 @@ export default function EditStudentClient({
   activeTrain,
   assignedTeacherIds,
   companies,
-  teachers,
+  advisorOptions,
+  assignmentOptions,
+  trainingsLoadFailed,
+  lookupsLoadFailed,
 }: Props) {
   const router = useRouter()
   const id = student.id as string
@@ -165,6 +224,17 @@ export default function EditStudentClient({
   }
 
   async function handleSave() {
+    // The Save button is disabled on both flags; these guards are here so a
+    // programmatic submit cannot write a company or advisor the form never
+    // managed to load, or save around training details it could not read.
+    if (lookupsLoadFailed) {
+      toast.error('Company and teacher lists could not be loaded. Refresh before saving.')
+      return
+    }
+    if (trainingsLoadFailed) {
+      toast.error('Training details could not be loaded. Refresh before saving.')
+      return
+    }
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
     if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
     // Only required when there is a training to hold them.
@@ -220,6 +290,12 @@ export default function EditStudentClient({
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
       toast.success('Changes saved!')
+      // Stays on this page rather than navigating away, so the server-fetched
+      // props (backfilled advisor/teacher options, activeTrain) go stale after
+      // a save that changes them — e.g. toggle a teacher off, save, the option
+      // list still shows it as backfilled-in, toggle back on re-adds a row the
+      // server would no longer have offered. Refresh re-runs the server component.
+      router.refresh()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
     } finally {
@@ -244,6 +320,12 @@ export default function EditStudentClient({
       {/* Single scrolling form — one card per section.
           pb-28 keeps the last field clear of the sticky action bar. */}
       <div className="max-w-6xl mx-auto space-y-8 pb-28">
+
+        {lookupsLoadFailed && (
+          <LoadErrorBanner>
+            Could not load companies/teachers lists. Refresh before editing.
+          </LoadErrorBanner>
+        )}
 
         {/* 1. Personal Info */}
         <Section title="Personal Info">
@@ -359,8 +441,8 @@ export default function EditStudentClient({
             <select className={selectClass} value={form.academic_advisor_id}
               onChange={(e) => set('academic_advisor_id', e.target.value)}>
               <option value="">— Select advisor —</option>
-              {teachers.map((t) => (
-                <option key={t.id} value={t.id}>{t.full_name}</option>
+              {advisorOptions.map((t) => (
+                <option key={t.id} value={t.id}>{teacherLabel(t)}</option>
               ))}
             </select>
           </Field>
@@ -370,7 +452,7 @@ export default function EditStudentClient({
           {hasActiveTraining && (
             <Field label="Assigned Teacher(s)">
               <div className="flex flex-wrap gap-2 mt-1">
-                {teachers.map((t) => (
+                {assignmentOptions.map((t) => (
                   <button
                     key={t.id}
                     type="button"
@@ -382,11 +464,11 @@ export default function EditStudentClient({
                         : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
                     }
                   >
-                    {t.full_name}
+                    {teacherLabel(t)}
                   </button>
                 ))}
               </div>
-              {teachers.length === 0 && (
+              {assignmentOptions.length === 0 && (
                 <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
               )}
             </Field>
@@ -473,9 +555,19 @@ export default function EditStudentClient({
           </Section>
         ) : (
           <Section title="Training Setup">
-            <p className="text-sm text-gray-500">
-              This student has no active training. Create a training to set the package, hours, end date and assigned teachers.
-            </p>
+            {trainingsLoadFailed ? (
+              // The read failed, so "no active training" is unproven — say so
+              // rather than asserting the student has none. Fields stay hidden
+              // and omitted from the PATCH exactly as in the genuine no-training
+              // case; only the copy differs.
+              <LoadErrorBanner>
+                Could not load this student&apos;s training. Refresh the page - do not save until training details are visible.
+              </LoadErrorBanner>
+            ) : (
+              <p className="text-sm text-gray-500">
+                This student has no active training. Create a training to set the package, hours, end date and assigned teachers.
+              </p>
+            )}
           </Section>
         )}
 
@@ -541,9 +633,14 @@ export default function EditStudentClient({
         </button>
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || lookupsLoadFailed || trainingsLoadFailed}
           className="btn-primary-hover px-5 py-2 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
           style={{ backgroundColor: '#FF8303' }}
+          title={lookupsLoadFailed
+            ? 'Saving is blocked: the company and teacher lists could not be loaded - refresh the page'
+            : trainingsLoadFailed
+            ? 'Saving is blocked: training details could not be loaded - refresh the page'
+            : undefined}
         >
           {saving ? 'Saving...' : 'Save Changes'}
         </button>
