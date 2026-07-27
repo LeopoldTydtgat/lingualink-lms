@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { UpdateStudentSchema } from '@/lib/validation/schemas'
+
+const UuidSchema = z.string().uuid()
 
 // ─── PATCH — update student ───────────────────────────────────────────────────
 
@@ -12,6 +15,11 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
+
+    if (!UuidSchema.safeParse(id).success) {
+      return NextResponse.json({ error: 'Invalid student id.' }, { status: 400 })
+    }
+
     const body = await req.json()
 
     const parsed = UpdateStudentSchema.safeParse(body)
@@ -222,6 +230,13 @@ export async function PATCH(
 
 // ─── DELETE — permanently purge student and all associated data ───────────────
 
+// Shape returned by public.purge_student_atomic on success.
+type PurgeStudentResult = {
+  success: boolean
+  auth_user_id: string | null
+  deleted: Record<string, number>
+}
+
 export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -229,164 +244,107 @@ export async function DELETE(
   try {
     const { id } = await params
 
+    if (!UuidSchema.safeParse(id).success) {
+      return NextResponse.json({ error: 'Invalid student id.' }, { status: 400 })
+    }
+
     const user = await requireAdmin()
     if (!user) return NextResponse.json({ error: 'Unauthorised or Forbidden' }, { status: 401 })
 
     const adminClient = createAdminClient()
 
-    // 1. Verify student exists and is 'former'
-    const { data: student, error: fetchError } = await adminClient
-      .from('students')
-      .select('id, full_name, status, auth_user_id')
-      .eq('id', id)
-      .single()
+    // Every table delete — messages, support_messages, lessons, students and
+    // the dual-identity profiles row — happens inside purge_student_atomic
+    // (SECURITY DEFINER), together with the fail-closed preflights. The route
+    // owns nothing but the auth.users cleanup below: a partial purge is not
+    // possible any more, because the RPC is a single transaction.
+    const { data, error } = await adminClient.rpc('purge_student_atomic', {
+      p_student_id: id,
+    })
 
-    if (fetchError || !student) {
-      return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
-    }
+    if (error) {
+      const message = error.message || ''
 
-    if (student.status !== 'former') {
-      return NextResponse.json(
-        { error: 'Student must be archived (status: former) before purging.' },
-        { status: 409 }
-      )
-    }
-
-    // 2. Check all linked teachers are 'former'
-    const { data: linkedLessons } = await adminClient
-      .from('lessons')
-      .select('teacher_id')
-      .eq('student_id', id)
-      .not('teacher_id', 'is', null)
-
-    const linkedTeacherIds = [
-      ...new Set((linkedLessons || []).map((l: { teacher_id: string }) => l.teacher_id)),
-    ]
-
-    if (linkedTeacherIds.length > 0) {
-      const { data: nonFormerTeachers } = await adminClient
-        .from('profiles')
-        .select('full_name')
-        .in('id', linkedTeacherIds)
-        .neq('status', 'former')
-
-      if (nonFormerTeachers && nonFormerTeachers.length > 0) {
-        return NextResponse.json(
-          {
-            error: `Cannot purge: the following teachers must be archived first.`,
-            blockedBy: nonFormerTeachers.map((t: { full_name: string }) => t.full_name),
-          },
-          { status: 409 }
-        )
+      if (error.code === 'P0002') {
+        return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
       }
-    }
 
-    // 2b. Dual-identity preflight — if this student also has a profiles row
-    // (auth_user_id doubles as profiles.id), that profile may own study
-    // sheets. Deleting the profiles row in step 3m CASCADEs
-    // study_sheets.owner_id and everything under those sheets. Owned sheets
-    // must never be destroyed by a student purge — block, mirroring the
-    // teacher purge preflight.
-    if (student.auth_user_id) {
-      const { count: ownedSheetCount, error: sheetCountError } = await adminClient
-        .from('study_sheets')
-        .select('owner_id', { count: 'exact', head: true })
-        .eq('owner_id', student.auth_user_id)
+      if (error.code === 'P0001') {
+        if (message.startsWith('student_not_former')) {
+          return NextResponse.json(
+            { error: 'Student must be archived (status: former) before purging.' },
+            { status: 409 }
+          )
+        }
 
-      // Fail closed: an errored (or null) count is unknown, never zero.
-      if (sheetCountError || ownedSheetCount === null) {
-        console.error('[purge student] study_sheets preflight failed:', sheetCountError)
-        return NextResponse.json(
-          { error: 'Failed to verify owned study sheets. Purge aborted; nothing was deleted.' },
-          { status: 500 }
-        )
+        if (message.startsWith('teachers_not_former:')) {
+          const names = message.slice('teachers_not_former:'.length).trim()
+          const blockedBy = names ? names.split(', ').map((n) => n.trim()).filter(Boolean) : []
+          return NextResponse.json(
+            {
+              error: 'Cannot purge: the following teachers must be archived first.',
+              blockedBy,
+            },
+            { status: 409 }
+          )
+        }
+
+        if (message.startsWith('dual_identity_blocked:')) {
+          const payload = message.slice('dual_identity_blocked:'.length).trim()
+          let blocking: unknown[] = []
+          try {
+            const parsedPayload = JSON.parse(payload)
+            blocking = Array.isArray(parsedPayload) ? parsedPayload : []
+          } catch (parseError) {
+            // The raw message never reaches the client — it is diagnostic only.
+            console.error('purge_student_atomic dual_identity_blocked parse failed:', parseError, message)
+            blocking = []
+          }
+          return NextResponse.json(
+            {
+              error: 'Cannot purge: this account also holds staff-side data. Resolve the blocking records first.',
+              blocking,
+            },
+            { status: 409 }
+          )
+        }
       }
-      if (ownedSheetCount > 0) {
-        return NextResponse.json(
-          {
-            error: 'Cannot purge: this account owns study sheets. Reassign or delete them first.',
-            blocking: [{ table: 'study_sheets', count: ownedSheetCount }],
-          },
-          { status: 409 }
-        )
-      }
+
+      // Includes students_delete_failed and anything unmapped. The RPC is
+      // transactional, so an error here means nothing was deleted.
+      console.error('purge_student_atomic error:', error)
+      return NextResponse.json({ error: 'Purge failed. Nothing was deleted.' }, { status: 500 })
     }
 
-    // 3. Cascade delete in dependency order
+    const result = data as PurgeStudentResult
 
-    // 3a. messages
-    await adminClient
-      .from('messages')
-      .delete()
-      .or(`sender_id.eq.${id},receiver_id.eq.${id}`)
-
-    // 3c. assignments (keyed by student_id)
-    await adminClient.from('assignments').delete().eq('student_id', id)
-
-    // 3d. Get lesson IDs for this student
-    const { data: lessonRows } = await adminClient
-      .from('lessons')
-      .select('id')
-      .eq('student_id', id)
-    const lessonIds = (lessonRows || []).map((l: { id: string }) => l.id)
-
-    // 3e. Delete reports for these lessons
-    if (lessonIds.length > 0) {
-      await adminClient.from('reports').delete().in('lesson_id', lessonIds)
-    }
-
-    // 3f. Delete lessons
-    await adminClient.from('lessons').delete().eq('student_id', id)
-
-    // 3g. Get training IDs for this student
-    const { data: trainingRows } = await adminClient
-      .from('trainings')
-      .select('id')
-      .eq('student_id', id)
-    const trainingIds = (trainingRows || []).map((t: { id: string }) => t.id)
-
-    // 3h. Delete training_teachers
-    if (trainingIds.length > 0) {
-      await adminClient.from('training_teachers').delete().in('training_id', trainingIds)
-    }
-
-    // 3i. Delete trainings
-    await adminClient.from('trainings').delete().eq('student_id', id)
-
-    // 3j. Delete hours_log
-    await adminClient.from('hours_log').delete().eq('student_id', id)
-
-    // 3k. Delete student_reviews
-    await adminClient.from('student_reviews').delete().eq('student_id', id)
-
-    // 3l. Delete the student record
-    await adminClient.from('students').delete().eq('id', id)
-
-    // 3m. Delete Supabase auth user
-    const authUserId = student.auth_user_id as string | null
+    // The auth id comes from the row the RPC locked and deleted — never from a
+    // separate pre-read, which could race the purge.
+    const authUserId = result.auth_user_id
     if (authUserId) {
-      // Dual-identity cleanup: no auth.users trigger exists (verified live
-      // 15 Jul 2026) — a profiles row is present only when this account was
-      // also given a staff identity. Delete it if present (no-op otherwise).
-      // Owned study sheets are guaranteed absent by the step 2b preflight,
-      // so this delete CASCADE-destroys nothing protected.
-      await adminClient.from('profiles').delete().eq('id', authUserId)
-      // Invalidate all active sessions for this user before deletion.
-      // signOut with global scope kills every refresh token across every device.
-      // Wrapped in try/catch and non-fatal — if signOut fails for any reason,
-      // we still proceed with deleteUser to ensure the account is removed.
+      // Non-fatal: the account is about to be deleted anyway.
       try {
         await adminClient.auth.admin.signOut(authUserId, 'global')
       } catch (signOutError) {
         console.error('[purge student] signOut failed but proceeding with delete:', signOutError)
       }
+
       const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(authUserId)
       if (authDeleteError) {
-        console.error('Auth user delete error (non-fatal):', authDeleteError)
+        // NOT a silent success: the DB rows are already gone, so retrying this
+        // route returns 404. The admin needs the auth id to finish by hand.
+        console.error('[purge student] auth user delete failed:', authDeleteError)
+        return NextResponse.json(
+          {
+            error: 'Student data was purged, but the login account could not be deleted. Remove it manually in Supabase Auth.',
+            auth_user_id: authUserId,
+          },
+          { status: 500 }
+        )
       }
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, deleted: result.deleted })
   } catch (err) {
     console.error('DELETE student error:', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
