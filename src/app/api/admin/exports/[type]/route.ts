@@ -310,7 +310,8 @@ export async function GET(
         }
 
         // Fetch invoice upload status per teacher/month
-        const invoiceRes = await supabase.from('invoices').select('teacher_id, billing_month, status')
+        // Service-role read — the route is requireAdmin-gated above.
+        const invoiceRes = await adminClient.from('invoices').select('teacher_id, billing_month, status')
         if (invoiceRes.error) throw invoiceRes.error
         const invoiceMap: Record<string, string> = {}
         invoiceRes.data?.forEach((inv: any) => {
@@ -341,7 +342,10 @@ export async function GET(
       case 'student-hours': {
         filename = `lingualink-student-hours-${Date.now()}.csv`
 
-        let trainQuery = supabase
+        // Service-role read — the route is requireAdmin-gated above.
+        const adminClient = createAdminClient()
+
+        let trainQuery = adminClient
           .from('trainings')
           .select('id, student_id, total_hours, hours_consumed, start_date, end_date, package_name, status')
           .order('created_at', { ascending: false })
