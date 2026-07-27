@@ -107,6 +107,12 @@ type Props = {
   reviews: Review[]
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
+  /**
+   * True when the server-side purge advisory pre-check could not complete (a
+   * query errored). Eligibility is unproven, so the purge control fails CLOSED
+   * rather than treating an empty purgeBlockedBy as "nothing is blocking".
+   */
+  purgePreflightFailed: boolean
   assignments: Assignment[]
   /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
   isStaffView?: boolean
@@ -381,6 +387,7 @@ export default function StudentDetailClient({
   reviews,
   conversations,
   purgeBlockedBy,
+  purgePreflightFailed,
   assignments: initialAssignments,
   isStaffView = false,
 }: Props) {
@@ -428,7 +435,10 @@ export default function StudentDetailClient({
   const status = student.status as string | null
 
   const isFormer = status === 'former'
-  const purgeReady = isFormer && purgeBlockedBy.length === 0
+  // Fail-safe: an unproven eligibility check blocks the control. purgeBlockedBy
+  // is empty both when nothing blocks AND when the pre-check query failed, so
+  // it cannot carry that distinction on its own.
+  const purgeReady = isFormer && purgeBlockedBy.length === 0 && !purgePreflightFailed
 
   function handleArchive() {
     if (isFormer) return
@@ -462,11 +472,59 @@ export default function StudentDetailClient({
     setPurging(true)
     try {
       const res = await fetch(`/api/admin/students/${id}`, { method: 'DELETE' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to purge student.')
-      setShowPurgeDialog(false)
-      router.push('/admin/students')
-      router.refresh()
+
+      // The authoritative gate is purge_student_atomic behind this route, so the
+      // structured 409/500 bodies below are the real reasons a purge failed --
+      // surface them verbatim rather than a generic message. A non-JSON body
+      // (proxy error page, empty response) must not throw past that handling.
+      let data: {
+        error?: string | null
+        blockedBy?: unknown
+        blocking?: unknown
+        auth_user_id?: string | null
+      }
+      try {
+        data = await res.json()
+      } catch {
+        data = { error: null }
+      }
+
+      if (res.ok) {
+        setShowPurgeDialog(false)
+        router.push('/admin/students')
+        router.refresh()
+        return
+      }
+
+      // 409 -- linked teachers are not archived. These names come from the RPC,
+      // not from this page's advisory pre-check, so they are authoritative.
+      if (Array.isArray(data.blockedBy) && data.blockedBy.length > 0) {
+        setPurgeError(`${data.error || 'Purge blocked.'} Blocked by: ${data.blockedBy.join(', ')}`)
+        return
+      }
+
+      // 409 -- the account also holds staff-side rows (dual identity).
+      if (Array.isArray(data.blocking) && data.blocking.length > 0) {
+        setPurgeError(
+          `${data.error || 'Purge blocked.'} Blocking records: ` +
+            data.blocking
+              .map((b: { table: string; count: number }) => `${b.table} (${b.count})`)
+              .join(', ')
+        )
+        return
+      }
+
+      // 500 -- the data purge SUCCEEDED but the auth user survived. The student
+      // row is already gone, so navigating away or refreshing would strand the
+      // admin on a 404 without the id they need. Keep the dialog open so the id
+      // can be copied and the login removed by hand in Supabase Auth.
+      if (data.auth_user_id) {
+        setPurgeError(`${data.error} Auth user id: ${data.auth_user_id}`)
+        return
+      }
+
+      // 400/404/500 with a plain body, or an unparseable one.
+      setPurgeError(data.error || 'Failed to purge student.')
     } catch (err: unknown) {
       setPurgeError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -657,7 +715,13 @@ export default function StudentDetailClient({
                   disabled={!purgeReady}
                   className="px-4 py-2 rounded-lg text-sm font-medium border disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ borderColor: '#fca5a5', color: '#dc2626' }}
-                  title={!purgeReady ? `Purge blocked: archive linked teachers first` : undefined}
+                  title={
+                    purgePreflightFailed
+                      ? 'Purge unavailable: eligibility check failed - reload the page'
+                      : !purgeReady
+                      ? `Purge blocked: archive linked teachers first`
+                      : undefined
+                  }
                 >
                   Purge
                 </button>
@@ -672,6 +736,16 @@ export default function StudentDetailClient({
               >
                 <p className="font-medium">Purge blocked — archive these teachers first:</p>
                 <p className="mt-0.5">{purgeBlockedBy.join(', ')}</p>
+              </div>
+            )}
+
+            {/* Purge preflight failed notice - eligibility could not be proven */}
+            {isFormer && purgePreflightFailed && (
+              <div
+                className="text-xs rounded-lg px-3 py-2 max-w-xs text-right"
+                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+              >
+                <p className="font-medium">Purge unavailable - the eligibility check could not run. Reload the page to retry.</p>
               </div>
             )}
           </div>
