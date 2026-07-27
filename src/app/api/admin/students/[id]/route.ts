@@ -55,6 +55,25 @@ export async function PATCH(
       end_date,
     } = parsed.data
 
+    // Rule: a training-side field arriving with a null training_id is a
+    // client/data mismatch and must 400, never be silently dropped. Every
+    // training block below is gated on `if (training_id && ...)`, so without
+    // this guard those fields would be discarded while the route still returned
+    // success. Uses the same `in` presence convention as the student payload
+    // below, and runs before ANY write so a rejected request mutates nothing.
+    const trainingFieldsPresent =
+      'package_name' in parsed.data ||
+      'total_hours' in parsed.data ||
+      'end_date' in parsed.data ||
+      'assigned_teacher_ids' in parsed.data
+
+    if (trainingFieldsPresent && !training_id) {
+      return NextResponse.json(
+        { error: 'This student has no active training. Create a training before editing training details.' },
+        { status: 400 }
+      )
+    }
+
     // Build the payload from ONLY the fields present in the request. The
     // schema is all-optional, so a partial request (e.g. Archive sending just
     // { status }) must never touch the other columns — defaulting absent

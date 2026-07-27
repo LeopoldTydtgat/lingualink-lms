@@ -110,6 +110,11 @@ export default function EditStudentClient({
   const router = useRouter()
   const id = student.id as string
 
+  // No active training means there is no trainings row to write package name,
+  // hours, end date or teacher assignments to. Those fields are hidden, not
+  // sent and not validated; the route rejects them outright if they arrive.
+  const hasActiveTraining = activeTrain !== null
+
   const [form, setForm] = useState({
     // Section A — Personal Info
     first_name: ((student.full_name as string) ?? '').split(' ')[0] ?? '',
@@ -135,8 +140,8 @@ export default function EditStudentClient({
     package_name: activeTrain?.package_name ?? '',
     total_hours: activeTrain?.total_hours != null ? String(activeTrain.total_hours) : '',
     end_date: activeTrain?.end_date ?? '',
+    // Section D - Notes (students column)
     cancellation_policy: (student.cancellation_policy as string) ?? '24hr',
-    // Section D — Notes
     admin_notes: (student.admin_notes as string) ?? '',
     teacher_notes: (student.teacher_notes as string) ?? '',
   })
@@ -162,9 +167,12 @@ export default function EditStudentClient({
   async function handleSave() {
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
     if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
-    if (form.assigned_teacher_ids.length === 0) { toast.error('At least one teacher must be assigned.'); return }
-    if (!form.package_name.trim()) { toast.error('Training package name is required.'); return }
-    if (!form.total_hours) { toast.error('Total hours is required.'); return }
+    // Only required when there is a training to hold them.
+    if (hasActiveTraining) {
+      if (form.assigned_teacher_ids.length === 0) { toast.error('At least one teacher must be assigned.'); return }
+      if (!form.package_name.trim()) { toast.error('Training package name is required.'); return }
+      if (!form.total_hours) { toast.error('Total hours is required.'); return }
+    }
 
     setSaving(true)
     try {
@@ -182,16 +190,25 @@ export default function EditStudentClient({
           is_private: form.is_private,
           company_id: form.company_id || null,
           academic_advisor_id: form.academic_advisor_id || null,
-          assigned_teacher_ids: form.assigned_teacher_ids,
+          // Training-side keys must be ABSENT, not null, when there is no active
+          // training: the route uses `in` presence checks and 400s on a training
+          // field paired with a null training_id.
+          ...(hasActiveTraining ? { assigned_teacher_ids: form.assigned_teacher_ids } : {}),
           native_language: form.native_language || null,
           learning_language: form.learning_language || null,
           current_fluency_level: form.current_fluency_level || null,
           self_assessed_level: form.self_assessed_level || null,
           learning_goals: form.learning_goals || null,
           interests: form.interests || null,
-          package_name: form.package_name,
-          total_hours: parseFloat(form.total_hours),
-          end_date: form.end_date || null,
+          ...(hasActiveTraining
+            ? {
+                package_name: form.package_name,
+                total_hours: parseFloat(form.total_hours),
+                end_date: form.end_date || null,
+              }
+            : {}),
+          // cancellation_policy is a students column, not a training column, so
+          // it is always sent regardless of whether a training exists.
           cancellation_policy: form.cancellation_policy,
           admin_notes: form.admin_notes || null,
           teacher_notes: form.teacher_notes || null,
@@ -348,28 +365,32 @@ export default function EditStudentClient({
             </select>
           </Field>
 
-          <Field label="Assigned Teacher(s)">
-            <div className="flex flex-wrap gap-2 mt-1">
-              {teachers.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => toggleTeacher(t.id)}
-                  className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
-                  style={
-                    form.assigned_teacher_ids.includes(t.id)
-                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
-                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
-                  }
-                >
-                  {t.full_name}
-                </button>
-              ))}
-            </div>
-            {teachers.length === 0 && (
-              <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
-            )}
-          </Field>
+          {/* Teacher assignment lives on the training (training_teachers), so it
+              is only offered when an active training exists. */}
+          {hasActiveTraining && (
+            <Field label="Assigned Teacher(s)">
+              <div className="flex flex-wrap gap-2 mt-1">
+                {teachers.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleTeacher(t.id)}
+                    className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                    style={
+                      form.assigned_teacher_ids.includes(t.id)
+                        ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                        : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                    }
+                  >
+                    {t.full_name}
+                  </button>
+                ))}
+              </div>
+              {teachers.length === 0 && (
+                <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
+              )}
+            </Field>
+          )}
         </Section>
 
         {/* 2. Learning Info */}
@@ -428,25 +449,39 @@ export default function EditStudentClient({
           </Field>
         </Section>
 
-        {/* 3. Training Setup */}
-        <Section title="Training Setup">
-          <Field label="Training Package Name">
-            <input className={inputClass} value={form.package_name}
-              onChange={(e) => set('package_name', e.target.value)}
-              placeholder="e.g. Standard 20hrs, Intensive B2" />
-          </Field>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Total Hours">
-              <input type="number" min="0.5" step="0.5" className={inputClass}
-                value={form.total_hours}
-                onChange={(e) => set('total_hours', e.target.value)} />
+        {/* 3. Training Setup. Every field here belongs to the trainings row, so
+            without an active training there is nothing to save and the fields
+            are replaced by a notice rather than shown and silently dropped. */}
+        {hasActiveTraining ? (
+          <Section title="Training Setup">
+            <Field label="Training Package Name">
+              <input className={inputClass} value={form.package_name}
+                onChange={(e) => set('package_name', e.target.value)}
+                placeholder="e.g. Standard 20hrs, Intensive B2" />
             </Field>
-            <Field label="Training End Date">
-              <DatePartInput value={form.end_date} onChange={(v) => set('end_date', v)} />
-            </Field>
-          </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Total Hours">
+                <input type="number" min="0.5" step="0.5" className={inputClass}
+                  value={form.total_hours}
+                  onChange={(e) => set('total_hours', e.target.value)} />
+              </Field>
+              <Field label="Training End Date">
+                <DatePartInput value={form.end_date} onChange={(v) => set('end_date', v)} />
+              </Field>
+            </div>
+          </Section>
+        ) : (
+          <Section title="Training Setup">
+            <p className="text-sm text-gray-500">
+              This student has no active training. Create a training to set the package, hours, end date and assigned teachers.
+            </p>
+          </Section>
+        )}
+
+        {/* 4. Notes. Cancellation Policy sits here because it is a students
+            column, not a training column, so it stays editable either way. */}
+        <Section title="Notes">
           <Field label="Cancellation Policy" adminOnly>
             <div className="flex gap-0 border border-gray-200 rounded-lg overflow-hidden w-fit mt-1">
               {CANCELLATION_OPTIONS.map((opt) => (
@@ -469,10 +504,7 @@ export default function EditStudentClient({
               48hr policy is for B2B clients with a commercial agreement. Never shown to student or teacher.
             </p>
           </Field>
-        </Section>
 
-        {/* 4. Notes */}
-        <Section title="Notes">
           <Field label="Teacher Notes">
             <textarea rows={4} className={inputClass} value={form.teacher_notes}
               onChange={(e) => set('teacher_notes', e.target.value)}
