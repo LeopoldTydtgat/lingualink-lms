@@ -23,8 +23,13 @@ function formatMonthCSV(dateStr: string): string {
 
 function escapeCSV(val: unknown): string {
   if (val === null || val === undefined) return ''
-  const str = String(val)
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+  let str = String(val)
+  // Neutralise spreadsheet formula injection: leading = + @ tab CR,
+  // or leading - that is not a plain number (negative amounts stay intact)
+  if (/^[=+@\t\r]/.test(str) || (str.startsWith('-') && !/^-\d+(\.\d+)?$/.test(str))) {
+    str = "'" + str
+  }
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return `"${str.replace(/"/g, '""')}"`
   }
   return str
