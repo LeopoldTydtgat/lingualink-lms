@@ -61,17 +61,47 @@ export async function PATCH(
     // this guard those fields would be discarded while the route still returned
     // success. Uses the same `in` presence convention as the student payload
     // below, and runs before ANY write so a rejected request mutates nothing.
-    const trainingFieldsPresent =
-      'package_name' in parsed.data ||
-      'total_hours' in parsed.data ||
-      'end_date' in parsed.data ||
-      'assigned_teacher_ids' in parsed.data
+    //
+    // This list is the IDOR gate for ALL training-side writes in this handler —
+    // any new writable training column added to UpdateStudentSchema MUST be
+    // added here, or its write path bypasses the ownership guard below.
+    const TRAINING_FIELD_KEYS = ['package_name', 'total_hours', 'end_date', 'assigned_teacher_ids'] as const
+    const trainingFieldsPresent = TRAINING_FIELD_KEYS.some((k) => k in parsed.data)
 
     if (trainingFieldsPresent && !training_id) {
       return NextResponse.json(
         { error: 'This student has no active training. Create a training before editing training details.' },
         { status: 400 }
       )
+    }
+
+    // This is the SINGLE ownership check protecting every training-side write
+    // below. training_id is client-supplied, and training_teachers has no
+    // student_id column, so those writes cannot be scoped per-query — this
+    // guard is what proves the training belongs to the student in the URL.
+    // It runs before any write, so a mismatched training_id mutates nothing.
+    if (training_id && trainingFieldsPresent) {
+      const { data: ownedTraining, error: ownershipError } = await adminClient
+        .from('trainings')
+        .select('id')
+        .eq('id', training_id)
+        .eq('student_id', id)
+        .maybeSingle()
+
+      // A transient DB failure is NOT a missing row. Collapsing the two into one
+      // 404 tells the admin the training is gone and invites them to create a
+      // duplicate, with nothing in the logs. Fail loud and distinct.
+      if (ownershipError) {
+        console.error('Training ownership check error (student PATCH):', ownershipError)
+        return NextResponse.json({ error: 'Failed to verify training.' }, { status: 500 })
+      }
+
+      if (!ownedTraining) {
+        return NextResponse.json(
+          { error: 'Training record not found for this student.' },
+          { status: 404 }
+        )
+      }
     }
 
     // Build the payload from ONLY the fields present in the request. The
@@ -119,6 +149,7 @@ export async function PATCH(
         .from('trainings')
         .update(trainingUpdate)
         .eq('id', training_id)
+        .eq('student_id', id)
 
       if (trainingError) {
         console.error('Training update error:', trainingError)

@@ -70,7 +70,15 @@ export async function POST(
       .eq('student_id', studentId)
       .maybeSingle()
 
-    if (ownErr || !owned) {
+    // A transient DB failure is NOT a missing row. Collapsing the two into one
+    // 404 tells the admin the training is gone and invites them to create a
+    // duplicate, with nothing in the logs. Fail loud and distinct.
+    if (ownErr) {
+      console.error('Training ownership check error (hours adjust):', ownErr)
+      return NextResponse.json({ error: 'Failed to verify training.' }, { status: 500 })
+    }
+
+    if (!owned) {
       return NextResponse.json({ error: 'Training record not found.' }, { status: 404 })
     }
 
