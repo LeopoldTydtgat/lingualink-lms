@@ -104,17 +104,20 @@ export default async function DashboardLayout({
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
   // Fail-SAFE (not fail-closed): this is the shell layout. A null timezone must
-  // degrade only the right-panel billing widget — never throw, which would bubble
-  // past the (dashboard) group to app/error.tsx and lock the teacher out of the
-  // ENTIRE portal (no error.tsx exists at this level). The canonical invoice amount
-  // is computed and guarded on the billing page, not here. Surface the null via log.
+  // degrade only the right-panel billing widget — never throw, which would render
+  // the root app/error.tsx retry boundary and blank the entire portal shell over a
+  // cosmetic widget. The canonical invoice amount is computed and guarded on the
+  // billing page, not here. Surface the null via log.
   const tz = profile.timezone
 
-  const { data: rateRow } = await admin
+  const { data: rateRow, error: rateRowError } = await admin
     .from('profiles')
     .select('hourly_rate, currency')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+  if (rateRowError) {
+    console.error('[dashboard/layout] rate lookup failed:', rateRowError)
+  }
   const hourlyRate = rateRow?.hourly_rate ?? 0
   const currency = rateRow?.currency ?? null
 
@@ -202,11 +205,14 @@ export default async function DashboardLayout({
   // Minimum-hours target from settings (service-role admin client). Fail SAFE:
   // any missing/non-numeric value degrades to null so the card renders the
   // neutral no-target state — never invent a target.
-  const { data: minHoursRow } = await admin
+  const { data: minHoursRow, error: minHoursRowError } = await admin
     .from('settings')
     .select('value')
     .eq('key', 'min_available_hours')
-    .single()
+    .maybeSingle()
+  if (minHoursRowError) {
+    console.error('[dashboard/layout] settings lookup failed:', minHoursRowError)
+  }
   const parsedMinHours = Number(minHoursRow?.value)
   const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
 
