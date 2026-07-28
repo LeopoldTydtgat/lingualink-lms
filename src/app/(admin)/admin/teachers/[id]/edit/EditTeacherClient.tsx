@@ -25,6 +25,13 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'staff', label: 'Staff' },
 ]
 
+// Client-locked role model: every profile always carries 'teacher'.
+// 'teacher_exam' and 'staff' are additive extras layered on top of it, never
+// replacements. Enforced in the DB by profiles_account_types_check and in the
+// API by CreateTeacherSchema/UpdateTeacherSchema; this pill is the UI layer.
+const LOCKED_ACCOUNT_TYPE = 'teacher'
+const LOCKED_ACCOUNT_TYPE_HINT = 'The Teacher account type is required and cannot be removed.'
+
 const STATUS_OPTIONS = [
   { value: 'current', label: 'Current' },
   { value: 'former', label: 'Former' },
@@ -55,6 +62,17 @@ function AdminOnlyBadge() {
       </svg>
       Admin only
     </span>
+  )
+}
+
+// Small padlock rendered inside the locked account-type pill.
+function LockGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      strokeLinecap="round" strokeLinejoin="round" style={{ width: '10px', height: '10px' }} aria-hidden="true">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
   )
 }
 
@@ -90,6 +108,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 const inputClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 const selectClass = "w-full border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-sm text-gray-800 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
+// Seed the account_types pills. A legacy row that predates
+// profiles_account_types_check could be stored without 'teacher' (or with a
+// non-array value); seed it WITH 'teacher' so the pills match the locked model
+// and the next save repairs the row instead of being rejected by the schema.
+function seedAccountTypes(raw: unknown): string[] {
+  const arr = Array.isArray(raw) ? (raw as string[]) : []
+  return arr.includes(LOCKED_ACCOUNT_TYPE) ? arr : [LOCKED_ACCOUNT_TYPE, ...arr]
+}
+
 export default function EditTeacherClient({ teacher, initialSection }: Props) {
   const router = useRouter()
   const id = teacher.id as string
@@ -99,7 +126,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
     first_name: ((teacher.full_name as string) ?? '').split(' ')[0] ?? '',
     last_name: ((teacher.full_name as string) ?? '').split(' ').slice(1).join(' ') ?? '',
     timezone: (teacher.timezone as string) ?? 'Africa/Johannesburg',
-    account_types: (teacher.account_types as string[]) ?? ['teacher'],
+    account_types: seedAccountTypes(teacher.account_types),
     status: (teacher.status as string) ?? 'current',
     contract_start: (teacher.contract_start as string) ?? '',
     orientation_date: (teacher.orientation_date as string) ?? '',
@@ -139,6 +166,10 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
   }
 
   function toggleArrayItem(field: 'account_types' | 'native_languages' | 'teaching_languages', value: string) {
+    // Second of the two layers that keep 'teacher' on: the pill is also
+    // disabled in the JSX below. Scoped to account_types so the language
+    // pickers, which share this toggle, are untouched.
+    if (field === 'account_types' && value === LOCKED_ACCOUNT_TYPE) return
     setForm((prev) => {
       const arr = prev[field] as string[]
       return {
@@ -151,6 +182,7 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
   async function handleSave() {
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
     if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
+    if (!form.account_types.includes(LOCKED_ACCOUNT_TYPE)) { toast.error(LOCKED_ACCOUNT_TYPE_HINT); return }
 
     setSaving(true)
     try {
@@ -273,17 +305,31 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
 
             <Field label="Account Types">
               <div className="flex flex-wrap gap-2 mt-1">
-                {ACCOUNT_TYPE_OPTIONS.map((opt) => (
-                  <button key={opt.value} type="button"
-                    onClick={() => toggleArrayItem('account_types', opt.value)}
-                    className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
-                    style={form.account_types.includes(opt.value)
-                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
-                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }}>
-                    {opt.label}
-                  </button>
-                ))}
+                {ACCOUNT_TYPE_OPTIONS.map((opt) => {
+                  const locked = opt.value === LOCKED_ACCOUNT_TYPE
+                  const selected = form.account_types.includes(opt.value)
+                  return (
+                    <button key={opt.value} type="button"
+                      disabled={locked}
+                      aria-pressed={selected}
+                      title={locked ? LOCKED_ACCOUNT_TYPE_HINT : undefined}
+                      onClick={() => toggleArrayItem('account_types', opt.value)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                      style={{
+                        ...(selected
+                          ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                          : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }),
+                        ...(locked ? { opacity: 0.7, cursor: 'not-allowed' } : {}),
+                      }}>
+                      {locked && <LockGlyph />}
+                      {opt.label}
+                    </button>
+                  )
+                })}
               </div>
+              <p className="text-xs text-gray-400 mt-1.5">
+                Teacher is always on. Teacher+Exam and Staff are added on top of it.
+              </p>
             </Field>
 
             <Field label="Status">
