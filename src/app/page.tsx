@@ -25,11 +25,20 @@ export default async function RootPage() {
   // Distinguish teacher/admin (has a profiles row, keyed by auth id) from a
   // student (no profiles row). Own-row read is permitted by RLS, so the
   // cookie client suffices — no admin client needed.
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id')
     .eq('id', user.id)
     .maybeSingle()
+
+  // A lookup error must throw to the retryable root error boundary, never
+  // redirect: an errored null previously read as "no profiles row" and
+  // misrouted a teacher/admin to the student portal, which could loop while
+  // the proxy's 60s status cache suppressed the role gate.
+  if (profileError) {
+    console.error('[root] profiles lookup failed:', profileError)
+    throw new Error('Failed to resolve portal')
+  }
 
   if (profile) redirect('/upcoming-classes')
   redirect('/student/my-classes')
