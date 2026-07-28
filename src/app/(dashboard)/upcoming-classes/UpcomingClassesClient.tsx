@@ -486,6 +486,8 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     })
   }
 
+  // Hide only after the dismissal is persisted - hiding on failure silently resurrects the
+  // banner next load, and the banner remaining visible is itself the failure feedback.
   async function handleDismissBanner() {
     setIsDismissing(true)
     try {
@@ -493,13 +495,14 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         console.error('Failed to persist banner dismiss:', data.error ?? res.status)
+        return
       }
+      setShowProfileBanner(false)
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
     } finally {
       setIsDismissing(false)
     }
-    setShowProfileBanner(false)
   }
 
   return (

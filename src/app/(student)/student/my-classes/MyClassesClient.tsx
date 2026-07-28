@@ -520,6 +520,8 @@ export default function MyClassesClient({
 
   const scheduledCount = scheduledLessons.length
 
+  // Hide only after the dismissal is persisted - hiding on failure silently resurrects the
+  // banner next load, and the banner remaining visible is itself the failure feedback.
   async function handleDismissBanner() {
     setIsDismissingBanner(true)
     try {
@@ -527,13 +529,14 @@ export default function MyClassesClient({
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         console.error('Failed to persist banner dismiss:', data.error ?? res.status)
+        return
       }
+      setShowProfileBanner(false)
     } catch (err) {
       console.error('Failed to persist banner dismiss:', err)
     } finally {
       setIsDismissingBanner(false)
     }
-    setShowProfileBanner(false)
   }
 
   // Next class hero derivations
