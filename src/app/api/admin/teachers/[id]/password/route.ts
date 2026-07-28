@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { isTeacherProfile } from '@/lib/auth/isTeacherProfile'
 
 export async function POST(
   req: NextRequest,
@@ -24,7 +25,7 @@ export async function POST(
     // admin's) and the route would reset that user's password instead.
     const { data: targetProfile } = await adminClient
       .from('profiles')
-      .select('id, account_types')
+      .select('id, role, account_types')
       .eq('id', id)
       .maybeSingle()
 
@@ -32,9 +33,13 @@ export async function POST(
       return NextResponse.json({ error: 'Teacher not found.' }, { status: 404 })
     }
 
-    const accountTypes = Array.isArray(targetProfile.account_types) ? targetProfile.account_types : []
-    const isTeacher = accountTypes.includes('teacher') || accountTypes.includes('teacher_exam')
-    if (!isTeacher) {
+    // THE canonical teacher rule (src/lib/auth/isTeacherProfile.ts) — the same
+    // one the Teachers list page, the list API and the teacher PATCH route
+    // apply: account_types overlaps ['teacher','teacher_exam'] OR role
+    // 'admin'. The local account_types-only copy this replaced left out the
+    // role 'admin' arm, so an admin profile the Teachers section lists and
+    // manages could not have its password set from that same screen.
+    if (!isTeacherProfile(targetProfile)) {
       return NextResponse.json({ error: 'Target user is not a teacher.' }, { status: 400 })
     }
 

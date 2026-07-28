@@ -51,6 +51,7 @@ export default async function StudentsPage({
         total_hours,
         hours_consumed,
         status,
+        created_at,
         training_teachers (
           teacher_id,
           profiles:teacher_id (
@@ -72,7 +73,11 @@ export default async function StudentsPage({
     const company = Array.isArray(s.companies) ? s.companies[0] : s.companies
 
     // Find the active training — fall back to the most recent if none is active
-    const trainingsArr = Array.isArray(s.trainings) ? s.trainings : []
+    // Deterministic pick - newest first, then prefer 'active' (same fix as
+    // students/[id]/page.tsx; display-only here).
+    const trainingsArr = (Array.isArray(s.trainings) ? s.trainings : [])
+      .slice()
+      .sort((a, b) => ((b.created_at ?? '') as string).localeCompare((a.created_at ?? '') as string))
     const activeTrain = trainingsArr.find((t) => t.status === 'active') ?? trainingsArr[0] ?? null
 
     // Compute hours remaining from the active training

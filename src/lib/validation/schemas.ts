@@ -49,7 +49,8 @@ export const CreateTeacherSchema = z.object({
   timezone: z.string().min(1, 'Timezone is required').max(100),
   account_types: z
     .array(z.enum(ACCOUNT_TYPES))
-    .min(1, 'At least one account type is required'),
+    .min(1, 'At least one account type is required')
+    .refine((arr) => arr.includes('teacher'), 'The Teacher account type is required and cannot be removed.'),
   status: z.enum(PROFILE_STATUS).default('current'),
 
   // Admin-only financial fields
@@ -139,7 +140,11 @@ export type CreateStudentInput = z.infer<typeof CreateStudentSchema>
 export const UpdateTeacherSchema = z.object({
   full_name: z.string().min(1).max(100).optional(),
   timezone: z.string().min(1).max(100).optional(),
-  account_types: z.array(z.enum(ACCOUNT_TYPES)).min(1).optional(),
+  account_types: z
+    .array(z.enum(ACCOUNT_TYPES))
+    .min(1)
+    .refine((arr) => arr.includes('teacher'), 'The Teacher account type is required and cannot be removed.')
+    .optional(),
   status: z.enum(PROFILE_STATUS).optional(),
   teacher_type: z.enum(['teacher', 'teacher_exam']).optional(),
   contract_start: dateString,

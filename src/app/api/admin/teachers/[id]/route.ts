@@ -232,7 +232,6 @@ export async function DELETE(
     const preflight = [
       { table: 'lessons',                 query: countBy('lessons', 'teacher_id') },
       { table: 'reports',                 query: countBy('reports', 'teacher_id') },
-      { table: 'classes',                 query: countBy('classes', 'teacher_id') },
       { table: 'trainings',               query: countBy('trainings', 'teacher_id') },
       { table: 'invoices',                query: countBy('invoices', 'teacher_id') },
       { table: 'reviews',                 query: countBy('reviews', 'teacher_id') },
@@ -263,6 +262,7 @@ export async function DELETE(
       { table: 'lesson_join_clicks',      query: countBy('lesson_join_clicks', 'user_id') },
       { table: 'user_action_attempts',    query: countBy('user_action_attempts', 'user_id') },
       { table: 'announcement_dismissals', query: countBy('announcement_dismissals', 'user_id') },
+      { table: 'activity_attempts',       query: countBy('activity_attempts', 'reviewed_by') },
     ]
 
     const results = await Promise.all(preflight.map((p) => p.query))
@@ -294,11 +294,12 @@ export async function DELETE(
       )
     }
 
-    // 3. Purge — the account is pristine. DB CASCADEs on the profile delete
-    // handle availability, availability_overrides, availability_templates, and
-    // teacher_history_log.teacher_id; nothing else references this user.
-    // study_sheets.owner_id rows are blocked by preflight above, so none exist
-    // at purge time.
+    // 3. Purge - the account is pristine. DB CASCADEs on the profile delete
+    // handle availability, availability_overrides, availability_templates,
+    // teacher_history_log.teacher_id, and whats_new_dismissals; nothing else
+    // references this user. study_sheets.owner_id rows are blocked by the
+    // preflight above, so none exist at purge time;
+    // activity_attempts.reviewed_by is likewise blocked by the preflight above.
 
     // 3a. Kill every live session first. Non-fatal: on a retry after a partial
     // failure the auth user may already be gone, which makes this throw.

@@ -13,9 +13,13 @@ import * as Sentry from '@sentry/nextjs'
 
 function escapeCSV(value: unknown): string {
   if (value === null || value === undefined) return ''
-  const str = String(value)
-  // Wrap in quotes if contains comma, quote, or newline
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+  let str = String(value)
+  // Neutralise spreadsheet formula injection: leading = + @ tab CR,
+  // or leading - that is not a plain number (negative amounts stay intact)
+  if (/^[=+@\t\r]/.test(str) || (str.startsWith('-') && !/^-\d+(\.\d+)?$/.test(str))) {
+    str = "'" + str
+  }
+  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
     return `"${str.replace(/"/g, '""')}"`
   }
   return str
@@ -306,7 +310,8 @@ export async function GET(
         }
 
         // Fetch invoice upload status per teacher/month
-        const invoiceRes = await supabase.from('invoices').select('teacher_id, billing_month, status')
+        // Service-role read — the route is requireAdmin-gated above.
+        const invoiceRes = await adminClient.from('invoices').select('teacher_id, billing_month, status')
         if (invoiceRes.error) throw invoiceRes.error
         const invoiceMap: Record<string, string> = {}
         invoiceRes.data?.forEach((inv: any) => {
@@ -337,7 +342,10 @@ export async function GET(
       case 'student-hours': {
         filename = `lingualink-student-hours-${Date.now()}.csv`
 
-        let trainQuery = supabase
+        // Service-role read — the route is requireAdmin-gated above.
+        const adminClient = createAdminClient()
+
+        let trainQuery = adminClient
           .from('trainings')
           .select('id, student_id, total_hours, hours_consumed, start_date, end_date, package_name, status')
           .order('created_at', { ascending: false })

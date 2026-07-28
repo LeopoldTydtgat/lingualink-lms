@@ -81,8 +81,70 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── 3. Create the Supabase auth user using the service role key ──────────
     const adminClient = createAdminClient()
+
+    // ── 2a. Validate the submitted teacher assignments ───────────────────────
+    // Deduped because the body could repeat an id, which would double-insert
+    // the join row below (or trip its (training_id, teacher_id) PK).
+    // Lowercased because z.string().uuid() accepts uppercase while Postgres
+    // returns lowercase: without normalising, a mixed-case pair survives the
+    // dedupe and the allowed-set comparison below can 400 a teacher that is
+    // genuinely assignable. Computed once here and used for EVERY downstream
+    // consumer — the join-row insert and the notification lookup — so the ids
+    // that were validated are exactly the ids that get used.
+    const submittedTeacherIds = [
+      ...new Set(data.assigned_teacher_ids.map((tid: string) => tid.toLowerCase())),
+    ]
+
+    // assigned_teacher_ids is raw client input and training_teachers is the
+    // messaging/access junction, so an unvalidated uuid here would hand an
+    // arbitrary profile — a student, an archived teacher — a live access edge
+    // to this student. The allowed set mirrors the create form's teachers query
+    // (src/app/(admin)/admin/students/new/page.tsx:31-36 —
+    // role in ('teacher','admin') AND status = 'current'). That filter is the
+    // canonical definition of an assignable teacher; this gate must not diverge
+    // from it, or the form offers picks the route rejects.
+    //
+    // Unlike the PATCH gate (src/app/api/admin/students/[id]/route.ts:140-184)
+    // there is NO union with ids already on the training: the training does not
+    // exist yet, so there is nothing to grandfather in and no archived-profile
+    // backfill to honour. Half A only.
+    //
+    // Placed ahead of the FIRST mutation in this handler — before the auth
+    // user, the students row and the training — so a rejected request creates
+    // nothing at all and needs no rollback.
+    if (submittedTeacherIds.length > 0) {
+      const { data: assignable, error: assignableError } = await adminClient
+        .from('profiles')
+        .select('id')
+        .in('id', submittedTeacherIds)
+        .in('role', ['teacher', 'admin'])
+        .eq('status', 'current')
+
+      // A failed read is neither "none of these are assignable" (which would
+      // 400 a legitimate create) nor "all of them are" (which would re-open the
+      // hole). Fail loud.
+      if (assignableError || !assignable) {
+        console.error('Assignable-teacher lookup error (student POST):', assignableError)
+        return NextResponse.json(
+          { error: 'Failed to verify the selected teachers.' },
+          { status: 500 }
+        )
+      }
+
+      const allowedTeacherIds = new Set<string>(
+        (assignable as { id: string }[]).map((p) => p.id)
+      )
+
+      if (submittedTeacherIds.some((tid) => !allowedTeacherIds.has(tid))) {
+        return NextResponse.json(
+          { error: 'One or more selected teachers are not assignable.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // ── 3. Create the Supabase auth user using the service role key ──────────
 
     // Throwaway password — never returned or logged. The student sets their
     // own password via the invite email sent after all inserts succeed.
@@ -102,10 +164,16 @@ export async function POST(req: NextRequest) {
 
     const newUserId = newUser.user.id
 
-    // ── 4. Upsert the student row ────────────────────────────────────────────
+    // ── 4. Insert the student row ────────────────────────────────────────────
+    // .insert(), not .upsert(): the payload carries no id, and PostgREST
+    // defaults the conflict target to the primary key, so the upsert could
+    // never match an existing row — it bought nothing while leaving a merge
+    // path open if a conflict target were ever added. A duplicate email must
+    // ERROR here so the auth user created above is rolled back, which the
+    // failure branch below already does.
     const { data: studentRow, error: studentError } = await adminClient
       .from('students')
-      .upsert({
+      .insert({
         auth_user_id: newUserId,
         full_name: data.full_name,
         email: data.email,
@@ -172,23 +240,62 @@ export async function POST(req: NextRequest) {
     const trainingId = trainingRow.id
 
     // ── 6. Insert training_teachers rows ─────────────────────────────────────
-    if (data.assigned_teacher_ids.length > 0) {
-      const ttRows = data.assigned_teacher_ids.map((teacherId: string) => ({
+    // Every id reaching this insert already cleared the assignability gate in
+    // step 2a.
+    if (submittedTeacherIds.length > 0) {
+      const ttRows = submittedTeacherIds.map((teacherId: string) => ({
         training_id: trainingId,
         teacher_id: teacherId,
       }))
       const { error: ttError } = await adminClient
         .from('training_teachers')
         .insert(ttRows)
-      if (ttError) console.error('training_teachers insert error:', ttError)
+
+      // A student created with none of their teachers attached is NOT a partial
+      // success: training_teachers is the access/messaging junction, so every
+      // assigned teacher would be unable to see or message the student, and the
+      // notification below would announce an assignment that does not exist.
+      // The insert is a single multi-row statement, so one bad row drops them
+      // all. Roll the create back in reverse creation order and fail loud —
+      // best-effort deletes, same style as the two failure branches above, but
+      // each error is logged so a stranded row is traceable.
+      if (ttError) {
+        console.error('training_teachers insert error:', ttError)
+
+        const { error: trainingRollbackError } = await adminClient
+          .from('trainings')
+          .delete()
+          .eq('id', trainingId)
+        if (trainingRollbackError) {
+          console.error('training rollback error (student POST):', trainingRollbackError)
+        }
+
+        const { error: studentRollbackError } = await adminClient
+          .from('students')
+          .delete()
+          .eq('id', studentId)
+        if (studentRollbackError) {
+          console.error('student rollback error (student POST):', studentRollbackError)
+        }
+
+        const { error: authRollbackError } = await adminClient.auth.admin.deleteUser(newUserId)
+        if (authRollbackError) {
+          console.error('auth user rollback error (student POST):', authRollbackError)
+        }
+
+        return NextResponse.json(
+          { error: 'Failed to assign teachers to the new student. The student was not created.' },
+          { status: 500 }
+        )
+      }
     }
 
     // ── 6a. Notify assigned teachers ─────────────────────────────────────────
-    if (data.assigned_teacher_ids.length > 0) {
+    if (submittedTeacherIds.length > 0) {
       const { data: teacherProfiles } = await adminClient
         .from('profiles')
         .select('id, full_name, email')
-        .in('id', data.assigned_teacher_ids)
+        .in('id', submittedTeacherIds)
 
       if (teacherProfiles && teacherProfiles.length > 0) {
         const endDateLabel = data.end_date

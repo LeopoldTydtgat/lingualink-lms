@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation'
+import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { requireStaff } from '@/lib/auth/requireStaff'
@@ -19,6 +20,13 @@ export default async function StudentDetailPage({
   }
 
   const { id } = await params
+
+  // The route param is interpolated raw into PostgREST filter strings below
+  // (the messages .or(...) in particular), so it must be proven to be a uuid
+  // before ANY query runs — not after. A non-uuid id can never match a row, so
+  // notFound() is the correct outcome as well as the safe one.
+  if (!z.string().uuid().safeParse(id).success) notFound()
+
   const supabase = createAdminClient()
 
   // Fetch student with company and active training + assigned teachers.
@@ -92,7 +100,16 @@ export default async function StudentDetailPage({
     : student.companies
 
   // Flatten training — use active training or most recent
-  const trainingsArr = Array.isArray(student.trainings) ? student.trainings : []
+  // Deterministic pick: newest training first (created_at DESC), then prefer
+  // status 'active', else newest overall. Without the sort, PostgREST nested
+  // rows arrive in arbitrary order and activeTrain.id (which feeds training_id
+  // on the edit PATCH, an hours-mutation path) could silently target a
+  // different training once multi-training students exist.
+  const trainingsArr = (Array.isArray(student.trainings) ? student.trainings : [])
+    .slice()
+    .sort((a: { created_at: string | null }, b: { created_at: string | null }) =>
+      (b.created_at ?? '').localeCompare(a.created_at ?? '')
+    )
   const activeTrain =
     trainingsArr.find((t: { status: string | null }) => t.status === 'active') ??
     trainingsArr[0] ??
@@ -264,13 +281,27 @@ export default async function StudentDetailPage({
 
   // ── Purge eligibility: check all linked teachers are 'former' ───────────────
   // (admin only — staff view skips it, purge controls are hidden)
-  const { data: linkedLessonRows } = isStaffView
-    ? { data: null }
+  //
+  // ADVISORY ONLY. The authoritative fail-closed gate is purge_student_atomic,
+  // called by DELETE /api/admin/students/[id]; this pre-check exists purely to
+  // disable the button and name the blocking teachers before the admin clicks.
+  // Because an empty purgeBlockedBy renders as "nothing is blocking", a failed
+  // query must NOT fall through to that state: if either read errors we cannot
+  // prove eligibility, so purgePreflightFailed fails the UI closed instead.
+  let purgePreflightFailed = false
+
+  const { data: linkedLessonRows, error: linkedLessonsError } = isStaffView
+    ? { data: null, error: null }
     : await supabase
         .from('lessons')
         .select('teacher_id')
         .eq('student_id', id)
         .not('teacher_id', 'is', null)
+
+  if (linkedLessonsError) {
+    console.error('[student purge preflight] linked lessons query failed:', linkedLessonsError)
+    purgePreflightFailed = true
+  }
 
   const linkedTeacherIds = [
     ...new Set(
@@ -279,13 +310,23 @@ export default async function StudentDetailPage({
   ]
 
   let purgeBlockedBy: string[] = []
-  if (linkedTeacherIds.length > 0) {
-    const { data: nonFormerTeachers } = await supabase
+  if (!purgePreflightFailed && linkedTeacherIds.length > 0) {
+    const { data: nonFormerTeachers, error: nonFormerTeachersError } = await supabase
       .from('profiles')
       .select('full_name')
       .in('id', linkedTeacherIds)
       .neq('status', 'former')
-    purgeBlockedBy = (nonFormerTeachers || []).map((t: { full_name: string }) => t.full_name)
+
+    if (nonFormerTeachersError || !nonFormerTeachers) {
+      console.error(
+        '[student purge preflight] non-former teachers query failed:',
+        nonFormerTeachersError ?? 'query returned null data'
+      )
+      purgePreflightFailed = true
+      purgeBlockedBy = []
+    } else {
+      purgeBlockedBy = nonFormerTeachers.map((t: { full_name: string }) => t.full_name)
+    }
   }
 
   // ── Messages: fetch all student conversations (admin only — staff skips) ───
@@ -367,6 +408,7 @@ export default async function StudentDetailPage({
       reviews={flatReviews}
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}
+      purgePreflightFailed={purgePreflightFailed}
       assignments={assignments}
       isStaffView={isStaffView}
     />
