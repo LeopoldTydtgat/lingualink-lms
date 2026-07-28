@@ -32,12 +32,19 @@ export default async function AdminLayout({
 
   const adminDb = createAdminClient()
 
-  const { data: profile } = await adminDb
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no profile" state. Discarding
+  // the error made both look like null and bounced the user to /login.
+  const { data: profile, error: profileError } = await adminDb
     .from('profiles')
     .select('id, full_name, role, account_types, photo_url, timezone')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
+  if (profileError) {
+    console.error('[admin/layout] profiles lookup failed:', profileError)
+    throw new Error('Failed to load profile')
+  }
   if (!profile) redirect('/login?error=profile_error')
 
   // Staff-or-admin gate (ROLE-5b): role 'admin', or account_types contains
