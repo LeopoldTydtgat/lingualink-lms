@@ -18,11 +18,18 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const admin = createAdminClient()
-  const { data: profile } = await admin
+  // A query error is a transient DB failure, not a missing row - it must 500,
+  // never fall through to the 401 denial below.
+  const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('id, role')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (profileError) {
+    console.error('[PATCH /api/teacher/students/[id]/notes] profiles lookup failed:', profileError)
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
 
   if (!profile) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (profile.role !== 'teacher' && profile.role !== 'admin') {

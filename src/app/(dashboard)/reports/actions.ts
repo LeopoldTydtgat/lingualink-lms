@@ -11,11 +11,21 @@ export async function reopenReport(reportId: string) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated' }
 
-  const { data: profile } = await supabase
+  // A query error is a transient DB failure, not a missing row - it must surface
+  // as an error rather than silently resolve isAdmin to false, which would deny a
+  // real admin during a DB blip. Returned, not thrown: the caller has no
+  // try/catch and a rejection would strand its Reopening state. A confirmed
+  // zero-row profile keeps isAdmin false and hits the denial below unchanged.
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[reports/actions] profiles lookup failed:', profileError)
+    return { error: 'Something went wrong. Please try again.' }
+  }
 
   // Mirror the admin route's exact admin check
   // (src/app/api/admin/reports/[id]/route.ts): role === 'admin'
@@ -73,11 +83,22 @@ export async function submitReport(reportId: string, payload: SubmitReportInput)
 
   if (fetchErr || !report) return { error: 'Report not found' }
 
-  const { data: profile } = await supabase
+  // A query error is a transient DB failure, not a missing row - it must surface
+  // as an error rather than silently resolve isAdmin to false, which would deny
+  // an admin submitting on someone else's behalf. Returned, not thrown: the
+  // caller has no try/catch and a rejection would strand its Saving state.
+  // A confirmed zero-row profile keeps isAdmin false and falls through to the
+  // teacher_id check unchanged.
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[reports/actions] profiles lookup failed:', profileError)
+    return { error: 'Something went wrong. Please try again.' }
+  }
 
   const isAdmin = profile?.role === 'admin'
   if (!isAdmin && report.teacher_id !== user.id) {

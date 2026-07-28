@@ -36,12 +36,18 @@ export async function POST(
     // ── 2. Authorise: teacher OR admin ───────────────────────────────────────
     // Same isAdmin derivation as the C3 responses page (mirrors requireAdmin.ts).
     // A missing profile cannot be authorised — fail closed, never treat it as
-    // unauthenticated.
-    const { data: profile } = await supabase
+    // unauthenticated. A query error is NOT a missing profile: it is a transient
+    // DB failure and must 500, never reach the 403 below.
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle()
+
+    if (profileError) {
+      console.error('[teacher/attempts/[attemptId]/review] profiles lookup failed:', profileError)
+      return NextResponse.json({ error: 'Failed to save your feedback' }, { status: 500 })
+    }
 
     if (!profile) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

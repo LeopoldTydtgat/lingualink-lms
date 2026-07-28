@@ -42,17 +42,33 @@ export async function GET(
     // Student = a row in `students` keyed by auth_user_id; teacher/admin = a row
     // in `profiles` keyed by id. We need role + account_types to tell
     // student / teacher / exam-teacher / admin apart for the tier check.
-    const { data: student } = await supabase
+    //
+    // A query error on either lookup is a transient DB failure, NOT an absent
+    // identity: swallowing it would blank the caller's role and deny a
+    // legitimate reader twice over - once at the both-null guard below, and
+    // again at the tier check, which reads account_types off the same row.
+    // Both must 500 instead.
+    const { data: student, error: studentError } = await supabase
       .from('students')
       .select('id')
       .eq('auth_user_id', user.id)
       .maybeSingle()
 
-    const { data: profile } = await supabase
+    if (studentError) {
+      console.error('[library-file] students lookup failed:', studentError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role, account_types')
       .eq('id', user.id)
       .maybeSingle()
+
+    if (profileError) {
+      console.error('[library-file] profiles lookup failed:', profileError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
 
     // Neither a student nor a profile → denied outright, before any sheet is
     // loaded, so sheet existence never leaks. (Matches prior behaviour.)
