@@ -26,11 +26,20 @@ export default async function DashboardLayout({
   if (!user) redirect('/login')
 
   const admin = createAdminClient()
-  const { data: profile } = await admin
+
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no profile" state. Discarding
+  // the error made both look like null and bounced the user to /login.
+  const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at, account_types, status')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[dashboard/layout] profiles lookup failed:', profileError)
+    throw new Error('Failed to load profile')
+  }
 
   // Defense-in-depth — proxy already gates by role, but if a teacher/admin
   // user somehow has no profiles row, fail safe.
