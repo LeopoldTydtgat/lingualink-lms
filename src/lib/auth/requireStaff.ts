@@ -14,8 +14,10 @@ import type { User } from '@supabase/supabase-js'
  * Returns null for anonymous callers AND for non-staff, so the caller cannot
  * accidentally treat "logged in" as "authorised".
  *
- * Fail-closed: a failed or empty profiles read yields no profile, which is
- * not staff.
+ * Fail-closed: a confirmed-empty profiles read yields no profile, which is not
+ * staff. A profiles read that FAILS is not the same thing — it says nothing
+ * about the caller's role, so it throws rather than silently demoting a valid
+ * admin to non-staff on a transient DB error.
  *
  * Server-only — it reads the session cookie. Never import into a client component.
  */
@@ -25,11 +27,16 @@ export async function requireStaff(): Promise<User | null> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('id, role, account_types, status')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (error) {
+    console.error('[requireStaff] profiles lookup failed:', error)
+    throw new Error('Failed to load profile')
+  }
 
   const isStaff =
     profile?.status === 'current' &&

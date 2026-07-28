@@ -8,13 +8,23 @@ export default async function AdminLibraryPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  // A failed profiles read says nothing about the caller's role — throw rather
+  // than treat it as "no profile" and bounce a valid admin. Only a confirmed
+  // zero-rows result falls through to the fail-closed role denial below.
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('id, full_name, role, account_types')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
-  if (!profile) redirect('/login')
+  if (error) {
+    console.error('[admin/library] profiles lookup failed:', error)
+    throw new Error('Failed to load profile')
+  }
+
+  // Session is valid (getUser succeeded) — a missing profile row is a role
+  // failure, not an authentication failure, so deny to /dashboard, not /login.
+  if (!profile) redirect('/dashboard')
 
   if (!isAdminProfile(profile)) redirect('/dashboard')
 

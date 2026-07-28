@@ -465,9 +465,11 @@ export default function AdminLayoutClient({
   )
 
   const allPanelWidgets = [
-    { label: 'Classes Today', value: rightPanelStats.classesTodayCount, href: rightPanelStats.classesTodayCount === null ? '/admin/settings' : '/admin/classes', alert: false },
+    // Route to Settings only for the timezone-unset case — a null count now also
+    // means the query failed, which Settings would do nothing to fix.
+    { label: 'Classes Today', value: rightPanelStats.classesTodayCount, href: rightPanelStats.timezoneMissing ? '/admin/settings' : '/admin/classes', alert: false },
     { label: 'Pending Reports', value: rightPanelStats.pendingCount, href: '/admin/reports?filter=pending', alert: false },
-    { label: 'Flagged Reports', value: rightPanelStats.flaggedCount, href: '/admin/reports?filter=flagged', alert: rightPanelStats.flaggedCount > 0 },
+    { label: 'Flagged Reports', value: rightPanelStats.flaggedCount, href: '/admin/reports?filter=flagged', alert: (rightPanelStats.flaggedCount ?? 0) > 0 },
     { label: 'Low Hours Students', value: rightPanelStats.lowHoursCount, href: '/admin/students?filter=low_hours', alert: false },
     { label: 'Invoices to Review', value: rightPanelStats.invoicesToReviewCount, href: '/admin/billing', alert: false },
   ]
@@ -623,8 +625,12 @@ export default function AdminLayoutClient({
                   <div className="card-elevated card-elevated-interactive p-3">
                     <p className="text-xs text-gray-500">{w.label}</p>
                     <p className="text-xl font-bold mt-0.5" style={{ color: w.alert ? '#dc2626' : '#111827', fontVariantNumeric: 'tabular-nums' }}>
-                      {w.value === null ? (
+                      {/* Three states, in order: timezone unset (actionable prompt),
+                          query failed (dash — never a fake 0), real value. */}
+                      {w.label === 'Classes Today' && rightPanelStats.timezoneMissing ? (
                         <span className="text-sm font-medium" style={{ color: '#9ca3af' }}>Set timezone</span>
+                      ) : w.value === null ? (
+                        <span style={{ color: '#9ca3af' }} title="Could not load">{'\u2014'}</span>
                       ) : (
                         w.value
                       )}

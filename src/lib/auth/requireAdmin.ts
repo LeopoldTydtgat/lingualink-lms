@@ -26,7 +26,10 @@ export function isAdminProfile(
  * AND for non-admins, so the
  * caller cannot accidentally treat "logged in" as "authorised".
  *
- * Fail-closed: a failed profiles read yields no profile, which is not an admin.
+ * Fail-closed: a confirmed-empty profiles read yields no profile, which is not
+ * an admin. A profiles read that FAILS is not the same thing — it says nothing
+ * about the caller's role, so it throws rather than silently demoting a real
+ * admin on a transient DB error.
  *
  * Server-only — it reads the session cookie. Never import into a client component.
  */
@@ -36,11 +39,16 @@ export async function requireAdmin(): Promise<User | null> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('id, role, account_types')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (error) {
+    console.error('[requireAdmin] profiles lookup failed:', error)
+    throw new Error('Failed to load profile')
+  }
 
   return isAdminProfile(profile) ? user : null
 }

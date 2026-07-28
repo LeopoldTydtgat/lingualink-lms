@@ -35,11 +35,20 @@ export default async function LiveLayout({
   // non-teacher auth user; the bounce is identical to (dashboard) — both leave
   // `profile` null on zero rows, and `id` is the PK so there is never more than one.
   const admin = createAdminClient()
-  const { data: profile } = await admin
+
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no profile" state. Discarding
+  // the error made both look like null and bounced the user to /login.
+  const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('id')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (profileError) {
+    console.error('[live/layout] profiles lookup failed:', profileError)
+    throw new Error('Failed to load profile')
+  }
 
   if (!profile) redirect('/login')
 

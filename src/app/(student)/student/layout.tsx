@@ -33,11 +33,19 @@ export default async function StudentDashboardLayout({
   } = await supabase.auth.getUser()
   if (!user) redirect('/student/login')
 
-  const { data: student } = await admin
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no student" state. Discarding
+  // the error made both look like null and bounced the user to /student/login.
+  const { data: student, error: studentError } = await admin
     .from('students')
     .select('id, full_name, email, photo_url, status, timezone, whats_new_seen_at')
     .eq('auth_user_id', user.id)
     .maybeSingle()
+
+  if (studentError) {
+    console.error('[student/layout] students lookup failed:', studentError)
+    throw new Error('Failed to load student')
+  }
 
   if (!student) redirect('/student/login')
   if (student.status === 'former' || student.status === 'on_hold') redirect('/student/login')

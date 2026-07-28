@@ -11,11 +11,11 @@ export type TeacherAuth = {
 /**
  * Resolves the caller and returns them only if they are a *current* teacher.
  *
- * Mirrors requireAdmin's fail-closed, null-on-denial contract, with one
- * deliberate addition: it also returns the user-scoped Supabase client it
- * created. Teacher library writes are gated by RLS itself
- * (owner_id = auth.uid() AND audience = 'staff' on study_sheets), so callers
- * MUST perform those writes through this exact session client - never
+ * Mirrors requireAdmin's contract - fail-closed, null on denial, throw on a
+ * failed profiles read - with one deliberate addition: it also returns the
+ * user-scoped Supabase client it created. Teacher library writes are gated by
+ * RLS itself (owner_id = auth.uid() AND audience = 'staff' on study_sheets), so
+ * callers MUST perform those writes through this exact session client - never
  * createAdminClient, which would bypass the very policy that enforces the
  * design. Returning the client here removes any chance a route reaches for the
  * wrong one. requireAdmin does not do this because its callers deliberately use
@@ -26,8 +26,11 @@ export type TeacherAuth = {
  * callers and for anyone who is not a current teacher, so "logged in" can never
  * be mistaken for "authorised".
  *
- * Fail-closed: a failed profiles read yields no profile, which is not a
- * teacher, so the result is null.
+ * Fail-closed: a confirmed-empty profiles read yields no profile, which is not
+ * a teacher. A profiles read that FAILS is not the same thing - it says nothing
+ * about the caller's role, so it throws rather than silently demoting a current
+ * teacher on a transient DB error (which callers would report as a misleading
+ * 401 Unauthorised).
  *
  * Server-only - it reads the session cookie. Never import into a client component.
  */
@@ -37,11 +40,16 @@ export async function requireTeacher(): Promise<TeacherAuth | null> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from('profiles')
     .select('account_types, status')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (error) {
+    console.error('[requireTeacher] profiles lookup failed:', error)
+    throw new Error('Failed to load profile')
+  }
 
   const isCurrentTeacher =
     profile?.status === 'current' &&

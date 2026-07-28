@@ -170,11 +170,22 @@ export async function proxy(request: NextRequest) {
       let hasStudent = false
 
       // Try profiles first — teachers and admins (profiles.id === auth user id)
-      const { data: profile } = await adminDb
+      const { data: profile, error: profileError } = await adminDb
         .from('profiles')
         .select('status')
         .eq('id', user.id)
         .maybeSingle()
+
+      // A failed query is not an inactive account. Fail open on a transient DB
+      // error: let the request continue, no signOut, no redirect, and no cache
+      // cookie written from an errored result — the next request re-checks.
+      if (profileError) {
+        console.error(
+          '[proxy] status check: profiles lookup failed — failing open',
+          profileError
+        )
+        return response
+      }
 
       if (profile) {
         hasRecord = true
@@ -182,11 +193,20 @@ export async function proxy(request: NextRequest) {
         status = profile.status ?? null
       } else {
         // Fall back to students table (students.auth_user_id === auth user id)
-        const { data: student } = await adminDb
+        const { data: student, error: studentError } = await adminDb
           .from('students')
           .select('status')
           .eq('auth_user_id', user.id)
           .maybeSingle()
+
+        // Same fail-open rule as the profiles branch above.
+        if (studentError) {
+          console.error(
+            '[proxy] status check: students lookup failed — failing open',
+            studentError
+          )
+          return response
+        }
 
         if (student) {
           hasRecord = true

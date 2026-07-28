@@ -12,11 +12,18 @@ export async function POST(request: Request) {
 
   // Role check — only teachers/admins may dispatch this email. The teacher's
   // display name must come from the session profile, never from the body.
-  const { data: profile } = await supabase
+  // A query error is a transient DB failure, not a missing row - it must 500,
+  // never fall through to the 403 denial below.
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name, role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[teacher/notify-homework-assigned] profiles lookup failed:', profileError)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
 
   const isAuthorized =
     profile?.role === 'teacher' ||

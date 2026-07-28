@@ -4,10 +4,13 @@
 // Shared form for creating and editing announcements.
 // In create mode: announcement prop is undefined.
 // In edit mode: announcement prop contains existing data.
+// Saving goes through /api/admin/announcements (POST) and
+// /api/admin/announcements/[id] (PATCH) — requireAdmin + Zod + service-role
+// client server-side. The form never writes the table itself, and created_by
+// is set from the verified session rather than sent from the browser.
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 
 interface Announcement {
@@ -95,34 +98,39 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
   const [startDate, setStartDate] = useState(toDateInputValue(announcement?.start_date ?? null))
   const [endDate, setEndDate] = useState(toDateInputValue(announcement?.end_date ?? null))
   const [saving, setSaving] = useState(false)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
-
-  const supabase = createClient()
-
-  // Fetch current admin user ID on mount — needed for created_by field
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id ?? null)
-    })
-  }, [])
+  // Shown in the action bar and kept there until the next save attempt — a
+  // toast alone leaves a failed save looking like nothing happened.
+  const [error, setError] = useState<string | null>(null)
 
   const needsTargetId =
     targetAudience === 'specific_teacher' || targetAudience === 'specific_student'
 
+  const fail = (msg: string) => {
+    setError(msg)
+    toast.error(msg, { duration: 6000 })
+  }
+
   const handleSave = async () => {
+    // announcements.title is NOT NULL — a blank title is rejected here and
+    // again by the route's schema, never written as null.
+    if (!title.trim()) {
+      fail('Title is required.')
+      return
+    }
     if (!message.trim()) {
-      toast.error('Message is required.')
+      fail('Message is required.')
       return
     }
     if (needsTargetId && !targetId) {
-      toast.error('Please select a specific person.')
+      fail('Please select a specific person.')
       return
     }
 
     setSaving(true)
+    setError(null)
 
     const payload = {
-      title: title.trim() || null,
+      title: title.trim(),
       message: message.trim(),
       target_audience: targetAudience,
       target_id: needsTargetId ? targetId : null,
@@ -131,26 +139,39 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
       // Store as midnight UTC for the chosen date
       start_date: startDate ? `${startDate}T00:00:00.000Z` : null,
       end_date: endDate ? `${endDate}T23:59:59.000Z` : null,
-      created_by: currentUserId,
     }
 
-    let dbError = null
+    const url = announcement
+      ? `/api/admin/announcements/${announcement.id}`
+      : '/api/admin/announcements'
 
-    if (isEdit) {
-      const { error } = await supabase
-        .from('announcements')
-        .update(payload)
-        .eq('id', announcement.id)
-      dbError = error
-    } else {
-      const { error } = await supabase
-        .from('announcements')
-        .insert(payload)
-      dbError = error
-    }
+    try {
+      const res = await fetch(url, {
+        method: announcement ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
 
-    if (dbError) {
-      toast.error(dbError.message, { duration: 6000 })
+      if (!res.ok) {
+        // A failed response may carry no JSON body at all — never assume one.
+        const body = await res.json().catch(() => null)
+        fail(
+          typeof body?.error === 'string' && body.error
+            ? body.error
+            : isEdit
+              ? 'Could not save your changes. Please try again.'
+              : 'Could not create the announcement. Please try again.'
+        )
+        setSaving(false)
+        return
+      }
+    } catch (err) {
+      console.error('Announcement save failed:', err)
+      fail(
+        isEdit
+          ? 'Could not save your changes — the server could not be reached.'
+          : 'Could not create the announcement — the server could not be reached.'
+      )
       setSaving(false)
       return
     }
@@ -181,7 +202,7 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
 
         {/* 1. Content */}
         <Section title="Content">
-          <Field label={<>Title <span className="text-gray-400 font-normal">(optional)</span></>}>
+          <Field label={<>Title <span className="text-red-500">*</span></>}>
             <input
               type="text"
               value={title}
@@ -299,8 +320,13 @@ export default function AnnouncementForm({ announcement, teachers, students }: P
       </div>
 
       {/* Sticky action bar — sticks to the bottom of the scrolling main area */}
-      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex justify-end gap-3"
+      <div className="sticky bottom-0 -mx-6 px-6 py-3 border-t bg-white/95 backdrop-blur flex items-center justify-end gap-3"
         style={{ borderColor: '#E0DFDC' }}>
+        {error && (
+          <span role="alert" className="text-sm mr-auto" style={{ color: '#B91C1C' }}>
+            {error}
+          </span>
+        )}
         <button
           onClick={() => router.push('/admin/announcements')}
           className="px-4 py-2 rounded-lg text-sm font-medium border border-[#E0DFDC] hover:bg-gray-50"

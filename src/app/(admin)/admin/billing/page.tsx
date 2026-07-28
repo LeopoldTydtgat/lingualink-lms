@@ -21,12 +21,19 @@ export default async function AdminBillingPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no profile" state. Discarding
+  // the error made both look like null and bounced the user to /login.
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, full_name, role, account_types')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
+  if (profileError) {
+    console.error('[admin/billing] profiles lookup failed:', profileError)
+    throw new Error('Failed to load profile')
+  }
   if (!profile) redirect('/login')
 
   if (!isAdminProfile(profile)) redirect('/dashboard')

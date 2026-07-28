@@ -12,12 +12,16 @@ export const metadata: Metadata = {
   description: 'Admin portal for LinguaLink Online',
 }
 
+// Every count is nullable because a failed query must not render as a confident
+// "0". timezoneMissing disambiguates the two reasons classesTodayCount can be
+// null: no admin timezone (prompt to set one) vs a query that failed (dash).
 export interface RightPanelStats {
   classesTodayCount: number | null
-  pendingCount: number
-  flaggedCount: number
-  lowHoursCount: number
-  invoicesToReviewCount: number
+  timezoneMissing: boolean
+  pendingCount: number | null
+  flaggedCount: number | null
+  lowHoursCount: number | null
+  invoicesToReviewCount: number | null
   activeAnnouncementText: string | null
 }
 
@@ -32,12 +36,19 @@ export default async function AdminLayout({
 
   const adminDb = createAdminClient()
 
-  const { data: profile } = await adminDb
+  // A query error and a genuinely missing row are different failures: the first is
+  // transient and must surface, the second is a real "no profile" state. Discarding
+  // the error made both look like null and bounced the user to /login.
+  const { data: profile, error: profileError } = await adminDb
     .from('profiles')
     .select('id, full_name, role, account_types, photo_url, timezone')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
+  if (profileError) {
+    console.error('[admin/layout] profiles lookup failed:', profileError)
+    throw new Error('Failed to load profile')
+  }
   if (!profile) redirect('/login?error=profile_error')
 
   // Staff-or-admin gate (ROLE-5b): role 'admin', or account_types contains
@@ -138,25 +149,45 @@ export default async function AdminLayout({
       .is('read_at', null),
   ])
 
-  const classesTodayCount = timezoneMissing
-    ? null
-    : (todayRes?.data ?? []).filter(
-        (l) => !isCancelledStatus(l.status)
-      ).length
+  // Each result's error was previously discarded, so a failed query rendered as a
+  // confident "0" — indistinguishable from a real zero. Log every failure under its
+  // own tag; the values below then fall to null so the rail can show a dash.
+  if (todayRes?.error) console.error('[admin/layout] lessons-today query failed:', todayRes.error)
+  if (pendingRes?.error) console.error('[admin/layout] reports-pending query failed:', pendingRes.error)
+  if (flaggedRes?.error) console.error('[admin/layout] reports-flagged query failed:', flaggedRes.error)
+  if (trainingsRes.error) console.error('[admin/layout] trainings-low-hours query failed:', trainingsRes.error)
+  if (invoicesRes?.error) console.error('[admin/layout] invoices-review query failed:', invoicesRes.error)
+  if (announcementRes?.error) console.error('[admin/layout] announcements-active query failed:', announcementRes.error)
+  if (unreadMessagesRes?.error) console.error('[admin/layout] messages-unread query failed:', unreadMessagesRes.error)
+  if (unreadSupportRes.error) console.error('[admin/layout] support-unread query failed:', unreadSupportRes.error)
 
-  const lowHoursCount = (trainingsRes.data ?? []).filter(
-    (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
-  ).length
+  const classesTodayCount =
+    timezoneMissing || todayRes?.error
+      ? null
+      : (todayRes?.data ?? []).filter(
+          (l) => !isCancelledStatus(l.status)
+        ).length
+
+  const lowHoursCount = trainingsRes.error
+    ? null
+    : (trainingsRes.data ?? []).filter(
+        (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
+      ).length
 
   const rightPanelStats: RightPanelStats = {
     classesTodayCount,
-    pendingCount:          pendingRes?.count  ?? 0,
-    flaggedCount:          flaggedRes?.count  ?? 0,
+    timezoneMissing,
+    // null means either "skipped for staff" (the widget is filtered out anyway) or
+    // "query failed" (the widget renders a dash). Neither may show as 0.
+    pendingCount:          pendingRes  && !pendingRes.error  ? pendingRes.count  ?? 0 : null,
+    flaggedCount:          flaggedRes  && !flaggedRes.error  ? flaggedRes.count  ?? 0 : null,
     lowHoursCount,
-    invoicesToReviewCount: invoicesRes?.count ?? 0,
+    invoicesToReviewCount: invoicesRes && !invoicesRes.error ? invoicesRes.count ?? 0 : null,
     activeAnnouncementText: announcementRes?.data?.message ?? null,
   }
 
+  // Badge counts keep ?? 0 deliberately: a dash inside a nav count badge tells the
+  // user nothing actionable, and Realtime resyncs the true count on the next event.
   const unreadMessagesCount = unreadMessagesRes?.count ?? 0
   const unreadSupportCount = unreadSupportRes.count ?? 0
 

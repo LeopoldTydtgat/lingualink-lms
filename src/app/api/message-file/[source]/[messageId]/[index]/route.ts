@@ -80,17 +80,32 @@ export async function GET(
     // `profiles` keyed by id. BOTH are loaded: the identities are not mutually exclusive
     // (a dual-identity account holds both), and the participant check below needs
     // whichever one the row's *_type calls for.
-    const { data: profile } = await supabase
+    //
+    // A query error on either lookup is a transient DB failure, NOT an absent identity.
+    // Swallowing it denies a legitimate reader twice over: once at the both-null guard
+    // below, and again at the participant check, which reads isAdmin/isStaffOrAdmin off
+    // the profile row and student.id off the student row. Both must 500 instead.
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
-    const { data: student } = await supabase
+    if (profileError) {
+      console.error('[message-file] profiles lookup failed:', profileError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    const { data: student, error: studentError } = await supabase
       .from('students')
       .select('id')
       .eq('auth_user_id', user.id)
       .maybeSingle()
+
+    if (studentError) {
+      console.error('[message-file] students lookup failed:', studentError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
 
     // Neither → denied outright, before any message row is loaded, so message existence
     // never leaks to a caller who is neither a student nor a profile.

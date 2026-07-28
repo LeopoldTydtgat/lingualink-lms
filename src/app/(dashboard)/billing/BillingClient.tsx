@@ -153,6 +153,7 @@ export default function BillingClient({
   const [viewingInvoiceId, setViewingInvoiceId] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadSuccessId, setUploadSuccessId] = useState<string | null>(null)
+  const [viewError, setViewError] = useState<{ invoiceId: string; message: string } | null>(null)
 
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
@@ -195,6 +196,7 @@ export default function BillingClient({
   const triggerUpload = (invoiceId: string, billingMonth: string) => {
     setTargetInvoice({ id: invoiceId, billing_month: billingMonth })
     setUploadError(null)
+    setViewError(null)
     fileInputRef.current?.click()
   }
 
@@ -235,15 +237,26 @@ export default function BillingClient({
     // outside RLS, and we want admin viewing to work without exposing private
     // file paths to the page.
     setViewingInvoiceId(invoiceId)
+    setViewError(null)
     try {
       const res = await fetch('/api/teacher/invoice/sign-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoiceId }),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setViewError({ invoiceId, message: body.error || 'Could not open the invoice. Please try again.' })
+        return
+      }
       const { signedUrl } = await res.json()
-      if (signedUrl) window.open(signedUrl, '_blank')
+      if (signedUrl) {
+        window.open(signedUrl, '_blank')
+      } else {
+        setViewError({ invoiceId, message: 'Could not open the invoice. Please try again.' })
+      }
+    } catch {
+      setViewError({ invoiceId, message: 'Could not open the invoice. Check your connection and try again.' })
     } finally {
       setViewingInvoiceId(null)
     }
@@ -561,6 +574,9 @@ export default function BillingClient({
                 {uploadSuccessId === invoice.id && (
                   <div className="px-4 pb-3"><p className="text-sm text-green-600">Invoice uploaded successfully.</p></div>
                 )}
+                {viewError?.invoiceId === invoice.id && (
+                  <div className="px-4 pb-3"><p className="text-sm text-red-600">{viewError.message}</p></div>
+                )}
               </div>
             )
           })}
@@ -715,6 +731,9 @@ export default function BillingClient({
                         )}
                         {markingPaidId === invoice.id && markPaidError && (
                           <p className="mt-2 text-sm" style={{ color: '#dc2626' }}>{markPaidError}</p>
+                        )}
+                        {viewError?.invoiceId === invoice.id && (
+                          <p className="mt-2 text-sm" style={{ color: '#dc2626' }}>{viewError.message}</p>
                         )}
                       </div>
                     ))}
