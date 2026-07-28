@@ -2,11 +2,12 @@
 
 // src/app/(admin)/admin/announcements/AnnouncementsClient.tsx
 // Displays the full list of announcements with quick toggle, edit, and delete.
+// Writes go through /api/admin/announcements/[id] (requireAdmin + Zod +
+// service-role client) — this component never touches the table directly.
 
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -39,6 +40,14 @@ function formatDate(iso: string | null) {
     .padStart(2, '0')}/${d.getFullYear()}`
 }
 
+// A failed response may carry no JSON body at all (proxy error, HTML 500,
+// dropped connection), so the body is never assumed — fall back to a plain
+// message rather than throwing inside the error path.
+async function readErrorMessage(res: Response, fallback: string): Promise<string> {
+  const body = await res.json().catch(() => null)
+  return typeof body?.error === 'string' && body.error ? body.error : fallback
+}
+
 export default function AnnouncementsClient({
   announcements: initial,
 }: {
@@ -48,43 +57,74 @@ export default function AnnouncementsClient({
   const [announcements, setAnnouncements] = useState(initial)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
+  // Persistent banner: a toast alone disappears, and a failed write must stay
+  // visible next to a list that did NOT change.
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  const supabase = createClient()
+  const reportFailure = (msg: string) => {
+    setActionError(msg)
+    toast.error(msg, { duration: 6000 })
+  }
 
   // ── Quick activate / deactivate toggle ─────────────────────────────────────
   const handleToggle = async (id: string, current: boolean) => {
     setTogglingId(id)
-    const { error } = await supabase
-      .from('announcements')
-      .update({ is_active: !current })
-      .eq('id', id)
+    setActionError(null)
 
-    if (!error) {
+    try {
+      const res = await fetch(`/api/admin/announcements/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !current }),
+      })
+
+      if (!res.ok) {
+        reportFailure(
+          await readErrorMessage(res, 'Failed to update announcement.')
+        )
+        return
+      }
+
+      // Only reflect the new state once the server confirms it — the switch
+      // must never show a change that was not written.
       setAnnouncements((prev) =>
         prev.map((a) => (a.id === id ? { ...a, is_active: !current } : a))
       )
-    } else {
-      toast.error('Failed to update announcement.', { duration: 6000 })
+      router.refresh()
+    } catch (err) {
+      console.error('Announcement toggle failed:', err)
+      reportFailure('Failed to update announcement — the server could not be reached.')
+    } finally {
+      setTogglingId(null)
     }
-    setTogglingId(null)
   }
 
   // ── Delete ──────────────────────────────────────────────────────────────────
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this announcement? This cannot be undone.')) return
     setDeletingId(id)
+    setActionError(null)
 
-    const { error } = await supabase
-      .from('announcements')
-      .delete()
-      .eq('id', id)
+    try {
+      const res = await fetch(`/api/admin/announcements/${id}`, {
+        method: 'DELETE',
+      })
 
-    if (!error) {
+      if (!res.ok) {
+        reportFailure(
+          await readErrorMessage(res, 'Failed to delete announcement.')
+        )
+        return
+      }
+
       setAnnouncements((prev) => prev.filter((a) => a.id !== id))
-    } else {
-      toast.error('Failed to delete announcement.', { duration: 6000 })
+      router.refresh()
+    } catch (err) {
+      console.error('Announcement delete failed:', err)
+      reportFailure('Failed to delete announcement — the server could not be reached.')
+    } finally {
+      setDeletingId(null)
     }
-    setDeletingId(null)
   }
 
   const active = announcements.filter((a) => a.is_active)
@@ -110,6 +150,17 @@ export default function AnnouncementsClient({
           New Announcement
         </Link>
       </div>
+
+      {/* Failed write — stays until the next action */}
+      {actionError && (
+        <div
+          role="alert"
+          className="mb-6 rounded-lg px-4 py-3 text-sm"
+          style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
+        >
+          {actionError}
+        </div>
+      )}
 
       {announcements.length === 0 && (
         <div className="text-center py-16 text-gray-400">
