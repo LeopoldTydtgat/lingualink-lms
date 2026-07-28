@@ -104,6 +104,86 @@ export async function PATCH(
       }
     }
 
+    // Deduped because the body could repeat an id, which would double-insert the
+    // join row below (or trip its (training_id, teacher_id) PK). Lowercased
+    // because z.string().uuid() accepts uppercase while Postgres returns
+    // lowercase: without normalising, a mixed-case pair survives the dedupe and
+    // the allowed-set comparison below can 400 a teacher that is genuinely
+    // assignable. Computed once here and reused by the write block further down.
+    const submittedTeacherIds = Array.isArray(assigned_teacher_ids)
+      ? [...new Set(assigned_teacher_ids.map((tid) => tid.toLowerCase()))]
+      : []
+
+    // The ownership check above proves the training belongs to this student,
+    // but says nothing about WHO may be attached to it. assigned_teacher_ids
+    // is raw client input and training_teachers is the messaging/access
+    // junction, so an unvalidated uuid here grants an arbitrary profile — a
+    // student, an archived teacher — a live access edge to this student.
+    //
+    // The allowed set mirrors the edit page's teachers query
+    // (src/app/(admin)/admin/students/[id]/edit/page.tsx:109-114 —
+    // role in ('teacher','admin') AND status = 'current'). That filter is the
+    // canonical definition of an assignable teacher; this gate must not
+    // diverge from it, or the form offers picks the route rejects.
+    //
+    // The union with ids ALREADY on this training exists because the edit page
+    // deliberately backfills an assigned profile that has since been archived
+    // (page.tsx:120-142) so the admin can see and remove it — the form re-sends
+    // that id on every save. Without the union, an unrelated profile edit would
+    // 400. A newly added archived/invalid id is still rejected: it is in
+    // neither half of the set.
+    //
+    // The gate is placed here, ahead of the first write in the handler: both of
+    // its reads depend on nothing written below, so a rejected request mutates
+    // nothing at all — not the students row, not the training, not the hours
+    // ledger, not training_teachers.
+    if (training_id && Array.isArray(assigned_teacher_ids) && submittedTeacherIds.length > 0) {
+      const { data: assignable, error: assignableError } = await adminClient
+        .from('profiles')
+        .select('id')
+        .in('id', submittedTeacherIds)
+        .in('role', ['teacher', 'admin'])
+        .eq('status', 'current')
+
+      // A failed read is neither "none of these are assignable" (which would
+      // 400 a legitimate save) nor "all of them are" (which would re-open the
+      // hole). Fail loud, same split as the ownership check above.
+      if (assignableError || !assignable) {
+        console.error('Assignable-teacher lookup error (student PATCH):', assignableError)
+        return NextResponse.json(
+          { error: 'Failed to verify the selected teachers.' },
+          { status: 500 }
+        )
+      }
+
+      const { data: alreadyAssigned, error: alreadyAssignedError } = await adminClient
+        .from('training_teachers')
+        .select('teacher_id')
+        .eq('training_id', training_id)
+
+      if (alreadyAssignedError || !alreadyAssigned) {
+        console.error('Existing training_teachers lookup error (student PATCH):', alreadyAssignedError)
+        return NextResponse.json(
+          { error: 'Failed to verify the current teacher assignments.' },
+          { status: 500 }
+        )
+      }
+
+      const allowedTeacherIds = new Set<string>([
+        ...(assignable as { id: string }[]).map((p) => p.id),
+        ...(alreadyAssigned as { teacher_id: string | null }[])
+          .map((r) => r.teacher_id)
+          .filter((tid): tid is string => Boolean(tid)),
+      ])
+
+      if (submittedTeacherIds.some((tid) => !allowedTeacherIds.has(tid))) {
+        return NextResponse.json(
+          { error: 'One or more selected teachers are not assignable.' },
+          { status: 400 }
+        )
+      }
+    }
+
     // Build the payload from ONLY the fields present in the request. The
     // schema is all-optional, so a partial request (e.g. Archive sending just
     // { status }) must never touch the other columns — defaulting absent
@@ -205,6 +285,8 @@ export async function PATCH(
       }
     }
 
+    // Every id reaching these writes has already cleared the assignability gate
+    // above, which ran before the first write in the handler.
     if (training_id && Array.isArray(assigned_teacher_ids)) {
       const { error: deleteError } = await adminClient
         .from('training_teachers')
@@ -216,8 +298,8 @@ export async function PATCH(
         return NextResponse.json({ error: 'Failed to update assigned teachers.' }, { status: 500 })
       }
 
-      if (assigned_teacher_ids.length > 0) {
-        const rows = assigned_teacher_ids.map((tid: string) => ({
+      if (submittedTeacherIds.length > 0) {
+        const rows = submittedTeacherIds.map((tid: string) => ({
           training_id,
           teacher_id: tid,
         }))
