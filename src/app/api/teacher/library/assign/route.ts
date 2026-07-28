@@ -19,12 +19,18 @@ export async function POST(request: Request) {
 
   // Gate pattern mirrors /api/teacher/notify-homework-assigned: session profile,
   // role teacher or admin. full_name comes from the session profile, never the
-  // request body.
-  const { data: profile } = await supabase
+  // request body. A query error is a transient DB failure, not a missing row -
+  // it must 500, never fall through to the 403 denial below.
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name, role')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  if (profileError) {
+    console.error('[teacher/library/assign] profiles lookup failed:', profileError)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+  }
 
   const isAdmin = profile?.role === 'admin'
   const isAuthorized = profile?.role === 'teacher' || isAdmin
