@@ -100,7 +100,16 @@ export default async function StudentDetailPage({
     : student.companies
 
   // Flatten training — use active training or most recent
-  const trainingsArr = Array.isArray(student.trainings) ? student.trainings : []
+  // Deterministic pick: newest training first (created_at DESC), then prefer
+  // status 'active', else newest overall. Without the sort, PostgREST nested
+  // rows arrive in arbitrary order and activeTrain.id (which feeds training_id
+  // on the edit PATCH, an hours-mutation path) could silently target a
+  // different training once multi-training students exist.
+  const trainingsArr = (Array.isArray(student.trainings) ? student.trainings : [])
+    .slice()
+    .sort((a: { created_at: string | null }, b: { created_at: string | null }) =>
+      (b.created_at ?? '').localeCompare(a.created_at ?? '')
+    )
   const activeTrain =
     trainingsArr.find((t: { status: string | null }) => t.status === 'active') ??
     trainingsArr[0] ??

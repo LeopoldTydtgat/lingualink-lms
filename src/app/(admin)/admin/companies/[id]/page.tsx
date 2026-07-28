@@ -37,7 +37,8 @@ export default async function CompanyDetailPage({
         total_hours,
         hours_consumed,
         status,
-        end_date
+        end_date,
+        created_at
       ),
       training_teachers (
         profiles:teacher_id (
@@ -50,7 +51,11 @@ export default async function CompanyDetailPage({
 
   // Flatten students — get active training hours remaining + teacher names
   const flatStudents = (students ?? []).map((s) => {
-    const trainingsArr = Array.isArray(s.trainings) ? s.trainings : []
+    // Deterministic pick - newest first, then prefer 'active' (same fix as
+    // students/[id]/page.tsx; display-only here).
+    const trainingsArr = (Array.isArray(s.trainings) ? s.trainings : [])
+      .slice()
+      .sort((a, b) => ((b.created_at ?? '') as string).localeCompare((a.created_at ?? '') as string))
     const active = trainingsArr.find((t) => t.status === 'active') ?? trainingsArr[0] ?? null
     const hoursRemaining = active
       ? Number(active.total_hours) - Number(active.hours_consumed)
