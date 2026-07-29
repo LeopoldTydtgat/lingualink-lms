@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
+import TasksMini from '@/components/admin/TasksMini'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 
@@ -742,6 +743,20 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
               <p className="text-sm text-gray-600">{teacher.bio as string}</p>
             </div>
           )}
+
+          {/* Open tasks linked to this teacher. TasksMini renders its own header,
+              so this wrapper supplies only the full-width card the other overview
+              sections use. linkedId is profiles.id, which is what tasks.linked_entity_id
+              holds for linked_entity_type 'teacher' (the TaskForm teacher dropdown is
+              fed by /api/admin/teachers?minimal=true, i.e. profiles rows). */}
+          <div className="col-span-3 card-elevated p-5">
+            <TasksMini
+              linkedType="teacher"
+              linkedId={id}
+              linkedName={fullName}
+              adminTz={adminTz}
+            />
+          </div>
         </div>
       )}
 
