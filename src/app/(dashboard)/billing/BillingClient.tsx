@@ -54,8 +54,10 @@ interface BillingInfoDisplay {
 
 // "2026-04-01" → "April 2026"
 function formatMonth(dateStr: string): string {
-  const date = new Date(dateStr + 'T12:00:00Z')
-  return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    month: 'long', year: 'numeric',
+  }).format(new Date(dateStr + 'T12:00:00Z'))
 }
 
 // Manual date/time build to avoid hydration mismatch

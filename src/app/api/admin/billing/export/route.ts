@@ -25,8 +25,10 @@ const INVOICE_STATUSES: readonly string[] = ['pending', 'uploaded', 'paid', 'ove
 // formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
 // is NOT an instant, so it keeps its own month formatter.
 function formatMonthCSV(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    month: 'long', year: 'numeric',
+  }).format(new Date(dateStr + 'T12:00:00Z'))
 }
 
 function escapeCSV(val: unknown): string {
