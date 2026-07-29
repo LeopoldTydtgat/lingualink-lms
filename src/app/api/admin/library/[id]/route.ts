@@ -48,23 +48,35 @@ export async function PATCH(
     const needCurrent = !('audience' in update) || !('category' in update) || !('level' in update)
     let current: { audience: string | null; category: string | null; level: string | null } | null = null
     if (needCurrent) {
-      const { data: cur } = await supabase
+      const { data: cur, error: currentError } = await supabase
         .from('study_sheets')
         .select('audience, category, level')
         .eq('id', id)
         .maybeSingle()
+      // Fail the request on a failed read. Discarding this error left current
+      // null, which the merge below reads as "not a student sheet" and skips the
+      // guard for entirely — an unreadable row is indistinguishable from a
+      // staff one, and guessing "staff" waves through the exact patch this guard
+      // exists to stop.
+      if (currentError) {
+        return NextResponse.json(
+          { error: `Could not read this sheet before updating it: ${currentError.message}` },
+          { status: 500 }
+        )
+      }
       current = cur
     }
     const resultAudience = 'audience' in update ? (update.audience as string) : current?.audience ?? null
     if (resultAudience === 'student') {
       const resultCategory = 'category' in update ? (update.category as string | null) : current?.category ?? null
       const resultLevel = 'level' in update ? (update.level as string | null) : current?.level ?? null
-      // category '' would fail the study_sheets_category_check anyway, so reject
-      // null AND empty. level has no CHECK and '' is the established "not
-      // specified" value the create route and admin form still produce, so reject
-      // only a null/missing level (the DDL-introduced hazard), not ''.
+      // Both fields are rejected when null, missing, OR empty. category '' would
+      // fail the study_sheets_category_check anyway. level has no CHECK and ''
+      // used to be accepted here as the "not specified" value, which let a
+      // student-facing worksheet through carrying no level at all — the same
+      // hole as a NULL level, so it is closed the same way.
       const categoryOk = typeof resultCategory === 'string' && resultCategory.length > 0
-      const levelOk = resultLevel != null
+      const levelOk = typeof resultLevel === 'string' && resultLevel.length > 0
       if (!categoryOk || !levelOk) {
         return NextResponse.json(
           { error: 'Student worksheets require a category and a level.' },

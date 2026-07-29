@@ -17,6 +17,8 @@ type FormTab = 'metadata' | 'vocabulary' | 'files' | 'tags' | 'access'
 
 type SheetType = 'teaching_material' | 'study_sheet'
 
+type Audience = 'student' | 'staff'
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
@@ -110,8 +112,12 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // EDIT derives from the saved audience: only an explicit 'student' resolves to
   // Study Sheet; 'staff', null, undefined, or anything else → Teaching Material.
   const existingAudience = (sheet as (StudySheet & { audience?: string | null }) | null)?.audience
+  // The audience this modal opened with, read exactly the way both routes coerce
+  // it. A row stored with a null audience therefore reads as 'staff' here and is
+  // saved as 'staff' — no change, so no confirmation is raised for it.
+  const loadedAudience: Audience = existingAudience === 'student' ? 'student' : 'staff'
   const [type, setType] = useState<SheetType>(
-    existingAudience === 'student' ? 'study_sheet' : 'teaching_material'
+    loadedAudience === 'student' ? 'study_sheet' : 'teaching_material'
   )
   const selectType = (next: SheetType) => {
     setType(next)
@@ -253,6 +259,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   // failed. The row exists, so re-saving would POST the same id again and collide
   // — the modal instead holds the reason on screen and offers only Close.
   const [createdIncomplete, setCreatedIncomplete] = useState(false)
+  // Edit mode only: set to the audience this save would move the sheet to, when
+  // that differs from the one it was opened with. Holds the save until the admin
+  // confirms the visibility change (see the dialog at the bottom of the render).
+  const [pendingAudience, setPendingAudience] = useState<Audience | null>(null)
 
   // ── Word helpers ──────────────────────────────────────────────────────────
   const updateWord = (id: string, field: keyof WordRow, value: string) => {
@@ -372,7 +382,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
+  // audienceConfirmed is passed only by the confirmation dialog below — never
+  // wire this straight to onClick, or React's click event lands in it.
+  const handleSave = async (audienceConfirmed = false) => {
     // The row already exists and its id is fixed — a second POST would collide.
     if (createdIncomplete) return
     // Tags: the PUT replaces the whole set, so saving before the sheet's saved tags
@@ -380,6 +392,29 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     // the sheet.
     if (tagsLoading) return
     if (!title.trim()) { setError('Title is required.'); setActiveTab('metadata'); return }
+    // A Study Sheet is student-facing, and the PATCH route refuses a student sheet
+    // that carries no level. Caught here so the request is never sent in that
+    // state: create POSTs the row first and uploads the staged files after, so a
+    // rejected follow-up PATCH would leave those files sitting in the bucket with
+    // nothing on the sheet pointing at them.
+    if (type === 'study_sheet' && !level) {
+      setError('Level is required for a Study Sheet.')
+      setActiveTab('metadata')
+      return
+    }
+
+    // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
+    // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
+    const nextAudience: Audience = type === 'study_sheet' ? 'student' : 'staff'
+
+    // Flipping Type on an existing sheet silently rewrote this column, and it is
+    // the student RLS gate — a slip publishes staff material to students, or drops
+    // student material out of their portal. Ask first, naming the consequence.
+    // Create mode has no previous audience, so nothing changes and nothing asks.
+    if (isEdit && !audienceConfirmed && nextAudience !== loadedAudience) {
+      setPendingAudience(nextAudience)
+      return
+    }
 
     setSaving(true)
     setError(null)
@@ -389,28 +424,42 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     let rowCreated = false
 
     try {
-      const content = {
-        words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
-        // Exercises/MCQs now live in the activities table; content keeps an empty
-        // array purely for the backward-compatible shape the routes expect.
-        exercises: [],
-      }
-
       const payload: Record<string, unknown> = {
         title: title.trim(),
-        category,
-        level,
-        difficulty: difficulty ?? 1,
         intro_text: introText.trim() || null,
-        content,
         allowed_roles: presetToRoles(rolesPreset),
-        // Audience wall: Study Sheet → 'student'; anything else (Teaching Material)
-        // → 'staff'. Fail-safe: only an explicit 'study_sheet' type reaches students.
-        audience: type === 'study_sheet' ? 'student' : 'staff',
+        audience: nextAudience,
         is_active: true,
         // Edit mode persists the already-uploaded attachments; create mode uploads
         // after the row exists (see below), so it sends none here.
         attachments: isEdit ? attachments : [],
+      }
+
+      if (type === 'study_sheet') {
+        payload.category = category
+        payload.level = level
+        payload.difficulty = difficulty ?? 1
+        payload.content = {
+          words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
+          // Exercises/MCQs now live in the activities table; content keeps an empty
+          // array purely for the backward-compatible shape the routes expect.
+          exercises: [],
+        }
+      } else if (!isEdit) {
+        // Teaching Material hides Category, Level, Difficulty and the Vocabulary
+        // tab, so those values were never shown to the admin and must not be
+        // written from their defaults. PATCH copies only the keys present in the
+        // body, so omitting them leaves the stored values untouched — which is
+        // what a hidden input should do.
+        //
+        // Create cannot omit all of them: POST rejects a missing category outright
+        // ("title and category are required"), and study_sheets.difficulty is
+        // NOT NULL (baseline_schema.sql:1054) while POST inserts an explicit NULL
+        // for an absent one. Both would fail the create, so those two are still
+        // sent here. level and content are omitted either way — POST supplies its
+        // own '' and empty-words defaults for them.
+        payload.category = category
+        payload.difficulty = difficulty ?? 1
       }
 
       // Edit mode: single PATCH; files were uploaded inline on selection.
@@ -726,13 +775,15 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Level</label>
+                      {/* Required, not optional: a student-facing sheet with no level
+                          is rejected by the PATCH route. */}
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Level *</label>
                       <select
                         value={level}
                         onChange={e => setLevel(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                       >
-                        <option value="">Not specified</option>
+                        <option value="">Select a level…</option>
                         {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                       </select>
                     </div>
@@ -1109,7 +1160,7 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
             </button>
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => { void handleSave() }}
               disabled={saving || tagsLoading || createdIncomplete}
               className="px-5 py-2 text-sm rounded-md text-white font-medium"
               style={
@@ -1125,6 +1176,49 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Audience change confirmation — edit mode only. Flipping Type rewrites
+          study_sheets.audience, which is the gate the student RLS policies read,
+          so the consequence is named before the save runs. */}
+      {pendingAudience && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 60 }}
+        >
+          <div className="bg-white rounded-xl p-7" style={{ width: '440px', maxWidth: '90vw' }}>
+            <h3 className="text-base font-bold text-gray-900 mt-0">
+              {pendingAudience === 'student'
+                ? 'Make this sheet visible to students?'
+                : 'Hide this sheet from students?'}
+            </h3>
+            <p className="text-sm text-gray-500">
+              {pendingAudience === 'student'
+                ? 'Saving switches this from Teaching Material to a Study Sheet. It becomes visible to students on the Student Portal.'
+                : 'Saving switches this from a Study Sheet to Teaching Material. It stops being visible to students on the Student Portal, including any student it is already assigned to.'}
+            </p>
+            <div className="flex gap-2.5 justify-end mt-4">
+              <button
+                type="button"
+                onClick={() => setPendingAudience(null)}
+                className="px-4 py-2 text-sm rounded-md"
+                style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
+                onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+              >
+                Go Back
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPendingAudience(null); void handleSave(true) }}
+                className="px-4 py-2 text-sm rounded-md text-white font-semibold"
+                style={{ backgroundColor: '#FF8303' }}
+              >
+                {pendingAudience === 'student' ? 'Yes, Show to Students' : 'Yes, Hide from Students'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
