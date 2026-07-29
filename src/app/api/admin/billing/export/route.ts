@@ -13,6 +13,14 @@ import { getExportTimezone, formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
+// The exact value set the admin billing client's invoice status filter can emit
+// (BillingAdminClient.tsx status <select>: pending / uploaded / paid / overdue).
+// 'All Statuses' sends no param at all, so absence — not a member of this list —
+// is what means "every status". Anything outside the set is rejected rather than
+// passed to .eq(), so a typo can never export an empty CSV that reads as a real,
+// settled "no invoices in this status" answer.
+const INVOICE_STATUSES: readonly string[] = ['pending', 'uploaded', 'paid', 'overdue']
+
 // Instant (timestamptz) columns render in the resolved export timezone via
 // formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
 // is NOT an instant, so it keeps its own month formatter.
@@ -64,6 +72,7 @@ export async function GET(req: NextRequest) {
   const studentId = searchParams.get('studentId')
   const companyId = searchParams.get('companyId')
   const month = searchParams.get('month') // YYYY-MM-01 for teacher_invoices
+  const status = searchParams.get('status') // optional invoice status for teacher_invoices
 
   // dateFrom/dateTo are bare YYYY-MM-DD calendar days the admin picked in the
   // export timezone, but every column they scope (scheduled_at, created_at) is a
@@ -91,6 +100,15 @@ export async function GET(req: NextRequest) {
 
   // ── 1. Teacher Invoice Summary ────────────────────────────────────────────────────────
   if (type === 'teacher_invoices') {
+    // Validate before the recompute below: an unknown status must cost nothing and
+    // must not answer 200 with a CSV whose scope the caller did not ask for.
+    if (status !== null && !INVOICE_STATUSES.includes(status)) {
+      return NextResponse.json(
+        { error: `Unknown invoice status '${status}'. Expected one of: ${INVOICE_STATUSES.join(', ')}.` },
+        { status: 400 }
+      )
+    }
+
     // Refresh amount_eur before export so the CSV matches the admin Billing
     // page header. Scope to one teacher when filtered, else recompute everyone.
     if (teacherId) {
@@ -120,6 +138,8 @@ export async function GET(req: NextRequest) {
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
     if (month) query = query.eq('billing_month', month)
+    // Absent = the client's All Statuses option; validated against INVOICE_STATUSES above.
+    if (status) query = query.eq('status', status)
 
     const { data: invoices, error: invoicesErr } = await query
     if (invoicesErr) throw invoicesErr

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -46,17 +46,53 @@ function priorityStyle(priority: string) {
   return { backgroundColor: '#f3f4f6', color: '#374151' }
 }
 
-function formatDate(dateStr: string | null) {
+// The two dates on a task are NOT the same kind of value, so one shared formatter could
+// never have been right for both — they are split here.
+//
+// due_date is a DATE-only column (baseline schema `due_date date`), and its only producer is
+// the <input type="date"> in TaskForm, which posts a bare 'YYYY-MM-DD'. It is a calendar day,
+// not an instant, so it is formatted in UTC and deliberately NOT in the admin's zone:
+// PostgREST returns 'YYYY-MM-DD', which Date parses as UTC midnight, so re-projecting it
+// through a viewer zone would move the label off the day that was actually picked (the
+// previous day anywhere west of UTC) and would disagree with the date the edit form shows for
+// the same task.
+function formatDueDate(dateStr: string | null) {
   if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(dateStr))
 }
 
-function isOverdue(task: Task) {
+// completed_at is a timestamptz INSTANT — the PATCH ?action=complete route stamps it with
+// new Date().toISOString() — so it is projected through the viewing admin's zone. Without an
+// explicit timeZone this followed whatever zone the browser happened to be in, which showed
+// the wrong calendar day either side of midnight for any admin not sitting on UTC.
+function formatCompletedAt(dateStr: string | null, timezone: string) {
+  if (!dateStr) return '—'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(dateStr))
+}
+
+// due_date is the same calendar day formatDueDate renders, not an instant, so "overdue" is a
+// calendar-day comparison and "today" has to be resolved in the admin's own zone rather than in
+// whatever zone the browser happens to sit in. The previous version compared two values that
+// were never the same kind: new Date('YYYY-MM-DD') is UTC midnight, while setHours(0, 0, 0, 0)
+// is browser-local midnight. Anywhere west of UTC local midnight is the later instant, so a task
+// due TODAY compared as earlier than "today" and was badged Overdue a full day early.
+// en-CA renders that day as 'YYYY-MM-DD', a zero-padded fixed-width form whose lexical order is
+// its chronological order, so a plain string compare is a correct date compare and never builds
+// a Date at all. slice(0, 10) is defensive normalisation in case the column ever arrives with a
+// time component appended.
+function isOverdue(task: Task, timezone: string) {
   if (!task.due_date || task.status === 'completed') return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return new Date(task.due_date) < today
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  return task.due_date.slice(0, 10) < todayStr
 }
 
 // Filter selects — reference select styling, sized to content rather than full width.
@@ -64,7 +100,7 @@ const filterSelectClass = "border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-[
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TasksPageClient() {
+export default function TasksPageClient({ adminTz }: { adminTz: string }) {
   const router = useRouter()
 
   const [tasks, setTasks] = useState<Task[]>([])
@@ -81,7 +117,14 @@ export default function TasksPageClient() {
   const [reopening, setReopening] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
+  // Monotonic request token. fetchTasks runs both from the filter effect and as a
+  // post-mutation refetch, so a filter change can land while an older request is
+  // still in flight — without this, the older response overwrites the newer
+  // filter's rows (or clears its spinner).
+  const tasksRequestIdRef = useRef(0)
+
   const fetchTasks = useCallback(async () => {
+    const requestId = ++tasksRequestIdRef.current
     setLoading(true)
     setError(null)
     const params = new URLSearchParams()
@@ -91,13 +134,18 @@ export default function TasksPageClient() {
 
     try {
       const res = await fetch(`/api/admin/tasks?${params.toString()}`)
+      if (requestId !== tasksRequestIdRef.current) return
+      // Body parse is a second await — re-check before the throw or any write.
       const data = await res.json()
+      if (requestId !== tasksRequestIdRef.current) return
       if (!res.ok) throw new Error(data.error || 'Failed to load tasks')
       setTasks(data.tasks)
     } catch (err: any) {
+      if (requestId !== tasksRequestIdRef.current) return
       setError(err.message)
     } finally {
-      setLoading(false)
+      // Only the newest request may turn the spinner off.
+      if (requestId === tasksRequestIdRef.current) setLoading(false)
     }
   }, [filterStatus, filterPriority, filterLinkedType])
 
@@ -161,7 +209,7 @@ export default function TasksPageClient() {
   }
 
   const openCount = tasks.filter(t => t.status === 'open').length
-  const overdueCount = tasks.filter(t => isOverdue(t)).length
+  const overdueCount = tasks.filter(t => isOverdue(t, adminTz)).length
 
   return (
     <div className="p-6">
@@ -278,7 +326,7 @@ export default function TasksPageClient() {
       ) : (
         <div className="flex flex-col gap-2.5">
           {tasks.map(task => {
-            const overdue = isOverdue(task)
+            const overdue = isOverdue(task, adminTz)
             return (
               <div
                 key={task.id}
@@ -332,7 +380,7 @@ export default function TasksPageClient() {
                       )}
                       {task.due_date && (
                         <span style={{ color: overdue ? '#ef4444' : '#6b7280' }}>
-                          <span className="font-medium">Due:</span> {formatDate(task.due_date)}
+                          <span className="font-medium">Due:</span> {formatDueDate(task.due_date)}
                         </span>
                       )}
                       {task.linked_entity_name && task.linked_entity_type && (
@@ -352,7 +400,7 @@ export default function TasksPageClient() {
                       )}
                       {task.completed_at && (
                         <span>
-                          <span className="font-medium">Completed:</span> {formatDate(task.completed_at)}
+                          <span className="font-medium">Completed:</span> {formatCompletedAt(task.completed_at, adminTz)}
                         </span>
                       )}
                     </div>

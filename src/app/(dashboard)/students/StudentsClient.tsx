@@ -53,12 +53,15 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
       .slice(0, 2)
   }
 
+  // Date-only DATE columns (trainings.start_date/end_date) parse as UTC midnight, so the
+  // label must be pinned to UTC or any browser west of UTC renders the previous day.
   function formatDate(dateStr: string | null) {
     if (!dateStr) return '—'
     return new Date(dateStr).toLocaleDateString('en-GB', {
       day: 'numeric',
       month: 'short',
       year: 'numeric',
+      timeZone: 'UTC',
     })
   }
 

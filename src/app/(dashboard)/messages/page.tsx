@@ -33,13 +33,17 @@ export default async function MessagesPage({ searchParams }: PageProps) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, role')
+    .select('id, full_name, role, timezone')
     .eq('id', user.id)
     .single()
 
   if (!profile) return (
     <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
   )
+
+  // display-only projection; a null timezone degrades to UTC labels rather than
+  // blocking the page (fail-safe, matches the dashboard layout's stance on this column).
+  const viewerTz = profile.timezone ?? 'UTC'
 
   // â”€â”€ Pre-open admin conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
@@ -239,6 +243,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   return (
     <MessagesClient
       currentUser={profile}
+      viewerTz={viewerTz}
       contacts={contacts}
       allStudents={allStudents || []}
       // The teacher's currently-assigned student ids (NEW275) — mirrors the send-action

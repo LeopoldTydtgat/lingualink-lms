@@ -67,6 +67,10 @@ interface Profile {
 
 interface MessagesClientProps {
   currentUser: Profile
+  // The viewing teacher's own profiles.timezone ('UTC' when unset). Every timestamp this
+  // file renders is a timestamptz instant, so all of them are projected through this zone
+  // instead of whatever zone the browser happens to sit in.
+  viewerTz: string
   contacts: Contact[]
   allStudents: Student[]
   // NEW275: the teacher's currently-assigned student ids (mirrors the send-action gate).
@@ -77,21 +81,38 @@ interface MessagesClientProps {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-  function formatTime(isoString: string): string {
-    const date = new Date(isoString)
-    const now = new Date()
-    const isToday = date.getDate() === now.getDate() &&
-      date.getMonth() === now.getMonth() &&
-      date.getFullYear() === now.getFullYear()
-    if (isToday) {
-      const h = String(date.getHours()).padStart(2, '0')
-      const m = String(date.getMinutes()).padStart(2, '0')
-      return `${h}:${m}`
-    }
-    const day = String(date.getDate()).padStart(2, '0')
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-    return `${day} ${months[date.getMonth()]}`
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// Every timestamp rendered in this file is a timestamptz INSTANT (messages.created_at), so
+// "which calendar day is this?" has an answer only relative to a zone. en-CA renders that day
+// as 'YYYY-MM-DD', a zero-padded fixed-width form whose lexical order is its chronological
+// order, so comparing two of these strings is a correct calendar-day compare that never builds
+// a second Date and never reads a browser-local getter.
+function zonedDay(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date)
+}
+
+// Projects a message instant through the VIEWER's own zone. The previous version used
+// browser-local getters for both the today-check and the labels, so a teacher whose browser
+// sat in another zone saw the wrong clock time on every message and — either side of midnight
+// — took the wrong branch too: a bare HH:mm on a message from another day, or a 'DD Mon' stamp
+// on one sent today. The month label is derived from the zoned day rather than from Intl's own
+// month:'short' because en-GB abbreviates September as 'Sept' under current CLDR, which would
+// silently change the rendered label.
+function formatTime(isoString: string, viewerTz: string): string {
+  const date = new Date(isoString)
+  const day = zonedDay(date, viewerTz)
+  if (day === zonedDay(new Date(), viewerTz)) {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: viewerTz,
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(date)
   }
+  return `${day.slice(8, 10)} ${MONTHS_SHORT[Number(day.slice(5, 7)) - 1]}`
+}
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').slice(0, 60)
@@ -120,6 +141,7 @@ function Avatar({ name, photoUrl, size = 10 }: {
 
 export default function MessagesClient({
   currentUser,
+  viewerTz,
   contacts: initialContacts,
   allStudents,
   assignedStudentIds,
@@ -583,7 +605,7 @@ export default function MessagesClient({
                     </span>
                     {contact.latestMessage && (
                       <span className="text-xs text-gray-400 flex-shrink-0">
-                        {formatTime(contact.latestMessage.created_at)}
+                        {formatTime(contact.latestMessage.created_at, viewerTz)}
                       </span>
                     )}
                   </div>
@@ -648,10 +670,13 @@ export default function MessagesClient({
                   // Own, non-emoji, non-empty messages render read ticks inside the
                   // bubble (WhatsApp pattern) instead of in the metadata row below.
                   const isBubbleTicked = isFromMe && hasContent && !isEmojiOnly(msg.content)
+                  // Day boundaries are the VIEWER's, not the browser's: toDateString()
+                  // grouped by browser-local day, which split or merged the wrong
+                  // messages for any teacher whose browser sat in another zone.
                   const showDate =
                     index === 0 ||
-                    new Date(msg.created_at).toDateString() !==
-                    new Date(messages[index - 1].created_at).toDateString()
+                    zonedDay(new Date(msg.created_at), viewerTz) !==
+                    zonedDay(new Date(messages[index - 1].created_at), viewerTz)
 
                   return (
                     <div key={msg.id}>
@@ -660,7 +685,7 @@ export default function MessagesClient({
                           <div className="flex-1 h-px bg-gray-100" />
                           <span className="text-xs text-gray-400 flex-shrink-0">
                             {new Date(msg.created_at).toLocaleDateString([], {
-                              weekday: 'long', day: 'numeric', month: 'long',
+                              weekday: 'long', day: 'numeric', month: 'long', timeZone: viewerTz,
                             })}
                           </span>
                           <div className="flex-1 h-px bg-gray-100" />
@@ -762,7 +787,7 @@ export default function MessagesClient({
                               <span className="text-gray-400 italic" style={{ fontSize: '11px' }}>(edited)</span>
                             )}
                             <span className="text-gray-400" style={{ fontSize: '11px' }}>
-                              {formatTime(msg.created_at)}
+                              {formatTime(msg.created_at, viewerTz)}
                             </span>
                             {/* Read ticks only on messages I sent, and only when the
                                 bubble above isn't already rendering its own ticks. */}

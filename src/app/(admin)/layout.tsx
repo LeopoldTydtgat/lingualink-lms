@@ -71,6 +71,8 @@ export default async function AdminLayout({
   // (resolve null) and surface a null count instead.
   const todayRange = timezoneMissing ? null : getDayRangeInTz(new Date(), adminTimezone)
 
+  const announcementNowIso = new Date().toISOString()
+
   const [
     todayRes,
     pendingRes,
@@ -109,7 +111,7 @@ export default async function AdminLayout({
     // Active trainings — for low hours count (balance < 2h)
     adminDb
       .from('trainings')
-      .select('total_hours, hours_consumed')
+      .select('total_hours, hours_consumed, student_id')
       .eq('status', 'active'),
 
     // Invoices uploaded but not yet marked paid — admin-only widget, skipped for staff
@@ -121,12 +123,18 @@ export default async function AdminLayout({
           .eq('status', 'uploaded'),
 
     // First active announcement text (if any) — admin-only panel card, skipped for staff
+    // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+    // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+    // The two .or() filters AND together in PostgREST, so a scheduled row stays
+    // hidden until its start and an expired row drops out after its end.
     isStaffView
       ? Promise.resolve(null)
       : adminDb
           .from('announcements')
           .select('message')
           .eq('is_active', true)
+          .or(`start_date.is.null,start_date.lte.${announcementNowIso}`)
+          .or(`end_date.is.null,end_date.gte.${announcementNowIso}`)
           .limit(1)
           .maybeSingle(),
 
@@ -168,11 +176,15 @@ export default async function AdminLayout({
           (l) => !isCancelledStatus(l.status)
         ).length
 
+  // distinct students, not training/lesson rows - a student can hold multiple active trainings
   const lowHoursCount = trainingsRes.error
     ? null
-    : (trainingsRes.data ?? []).filter(
-        (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
-      ).length
+    : new Set(
+        (trainingsRes.data ?? [])
+          .filter((t) => Number(t.total_hours) - Number(t.hours_consumed) < 2)
+          .map((t) => t.student_id)
+          .filter(Boolean)
+      ).size
 
   const rightPanelStats: RightPanelStats = {
     classesTodayCount,

@@ -194,10 +194,16 @@ export default async function AdminDashboardPage() {
       .eq('status', 'uploaded'),
 
     // Active announcements — first one's text shown in dashboard banner
+    // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+    // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+    // The two .or() filters AND together in PostgREST, so a scheduled row stays
+    // hidden until its start and an expired row drops out after its end.
     supabase
       .from('announcements')
       .select('id, title, message')
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .or(`start_date.is.null,start_date.lte.${nowStr}`)
+      .or(`end_date.is.null,end_date.gte.${nowStr}`),
 
     // Alert: classes in next 24h with no Teams link (Graph API failure)
     // nowStr / in24hStr are UTC instants — correct as-is for these future-lesson comparisons
@@ -231,9 +237,13 @@ export default async function AdminDashboardPage() {
   // ── compute low-hours and zero-balance counts ─────────────────────────────
   const trainings = trainingsRes.data ?? []
 
-  const lowHoursCount = trainings.filter(
-    (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
-  ).length
+  // distinct students, not training/lesson rows - a student can hold multiple active trainings
+  const lowHoursCount = new Set(
+    trainings
+      .filter((t) => Number(t.total_hours) - Number(t.hours_consumed) < 2)
+      .map((t) => t.student_id)
+      .filter(Boolean)
+  ).size
 
   // Find student IDs with zero balance, then check if any have upcoming classes
   const zeroIds = trainings
@@ -243,13 +253,14 @@ export default async function AdminDashboardPage() {
 
   let zeroBalanceWithClassesCount = 0
   if (zeroIds.length > 0) {
-    const { count } = await supabase
+    const { data } = await supabase
       .from('lessons')
-      .select('id', { count: 'exact', head: true })
+      .select('student_id')
       .in('student_id', zeroIds)
       .gt('scheduled_at', nowStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
-    zeroBalanceWithClassesCount = count ?? 0
+    // distinct students, not training/lesson rows - a student can hold multiple active trainings
+    zeroBalanceWithClassesCount = new Set((data ?? []).map((l) => l.student_id)).size
   }
 
   // ── flatten nested joins and normalise into clean types ───────────────────

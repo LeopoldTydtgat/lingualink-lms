@@ -71,6 +71,14 @@ export async function POST(req: NextRequest) {
       console.error('Billing entities — student fetch error:', studentResult.error)
     }
 
+    // A failed lookup must NOT fall through to the success payload. `?? []` is
+    // indistinguishable from a genuinely empty set, and this route is the sole
+    // source of hourly_rate for the billing client — an errored fetch would
+    // render every lesson at rate 0 as fact. Fail loudly instead.
+    if (teacherResult.error || studentResult.error) {
+      return NextResponse.json({ error: 'Failed to load billing entities.' }, { status: 500 })
+    }
+
     return NextResponse.json({
       teachers: teacherResult.data ?? [],
       students: studentResult.data ?? [],

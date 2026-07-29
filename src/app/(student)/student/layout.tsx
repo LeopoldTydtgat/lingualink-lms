@@ -196,10 +196,18 @@ export default async function StudentDashboardLayout({
     (d: { announcement_id: string }) => d.announcement_id
   )
 
+  const announcementNowIso = new Date().toISOString()
+
+  // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+  // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+  // The two .or() filters AND together in PostgREST, so a scheduled row stays
+  // hidden until its start and an expired row drops out after its end.
   const { data: allAnnouncements } = await supabase
     .from('announcements')
     .select('id, title, message, is_dismissable, target_audience, target_id')
     .eq('is_active', true)
+    .or(`start_date.is.null,start_date.lte.${announcementNowIso}`)
+    .or(`end_date.is.null,end_date.gte.${announcementNowIso}`)
 
   const announcements: AnnouncementItem[] = (allAnnouncements ?? []).filter((a) => {
     if (dismissedIds.includes(a.id)) return false

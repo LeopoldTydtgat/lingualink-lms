@@ -32,12 +32,22 @@ const AUDIENCE_LABELS: Record<string, string> = {
   specific_student: 'Specific Student',
 }
 
+// start_date / end_date are CALENDAR DATES, not instants. Their only producer is the date
+// picker in AnnouncementForm, which stores the chosen day as `${YYYY-MM-DD}T00:00:00.000Z`
+// (start) / `T23:59:59.000Z` (end) and reads it back with a literal `.slice(0, 10)` — so the
+// UTC calendar date IS the stored value. They are therefore formatted in UTC and deliberately
+// NOT in the admin's zone: re-projecting them through a viewer zone would move the label off
+// the day the admin actually picked (a 23:59:59Z end_date reads as the NEXT day anywhere east
+// of UTC, a 00:00:00Z start_date as the PREVIOUS day anywhere west of it), and would disagree
+// with the date the edit form shows for the same row. Without an explicit timeZone this read
+// the HOST zone on the server and the VIEWER zone in the browser — a hydration mismatch on
+// top of the wrong-day shift.
 function formatDate(iso: string | null) {
   if (!iso) return '—'
-  const d = new Date(iso)
-  return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1)
-    .toString()
-    .padStart(2, '0')}/${d.getFullYear()}`
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(new Date(iso))
 }
 
 // A failed response may carry no JSON body at all (proxy error, HTML 500,

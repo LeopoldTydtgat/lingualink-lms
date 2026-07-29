@@ -67,6 +67,10 @@ interface Student {
 
 interface Props {
   currentStudent: Student
+  // The viewing student's own students.timezone (fail-closed upstream). Every timestamp
+  // this file renders is a timestamptz instant, so all of them are projected through
+  // this zone instead of whatever zone the browser happens to sit in.
+  viewerTz: string
   contacts: Contact[]
   assignedTeachers: Teacher[]
 }
@@ -76,18 +80,40 @@ interface Props {
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const DAYS_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
-  if (diffDays === 0) {
-    const h = date.getHours().toString().padStart(2, '0')
-    const m = date.getMinutes().toString().padStart(2, '0')
-    return `${h}:${m}`
+// Every timestamp rendered in this file is a timestamptz INSTANT (messages.created_at), so
+// "which calendar day is this?" has an answer only relative to a zone. en-CA renders that day
+// as 'YYYY-MM-DD', a zero-padded fixed-width form whose lexical order is its chronological
+// order, so comparing two of these strings is a correct calendar-day compare that never builds
+// a second Date and never reads a browser-local getter.
+function zonedDay(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date)
+}
+
+function formatTime(isoString: string, viewerTz: string): string {
+  const date = new Date(isoString)
+  const day = zonedDay(date, viewerTz)
+  const today = zonedDay(new Date(), viewerTz)
+  if (day === today) {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: viewerTz,
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(date)
   }
+  // Calendar-day distance computed from the two zoned 'YYYY-MM-DD' strings, each parsed
+  // at UTC midnight, so the diff is exact whole days regardless of DST in either zone.
+  // The old elapsed-ms floor bucketed by 24h windows, not calendar days, and also let
+  // FUTURE instants (negative diff) fall into the weekday branch.
+  const dayUtc = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)))
+  const todayUtc = Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1, Number(today.slice(8, 10)))
+  const diffDays = Math.round((todayUtc - dayUtc) / 86400000)
   if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return DAYS_SHORT[date.getDay()]
-  return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}`
+  if (diffDays > 1 && diffDays < 7) return DAYS_SHORT[new Date(dayUtc).getUTCDay()]
+  // Month label derived from the zoned day, not Intl month:'short' — en-GB renders
+  // September as 'Sept' under current CLDR.
+  return `${day.slice(8, 10)} ${MONTHS_SHORT[Number(day.slice(5, 7)) - 1]}`
 }
 
 function stripHtml(html: string): string {
@@ -158,6 +184,7 @@ function ReadTicks({
 
 export default function StudentMessagesClient({
   currentStudent,
+  viewerTz,
   contacts: initialContacts,
   assignedTeachers,
 }: Props) {
@@ -618,7 +645,7 @@ export default function StudentMessagesClient({
                     </span>
                     {contact.latestMessage && (
                       <span className="text-xs text-gray-400 flex-shrink-0">
-                        {formatTime(contact.latestMessage.created_at)}
+                        {formatTime(contact.latestMessage.created_at, viewerTz)}
                       </span>
                     )}
                   </div>
@@ -670,10 +697,13 @@ export default function StudentMessagesClient({
                   // Own, non-emoji, non-empty messages render read ticks inside the
                   // bubble (WhatsApp pattern) instead of in the metadata row below.
                   const isBubbleTicked = isFromMe && hasContent && !isEmojiOnly(msg.content)
+                  // Day boundaries are the VIEWER's, not the browser's: toDateString()
+                  // grouped by browser-local day, which split or merged the wrong
+                  // messages for any student whose browser sat in another zone.
                   const showDate =
                     index === 0 ||
-                    new Date(msg.created_at).toDateString() !==
-                    new Date(messages[index - 1].created_at).toDateString()
+                    zonedDay(new Date(msg.created_at), viewerTz) !==
+                    zonedDay(new Date(messages[index - 1].created_at), viewerTz)
 
                   return (
                     <div key={msg.id}>
@@ -681,12 +711,9 @@ export default function StudentMessagesClient({
                         <div className="flex items-center gap-3 my-4">
                           <div className="flex-1 h-px bg-gray-100" />
                           <span className="text-xs text-gray-400 flex-shrink-0">
-                            {(() => {
-                              const d = new Date(msg.created_at)
-                              const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-                              const months = ['January','February','March','April','May','June','July','August','September','October','November','December']
-                              return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`
-                            })()}
+                            {new Date(msg.created_at).toLocaleDateString([], {
+                              weekday: 'long', day: 'numeric', month: 'long', timeZone: viewerTz,
+                            })}
                           </span>
                           <div className="flex-1 h-px bg-gray-100" />
                         </div>
@@ -783,7 +810,7 @@ export default function StudentMessagesClient({
                               <span className="text-xs text-gray-400 italic">(edited)</span>
                             )}
                             <span className="text-xs text-gray-400">
-                              {formatTime(msg.created_at)}
+                              {formatTime(msg.created_at, viewerTz)}
                             </span>
                             {isFromMe && !isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>

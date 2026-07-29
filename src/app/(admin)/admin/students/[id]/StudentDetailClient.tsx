@@ -7,6 +7,7 @@ import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
+import TasksMini from '@/components/admin/TasksMini'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -116,6 +117,8 @@ type Props = {
   assignments: Assignment[]
   /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
   isStaffView?: boolean
+  /** IANA zone of the viewing admin/staff account. Every rendered instant is projected through it. */
+  adminTz: string
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messages' | 'reviews'
@@ -242,18 +245,72 @@ function StarRating({ rating }: { rating: number }) {
 
 // ─── Messages helpers ─────────────────────────────────────────────────────────
 
-function msgFormatTime(dateStr: string): string {
+// Wall-clock parts of an instant in an explicit timezone. Intl with a timeZone is
+// deterministic: the same output on server and client, so it is safe in this client
+// component under SSR. The Date getters this replaces (getFullYear/getMonth/getDate/
+// getHours/getMinutes) read the HOST zone on the server and the VIEWER zone in the browser,
+// which both mismatched on hydration and showed the wrong wall-clock time. hourCycle 'h23'
+// (not hour12: false) is required: hour12: false yields "24" for midnight under some
+// locales, where the getHours() version returned "00".
+function zonedParts(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '0'
+  return {
+    year:   Number(get('year')),
+    month:  Number(get('month')),  // 1-12
+    day:    Number(get('day')),
+    hour:   get('hour'),           // already zero-padded '00'-'23'
+    minute: get('minute'),         // already zero-padded '00'-'59'
+  }
+}
+
+// The day-boundary definition in this file: an instant's calendar date in `timezone`, as a
+// UTC-midnight stamp. The in-thread date separators group on it, replacing toDateString()
+// (browser-local on the client, host-local on the server).
+function zonedDayStamp(date: Date, timezone: string): number {
+  const p = zonedParts(date, timezone)
+  return Date.UTC(p.year, p.month - 1, p.day)
+}
+
+// Relative timestamp for the conversation list and the message rows. diffDays stays an
+// elapsed-milliseconds floor: it reads no zone at all, so preserving it keeps the
+// today/Yesterday/weekday/date thresholds exactly where they were. Only the rendered parts
+// were zone-dependent — getHours/getMinutes read the host zone on the server and the viewer
+// zone in the browser, and toLocaleDateString([], …) followed the browser's zone AND its
+// locale, so the same message rendered differently for different viewers. The locale is now
+// pinned to en-GB, which is the form the en-GB rendering already produced ("29 Jul").
+function msgFormatTime(dateStr: string, timezone: string): string {
   const date = new Date(dateStr)
   const now = new Date()
   const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24))
   if (diffDays === 0) {
-    const h = date.getHours().toString().padStart(2, '0')
-    const m = date.getMinutes().toString().padStart(2, '0')
-    return `${h}:${m}`
+    const p = zonedParts(date, timezone)
+    return `${p.hour}:${p.minute}`
   }
   if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return date.toLocaleDateString([], { weekday: 'short' })
-  return date.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  if (diffDays < 7) {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone, weekday: 'short',
+    }).format(date)
+  }
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone, day: 'numeric', month: 'short',
+  }).format(date)
+}
+
+// In-thread date separator ("Wednesday 29 July"), in the admin's timezone. The locale is
+// pinned to en-GB rather than left to the viewer: toLocaleDateString([], …) followed the
+// browser's locale AND the browser's zone, so the same thread rendered a different label
+// (and, near midnight, a different day) depending on who was looking at it.
+function formatSeparatorDate(dateStr: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'long', day: 'numeric', month: 'long',
+  }).format(new Date(dateStr))
 }
 
 function stripHtml(html: string): string {
@@ -279,9 +336,11 @@ function MsgAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }
 function MessageThread({
   conversation,
   studentId,
+  timezone,
 }: {
   conversation: AdminConversation
   studentId: string
+  timezone: string
 }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -311,8 +370,8 @@ function MessageThread({
           const isFromStudent = msg.sender_id === studentId
           const showDate =
             index === 0 ||
-            new Date(msg.created_at).toDateString() !==
-              new Date(conversation.messages[index - 1].created_at).toDateString()
+            zonedDayStamp(new Date(msg.created_at), timezone) !==
+              zonedDayStamp(new Date(conversation.messages[index - 1].created_at), timezone)
 
           return (
             <div key={msg.id}>
@@ -320,9 +379,7 @@ function MessageThread({
                 <div className="flex items-center gap-3 my-4">
                   <div className="flex-1 h-px bg-gray-100" />
                   <span className="text-xs text-gray-400 flex-shrink-0">
-                    {new Date(msg.created_at).toLocaleDateString([], {
-                      weekday: 'long', day: 'numeric', month: 'long',
-                    })}
+                    {formatSeparatorDate(msg.created_at, timezone)}
                   </span>
                   <div className="flex-1 h-px bg-gray-100" />
                 </div>
@@ -355,7 +412,7 @@ function MessageThread({
                     </div>
                   )}
                   <div className={`flex items-center mt-1 ${isFromStudent ? 'justify-end' : 'justify-start'}`}>
-                    <span className="text-xs text-gray-400">{msgFormatTime(msg.created_at)}</span>
+                    <span className="text-xs text-gray-400">{msgFormatTime(msg.created_at, timezone)}</span>
                   </div>
                 </div>
               </div>
@@ -390,6 +447,7 @@ export default function StudentDetailClient({
   purgePreflightFailed,
   assignments: initialAssignments,
   isStaffView = false,
+  adminTz,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -936,6 +994,27 @@ export default function StudentDetailClient({
             </div>
           </div>
           )}
+
+          {/* Open tasks linked to this student. TasksMini renders its own header, so this
+              wrapper supplies only the card — card-elevated p-5 is this file's neutral
+              overview-card class, with col-span-2 (not the teacher page's col-span-3)
+              because this overview grid is grid-cols-2. linkedId is students.id, which is
+              what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
+              TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
+              students rows, and the tasks route resolves those ids back against `students`.
+              Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
+              which requireStaff() explicitly excludes tasks from, so for a staff viewer this
+              panel could only render a permission error and an Add Task button they cannot use. */}
+          {!isStaffView && (
+          <div className="col-span-2 card-elevated p-5">
+            <TasksMini
+              linkedType="student"
+              linkedId={id}
+              linkedName={fullName}
+              adminTz={adminTz}
+            />
+          </div>
+          )}
         </div>
       )}
 
@@ -964,6 +1043,7 @@ export default function StudentDetailClient({
                       {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
                         hour: '2-digit', minute: '2-digit',
+                        timeZone: adminTz,
                       })}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
@@ -1120,6 +1200,7 @@ export default function StudentDetailClient({
                       <td className="px-4 py-3 text-gray-500">
                         {new Date(entry.created_at).toLocaleDateString('en-GB', {
                           day: '2-digit', month: 'short', year: 'numeric',
+                          timeZone: adminTz,
                         })}
                       </td>
                     </tr>
@@ -1156,6 +1237,7 @@ export default function StudentDetailClient({
                       {report.lesson_scheduled_at
                         ? new Date(report.lesson_scheduled_at).toLocaleDateString('en-GB', {
                             day: '2-digit', month: 'short', year: 'numeric',
+                            timeZone: adminTz,
                           })
                         : '—'}
                     </td>
@@ -1178,6 +1260,7 @@ export default function StudentDetailClient({
                     <td className="px-4 py-3 text-gray-500">
                       {new Date(report.created_at).toLocaleDateString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
+                        timeZone: adminTz,
                       })}
                     </td>
                   </tr>
@@ -1253,6 +1336,7 @@ export default function StudentDetailClient({
                         <td className="px-4 py-3 text-gray-500">
                           {new Date(assignment.assigned_at).toLocaleDateString('en-GB', {
                             day: '2-digit', month: 'short', year: 'numeric',
+                            timeZone: adminTz,
                           })}
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -1328,7 +1412,7 @@ export default function StudentDetailClient({
                           </span>
                           {lastMsg && (
                             <span className="text-xs text-gray-400 flex-shrink-0">
-                              {msgFormatTime(lastMsg.created_at)}
+                              {msgFormatTime(lastMsg.created_at, adminTz)}
                             </span>
                           )}
                         </div>
@@ -1354,6 +1438,7 @@ export default function StudentDetailClient({
                 <MessageThread
                   conversation={selectedConversation}
                   studentId={id}
+                  timezone={adminTz}
                 />
               )}
             </div>
@@ -1377,6 +1462,7 @@ export default function StudentDetailClient({
                     <p className="text-xs text-gray-400">
                       {new Date(review.submitted_at).toLocaleDateString('en-GB', {
                         day: '2-digit', month: 'short', year: 'numeric',
+                        timeZone: adminTz,
                       })}
                     </p>
                   </div>
