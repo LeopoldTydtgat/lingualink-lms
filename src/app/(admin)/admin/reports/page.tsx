@@ -29,6 +29,20 @@ export default async function AdminReportsPage({
   const { data: roleData } = await supabase.rpc('get_user_role');
   if (roleData !== 'admin') redirect('/dashboard');
 
+  // Same source as the admin class-detail page ((admin)/admin/classes/[id]/page.tsx):
+  // the logged-in admin's own profiles.timezone, read through the cookie client, falling
+  // back to UTC when unset. Report/class times are stored in UTC and formatted client-side
+  // with an explicit Intl timeZone, which is deterministic on server and client — no
+  // hydration mismatch. A missing profile row must never block the page, so this is a
+  // non-fatal read.
+  const { data: adminProfile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const adminTimezone = adminProfile?.timezone ?? 'UTC';
+
   // Query 1: reports + lessons + teacher
   const { data: reportsData } = await supabase
     .from('reports')
@@ -139,6 +153,7 @@ export default async function AdminReportsPage({
       students={allStudentsData ?? []}
       initialStatusFilter={initialStatusFilter}
       initialReopenId={reopen}
+      adminTimezone={adminTimezone}
     />
   );
 }

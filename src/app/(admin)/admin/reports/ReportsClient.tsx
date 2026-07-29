@@ -46,18 +46,23 @@ interface Props {
   // Seeded from ?reopen= by the server page; opens the reopen-confirmation modal
   // for that report on load. undefined means "no modal open".
   initialReopenId?: string;
+  // The logged-in admin's IANA timezone (server page falls back to 'UTC').
+  adminTimezone: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDateTime(iso: string) {
-  const d   = new Date(iso);
-  const day = d.getDate().toString().padStart(2, '0');
-  const mon = d.toLocaleString('en-GB', { month: 'short' });
-  const yr  = d.getFullYear();
-  const hr  = d.getHours().toString().padStart(2, '0');
-  const min = d.getMinutes().toString().padStart(2, '0');
-  return `${day} ${mon} ${yr}, ${hr}:${min}`;
+// Times are stored in UTC. We format each in the admin's own timezone via Intl with an
+// explicit timeZone. That is deterministic: the same output on server and client, so it is
+// safe in this client component under SSR (no hydration mismatch). Without the timeZone the
+// server rendered in the host's zone and the browser re-rendered in the viewer's, which both
+// mismatched on hydration and showed the wrong wall-clock time.
+function formatDateTime(iso: string, timezone: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(iso));
 }
 
 function hoursAgo(iso: string) {
@@ -117,7 +122,7 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   const [listError,     setListError]     = useState('');
@@ -267,7 +272,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                   if (r.status === 'reopened') rowBg = '#FFF7ED';
                   return (
                     <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
-                      <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at) : '—'}</td>
+                      <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at, adminTimezone) : '—'}</td>
                       <td className="py-3 px-3 font-medium text-gray-800">{r.teacher?.full_name ?? '—'}</td>
                       <td className="py-3 px-3 text-gray-700">{r.student?.full_name ?? '—'}</td>
                       <td className="py-3 px-3 text-gray-600">{r.lesson?.duration_minutes ? `${r.lesson.duration_minutes} min` : '—'}</td>
@@ -284,7 +289,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                           ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
                           : r.status === 'reopened'
                             ? '—'
-                            : r.deadline_at ? formatDateTime(r.deadline_at) : '—'}
+                            : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2">
@@ -331,7 +336,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
 
 // ─── Live Trace ───────────────────────────────────────────────────────────────
 
-function LiveTrace() {
+function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
   const [lessons,      setLessons]      = useState<TraceLesson[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [traceError,   setTraceError]   = useState('');
@@ -420,7 +425,7 @@ function LiveTrace() {
               <tbody>
                 {lessons.map((l) => (
                   <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                    <td className="py-3 px-3 text-gray-700 whitespace-nowrap">{formatDateTime(l.scheduled_at)}</td>
+                    <td className="py-3 px-3 text-gray-700 whitespace-nowrap">{formatDateTime(l.scheduled_at, adminTimezone)}</td>
                     <td className="py-3 px-3 font-medium text-gray-800">{l.teacher?.full_name ?? '—'}</td>
                     <td className="py-3 px-3 text-gray-700">{l.student?.full_name ?? '—'}</td>
                     <td className="py-3 px-3 text-gray-600">{l.duration_minutes} min</td>
@@ -446,7 +451,7 @@ function LiveTrace() {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
@@ -614,8 +619,8 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} />}
-      {activeTab === 'trace' && <LiveTrace />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} />}
+      {activeTab === 'trace' && <LiveTrace adminTimezone={adminTimezone} />}
 
       {showExport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
