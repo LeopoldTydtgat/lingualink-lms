@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
@@ -81,7 +81,14 @@ export default function TasksPageClient() {
   const [reopening, setReopening] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
 
+  // Monotonic request token. fetchTasks runs both from the filter effect and as a
+  // post-mutation refetch, so a filter change can land while an older request is
+  // still in flight — without this, the older response overwrites the newer
+  // filter's rows (or clears its spinner).
+  const tasksRequestIdRef = useRef(0)
+
   const fetchTasks = useCallback(async () => {
+    const requestId = ++tasksRequestIdRef.current
     setLoading(true)
     setError(null)
     const params = new URLSearchParams()
@@ -91,13 +98,18 @@ export default function TasksPageClient() {
 
     try {
       const res = await fetch(`/api/admin/tasks?${params.toString()}`)
+      if (requestId !== tasksRequestIdRef.current) return
+      // Body parse is a second await — re-check before the throw or any write.
       const data = await res.json()
+      if (requestId !== tasksRequestIdRef.current) return
       if (!res.ok) throw new Error(data.error || 'Failed to load tasks')
       setTasks(data.tasks)
     } catch (err: any) {
+      if (requestId !== tasksRequestIdRef.current) return
       setError(err.message)
     } finally {
-      setLoading(false)
+      // Only the newest request may turn the spinner off.
+      if (requestId === tasksRequestIdRef.current) setLoading(false)
     }
   }, [filterStatus, filterPriority, filterLinkedType])
 
