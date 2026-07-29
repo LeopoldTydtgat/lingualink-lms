@@ -46,10 +46,34 @@ function priorityStyle(priority: string) {
   return { backgroundColor: '#f3f4f6', color: '#374151' }
 }
 
-function formatDate(dateStr: string | null) {
+// The two dates on a task are NOT the same kind of value, so one shared formatter could
+// never have been right for both — they are split here.
+//
+// due_date is a DATE-only column (baseline schema `due_date date`), and its only producer is
+// the <input type="date"> in TaskForm, which posts a bare 'YYYY-MM-DD'. It is a calendar day,
+// not an instant, so it is formatted in UTC and deliberately NOT in the admin's zone:
+// PostgREST returns 'YYYY-MM-DD', which Date parses as UTC midnight, so re-projecting it
+// through a viewer zone would move the label off the day that was actually picked (the
+// previous day anywhere west of UTC) and would disagree with the date the edit form shows for
+// the same task.
+function formatDueDate(dateStr: string | null) {
   if (!dateStr) return '—'
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(dateStr))
+}
+
+// completed_at is a timestamptz INSTANT — the PATCH ?action=complete route stamps it with
+// new Date().toISOString() — so it is projected through the viewing admin's zone. Without an
+// explicit timeZone this followed whatever zone the browser happened to be in, which showed
+// the wrong calendar day either side of midnight for any admin not sitting on UTC.
+function formatCompletedAt(dateStr: string | null, timezone: string) {
+  if (!dateStr) return '—'
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(dateStr))
 }
 
 function isOverdue(task: Task) {
@@ -64,7 +88,7 @@ const filterSelectClass = "border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-[
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function TasksPageClient() {
+export default function TasksPageClient({ adminTz }: { adminTz: string }) {
   const router = useRouter()
 
   const [tasks, setTasks] = useState<Task[]>([])
@@ -344,7 +368,7 @@ export default function TasksPageClient() {
                       )}
                       {task.due_date && (
                         <span style={{ color: overdue ? '#ef4444' : '#6b7280' }}>
-                          <span className="font-medium">Due:</span> {formatDate(task.due_date)}
+                          <span className="font-medium">Due:</span> {formatDueDate(task.due_date)}
                         </span>
                       )}
                       {task.linked_entity_name && task.linked_entity_type && (
@@ -364,7 +388,7 @@ export default function TasksPageClient() {
                       )}
                       {task.completed_at && (
                         <span>
-                          <span className="font-medium">Completed:</span> {formatDate(task.completed_at)}
+                          <span className="font-medium">Completed:</span> {formatCompletedAt(task.completed_at, adminTz)}
                         </span>
                       )}
                     </div>
