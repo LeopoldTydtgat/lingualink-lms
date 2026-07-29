@@ -26,10 +26,21 @@ export default async function AdminSettingsPage() {
   if (!adminUser) redirect('/dashboard')
 
   // Fetch current settings from Supabase
-  const { data: rows } = await supabase
+  const { data: rows, error: settingsError } = await supabase
     .from('settings')
     .select('key, value')
     .in('key', SETTING_KEYS)
+
+  // A read error must throw to the retryable error boundary, never fall
+  // through: an errored null is indistinguishable from "nothing saved yet",
+  // so SettingsClient would render its hard-coded DEFAULTS as though they
+  // were the stored values — and an admin who then hits Save would persist
+  // those defaults over the real policy. Zero rows is a legitimate empty
+  // read and still falls through to the defaults below.
+  if (settingsError) {
+    console.error('[admin/settings] settings lookup failed:', settingsError)
+    throw new Error('Failed to load settings')
+  }
 
   // Convert array of rows to a plain object
   const initialSettings: Record<string, string> = {}
