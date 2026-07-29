@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
+import { requireTz } from '@/lib/time/requireTz'
 import StudentMessagesClient from './StudentMessagesClient'
 
 export default async function StudentMessagesPage() {
@@ -13,11 +14,17 @@ export default async function StudentMessagesPage() {
   // Get the student record
   const { data: student } = await supabase
     .from('students')
-    .select('id, full_name, email, photo_url')
+    .select('id, full_name, email, photo_url, timezone')
     .eq('auth_user_id', user.id)
     .single()
 
   if (!student) redirect('/student/login')
+
+  // Every timestamp StudentMessagesClient renders is a timestamptz instant, so it needs
+  // the VIEWER's own zone rather than the browser's. Fail-closed via the same helper the
+  // (student) layout already applies to this column, so this cannot introduce a new crash
+  // path — the layout wrapping this page throws first on a null timezone.
+  const viewerTz = requireTz(student.timezone, 'student-messages')
 
   // Get all teachers assigned to this student via the SHARED training-assignment gate
   // (NEW275) — identical rule to the one the send action enforces. The helper returns the
@@ -135,6 +142,7 @@ export default async function StudentMessagesPage() {
   return (
     <StudentMessagesClient
       currentStudent={student}
+      viewerTz={viewerTz}
       contacts={contacts}
       assignedTeachers={assignedTeachers}
     />
