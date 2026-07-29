@@ -17,6 +17,19 @@ export default async function AdminClassDetailPage({
   const staffUser = await requireStaff()
   if (!staffUser) redirect('/dashboard')
 
+  // Same source as the admin dashboard (src/app/(admin)/admin/page.tsx): the logged-in
+  // staff user's own profiles.timezone, read through the cookie client, falling back to
+  // UTC when unset. Times are stored in UTC and formatted client-side with an explicit
+  // Intl timeZone, which is deterministic on server and client — no hydration mismatch.
+  // A missing profile row must never block the page, so this is a non-fatal read.
+  const { data: adminProfile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  const adminTimezone = adminProfile?.timezone ?? 'UTC'
+
   // Fetch lesson with joined teacher, student, and training
   const { data: lessonRaw, error } = await supabase
     .from('lessons')
@@ -82,5 +95,5 @@ export default async function AdminClassDetailPage({
     trainings: undefined,
   }
 
-  return <ClassDetailClient lesson={lesson} />
+  return <ClassDetailClient lesson={lesson} adminTimezone={adminTimezone} />
 }

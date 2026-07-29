@@ -29,6 +29,7 @@ interface LessonDetail {
 
 interface Props {
   lesson: LessonDetail
+  adminTimezone: string  // the logged-in admin's IANA timezone (falls back to 'UTC')
 }
 
 function getStatusMeta(status: string): { label: string; bg: string; color: string } {
@@ -47,15 +48,20 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
   }
 }
 
-function formatDateTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleString('en-GB', {
+// Times are stored in UTC. We format each in the admin's own timezone via Intl with an
+// explicit timeZone. That is deterministic: the same output on server and client, so it is
+// safe in this client component under SSR (no hydration mismatch). Without the timeZone the
+// server rendered in the host's zone and the browser re-rendered in the viewer's, which both
+// mismatched on hydration and showed the wrong wall-clock time.
+function formatDateTime(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
-  })
+  }).format(new Date(iso))
 }
 
-export default function ClassDetailClient({ lesson }: Props) {
+export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
   const router = useRouter()
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -209,7 +215,7 @@ export default function ClassDetailClient({ lesson }: Props) {
       {/* Main details card */}
       <div className="card-elevated" style={{ padding: '24px', marginBottom: '20px' }}>
         <SectionTitle>Class Information</SectionTitle>
-        <DetailRow label="Date & Time" value={formatDateTime(lesson.scheduled_at)} />
+        <DetailRow label="Date & Time" value={formatDateTime(lesson.scheduled_at, adminTimezone)} />
         <DetailRow label="Duration" value={`${lesson.duration_minutes} minutes`} />
         <DetailRow
           label="Teams Link"
@@ -238,7 +244,7 @@ export default function ClassDetailClient({ lesson }: Props) {
           <DetailRow label="Cancellation Reason" value={lesson.cancellation_reason} />
         )}
         {lesson.cancelled_at && (
-          <DetailRow label="Cancelled At" value={formatDateTime(lesson.cancelled_at)} />
+          <DetailRow label="Cancelled At" value={formatDateTime(lesson.cancelled_at, adminTimezone)} />
         )}
         {isCancelled && lesson.hours_refunded === true && (
           <DetailRow label="Hours refunded" value="Yes" />
