@@ -149,6 +149,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   // (update in place) without a stale closure or resubscribing.
   const conversationsRef = useRef<Conversation[]>(initialConversations)
   useEffect(() => { conversationsRef.current = conversations }, [conversations])
+  // Monotonic token for the in-flight loadMessages request. openingConvIds disables only the
+  // clicked row, so every OTHER conversation stays clickable while one thread is loading: a
+  // slow response for thread A could resolve after thread B was opened and render A's messages
+  // under B's header. Each call claims the next id; a response whose id is no longer the
+  // current one has been superseded and writes nothing.
+  const messagesRequestIdRef = useRef(0)
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -205,6 +211,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   }, [supabase])
 
   const loadMessages = useCallback(async (conv: Conversation) => {
+    // Claim this request. The three resets below run synchronously before any await, so
+    // they always belong to the newest claim; every write AFTER the await is gated on
+    // still holding it.
+    const requestId = ++messagesRequestIdRef.current
     setMessagesLoaded(false)
     setMessagesError(false)
     setEditingMessageId(null)
@@ -215,6 +225,10 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       .order('created_at', { ascending: true })
 
     if (error) {
+      // Superseded: a newer conversation owns the thread state, and this failure belongs to
+      // a thread the admin has already navigated away from — blanking the messages, raising
+      // the error banner or toasting here would all attribute it to the wrong conversation.
+      if (requestId !== messagesRequestIdRef.current) return
       // Don't fall through to markUserMessagesRead: we never saw the thread, so claiming
       // it was read (and clearing the badge) would be a second lie on top of the first.
       setMessages([])
@@ -223,6 +237,12 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
       toast.error('Conversation failed to load. Please try again.', { duration: 6000 })
       return
     }
+
+    // Same check on the success path: these rows are thread A's, and rendering them now
+    // would put them under thread B's header. The newer request owns the state and will
+    // set it — including marking ITS conversation read, so this one is skipped whole
+    // (leaving the superseded thread's unread badge intact, which is the safe direction).
+    if (requestId !== messagesRequestIdRef.current) return
 
     setMessages((data as SupportMessage[]) || [])
     setMessagesLoaded(true)
