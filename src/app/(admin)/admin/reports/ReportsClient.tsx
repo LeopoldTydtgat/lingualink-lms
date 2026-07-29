@@ -135,8 +135,16 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [dateFrom,          setDateFrom]          = useState('');
   const [dateTo,            setDateTo]            = useState('');
 
+  // Monotonic request token. The filter controls stay enabled during a fetch, so a
+  // filter change mid-flight fires a second request; without this, a slow earlier
+  // response could overwrite the newer list/error, and its loading-off could clear
+  // the spinner while the newer request is still in flight.
+  const reportsRequestIdRef = useRef(0);
+
   // Returns true only when the list was actually refreshed from the server.
   const fetchReports = useCallback(async () => {
+    // Claim the newest request; every post-await write below re-checks this id.
+    const requestId = ++reportsRequestIdRef.current;
     setLoading(true);
     setListError('');
     const params = new URLSearchParams();
@@ -147,18 +155,25 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     if (dateTo)            params.set('date_to',      dateTo);
     try {
       const res = await fetch(`/api/admin/reports?${params.toString()}`);
+      if (requestId !== reportsRequestIdRef.current) return false;
       if (!res.ok) {
-        setListError(await errorText(res, 'Could not load reports'));
+        const message = await errorText(res, 'Could not load reports');
+        if (requestId !== reportsRequestIdRef.current) return false;
+        setListError(message);
         return false;
       }
       const data = await res.json();
+      if (requestId !== reportsRequestIdRef.current) return false;
       setReports(data.reports ?? []);
       return true;
     } catch {
+      if (requestId !== reportsRequestIdRef.current) return false;
       setListError('Network error - could not load reports.');
       return false;
     } finally {
-      setLoading(false);
+      // A superseded request must never turn the spinner off - the newest request
+      // owns the loading state until its own response lands.
+      if (requestId === reportsRequestIdRef.current) setLoading(false);
     }
   }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
 
