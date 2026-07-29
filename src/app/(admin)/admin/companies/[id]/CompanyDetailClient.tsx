@@ -36,6 +36,21 @@ const STATUS_COLOURS: Record<string, { bg: string; text: string }> = {
   on_hold: { bg: '#FFF8E8', text: '#B45309' },
 }
 
+// The students table's End Date is trainings.end_date — a DATE-only column (baseline schema
+// `end_date date`), whose only producer is the YYYY-MM-DD date picker behind the
+// TrainingSchema `dateString` regex on the student create/edit forms. It is a calendar day,
+// not an instant, so it is formatted in UTC and deliberately NOT in the viewing admin's zone:
+// PostgREST returns 'YYYY-MM-DD', which Date parses as UTC midnight, so re-projecting it
+// through a viewer zone would move the label off the day that was actually picked (the
+// previous day anywhere west of UTC) and would disagree with the date the edit form shows for
+// the same training. Reading it through UTC also survives the column being widened to a
+// UTC-day-anchored timestamptz. Without an explicit timeZone this read the HOST zone on the
+// server and the VIEWER zone in the browser — a hydration mismatch on top of the wrong-day
+// shift. Options are omitted so the output stays the bare en-GB dd/mm/yyyy it already was.
+function formatEndDate(dateStr: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC' }).format(new Date(dateStr))
+}
+
 function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div className="flex gap-4 py-2.5 border-b border-gray-50 last:border-0">
@@ -178,7 +193,7 @@ export default function CompanyDetailClient({ company, students }: Props) {
                         ) : '—'}
                       </td>
                       <td className="px-4 py-3 text-gray-500">
-                        {s.end_date ? new Date(s.end_date).toLocaleDateString('en-GB') : '—'}
+                        {s.end_date ? formatEndDate(s.end_date) : '—'}
                       </td>
                       <td className="px-4 py-3">
                         <span className="px-2 py-0.5 rounded text-xs font-medium"
