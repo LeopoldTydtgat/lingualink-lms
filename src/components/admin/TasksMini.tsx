@@ -4,13 +4,13 @@
 // TasksMini — a compact task panel for embedding in teacher/student detail pages
 //
 // Usage on Teacher Detail:
-//   <TasksMini linkedType="teacher" linkedId={teacher.id} linkedName={teacher.full_name} />
+//   <TasksMini linkedType="teacher" linkedId={teacher.id} linkedName={teacher.full_name} adminTz={adminTz} />
 //
 // Usage on Student Detail:
-//   <TasksMini linkedType="student" linkedId={student.id} linkedName={student.full_name} />
+//   <TasksMini linkedType="student" linkedId={student.id} linkedName={student.full_name} adminTz={adminTz} />
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Task = {
@@ -52,27 +52,50 @@ function priorityDot(priority: string) {
   )
 }
 
-function formatDate(dateStr: string | null) {
+// due_date is a DATE-only column (baseline schema `due_date date`) whose only producer is the
+// <input type="date"> in TaskForm, which posts a bare 'YYYY-MM-DD'. It is a calendar day, not an
+// instant, so it is pinned to UTC and deliberately NOT projected through the admin's zone:
+// PostgREST returns 'YYYY-MM-DD', which Date parses as UTC midnight, so a viewer-zone projection
+// would move the label off the day that was actually picked (the previous day anywhere west of
+// UTC) and would disagree with the date the edit form shows for the same task. Null returns null
+// rather than a dash placeholder because the caller only renders this when due_date is set.
+function formatDueDate(dateStr: string | null) {
   if (!dateStr) return null
-  const d = new Date(dateStr)
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: '2-digit', month: 'short', year: 'numeric',
+  }).format(new Date(dateStr))
 }
 
-function isOverdue(task: Task) {
+// due_date is the same calendar day formatDueDate renders, not an instant, so "overdue" is a
+// calendar-day comparison and "today" has to be resolved in the admin's own zone rather than in
+// whatever zone the browser happens to sit in. The previous version compared two values that
+// were never the same kind: new Date('YYYY-MM-DD') is UTC midnight, while setHours(0, 0, 0, 0)
+// is browser-local midnight. Anywhere west of UTC local midnight is the later instant, so a task
+// due TODAY compared as earlier than "today" and was badged Overdue a full day early.
+// en-CA renders that day as 'YYYY-MM-DD', a zero-padded fixed-width form whose lexical order is
+// its chronological order, so a plain string compare is a correct date compare and never builds
+// a Date at all. slice(0, 10) is defensive normalisation in case the column ever arrives with a
+// time component appended.
+function isOverdue(task: Task, timezone: string) {
   if (!task.due_date || task.status === 'completed') return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return new Date(task.due_date) < today
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  return task.due_date.slice(0, 10) < todayStr
 }
 
 export default function TasksMini({
   linkedType,
   linkedId,
   linkedName,
+  adminTz,
 }: {
   linkedType: 'teacher' | 'student'
   linkedId: string
   linkedName: string
+  adminTz: string
 }) {
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -81,18 +104,30 @@ export default function TasksMini({
   const [completing, setCompleting] = useState<string | null>(null)
   const [completeError, setCompleteError] = useState<string | null>(null)
 
+  // Monotonic request token. fetchTasks runs both from the mount/deps effect and as the
+  // refetch after a successful complete, so a newer request can start while an older one is
+  // still in flight. Without this the older response can land last and overwrite the newer
+  // one's rows, or raise the error banner on a result nobody is waiting for any more.
+  const tasksRequestIdRef = useRef(0)
+
   const fetchTasks = useCallback(async () => {
+    const requestId = ++tasksRequestIdRef.current
     setLoadError(false)
     try {
       const res = await fetch(`/api/admin/tasks?linkedType=${linkedType}&linkedId=${linkedId}&status=open`)
+      if (requestId !== tasksRequestIdRef.current) return
       if (!res.ok) throw new Error('Failed to load tasks')
+      // Body parse is a second await - re-check before any write.
       const data = await res.json()
+      if (requestId !== tasksRequestIdRef.current) return
       setTasks(data.tasks ?? [])
     } catch {
+      if (requestId !== tasksRequestIdRef.current) return
       setTasks([])
       setLoadError(true)
     } finally {
-      setLoading(false)
+      // Only the newest request may turn the spinner off.
+      if (requestId === tasksRequestIdRef.current) setLoading(false)
     }
   }, [linkedType, linkedId])
 
@@ -220,7 +255,7 @@ export default function TasksMini({
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {tasks.map(task => {
-            const overdue = isOverdue(task)
+            const overdue = isOverdue(task, adminTz)
             return (
               <div
                 key={task.id}
@@ -245,7 +280,7 @@ export default function TasksMini({
                       {task.assigned_to_name && <span>→ {task.assigned_to_name}</span>}
                       {task.due_date && (
                         <span style={{ color: overdue ? '#ef4444' : '#6b7280' }}>
-                          Due {formatDate(task.due_date)}{overdue ? ' — Overdue' : ''}
+                          Due {formatDueDate(task.due_date)}{overdue ? ' — Overdue' : ''}
                         </span>
                       )}
                     </div>
