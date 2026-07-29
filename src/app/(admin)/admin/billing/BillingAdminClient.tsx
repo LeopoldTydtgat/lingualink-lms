@@ -1045,6 +1045,11 @@ export default function BillingAdminClient({
               onClick={() => downloadCSV('teacher_invoices', {
                 ...(invoiceFilterTeacher && { teacherId: invoiceFilterTeacher }),
                 ...(invoiceFilterMonth && { month: invoiceFilterMonth }),
+                // The status filter scopes the CSV exactly as it scopes the table
+                // above (filteredInvoices) — without it, exporting while filtered to
+                // e.g. Uploaded silently produced every invoice of every status.
+                // '' is the All Statuses option, which omits the param entirely.
+                ...(invoiceFilterStatus && { status: invoiceFilterStatus }),
               })}
               disabled={downloadingType === 'teacher_invoices'}
               className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
