@@ -194,10 +194,16 @@ export default async function AdminDashboardPage() {
       .eq('status', 'uploaded'),
 
     // Active announcements — first one's text shown in dashboard banner
+    // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+    // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+    // The two .or() filters AND together in PostgREST, so a scheduled row stays
+    // hidden until its start and an expired row drops out after its end.
     supabase
       .from('announcements')
       .select('id, title, message')
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .or(`start_date.is.null,start_date.lte.${nowStr}`)
+      .or(`end_date.is.null,end_date.gte.${nowStr}`),
 
     // Alert: classes in next 24h with no Teams link (Graph API failure)
     // nowStr / in24hStr are UTC instants — correct as-is for these future-lesson comparisons
