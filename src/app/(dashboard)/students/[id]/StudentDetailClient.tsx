@@ -74,6 +74,9 @@ type Props = {
   pastLessons: Lesson[]
   reports: Report[]
   isAdmin: boolean
+  // Viewing teacher's own profiles.timezone (UTC display-only fallback upstream).
+  // Instant labels project through this; date-only labels stay UTC-pinned.
+  viewerTz: string
   currentUserId: string
   assignments: Assignment[]
   assignedTeacherNames: string[]
@@ -117,6 +120,7 @@ export default function StudentDetailClient({
   upcomingLessons,
   pastLessons,
   reports,
+  viewerTz,
   assignments,
   assignedTeacherNames,
 }: Props) {
@@ -158,17 +162,32 @@ export default function StudentDetailClient({
     return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
   }
 
+  // Date-only DATE columns (trainings.start_date/end_date) parse as UTC midnight, so the
+  // label must be pinned to UTC or any browser west of UTC renders the previous day.
   function formatDate(dateStr: string | null) {
     if (!dateStr) return '—'
     return new Date(dateStr).toLocaleDateString('en-GB', {
       day: 'numeric', month: 'short', year: 'numeric',
+      timeZone: 'UTC',
     })
   }
 
+  // Instant (timestamptz) rendered as a date label in the VIEWER's zone - do not
+  // route instants through the UTC-pinned formatDate above.
+  function formatInstantDate(dateStr: string | null, viewerTz: string) {
+    if (!dateStr) return '—'
+    return new Date(dateStr).toLocaleDateString('en-GB', {
+      day: 'numeric', month: 'short', year: 'numeric', timeZone: viewerTz,
+    })
+  }
+
+  // lessons.scheduled_at is a timestamptz instant; without a timeZone option it rendered
+  // in whatever zone the browser sat in, not the teacher's account zone.
   function formatDateTime(dateStr: string) {
     return new Date(dateStr).toLocaleString('en-GB', {
       day: 'numeric', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
+      timeZone: viewerTz,
     })
   }
 
@@ -562,7 +581,7 @@ export default function StudentDetailClient({
                             </p>
                             {cancelled && lesson.cancelled_at && (
                               <p className="text-xs text-gray-500 mt-1">
-                                Cancelled {formatDate(lesson.cancelled_at)}
+                                Cancelled {formatInstantDate(lesson.cancelled_at, viewerTz)}
                                 {lesson.cancellation_reason ? ` · ${lesson.cancellation_reason}` : ''}
                               </p>
                             )}

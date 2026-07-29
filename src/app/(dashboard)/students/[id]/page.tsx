@@ -23,11 +23,16 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, timezone')
     .eq('id', user.id)
     .maybeSingle()
 
   const isAdmin = profile?.role === 'admin'
+
+  // Viewer's own zone for instant labels in the client (da9067b convention: profiles
+  // timezone with a display-only UTC fallback - this is a maybeSingle'd profile, not
+  // the fail-closed student-portal path).
+  const viewerTz = profile?.timezone ?? 'UTC'
 
   // Fetch the training with student info
   const adminClient = createAdminClient()
@@ -234,6 +239,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       pastLessons={pastLessons as unknown as Parameters<typeof StudentDetailClient>[0]['pastLessons']}
       reports={reports ?? []}
       isAdmin={isAdmin}
+      viewerTz={viewerTz}
       currentUserId={user.id}
       assignments={assignments}
       assignedTeacherNames={assignedTeacherNames}
