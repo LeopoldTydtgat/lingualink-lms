@@ -15,42 +15,6 @@ const ALLOWED_KEYS = [
   'export_timezone',
 ]
 
-export async function GET() {
-  const supabase = await createClient()
-
-  // Confirm the user is an admin before returning settings
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-  }
-
-  const adminUser = await requireAdmin()
-  if (!adminUser) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  // Fetch all settings rows for our allowed keys
-  const { data, error } = await supabase
-    .from('settings')
-    .select('key, value')
-    .in('key', ALLOWED_KEYS)
-
-  if (error) {
-    console.error('Settings GET error:', error)
-    return NextResponse.json({ error: 'Failed to load settings' }, { status: 500 })
-  }
-
-  // Convert array of { key, value } rows into a plain object for the client
-  const settingsMap: Record<string, string> = {}
-  if (data) {
-    for (const row of data) {
-      settingsMap[row.key] = row.value
-    }
-  }
-
-  return NextResponse.json({ settings: settingsMap })
-}
-
 export async function POST(request: Request) {
   const supabase = await createClient()
 
