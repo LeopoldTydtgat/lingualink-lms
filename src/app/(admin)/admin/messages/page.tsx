@@ -23,9 +23,15 @@ export default async function AdminMessagesPage() {
 
   const adminDb = createAdminClient()
 
+  // `timezone` rides along on the profile read this page already performs for the
+  // admin gate — same row, same user, same client, so no extra round trip. It is the
+  // same source the other admin pages use (admin/reports/[id]/page.tsx:26-32): the
+  // logged-in admin's own profiles.timezone, falling back to UTC when unset.
+  // Message timestamps are stored in UTC and formatted client-side with an explicit
+  // Intl timeZone, which is deterministic on server and client — no hydration mismatch.
   const { data: adminProfile } = await adminDb
     .from('profiles')
-    .select('id, full_name, photo_url, role')
+    .select('id, full_name, photo_url, role, timezone')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -38,6 +44,8 @@ export default async function AdminMessagesPage() {
   // missing or unreadable profile row is denied here rather than redirected to
   // /login — profile-null does not mean unauthenticated.
   if (adminProfile?.role !== 'admin') redirect('/dashboard')
+
+  const adminTimezone = adminProfile?.timezone ?? 'UTC'
 
   // Fetch all messages newest-first — service role bypasses RLS
   const { data: allMessages } = await adminDb
@@ -115,6 +123,7 @@ export default async function AdminMessagesPage() {
     <AdminMessagesClient
       currentAdmin={adminProfile}
       conversations={conversations}
+      adminTimezone={adminTimezone}
     />
   )
 }

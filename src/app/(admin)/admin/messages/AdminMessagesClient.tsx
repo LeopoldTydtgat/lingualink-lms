@@ -45,6 +45,8 @@ interface AdminProfile {
 interface Props {
   currentAdmin: AdminProfile
   conversations: AdminConversation[]
+  // The logged-in admin's IANA timezone (server page falls back to 'UTC').
+  adminTimezone: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,20 +54,63 @@ interface Props {
 const DAYS   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now  = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const dateStart  = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+// Calendar-day and wall-clock parts of an instant, in an explicit timezone. Intl with a
+// timeZone is deterministic: the same output on server and client, so it is safe in this
+// client component under SSR. The Date getters this replaces (getFullYear/getMonth/getDate/
+// getHours/getMinutes/getDay) read the HOST zone on the server and the VIEWER zone in the
+// browser, which both mismatched on hydration and showed the wrong wall-clock time.
+// hourCycle 'h23' (not hour12: false) is required: hour12: false yields "24" for midnight
+// under some locales, where the getHours() version returned "00".
+function zonedParts(date: Date, timezone: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find(p => p.type === type)?.value ?? '0'
+  return {
+    year:   Number(get('year')),
+    month:  Number(get('month')),  // 1-12
+    day:    Number(get('day')),
+    hour:   get('hour'),           // already zero-padded '00'-'23'
+    minute: get('minute'),         // already zero-padded '00'-'59'
+  }
+}
+
+// The single day-boundary definition in this file: an instant's calendar date in
+// `timezone`, as a UTC-midnight stamp. Both the relative-day stamps (formatTime) and the
+// in-thread date separators derive from this, so a message can never sit under a separator
+// for a different day than its own stamp implies. Stamps are exact multiples of 24h apart
+// (the old local-midnight subtraction was off by an hour across a DST boundary, which is
+// what the Math.round below was absorbing).
+function zonedDayStamp(date: Date, timezone: string): number {
+  const p = zonedParts(date, timezone)
+  return Date.UTC(p.year, p.month - 1, p.day)
+}
+
+function formatTime(dateStr: string, timezone: string): string {
+  const d = zonedParts(new Date(dateStr), timezone)
+
+  const todayStart = zonedDayStamp(new Date(), timezone)
+  const dateStart  = zonedDayStamp(new Date(dateStr), timezone)
   const diffDays   = Math.round((todayStart - dateStart) / (1000 * 60 * 60 * 24))
 
-  if (diffDays === 0) {
-    const h = String(date.getHours()).padStart(2, '0')
-    const m = String(date.getMinutes()).padStart(2, '0')
-    return `${h}:${m}`
-  }
-  if (diffDays < 7) return DAYS[date.getDay()]
-  return `${date.getDate()} ${MONTHS[date.getMonth()]}`
+  if (diffDays === 0) return `${d.hour}:${d.minute}`
+  // getUTCDay() of the UTC-midnight stamp is the weekday of that zoned calendar date —
+  // the same value the old date.getDay() produced with the zone held equal.
+  if (diffDays < 7) return DAYS[new Date(dateStart).getUTCDay()]
+  return `${d.day} ${MONTHS[d.month - 1]}`
+}
+
+// In-thread date separator ("Wednesday 29 July"), in the admin's timezone. The locale is
+// pinned to en-GB rather than left to the viewer: toLocaleDateString([], …) followed the
+// browser's locale AND the browser's zone, so the same thread rendered a different label
+// (and, near midnight, a different day) depending on who was looking at it.
+function formatSeparatorDate(dateStr: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'long', day: 'numeric', month: 'long',
+  }).format(new Date(dateStr))
 }
 
 function stripHtml(html: string): string {
@@ -111,6 +156,7 @@ function Avatar({ name, photoUrl, size = 10 }: {
 export default function AdminMessagesClient({
   currentAdmin,
   conversations: initialConversations,
+  adminTimezone,
 }: Props) {
   const supabase = useMemo(() => createClient(), [])
 
@@ -330,7 +376,7 @@ export default function AdminMessagesClient({
                       {conv.teacherSideName} → {conv.studentName}
                     </span>
                     <span className="text-xs text-gray-400 flex-shrink-0">
-                      {formatTime(conv.latestMessage.created_at)}
+                      {formatTime(conv.latestMessage.created_at, adminTimezone)}
                     </span>
                   </div>
                   <p className="text-xs text-gray-400 truncate mt-0.5">
@@ -403,8 +449,8 @@ export default function AdminMessagesClient({
 
                   const showDate =
                     index === 0 ||
-                    new Date(msg.created_at).toDateString() !==
-                    new Date(messages[index - 1].created_at).toDateString()
+                    zonedDayStamp(new Date(msg.created_at), adminTimezone) !==
+                    zonedDayStamp(new Date(messages[index - 1].created_at), adminTimezone)
 
                   return (
                     <div key={msg.id}>
@@ -412,9 +458,7 @@ export default function AdminMessagesClient({
                         <div className="flex items-center gap-3 my-4">
                           <div className="flex-1 h-px bg-gray-100" />
                           <span className="text-xs text-gray-400 flex-shrink-0">
-                            {new Date(msg.created_at).toLocaleDateString([], {
-                              weekday: 'long', day: 'numeric', month: 'long',
-                            })}
+                            {formatSeparatorDate(msg.created_at, adminTimezone)}
                           </span>
                           <div className="flex-1 h-px bg-gray-100" />
                         </div>
@@ -481,7 +525,7 @@ export default function AdminMessagesClient({
                               <span className="text-gray-400 italic" style={{ fontSize: '11px' }}>(edited)</span>
                             )}
                             <span className="text-gray-400" style={{ fontSize: '11px' }}>
-                              {formatTime(msg.created_at)}
+                              {formatTime(msg.created_at, adminTimezone)}
                             </span>
                             {!isBubbleTicked && <ReadTicks readAt={msg.read_at} />}
                           </div>
