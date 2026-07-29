@@ -13,10 +13,16 @@ export default async function StudentDetailPage({
 }) {
   const adminUser = await requireAdmin()
   let isStaffView = false
-  if (!adminUser) {
+  // The viewer is the admin OR the staff user, whichever gate passed — their own
+  // profiles.timezone is what every instant on this page is rendered in.
+  let viewerId: string
+  if (adminUser) {
+    viewerId = adminUser.id
+  } else {
     const staffUser = await requireStaff()
     if (!staffUser) redirect('/dashboard')
     isStaffView = true
+    viewerId = staffUser.id
   }
 
   const { id } = await params
@@ -28,6 +34,20 @@ export default async function StudentDetailPage({
   if (!z.string().uuid().safeParse(id).success) notFound()
 
   const supabase = createAdminClient()
+
+  // Resolve the viewing account's timezone — every account sees timestamps in its
+  // own zone. Times are stored in UTC and formatted client-side with an explicit
+  // Intl timeZone, which is deterministic on server and client (no hydration
+  // mismatch). This page does not use requireTz, so a missing profile row or an
+  // unset column falls back to UTC rather than throwing: a timezone is display
+  // metadata here and must never block a student record from loading.
+  const { data: viewerProfile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', viewerId)
+    .maybeSingle()
+
+  const adminTz = viewerProfile?.timezone ?? 'UTC'
 
   // Fetch student with company and active training + assigned teachers.
   // Staff must never receive the full row — explicit column list excluding
@@ -411,6 +431,7 @@ export default async function StudentDetailPage({
       purgePreflightFailed={purgePreflightFailed}
       assignments={assignments}
       isStaffView={isStaffView}
+      adminTz={adminTz}
     />
   )
 }
