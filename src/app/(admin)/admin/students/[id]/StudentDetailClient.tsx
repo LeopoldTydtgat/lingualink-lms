@@ -7,6 +7,7 @@ import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
+import TasksMini from '@/components/admin/TasksMini'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -991,6 +992,27 @@ export default function StudentDetailClient({
                 {passwordSaving ? 'Saving...' : 'Set Password'}
               </button>
             </div>
+          </div>
+          )}
+
+          {/* Open tasks linked to this student. TasksMini renders its own header, so this
+              wrapper supplies only the card — card-elevated p-5 is this file's neutral
+              overview-card class, with col-span-2 (not the teacher page's col-span-3)
+              because this overview grid is grid-cols-2. linkedId is students.id, which is
+              what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
+              TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
+              students rows, and the tasks route resolves those ids back against `students`.
+              Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
+              which requireStaff() explicitly excludes tasks from, so for a staff viewer this
+              panel could only render a permission error and an Add Task button they cannot use. */}
+          {!isStaffView && (
+          <div className="col-span-2 card-elevated p-5">
+            <TasksMini
+              linkedType="student"
+              linkedId={id}
+              linkedName={fullName}
+              adminTz={adminTz}
+            />
           </div>
           )}
         </div>
