@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -84,14 +84,35 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
   const [filterDateFrom, setFilterDateFrom] = useState(initialDateFrom)
   const [filterDateTo, setFilterDateTo] = useState(initialDateTo)
 
+  // Only the search-driven fetch is debounced. `search` stays a controlled input so
+  // the field updates on every keystroke; the request keys off `debouncedSearch`,
+  // which settles 300ms after the last keystroke. The other filters are not
+  // debounced — they feed fetchLessons directly and fire immediately.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
   const pageSize = 50
 
+  // Cleanup cancels the pending timer on the next keystroke and on unmount.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
+
+  // Monotonic request token. Filter controls stay enabled during a fetch, so a
+  // newer request can start while an older one is in flight — without this, a slow
+  // earlier response would overwrite the newer rows, and a late-FAILING stale
+  // request (the Clear case) would blank the list and raise the error banner over
+  // fresher results.
+  const lessonsRequestIdRef = useRef(0)
+
   const fetchLessons = useCallback(async (currentPage: number) => {
+    // Claim the newest request; every post-await write below re-checks this id.
+    const requestId = ++lessonsRequestIdRef.current
     setLoading(true)
     setLoadError(false)
     const params = new URLSearchParams()
     params.set('page', currentPage.toString())
-    if (search) params.set('search', search)
+    if (debouncedSearch) params.set('search', debouncedSearch)
     if (filterTeacher) params.set('teacher_id', filterTeacher)
     if (filterStatus) params.set('status', filterStatus)
     if (filterDateFrom) params.set('date_from', filterDateFrom)
@@ -99,32 +120,52 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
 
     try {
       const res = await fetch(`/api/admin/classes?${params.toString()}`)
+      if (requestId !== lessonsRequestIdRef.current) return
       if (!res.ok) throw new Error('Failed to load classes')
+      // Body parse is a second await — re-check before any write.
       const data = await res.json()
+      if (requestId !== lessonsRequestIdRef.current) return
       setLessons(data.lessons ?? [])
       setTotal(data.total ?? 0)
     } catch {
+      if (requestId !== lessonsRequestIdRef.current) return
       setLessons([])
       setTotal(0)
       setLoadError(true)
     } finally {
-      setLoading(false)
+      // A superseded request must never turn the spinner off — the newest request
+      // owns the loading state until its own response lands.
+      if (requestId === lessonsRequestIdRef.current) setLoading(false)
     }
-  }, [search, filterTeacher, filterStatus, filterDateFrom, filterDateTo])
+  }, [debouncedSearch, filterTeacher, filterStatus, filterDateFrom, filterDateTo])
 
-  // Refetch when filters or page change
+  // Single fetch driver: fetchLessons is memoised on the filter values, so any
+  // filter or page change re-runs this effect exactly once. Nothing else calls
+  // fetchLessons except the applyFilters no-op corner below.
   useEffect(() => {
     fetchLessons(page)
   }, [fetchLessons, page])
 
   // Reset to page 1 when filters change
   function applyFilters() {
-    setPage(1)
-    fetchLessons(1)
+    // Apply must not race the search debounce, so flush the typed term now. The
+    // still-pending timer will later set this same value, which React bails out
+    // of — no extra render, no second request.
+    const searchChanged = debouncedSearch !== search
+    const pageChanged = page !== 1
+    if (searchChanged) setDebouncedSearch(search)
+    if (pageChanged) setPage(1)
+    // Both updates batch into one render, so the effect above fires once. If
+    // neither changed there is no state change to drive it, so refetch directly
+    // (token-guarded like every other call).
+    if (!searchChanged && !pageChanged) fetchLessons(1)
   }
 
   function clearFilters() {
     setSearch('')
+    // Flush the debounced term in the same batch, otherwise the pending timer
+    // would land 300ms later and fire a second request.
+    setDebouncedSearch('')
     setFilterTeacher('')
     setFilterStatus('')
     setFilterDateFrom('')
