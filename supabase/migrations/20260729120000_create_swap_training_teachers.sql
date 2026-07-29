@@ -58,3 +58,5 @@ end;
 $function$;
 
 REVOKE EXECUTE ON FUNCTION public.swap_training_teachers(uuid, uuid[]) FROM public, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.swap_training_teachers(uuid, uuid[]) TO service_role;
