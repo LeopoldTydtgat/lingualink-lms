@@ -51,16 +51,21 @@ interface Assignment {
 interface Props {
   report:      Report;
   assignments: Assignment[];
+  // The logged-in admin's IANA timezone (server page falls back to 'UTC').
+  adminTimezone: string;
 }
 
-function formatDateTime(iso: string) {
-  const d   = new Date(iso);
-  const day = d.getDate().toString().padStart(2, '0');
-  const mon = d.toLocaleString('en-GB', { month: 'long' });
-  const yr  = d.getFullYear();
-  const hr  = d.getHours().toString().padStart(2, '0');
-  const min = d.getMinutes().toString().padStart(2, '0');
-  return `${day} ${mon} ${yr} at ${hr}:${min}`;
+// Times are stored in UTC. We format each in the admin's own timezone via Intl with an
+// explicit timeZone. That is deterministic: the same output on server and client, so it is
+// safe in this client component under SSR (no hydration mismatch). Without the timeZone the
+// server rendered in the host's zone and the browser re-rendered in the viewer's, which both
+// mismatched on hydration and showed the wrong wall-clock time.
+function formatDateTime(iso: string, timezone: string) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date(iso));
 }
 
 // Prefer the server's error string, fall back to the status code when the body is not JSON.
@@ -134,7 +139,7 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
   );
 }
 
-export default function ReportDetailClient({ report, assignments }: Props) {
+export default function ReportDetailClient({ report, assignments, adminTimezone }: Props) {
   const router = useRouter();
   const [reopening,   setReopening]   = useState(false);
   const [reopenError, setReopenError] = useState('');
@@ -201,7 +206,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
           <dl className="space-y-3 text-sm">
             <div className="flex justify-between">
               <dt className="text-gray-500">Date &amp; Time</dt>
-              <dd className="text-gray-800 font-medium">{report.lesson?.scheduled_at ? formatDateTime(report.lesson.scheduled_at) : '—'}</dd>
+              <dd className="text-gray-800 font-medium">{report.lesson?.scheduled_at ? formatDateTime(report.lesson.scheduled_at, adminTimezone) : '—'}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-gray-500">Duration</dt>
@@ -218,13 +223,13 @@ export default function ReportDetailClient({ report, assignments }: Props) {
             {report.completed_at && (
               <div className="flex justify-between">
                 <dt className="text-gray-500">Report submitted</dt>
-                <dd className="text-gray-800">{formatDateTime(report.completed_at)}</dd>
+                <dd className="text-gray-800">{formatDateTime(report.completed_at, adminTimezone)}</dd>
               </div>
             )}
             {report.flagged_at && (
               <div className="flex justify-between">
                 <dt className="text-gray-500">Flagged at</dt>
-                <dd style={{ color: '#DC2626' }}>{formatDateTime(report.flagged_at)}</dd>
+                <dd style={{ color: '#DC2626' }}>{formatDateTime(report.flagged_at, adminTimezone)}</dd>
               </div>
             )}
           </dl>
@@ -305,7 +310,7 @@ export default function ReportDetailClient({ report, assignments }: Props) {
                   <p className="text-sm font-medium text-gray-800">{a.sheet?.title ?? 'Untitled sheet'}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{[a.sheet?.category, a.sheet?.level].filter(Boolean).join(' ' + String.fromCharCode(183) + ' ')}</p>
                 </div>
-                <span className="text-xs text-gray-400">{a.assigned_at ? new Date(a.assigned_at).toLocaleDateString('en-GB') : ''}</span>
+                <span className="text-xs text-gray-400">{a.assigned_at ? new Intl.DateTimeFormat('en-GB', { timeZone: adminTimezone, day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(a.assigned_at)) : ''}</span>
               </div>
             ))}
           </div>
