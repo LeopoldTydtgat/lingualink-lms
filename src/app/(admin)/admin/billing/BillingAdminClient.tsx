@@ -32,6 +32,11 @@ interface TeacherProfile {
   // Used to bucket invoice-detail lessons by the teacher's local month, matching
   // invoices.amount_eur (recomputeAmounts.ts buckets in the teacher's timezone).
   timezone: string | null
+  // Also non-sensitive (authenticated holds a column-level SELECT grant), so it is
+  // selected directly alongside timezone. Drives the invoice row's currency symbol,
+  // which must be right BEFORE Detail is expanded — the per-lesson currency from the
+  // entities route only exists once that row's lessons have loaded.
+  currency: string | null
 }
 
 interface Company {
@@ -288,7 +293,7 @@ export default function BillingAdminClient({
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, timezone')
+          .select('id, full_name, timezone, currency')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
@@ -1064,7 +1069,12 @@ export default function BillingAdminClient({
                   const lessonData = invoiceLessons[lessonKey] || []
                   const isLoadingThis = loadingLessons === lessonKey
                   const lessonLoadError = invoiceLessonErrors[lessonKey]
-                  const currSym = currencySymbol(lessonData[0]?.teacherCurrency)
+                  // From the teacher record, NOT lessonData[0] — lessonData is empty
+                  // until this row's Detail is expanded, so a GBP or USD teacher's
+                  // invoice amount and Mark-as-paid confirm both rendered under a euro
+                  // symbol until then. Same '?? EUR' fallback as the entities-route
+                  // mapping above, so an expanded row's Total cannot disagree.
+                  const currSym = currencySymbol(teacher?.currency ?? 'EUR')
 
                   return (
                     <div key={inv.id}>
