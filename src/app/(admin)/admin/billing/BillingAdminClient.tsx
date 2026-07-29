@@ -1429,8 +1429,15 @@ export default function BillingAdminClient({
           {cbLoaded && Object.keys(cbByCompany).length > 0 && (
             <div className="space-y-5">
               {Object.entries(cbByCompany).map(([companyId, { companyName, lessons }]) => {
-                const flags48hr = lessons.filter(l => {
-                  const bill = getBillability({
+                // ONE getBillability call per lesson for this whole company card.
+                // It replaces five separate call sites that all passed byte-identical
+                // inputs, so no figure moves from the dedup itself — but the summary
+                // line, the 48hr panel and the per-class Billing Flag column can now
+                // never disagree about the same lesson. Order is preserved (map, then
+                // filter), so every list below renders in the order it did before.
+                const billedLessons = lessons.map(l => ({
+                  lesson: l,
+                  bill: getBillability({
                     status: l.status,
                     scheduledAt: l.scheduled_at,
                     cancelledAt: l.cancelled_at,
@@ -1439,26 +1446,17 @@ export default function BillingAdminClient({
                     durationMinutes: l.duration_minutes,
                     cancelledBy: l.cancelled_by ?? null,
                     rescheduledBy: l.rescheduled_by ?? null,
-                  })
-                  return bill.billable48hr
-                })
+                  }),
+                }))
+
+                const flags48hr = billedLessons.filter(({ bill }) => bill.billable48hr)
 
                 // Per-currency sum of what the company owes for its 48hr-policy
                 // cancellations. Mirrors sbTotalsByCurrency: never merge currencies
                 // into one number. companyAmount comes from getBillability (single
                 // source) so this can't drift from the per-line figures below.
                 const companyOwedByCurrency: Record<string, number> = {}
-                for (const l of flags48hr) {
-                  const bill = getBillability({
-                    status: l.status,
-                    scheduledAt: l.scheduled_at,
-                    cancelledAt: l.cancelled_at,
-                    cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
-                    hourlyRate: l.hourlyRate,
-                    durationMinutes: l.duration_minutes,
-                    cancelledBy: l.cancelled_by ?? null,
-                    rescheduledBy: l.rescheduled_by ?? null,
-                  })
+                for (const { lesson: l, bill } of flags48hr) {
                   const cur = l.teacherCurrency ?? 'EUR'
                   companyOwedByCurrency[cur] = (companyOwedByCurrency[cur] ?? 0) + bill.companyAmount
                 }
@@ -1466,21 +1464,19 @@ export default function BillingAdminClient({
                   .map(([cur, amt]) => `${currencySymbol(cur)}${amt.toFixed(2)}`)
                   .join(' + ') || '€0.00'
 
-                const billableToTeacherLessons = lessons.filter(l => {
-                  const bill = getBillability({
-                    status: l.status,
-                    scheduledAt: l.scheduled_at,
-                    cancelledAt: l.cancelled_at,
-                    cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
-                    hourlyRate: l.hourlyRate,
-                    durationMinutes: l.duration_minutes,
-                    cancelledBy: l.cancelled_by ?? null,
-                    rescheduledBy: l.rescheduled_by ?? null,
-                  })
-                  return bill.billableToTeacher
-                })
+                // Hours the COMPANY is invoiced for, under the same union gate the
+                // CSV route applies (api/admin/billing/export/route.ts:210):
+                // billableToTeacher OR billable48hr. Teacher pay and company billing
+                // are different rules — a 24-48hr cancellation by a 48hr-policy
+                // student is billed to the company (companyAmount above, priced in
+                // the orange panel below) while the teacher is unpaid. Gating these
+                // hours on billableToTeacher alone therefore omitted exactly the
+                // hours this same card invoices for.
+                const billableLessons = billedLessons.filter(
+                  ({ bill }) => bill.billableToTeacher || bill.billable48hr
+                )
 
-                const totalHours = billableToTeacherLessons.reduce((sum, l) => sum + l.duration_minutes / 60, 0)
+                const totalHours = billableLessons.reduce((sum, { lesson: l }) => sum + l.duration_minutes / 60, 0)
 
                 return (
                   <div key={companyId} className="card-elevated overflow-hidden">
@@ -1488,7 +1484,13 @@ export default function BillingAdminClient({
                       <div>
                         <h3 className="font-semibold text-gray-900">{companyName}</h3>
                         <p className="text-xs text-gray-400 mt-0.5">
-                          {lessons.length} classes · {totalHours.toFixed(1)} hours ·{' '}
+                          {/* "classes" counts every settled lesson fetched for this
+                              company; "billable hours" counts only the billableLessons
+                              subset above. The two numbers deliberately describe
+                              different sets, so the hours figure is labelled as the
+                              billable subset rather than reading as the hours behind
+                              all N classes. */}
+                          {lessons.length} classes · {totalHours.toFixed(1)} billable hours ·{' '}
                           {flags48hr.length > 0 && (
                             <span style={{ color: '#FF8303' }}>{flags48hr.length} billable cancellation{flags48hr.length !== 1 ? 's' : ''} (48hr policy)</span>
                           )}
@@ -1503,17 +1505,7 @@ export default function BillingAdminClient({
                           48hr policy cancellations — Lingualink bills the company, teacher is not paid · Company owes: {companyOwedDisplay}
                         </p>
                         <div className="mt-2 space-y-1">
-                          {flags48hr.map(l => {
-                            const bill = getBillability({
-                              status: l.status,
-                              scheduledAt: l.scheduled_at,
-                              cancelledAt: l.cancelled_at,
-                              cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
-                              hourlyRate: l.hourlyRate,
-                              durationMinutes: l.duration_minutes,
-                              cancelledBy: l.cancelled_by ?? null,
-                              rescheduledBy: l.rescheduled_by ?? null,
-                            })
+                          {flags48hr.map(({ lesson: l, bill }) => {
                             return (
                               <div key={l.id} className="flex items-center gap-4 text-xs text-gray-600">
                                 <span>{l.studentName}</span>
@@ -1536,17 +1528,7 @@ export default function BillingAdminClient({
                         <span>Class Status</span>
                         <span className="text-right">Billing Flag</span>
                       </div>
-                      {lessons.map(l => {
-                        const bill = getBillability({
-                          status: l.status,
-                          scheduledAt: l.scheduled_at,
-                          cancelledAt: l.cancelled_at,
-                          cancellationPolicy: l.cancellationPolicy as '24hr' | '48hr' | null,
-                          hourlyRate: l.hourlyRate,
-                          durationMinutes: l.duration_minutes,
-                          cancelledBy: l.cancelled_by ?? null,
-                          rescheduledBy: l.rescheduled_by ?? null,
-                        })
+                      {billedLessons.map(({ lesson: l, bill }) => {
                         return (
                           <div key={l.id} className="grid grid-cols-6 gap-3 px-5 py-3 text-sm">
                             <div className="col-span-2">
