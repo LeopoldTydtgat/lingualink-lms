@@ -76,11 +76,23 @@ function formatCompletedAt(dateStr: string | null, timezone: string) {
   }).format(new Date(dateStr))
 }
 
-function isOverdue(task: Task) {
+// due_date is the same calendar day formatDueDate renders, not an instant, so "overdue" is a
+// calendar-day comparison and "today" has to be resolved in the admin's own zone rather than in
+// whatever zone the browser happens to sit in. The previous version compared two values that
+// were never the same kind: new Date('YYYY-MM-DD') is UTC midnight, while setHours(0, 0, 0, 0)
+// is browser-local midnight. Anywhere west of UTC local midnight is the later instant, so a task
+// due TODAY compared as earlier than "today" and was badged Overdue a full day early.
+// en-CA renders that day as 'YYYY-MM-DD', a zero-padded fixed-width form whose lexical order is
+// its chronological order, so a plain string compare is a correct date compare and never builds
+// a Date at all. slice(0, 10) is defensive normalisation in case the column ever arrives with a
+// time component appended.
+function isOverdue(task: Task, timezone: string) {
   if (!task.due_date || task.status === 'completed') return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return new Date(task.due_date) < today
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date())
+  return task.due_date.slice(0, 10) < todayStr
 }
 
 // Filter selects — reference select styling, sized to content rather than full width.
@@ -197,7 +209,7 @@ export default function TasksPageClient({ adminTz }: { adminTz: string }) {
   }
 
   const openCount = tasks.filter(t => t.status === 'open').length
-  const overdueCount = tasks.filter(t => isOverdue(t)).length
+  const overdueCount = tasks.filter(t => isOverdue(t, adminTz)).length
 
   return (
     <div className="p-6">
@@ -314,7 +326,7 @@ export default function TasksPageClient({ adminTz }: { adminTz: string }) {
       ) : (
         <div className="flex flex-col gap-2.5">
           {tasks.map(task => {
-            const overdue = isOverdue(task)
+            const overdue = isOverdue(task, adminTz)
             return (
               <div
                 key={task.id}
