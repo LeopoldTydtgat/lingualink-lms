@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { formatInstantInTz } from '@/lib/exportTime'
 import { Receipt, CheckCircle2, Info, ChevronDown } from 'lucide-react'
 
 interface Profile {
@@ -58,17 +59,6 @@ function formatMonth(dateStr: string): string {
     timeZone: 'UTC',
     month: 'long', year: 'numeric',
   }).format(new Date(dateStr + 'T12:00:00Z'))
-}
-
-// Manual date/time build to avoid hydration mismatch
-function formatDateTime(dateStr: string): string {
-  const date = new Date(dateStr)
-  const day = String(date.getDate()).padStart(2, '0')
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const year = date.getFullYear()
-  const hours = String(date.getHours()).padStart(2, '0')
-  const mins = String(date.getMinutes()).padStart(2, '0')
-  return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
 function getStatusLabel(lesson: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }): string {
@@ -160,6 +150,12 @@ export default function BillingClient({
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
   const sym = currencySymbol(billingInfo?.currency)
+
+  // Teacher's account timezone for rendering instants. The server page
+  // fails closed when profiles.timezone is unset, so this is populated on
+  // every real render; UTC is a display-only fail-safe for the null-typed
+  // prop, matching the Messages/StudentDetail convention.
+  const viewerTz = billingInfo?.timezone ?? 'UTC'
 
   const [allTeacherInvoices, setAllTeacherInvoices] = useState<
     { teacher: { id: string; full_name: string }; invoices: Invoice[] }[]
@@ -491,7 +487,7 @@ export default function BillingClient({
                                 <span className="font-medium text-gray-900 truncate">
                                   {getStudentName(lesson)}
                                 </span>
-                                <span className="text-gray-500">{formatDateTime(lesson.scheduled_at)}</span>
+                                <span className="text-gray-500">{formatInstantInTz(lesson.scheduled_at, viewerTz)}</span>
                                 <span className="text-gray-500">{lesson.duration_minutes} min</span>
                                 <span>
                                   <span
@@ -532,7 +528,7 @@ export default function BillingClient({
                         <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
                         </svg>
-                        Invoice uploaded {invoice.uploaded_at ? formatDateTime(invoice.uploaded_at) : ''}
+                        Invoice uploaded {invoice.uploaded_at ? formatInstantInTz(invoice.uploaded_at, viewerTz) : ''}
                       </div>
                       {isUploadWindow && !isCurrentMonth && (
                         <button
