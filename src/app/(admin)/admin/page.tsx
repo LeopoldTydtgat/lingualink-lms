@@ -231,9 +231,13 @@ export default async function AdminDashboardPage() {
   // ── compute low-hours and zero-balance counts ─────────────────────────────
   const trainings = trainingsRes.data ?? []
 
-  const lowHoursCount = trainings.filter(
-    (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
-  ).length
+  // distinct students, not training/lesson rows - a student can hold multiple active trainings
+  const lowHoursCount = new Set(
+    trainings
+      .filter((t) => Number(t.total_hours) - Number(t.hours_consumed) < 2)
+      .map((t) => t.student_id)
+      .filter(Boolean)
+  ).size
 
   // Find student IDs with zero balance, then check if any have upcoming classes
   const zeroIds = trainings
@@ -243,13 +247,14 @@ export default async function AdminDashboardPage() {
 
   let zeroBalanceWithClassesCount = 0
   if (zeroIds.length > 0) {
-    const { count } = await supabase
+    const { data } = await supabase
       .from('lessons')
-      .select('id', { count: 'exact', head: true })
+      .select('student_id')
       .in('student_id', zeroIds)
       .gt('scheduled_at', nowStr)
       .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
-    zeroBalanceWithClassesCount = count ?? 0
+    // distinct students, not training/lesson rows - a student can hold multiple active trainings
+    zeroBalanceWithClassesCount = new Set((data ?? []).map((l) => l.student_id)).size
   }
 
   // ── flatten nested joins and normalise into clean types ───────────────────

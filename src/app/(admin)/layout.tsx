@@ -109,7 +109,7 @@ export default async function AdminLayout({
     // Active trainings — for low hours count (balance < 2h)
     adminDb
       .from('trainings')
-      .select('total_hours, hours_consumed')
+      .select('total_hours, hours_consumed, student_id')
       .eq('status', 'active'),
 
     // Invoices uploaded but not yet marked paid — admin-only widget, skipped for staff
@@ -168,11 +168,15 @@ export default async function AdminLayout({
           (l) => !isCancelledStatus(l.status)
         ).length
 
+  // distinct students, not training/lesson rows - a student can hold multiple active trainings
   const lowHoursCount = trainingsRes.error
     ? null
-    : (trainingsRes.data ?? []).filter(
-        (t) => Number(t.total_hours) - Number(t.hours_consumed) < 2
-      ).length
+    : new Set(
+        (trainingsRes.data ?? [])
+          .filter((t) => Number(t.total_hours) - Number(t.hours_consumed) < 2)
+          .map((t) => t.student_id)
+          .filter(Boolean)
+      ).size
 
   const rightPanelStats: RightPanelStats = {
     classesTodayCount,
