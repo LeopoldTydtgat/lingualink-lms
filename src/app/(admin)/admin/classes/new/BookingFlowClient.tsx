@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isBookableStart } from '@/lib/bookingGrid'
+import { getLocalDateKey, isValidTimeZone } from '@/lib/utils/timezone'
 
 interface Teacher {
   id: string
@@ -93,9 +94,20 @@ export default function BookingFlowClient({ teachers, students }: Props) {
 
   const timeSlots = generateTimeSlots()
 
-  // Today's date as YYYY-MM-DD for the min date attribute
-  const today = new Date()
-  const todayString = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
+  // Floor for the Step 4 date input, as YYYY-MM-DD in the SELECTED TEACHER's
+  // timezone. That is the frame the picked date and time are interpreted in (see
+  // the Time label and the conversion note in Step 4), so a browser-local floor
+  // disagrees by a day whenever the admin's zone and the teacher's straddle
+  // midnight - offering a date already past for the teacher, or blocking the
+  // teacher's own today. A missing or invalid teacher timezone keeps the shipped
+  // browser-local behaviour; the "no timezone set" error in handleContinue stays
+  // the real gate.
+  const todayString = useMemo(() => {
+    const now = new Date()
+    const tz = selectedTeacher?.timezone
+    if (tz && isValidTimeZone(tz)) return getLocalDateKey(now, tz)
+    return `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`
+  }, [selectedTeacher?.timezone])
 
   const hoursRequested = selectedDuration ? selectedDuration / 60 : 0
   const hoursRemaining = selectedStudent?.training

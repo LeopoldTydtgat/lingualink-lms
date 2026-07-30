@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { isBookableStart } from '@/lib/bookingGrid'
-import { localToUtc } from '@/lib/utils/timezone'
+import { getLocalDateKey, isValidTimeZone, localToUtc } from '@/lib/utils/timezone'
 
 interface Teacher {
   id: string
@@ -195,8 +195,19 @@ export default function EditClassClient({ lesson, teachers, totalHours, hoursCon
   // +5:30 offsets). Inject it as an extra option so the select never renders blank.
   const outOfGridTime = time !== '' && !timeSlots.includes(time) ? time : null
   const displayTimeSlots = outOfGridTime ? [...timeSlots, outOfGridTime].sort() : timeSlots
+  // Floor for the date input, as YYYY-MM-DD in the SELECTED TEACHER's timezone.
+  // The date and time on this form are wall-clock in that zone (parseScheduledAt
+  // renders them there and the PATCH is interpreted there), so a browser-local
+  // floor disagrees by a day whenever the admin's zone and the teacher's straddle
+  // midnight - offering a date already past for the teacher, or blocking the
+  // teacher's own today. selectedTeacherTz is non-null here (the early return
+  // above bails when it is falsy); an invalid IANA string still falls back to the
+  // shipped browser-local value rather than throwing out of Intl. Plain const, not
+  // useMemo - this sits below that early return, so it cannot be a hook.
   const today = new Date()
-  const todayString = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
+  const todayString = isValidTimeZone(selectedTeacherTz)
+    ? getLocalDateKey(today, selectedTeacherTz)
+    : `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`
 
   // The existing PATCH logic, unchanged. Called either directly (slot matched)
   // or from "Proceed anyway" (admin override).

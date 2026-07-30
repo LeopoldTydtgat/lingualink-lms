@@ -2,8 +2,9 @@
 
 import { useState } from 'react'
 import { AvailabilityRecord } from '../ScheduleClient'
+import { getLocalDateKey, isValidTimeZone } from '@/lib/utils/timezone'
 
-interface Profile { id: string; full_name: string; role: string }
+interface Profile { id: string; full_name: string; role: string; timezone: string }
 
 interface Props {
   profile: Profile
@@ -21,15 +22,6 @@ function formatDate(dateStr: string): string {
   })
 }
 
-// Get today's date as YYYY-MM-DD for the date input minimum value
-function todayStr(): string {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
 export default function Holidays({ profile, availability, onAvailabilityChange }: Props) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -41,6 +33,15 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
 
   // Filter down to just holiday records for display
   const holidays = availability.filter(a => a.type === 'holiday')
+
+  // Floor for both date inputs, as YYYY-MM-DD in the TEACHER's own timezone. A
+  // holiday is a teacher-local calendar range, and near midnight the browser and
+  // the profile disagree by a day - a browser-local floor either offers a date
+  // already past for the teacher or blocks the teacher's own today. Falls back to
+  // UTC on an invalid IANA value the way DayToDay's displayTz does, so a bad
+  // profiles.timezone cannot throw out of Intl and blank the tab.
+  const displayTz = isValidTimeZone(profile.timezone) ? profile.timezone : 'UTC'
+  const todayStr = getLocalDateKey(new Date(), displayTz)
 
   async function addHoliday() {
     setError('')
@@ -158,7 +159,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
             <input
               type="date"
               value={fromDate}
-              min={todayStr()}
+              min={todayStr}
               onChange={e => {
                 setFromDate(e.target.value)
                 // Default TO to match FROM when empty; otherwise clear it if it's now before FROM
@@ -183,7 +184,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
             <input
               type="date"
               value={toDate}
-              min={fromDate || todayStr()}
+              min={fromDate || todayStr}
               onChange={e => setToDate(e.target.value)}
               style={{
                 padding: '8px 12px',
