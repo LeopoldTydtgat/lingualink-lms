@@ -1,5 +1,5 @@
 import type { createAdminClient } from '@/lib/supabase/admin'
-import { getLocalDateKey, addDaysToDateKey } from '@/lib/utils/timezone'
+import { getLocalDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 
 type AdminClient = ReturnType<typeof createAdminClient>
 
@@ -13,33 +13,30 @@ interface AvailabilityRecord {
   is_available: boolean
 }
 
-// Convert a "HH:MM:SS" time on a specific YYYY-MM-DD date from a named timezone to UTC ms.
-// NEW326: the offset probe compares full local DATETIMEs (date + time), never the wall
-// clock alone. A bare hour:minute diff is ambiguous at exactly ±720 min (+12h and -12h
-// produce identical wall clocks) and the old wrap clamp mis-normalised every offset at
-// or beyond ±12h — UTC+12 (Pacific/Auckland NZST) afternoons and all NZDT (+13) times
-// resolved one day off. With the observed local DATE in the comparison the diff IS the
-// true offset, so no wrap clamp is needed. This is the same probe localToUtc in
-// @/lib/utils/timezone uses. Inside a DST spring-forward gap the requested wall time
-// does not exist; the single-pass probe then returns a best-effort instant that can be
-// off by the DST delta (same approximation as before the rewrite).
+// Convert a "HH:MM" or "HH:MM:SS" time on a specific YYYY-MM-DD date from a named
+// timezone to UTC ms. Thin wrapper over wallTimeToUtcMs in @/lib/utils/timezone — the
+// one DST-correct local->UTC primitive in the project, shared with localToUtc and
+// localMidnightToUtc. Seconds in timeStr are parsed off and ignored (availability rows
+// are always :00); signature and return type are unchanged from the NEW326 version.
+//
+// NEW326 (still true, now inherited from the shared helper): the offset derivation
+// compares full local DATETIMEs (date + time), never the wall clock alone. A bare
+// hour:minute diff is ambiguous at exactly ±720 min (+12h and -12h produce identical
+// wall clocks) and the old wrap clamp mis-normalised every offset at or beyond ±12h —
+// UTC+12 (Pacific/Auckland NZST) afternoons and all NZDT (+13) times resolved one day off.
+//
+// NEW (this change): the probe is now genuinely two-pass, which the old docstring here
+// falsely claimed. The single-pass version read the offset at the wall clock
+// reinterpreted as UTC — an instant up to 14h from the answer — so a DST transition in
+// between returned the wrong side's offset: America/New_York lost an hour of general
+// availability on every spring-forward day and resolved the rest of that day's slots 1h
+// off. Nonexistent spring-forward wall times now resolve forward past the gap and
+// ambiguous fall-back wall times resolve to the first occurrence; both contracts are
+// documented and tested on wallTimeToUtcMs.
 export function localTimeToUtcMs(dateStr: string, timeStr: string, timezone: string): number {
   const [y, mo, d] = dateStr.split('-').map(Number)
   const [h, m] = timeStr.split(':').map(Number)
-  const intendedLocalMs = Date.UTC(y, mo - 1, d, h, m, 0)
-  const guessUtc = new Date(intendedLocalMs)
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(guessUtc)
-  const get = (type: string) => Number(parts.find((p) => p.type === type)!.value)
-  const observedLocalMs = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
-  return guessUtc.getTime() + (intendedLocalMs - observedLocalMs)
+  return wallTimeToUtcMs(y, mo, d, h, m, timezone)
 }
 
 // Check whether two time ranges overlap.

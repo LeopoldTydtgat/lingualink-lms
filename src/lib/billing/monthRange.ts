@@ -1,3 +1,5 @@
+import { wallTimeToUtcMs } from '@/lib/utils/timezone'
+
 export interface MonthRange {
   startUtc: string  // ISO timestamp for .gte() filter
   endUtc: string    // ISO timestamp for .lt() filter
@@ -10,26 +12,25 @@ export interface DayRange {
 }
 
 // Convert a local calendar date (year, month, day) at midnight to a UTC ISO string.
-// Two-pass approach: probe the timezone offset via Intl, then apply the correction.
-// Handles DST correctly. Follows the pattern in src/app/api/admin/classes/route.ts.
+// Thin wrapper over wallTimeToUtcMs in @/lib/utils/timezone — the one DST-correct
+// local->UTC primitive in the project, shared with localToUtc and localTimeToUtcMs.
 // Exported so the admin classes GET filter resolves its yyyy-mm-dd edges through this
 // same math rather than re-deriving it — one definition of "local midnight".
+//
+// The previous implementation claimed "two-pass" but was single-pass: it read the
+// offset at midnight-reinterpreted-as-UTC and never re-derived it at the resulting
+// instant, so any month or day boundary sitting on the far side of a DST transition
+// from that probe came out an hour off — a billing window that started or ended in the
+// wrong hour, and on a boundary day the wrong set of lessons.
+//
+// Zones whose DST jump happens AT midnight (America/Santiago, Asia/Beirut) have no
+// 00:00 at all on their spring-forward date; per the wallTimeToUtcMs gap contract this
+// returns 01:00 local, which is the genuine first instant of that calendar day. A
+// half-open [start, end) range built from two such calls stays exactly contiguous —
+// no gap, no overlap, nothing double-counted. On a fall-back date the ambiguous
+// midnight resolves to its FIRST occurrence, so the range covers all 25 hours.
 export function localMidnightToUtc(year: number, month: number, day: number, tz: string): string {
-  const probe = new Date(Date.UTC(year, month - 1, day, 0, 0, 0))
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(probe)
-  const get = (t: string) => parseInt(parts.find(p => p.type === t)!.value)
-  const diffMs =
-    Date.UTC(year, month - 1, day, 0, 0, 0) -
-    Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), 0)
-  return new Date(probe.getTime() + diffMs).toISOString()
+  return new Date(wallTimeToUtcMs(year, month, day, 0, 0, tz)).toISOString()
 }
 
 export function getMonthKeyInTz(date: Date, timezone: string): string {
