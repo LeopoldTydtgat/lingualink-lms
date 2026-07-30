@@ -51,7 +51,10 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
   const now = new Date()
   const classTime = new Date(lesson.scheduled_at)
   const hoursUntilClass = (classTime.getTime() - now.getTime()) / (1000 * 60 * 60)
-  const isRefundable = hoursUntilClass > 24
+  // >= so exactly 24.0h refunds: the sibling booking/reschedule gates block
+  // on < 24, and teacher billability pays cancellations strictly under 24h,
+  // so the 24.0 instant belongs to the refundable/>24hr bucket on all sides.
+  const isRefundable = hoursUntilClass >= 24
   const hoursToRefund = lesson.duration_minutes / 60
 
   // Cancel atomically — the RPC flips status, nulls teams_join_url, and conditionally
