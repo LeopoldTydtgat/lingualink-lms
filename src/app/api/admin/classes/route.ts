@@ -308,13 +308,23 @@ export async function POST(request: NextRequest) {
   const newStart = new Date(scheduledAtUtc)
   const newEnd = new Date(newStart.getTime() + duration_minutes * 60 * 1000)
 
-  const { data: clashLessons } = await adminClient
+  const { data: clashLessons, error: clashError } = await adminClient
     .from('lessons')
     .select('id, scheduled_at, duration_minutes')
     .eq('teacher_id', teacher_id)
     .eq('status', 'scheduled')
     .lt('scheduled_at', newEnd.toISOString())
     .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+  // Fail closed: a query error previously yielded an empty list, which reads as
+  // "no clash" and lets the booking proceed straight past the overlap guard.
+  if (clashError) {
+    console.error('[admin create class] teacher clash check failed:', clashError)
+    return NextResponse.json(
+      { error: 'Could not verify availability. Please try again.' },
+      { status: 500 }
+    )
+  }
 
   const hasClash = (clashLessons ?? []).some(
     (l) =>
@@ -325,6 +335,41 @@ export async function POST(request: NextRequest) {
   if (hasClash) {
     return NextResponse.json(
       { error: 'This time slot is no longer available. Please select a different time.' },
+      { status: 409 }
+    )
+  }
+
+  // Check the student is not already booked at this time. Mirrors the teacher
+  // check above exactly (same adminClient, same select, same status filter, same
+  // 90-minute back-window, same half-open JS overlap test) but keyed on
+  // student_id. Backs the no_student_overlap DB exclusion constraint the same
+  // way the teacher check backs no_teacher_overlap.
+  const { data: studentClashLessons, error: studentClashError } = await adminClient
+    .from('lessons')
+    .select('id, scheduled_at, duration_minutes')
+    .eq('student_id', student_id)
+    .eq('status', 'scheduled')
+    .lt('scheduled_at', newEnd.toISOString())
+    .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+  // Fail closed, same reasoning as the teacher check above.
+  if (studentClashError) {
+    console.error('[admin create class] student clash check failed:', studentClashError)
+    return NextResponse.json(
+      { error: 'Could not verify availability. Please try again.' },
+      { status: 500 }
+    )
+  }
+
+  const hasStudentClash = (studentClashLessons ?? []).some(
+    (l) =>
+      new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000 >
+      newStart.getTime()
+  )
+
+  if (hasStudentClash) {
+    return NextResponse.json(
+      { error: 'This student already has a class booked at this time.' },
       { status: 409 }
     )
   }
@@ -405,6 +450,12 @@ export async function POST(request: NextRequest) {
 
   if (lessonError) {
     const isSlotConflict = lessonError.code === '23P01'
+    // A 23P01 carries the violated constraint name in the Postgres error text.
+    // no_student_overlap means the STUDENT already has an overlapping class;
+    // anything else (no_teacher_overlap) keeps the existing teacher-side wording.
+    const isStudentSlotConflict =
+      isSlotConflict &&
+      `${lessonError.message} ${lessonError.details}`.includes('no_student_overlap')
 
     if (teamsMeetingId) {
       try {
@@ -434,7 +485,12 @@ export async function POST(request: NextRequest) {
 
     if (isSlotConflict) {
       return NextResponse.json(
-        { error: 'SLOT_NOT_AVAILABLE', message: 'This slot is no longer available - it was just booked by another student.' },
+        {
+          error: 'SLOT_NOT_AVAILABLE',
+          message: isStudentSlotConflict
+            ? 'This student already has a class booked at this time.'
+            : 'This slot is no longer available - it was just booked by another student.',
+        },
         { status: 409 }
       )
     }

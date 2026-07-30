@@ -5,8 +5,11 @@ import {
   getValidStartsByColumn,
   collapseEmptyBands,
   getVisibleColumns,
+  buildCellMaps,
   type SlotsResponse,
+  type GridStartSlot,
 } from './bookingWeekGrid'
+import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
 /**
  * BOOK-1 Stage A regression net for the single-page week-grid helpers.
@@ -19,7 +22,10 @@ import {
  * - rows keyed by instant instead of student-local wall clock, which splits
  *   one visual row in two on a DST-transition week;
  * - mid-run continuation rows (valid inside a run, a valid start nowhere)
- *   collapsed out of the band list, swallowing the selected-run highlight.
+ *   collapsed out of the band list, swallowing the selected-run highlight;
+ * - CAL2: two distinct UTC instants sharing one wall-clock row on a DST
+ *   fall-back day, where last-write-wins silently dropped the earlier
+ *   instant so it could never be booked.
  *
  * Instants are built via Date.UTC only — no toISOString-derived local dates.
  */
@@ -36,6 +42,11 @@ function run(baseMs: number, count: number, available = true) {
     startIso: iso(baseMs + i * HALF_HOUR),
     available,
   }))
+}
+
+// A single already-flagged grid slot, as getValidStartsByColumn would emit it.
+function gridSlot(ms: number, bookable = true): GridStartSlot {
+  return { startIso: iso(ms), bookable }
 }
 
 // 2026-06-01 is a Monday; UTC student keeps date keys == UTC dates.
@@ -308,5 +319,101 @@ describe('DST transition week (Europe/Madrid, spring forward 2026-03-29)', () =>
   it('a 60-min run on the transition day itself assembles from real instants', () => {
     const bySixty = getValidStartsByColumn(columns, response, buildInstantSet(response), 60)
     expect(bySixty['2026-03-29'].map((s) => s.bookable)).toEqual([true, false])
+  })
+})
+
+describe('buildCellMaps (CAL2)', () => {
+  // America/New_York falls back on 2026-11-01 at 02:00 EDT → 01:00 EST, so the
+  // wall time 01:00 occurs TWICE: once at 05:00:00Z (EDT, UTC-4) and again at
+  // 06:00:00Z (EST, UTC-5). Both land on grid row key 60.
+  const NY = 'America/New_York'
+  const FALLBACK_KEY = '2026-11-01'
+  const EDT_ONE_AM = Date.UTC(2026, 10, 1, 5, 0)
+  const EST_ONE_AM = Date.UTC(2026, 10, 1, 6, 0)
+  const ROW_ONE_AM = 60
+
+  // Fixture guard: assert against Intl that the two chosen instants really do
+  // both read 01:00 on 2026-11-01 in New York, and really are an hour apart.
+  // Called from every collision test so a wrong fixture fails loudly here
+  // instead of quietly making the collision assertions vacuous.
+  function assertFixtureIsTheDuplicatedHour() {
+    for (const ms of [EDT_ONE_AM, EST_ONE_AM]) {
+      const parts = utcInstantToTzParts(new Date(ms), NY)
+      expect(parts.hour).toBe(1)
+      expect(parts.minute).toBe(0)
+      expect(parts.year).toBe(2026)
+      expect(parts.month).toBe(11)
+      expect(parts.day).toBe(1)
+      expect(parts.hour * 60 + parts.minute).toBe(ROW_ONE_AM)
+    }
+    // Two genuinely distinct instants, one hour apart — not the same slot twice.
+    expect(EST_ONE_AM - EDT_ONE_AM).toBe(60 * 60 * 1000)
+  }
+
+  it('fixture: both instants really are wall-clock 01:00 on the fall-back day', () => {
+    assertFixtureIsTheDuplicatedHour()
+  })
+
+  it('fall-back collision: the EARLIER instant wins the cell (earlier fed first)', () => {
+    assertFixtureIsTheDuplicatedHour()
+    const cellMaps = buildCellMaps(
+      [FALLBACK_KEY],
+      { [FALLBACK_KEY]: [gridSlot(EDT_ONE_AM), gridSlot(EST_ONE_AM)] },
+      NY,
+    )
+    const column = cellMaps.get(FALLBACK_KEY)
+    expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
+    // One row key, one cell — never a duplicated row for the second instant.
+    expect(column?.size).toBe(1)
+  })
+
+  it('fall-back collision: the EARLIER instant wins the cell (later fed first — order independent)', () => {
+    assertFixtureIsTheDuplicatedHour()
+    const cellMaps = buildCellMaps(
+      [FALLBACK_KEY],
+      { [FALLBACK_KEY]: [gridSlot(EST_ONE_AM), gridSlot(EDT_ONE_AM)] },
+      NY,
+    )
+    const column = cellMaps.get(FALLBACK_KEY)
+    expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
+    expect(column?.size).toBe(1)
+  })
+
+  it('non-transition day: keys and slots map 1:1 and hold the input slot objects', () => {
+    // Mon 09:00/09:30/10:00 UTC → rows 540/570/600, one cell each.
+    const slots = [
+      gridSlot(Date.UTC(2026, 5, 1, 9, 0)),
+      gridSlot(Date.UTC(2026, 5, 1, 9, 30)),
+      gridSlot(Date.UTC(2026, 5, 1, 10, 0), false),
+    ]
+    const cellMaps = buildCellMaps(
+      ['2026-06-01', '2026-06-02'],
+      { '2026-06-01': slots, '2026-06-02': [] },
+      UTC,
+    )
+    const column = cellMaps.get('2026-06-01')
+    expect(column?.size).toBe(3)
+    expect([...(column?.keys() ?? [])]).toEqual([540, 570, 600])
+    // toBe, not toEqual: the exact input objects are stored, unwrapped.
+    expect(column?.get(540)).toBe(slots[0])
+    expect(column?.get(570)).toBe(slots[1])
+    expect(column?.get(600)).toBe(slots[2])
+    // A slot-less column still gets a map, empty — every row renders grey.
+    expect(cellMaps.get('2026-06-02')?.size).toBe(0)
+  })
+
+  it('columns are isolated: the same wall minute in two columns keeps each column its own slot', () => {
+    const monNine = Date.UTC(2026, 5, 1, 9, 0)
+    const tueNine = Date.UTC(2026, 5, 2, 9, 0)
+    const cellMaps = buildCellMaps(
+      ['2026-06-01', '2026-06-02'],
+      { '2026-06-01': [gridSlot(monNine)], '2026-06-02': [gridSlot(tueNine)] },
+      UTC,
+    )
+    expect(cellMaps.get('2026-06-01')?.get(540)?.startIso).toBe(iso(monNine))
+    expect(cellMaps.get('2026-06-02')?.get(540)?.startIso).toBe(iso(tueNine))
+    // Later columns never overwrite earlier ones despite the shared row key.
+    expect(cellMaps.get('2026-06-01')?.size).toBe(1)
+    expect(cellMaps.get('2026-06-02')?.size).toBe(1)
   })
 })

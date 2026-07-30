@@ -6,8 +6,10 @@ import { buildEmailTemplate } from '@/lib/email/templates'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 
 function formatMonthName(dateStr: string): string {
-  const d = new Date(dateStr + 'T12:00:00Z')
-  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    month: 'long', year: 'numeric',
+  }).format(new Date(dateStr + 'T12:00:00Z'))
 }
 
 export async function PATCH(req: NextRequest) {

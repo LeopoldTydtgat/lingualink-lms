@@ -137,6 +137,16 @@ export async function PATCH(
     // its reads depend on nothing written below, so a rejected request mutates
     // nothing at all — not the students row, not the training, not the hours
     // ledger, not training_teachers.
+    // The edit form already blocks an empty selection (EditStudentClient.tsx:242),
+    // but that is a client guard only — a raw PATCH with [] would strip every
+    // teacher off the training. Rejecting here means no write has happened yet.
+    if (training_id && Array.isArray(assigned_teacher_ids) && submittedTeacherIds.length === 0) {
+      return NextResponse.json(
+        { error: 'At least one teacher must be assigned.' },
+        { status: 400 }
+      )
+    }
+
     if (training_id && Array.isArray(assigned_teacher_ids) && submittedTeacherIds.length > 0) {
       const { data: assignable, error: assignableError } = await adminClient
         .from('profiles')
@@ -288,30 +298,34 @@ export async function PATCH(
     // Every id reaching these writes has already cleared the assignability gate
     // above, which ran before the first write in the handler.
     if (training_id && Array.isArray(assigned_teacher_ids)) {
-      const { error: deleteError } = await adminClient
-        .from('training_teachers')
-        .delete()
-        .eq('training_id', training_id)
+      // Atomic delta swap in a single transaction: the training row is locked,
+      // only ids leaving the set are deleted and only ids not already present are
+      // inserted. So unchanged teachers keep their original assigned_at, and there
+      // is no window in which the training has zero assigned teachers. SECURITY
+      // DEFINER with EXECUTE granted to service_role only — must be adminClient.
+      const { error: swapError } = await adminClient.rpc('swap_training_teachers', {
+        p_training_id: training_id,
+        p_teacher_ids: submittedTeacherIds,
+      })
 
-      if (deleteError) {
-        console.error('training_teachers delete error:', deleteError)
-        return NextResponse.json({ error: 'Failed to update assigned teachers.' }, { status: 500 })
-      }
+      if (swapError) {
+        const msg = swapError.message || ''
 
-      if (submittedTeacherIds.length > 0) {
-        const rows = submittedTeacherIds.map((tid: string) => ({
-          training_id,
-          teacher_id: tid,
-        }))
-
-        const { error: insertError } = await adminClient
-          .from('training_teachers')
-          .insert(rows)
-
-        if (insertError) {
-          console.error('training_teachers insert error:', insertError)
-          return NextResponse.json({ error: 'Failed to assign teachers.' }, { status: 500 })
+        // Unreachable via the guard above; kept so the RPC's own rejection still
+        // maps to the same 400 if another path ever reaches it with an empty set.
+        if (msg.includes('empty_teacher_set')) {
+          return NextResponse.json(
+            { error: 'At least one teacher must be assigned.' },
+            { status: 400 }
+          )
         }
+
+        if (msg.includes('training_not_found')) {
+          return NextResponse.json({ error: 'Training not found.' }, { status: 404 })
+        }
+
+        console.error('swap_training_teachers error:', swapError)
+        return NextResponse.json({ error: 'Failed to update assigned teachers.' }, { status: 500 })
       }
     }
 

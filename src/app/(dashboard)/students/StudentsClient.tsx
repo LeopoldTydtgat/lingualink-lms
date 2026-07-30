@@ -29,8 +29,105 @@ type Props = {
   isAdmin: boolean
 }
 
-export default function StudentsClient({ currentTrainings, pastTrainings, isAdmin }: Props) {
+function getInitials(name: string) {
+  return name
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+}
+
+// Date-only DATE columns (trainings.start_date/end_date) parse as UTC midnight, so the
+// label must be pinned to UTC or any browser west of UTC renders the previous day.
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return '—'
+  return new Date(dateStr).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+function TrainingCard({ training, isPast = false, isAdmin }: { training: Training; isPast?: boolean; isAdmin: boolean }) {
   const router = useRouter()
+  const student = training.students
+  if (!student) return null
+
+  const hoursRemaining = training.total_hours - training.hours_consumed
+  const progressPercent = training.total_hours > 0
+    ? Math.round((training.hours_consumed / training.total_hours) * 100)
+    : 0
+
+  const lowHours = !isPast && hoursRemaining < 2
+  const lowPct = !isPast && training.total_hours > 0 &&
+    (hoursRemaining / training.total_hours) < 0.25
+
+  const barColor = isPast
+    ? '#d1d5db'
+    : lowHours
+      ? '#FD5602'
+      : lowPct
+        ? '#FFB942'
+        : '#FF8303'
+
+  return (
+    <div
+      className="bg-white rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow shadow-sm"
+      style={{ border: '1px solid #f3f4f6', opacity: isPast ? 0.75 : undefined }}
+      onClick={() => router.push(`/students/${training.id}`)}
+    >
+      <div className="flex items-center gap-3 mb-3">
+        {/* Student photo or initials avatar */}
+        {student.photo_url ? (
+          <img
+            src={student.photo_url}
+            alt={student.full_name}
+            className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+          />
+        ) : (
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
+            style={{ backgroundColor: '#FF8303' }}
+          >
+            {getInitials(student.full_name)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
+          {/* Show assigned teacher name — useful for admin view */}
+          {isAdmin && training.profiles && (
+            <p className="text-xs text-gray-500 truncate">Teacher: {training.profiles.full_name}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Training hours progress bar */}
+      <div className="mb-2">
+        <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <span>{training.hours_consumed}h used</span>
+          <span style={lowHours ? { color: '#FD5602', fontWeight: 600 } : undefined}>
+            {lowHours ? `${hoursRemaining}h remaining — low` : `${hoursRemaining}h remaining`}
+          </span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-1.5">
+          <div
+            className="h-1.5 rounded-full"
+            style={{ width: `${progressPercent}%`, backgroundColor: barColor }}
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-between text-xs text-gray-500">
+        <span>{training.package_type ?? 'Standard'}</span>
+        <span>Ends {formatDate(training.end_date)}</span>
+      </div>
+    </div>
+  )
+}
+
+export default function StudentsClient({ currentTrainings, pastTrainings, isAdmin }: Props) {
   const [searchCurrent, setSearchCurrent] = useState('')
   const [searchPast, setSearchPast] = useState('')
 
@@ -43,103 +140,6 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
   const filteredPast = pastTrainings.filter(t =>
     t.students?.full_name.toLowerCase().includes(searchPast.toLowerCase())
   )
-
-  function getInitials(name: string) {
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2)
-  }
-
-  // Date-only DATE columns (trainings.start_date/end_date) parse as UTC midnight, so the
-  // label must be pinned to UTC or any browser west of UTC renders the previous day.
-  function formatDate(dateStr: string | null) {
-    if (!dateStr) return '—'
-    return new Date(dateStr).toLocaleDateString('en-GB', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      timeZone: 'UTC',
-    })
-  }
-
-  function TrainingCard({ training, isPast = false }: { training: Training; isPast?: boolean }) {
-    const student = training.students
-    if (!student) return null
-
-    const hoursRemaining = training.total_hours - training.hours_consumed
-    const progressPercent = training.total_hours > 0
-      ? Math.round((training.hours_consumed / training.total_hours) * 100)
-      : 0
-
-    const lowHours = !isPast && hoursRemaining < 2
-    const lowPct = !isPast && training.total_hours > 0 &&
-      (hoursRemaining / training.total_hours) < 0.25
-
-    const barColor = isPast
-      ? '#d1d5db'
-      : lowHours
-        ? '#FD5602'
-        : lowPct
-          ? '#FFB942'
-          : '#FF8303'
-
-    return (
-      <div
-        className="bg-white rounded-xl p-4 cursor-pointer hover:shadow-md transition-shadow shadow-sm"
-        style={{ border: '1px solid #f3f4f6', opacity: isPast ? 0.75 : undefined }}
-        onClick={() => router.push(`/students/${training.id}`)}
-      >
-        <div className="flex items-center gap-3 mb-3">
-          {/* Student photo or initials avatar */}
-          {student.photo_url ? (
-            <img
-              src={student.photo_url}
-              alt={student.full_name}
-              className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-            />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0"
-              style={{ backgroundColor: '#FF8303' }}
-            >
-              {getInitials(student.full_name)}
-            </div>
-          )}
-          <div className="min-w-0">
-            <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
-            {/* Show assigned teacher name — useful for admin view */}
-            {isAdmin && training.profiles && (
-              <p className="text-xs text-gray-500 truncate">Teacher: {training.profiles.full_name}</p>
-            )}
-          </div>
-        </div>
-
-        {/* Training hours progress bar */}
-        <div className="mb-2">
-          <div className="flex justify-between text-xs text-gray-500 mb-1">
-            <span>{training.hours_consumed}h used</span>
-            <span style={lowHours ? { color: '#FD5602', fontWeight: 600 } : undefined}>
-              {lowHours ? `${hoursRemaining}h remaining — low` : `${hoursRemaining}h remaining`}
-            </span>
-          </div>
-          <div className="w-full bg-gray-100 rounded-full h-1.5">
-            <div
-              className="h-1.5 rounded-full"
-              style={{ width: `${progressPercent}%`, backgroundColor: barColor }}
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-between text-xs text-gray-500">
-          <span>{training.package_type ?? 'Standard'}</span>
-          <span>Ends {formatDate(training.end_date)}</span>
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-6">
@@ -174,7 +174,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
             <p className="text-sm text-gray-400 text-center py-8">No current trainings found.</p>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredCurrent.map(t => <TrainingCard key={t.id} training={t} />)}
+              {filteredCurrent.map(t => <TrainingCard key={t.id} training={t} isAdmin={isAdmin} />)}
             </div>
           )}
         </div>
@@ -199,7 +199,7 @@ export default function StudentsClient({ currentTrainings, pastTrainings, isAdmi
             <p className="text-sm text-gray-400 text-center py-8">No past trainings found.</p>
           ) : (
             <div className="flex flex-col gap-3">
-              {filteredPast.map(t => <TrainingCard key={t.id} training={t} isPast />)}
+              {filteredPast.map(t => <TrainingCard key={t.id} training={t} isPast isAdmin={isAdmin} />)}
             </div>
           )}
         </div>

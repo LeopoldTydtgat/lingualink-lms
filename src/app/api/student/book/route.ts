@@ -158,13 +158,31 @@ export async function POST(req: NextRequest) {
     const newStart = new Date(scheduledAt)
     const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000)
 
-    const { data: clashLessons } = await adminClient
+    // Reschedule self-clash: both clash checks run BEFORE
+    // reschedule_class_atomic cancels the old row, so without this exclusion the
+    // lesson being moved counts as a clash against itself and a small shift
+    // (e.g. +15 min) 409s. Applied conditionally — on a fresh book rescheduleId
+    // is unset and the query is exactly as before.
+    let teacherClashQuery = adminClient
       .from('lessons')
       .select('id, scheduled_at, duration_minutes')
       .eq('teacher_id', teacherId)
       .eq('status', 'scheduled')
       .lt('scheduled_at', newEnd.toISOString())
       .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+    if (rescheduleId) teacherClashQuery = teacherClashQuery.neq('id', rescheduleId)
+
+    const { data: clashLessons, error: teacherClashError } = await teacherClashQuery
+
+    // Fail closed: a query error previously yielded an empty list, which reads as
+    // "no clash" and lets the booking proceed straight past the overlap guard.
+    if (teacherClashError) {
+      console.error('[student book] teacher clash check failed:', teacherClashError)
+      return NextResponse.json(
+        { error: 'Could not verify availability. Please try again.' },
+        { status: 500 }
+      )
+    }
 
     const hasClash = (clashLessons ?? []).some(
       (l) =>
@@ -175,6 +193,46 @@ export async function POST(req: NextRequest) {
     if (hasClash) {
       return NextResponse.json(
         { error: 'This time slot is no longer available. Please select a different time.' },
+        { status: 409 }
+      )
+    }
+
+    // 4b-2. Check the student is not already booked at this time. Mirrors the
+    // teacher check above exactly (same adminClient, same select, same status
+    // filter, same 90-minute back-window, same half-open JS overlap test) but
+    // keyed on student_id. Backs the no_student_overlap DB exclusion constraint
+    // the same way the teacher check backs no_teacher_overlap.
+    // Same reschedule self-clash exclusion as the teacher check above — this is
+    // the check the student's own original lesson trips on a shift-in-place.
+    let studentClashQuery = adminClient
+      .from('lessons')
+      .select('id, scheduled_at, duration_minutes')
+      .eq('student_id', studentId)
+      .eq('status', 'scheduled')
+      .lt('scheduled_at', newEnd.toISOString())
+      .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+    if (rescheduleId) studentClashQuery = studentClashQuery.neq('id', rescheduleId)
+
+    const { data: studentClashLessons, error: studentClashError } = await studentClashQuery
+
+    // Fail closed, same reasoning as the teacher check above.
+    if (studentClashError) {
+      console.error('[student book] student clash check failed:', studentClashError)
+      return NextResponse.json(
+        { error: 'Could not verify availability. Please try again.' },
+        { status: 500 }
+      )
+    }
+
+    const hasStudentClash = (studentClashLessons ?? []).some(
+      (l) =>
+        new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000 >
+        newStart.getTime()
+    )
+
+    if (hasStudentClash) {
+      return NextResponse.json(
+        { error: 'You already have a class booked at this time.' },
         { status: 409 }
       )
     }
@@ -197,11 +255,19 @@ export async function POST(req: NextRequest) {
     let hoursLogId: string | null = null
 
     if (rescheduleId) {
+      // training_id and teacher_id are selected to feed the two guards below.
+      // training_id is ALSO an equality filter: reschedule_class_atomic refunds
+      // the old duration against p_training_id (this request's training), not
+      // against the old lesson's own training, so without this filter a lesson
+      // belonging to another still-active training would have its hours
+      // migrated onto this one. Scoped here it reads as not found and falls into
+      // the existing 404 'Original lesson not found or no longer reschedulable.'
       const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .select('duration_minutes, teams_meeting_id, teams_join_url, scheduled_at')
+        .select('duration_minutes, teams_meeting_id, teams_join_url, scheduled_at, training_id, teacher_id')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
+        .eq('training_id', trainingId)
         .eq('status', 'scheduled')
         .maybeSingle()
 
@@ -209,6 +275,34 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: 'Original lesson not found or no longer reschedulable.' },
           { status: 404 }
+        )
+      }
+
+      // Teacher lock. Students may never move a lesson onto a different teacher;
+      // the client pins the teacher to rescheduleLesson.teacher_id, so this only
+      // fires on a forged POST. The 3b assignment check alone would allow any
+      // OTHER teacher assigned to the training, which is why this is separate.
+      if (teacherId !== oldLesson.teacher_id) {
+        return NextResponse.json(
+          {
+            error:
+              'You cannot change teacher when rescheduling. Please cancel and book a new class instead.',
+          },
+          { status: 400 }
+        )
+      }
+
+      // 24-hour rule on the OLD lesson. The NEW time is already gated at 3b;
+      // this is the missing half — the rule existed only as a disabled attribute
+      // on the client, so a lesson starting in 30 minutes, or a past lesson
+      // still sitting at 'scheduled', could be moved and its hours recovered.
+      // A past start makes this value negative, so one comparison covers both.
+      const hoursUntilOldClass =
+        (new Date(oldLesson.scheduled_at).getTime() - Date.now()) / (1000 * 60 * 60)
+      if (hoursUntilOldClass < 24) {
+        return NextResponse.json(
+          { error: 'Classes cannot be rescheduled within 24 hours of the start time.' },
+          { status: 403 }
         )
       }
 
@@ -323,6 +417,12 @@ export async function POST(req: NextRequest) {
 
     if (lessonError || !newLesson) {
       const isSlotConflict = lessonError?.code === '23P01'
+      // A 23P01 carries the violated constraint name in the Postgres error text.
+      // no_student_overlap means the STUDENT already has an overlapping class;
+      // anything else (no_teacher_overlap) keeps the existing wording below.
+      const isStudentSlotConflict =
+        isSlotConflict &&
+        `${lessonError?.message ?? ''} ${lessonError?.details ?? ''}`.includes('no_student_overlap')
 
       if (rescheduleId) {
         // Reschedule recovery: reschedule_class_atomic has already cancelled
@@ -387,6 +487,13 @@ export async function POST(req: NextRequest) {
           )
         }
 
+        if (isStudentSlotConflict && !unwindError) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
+            { status: 409 }
+          )
+        }
+
         if (isSlotConflict && !unwindError) {
           // unwindRestored === true: original lesson is back at its original time.
           // The reschedule simply did not go through — original class is intact.
@@ -427,6 +534,13 @@ export async function POST(req: NextRequest) {
             lesson_id: null,
             error: refundError,
           })
+        }
+
+        if (isStudentSlotConflict) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
+            { status: 409 }
+          )
         }
 
         if (isSlotConflict) {

@@ -414,6 +414,12 @@ export async function PATCH(
 
     if (rpcError) {
       const msg = (rpcError.message || '').toLowerCase()
+      // A 23P01 carries the violated constraint name in the Postgres error text.
+      // no_student_overlap means the STUDENT already has an overlapping class;
+      // anything else (no_teacher_overlap) keeps the existing wording below.
+      const isStudentSlotConflict =
+        rpcError.code === '23P01' &&
+        `${rpcError.message} ${rpcError.details}`.includes('no_student_overlap')
       if (msg.includes('insufficient_hours')) {
         const { data: trainingData } = await adminClient
           .from('trainings')
@@ -438,6 +444,12 @@ export async function PATCH(
       }
       if (msg.includes('lesson_not_found')) {
         return NextResponse.json({ error: 'Lesson not found' }, { status: 404 })
+      }
+      if (isStudentSlotConflict) {
+        return NextResponse.json(
+          { error: 'SLOT_NOT_AVAILABLE', message: 'This student already has a class booked at this time.' },
+          { status: 409 }
+        )
       }
       if (rpcError.code === '23P01') {
         return NextResponse.json(
@@ -580,7 +592,8 @@ export async function PATCH(
     }
   }
 
-  if (durationChanged || teacherChanged) {
+  // timeChanged included: a time-only move can cross a month boundary and re-bucket the lesson's amount — the recompute reconciles both months in one pass.
+  if (durationChanged || teacherChanged || timeChanged) {
     const teachersToRecompute: string[] = [existing.teacher_id]
     if (teacherChanged && fields.teacher_id) {
       teachersToRecompute.push(fields.teacher_id)

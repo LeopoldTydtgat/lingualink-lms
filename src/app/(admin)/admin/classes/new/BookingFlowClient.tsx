@@ -238,7 +238,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
       const data = await res.json().catch(() => null)
 
       if (!res.ok || !data) {
-        setError((data && data.error) ?? 'Something went wrong. Please try again.')
+        setError((data && (data.message ?? data.error)) ?? 'Something went wrong. Please try again.')
         return
       }
 

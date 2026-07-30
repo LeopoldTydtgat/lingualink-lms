@@ -25,10 +25,10 @@ interface ClassEvent {
 }
 
 const SLOT_HEIGHT = 30
-const START_HOUR = 5
+const START_HOUR = 0
 const END_HOUR = 23
-const SLOT_COUNT = 38                              // 05:00 → 23:30 in 30-min slots
-const GRID_HEIGHT = SLOT_COUNT * SLOT_HEIGHT       // 836px
+const SLOT_COUNT = 48                              // 00:00 → 24:00 in 30-min slots
+const GRID_HEIGHT = SLOT_COUNT * SLOT_HEIGHT       // 1440px
 // Monday-first; index-aligned with getWeekDays(weekStart) — DAY_LABELS[i] labels weekDays[i].
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -598,7 +598,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
   // NEW282: position the vertical scroll so the earliest event of the visible week — and any
   // holiday/unavailability label parked at the top of a day — is on screen at a glance. Target
-  // one hour before the earliest start; pxFromMin clamps it into the START_HOUR..END_HOUR grid.
+  // one hour before the earliest start, with 00:00 as the natural minimum (pxFromMin's clamp is defensive-only).
   // Falls back to 08:00 when the week is empty. Keyed on the fetched classes and the visible
   // week (not just viewMode), so it re-scrolls on week navigation, on re-entry into week view,
   // and after the async class fetch resolves — reading the freshest earliestEventMin each time.

@@ -455,15 +455,21 @@ export default function StudentDetailClient({
       ? pastLessons
       : pastLessons.filter(l => pastLessonCategory(isCancelledStatus(l.status), reportsByLessonId[l.id]) === pastFilter)
 
-    // Group by month (local time). Newest month first; newest lesson first within a month.
+    // Group by month in the viewer's account timezone (viewerTz), not the
+    // browser zone — boundary instants could otherwise land in the wrong
+    // month group. en-CA renders 'YYYY-MM', preserving the previous key
+    // shape, so the lexical sort below and the collapsedMonths keys are
+    // unchanged. Key and label are derived from the same zoned formatting
+    // of the same instant, so they can never disagree.
+    const monthKeyFmt = new Intl.DateTimeFormat('en-CA', { timeZone: viewerTz, year: 'numeric', month: '2-digit' })
+    const monthLabelFmt = new Intl.DateTimeFormat('en-GB', { timeZone: viewerTz, month: 'long', year: 'numeric' })
     const groupMap = new Map<string, { key: string; label: string; lessons: Lesson[] }>()
     for (const lesson of filtered) {
       const d = new Date(lesson.scheduled_at)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const key = monthKeyFmt.format(d)
       let group = groupMap.get(key)
       if (!group) {
-        const labelDate = new Date(d.getFullYear(), d.getMonth(), 1)
-        group = { key, label: labelDate.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }), lessons: [] }
+        group = { key, label: monthLabelFmt.format(d), lessons: [] }
         groupMap.set(key, group)
       }
       group.lessons.push(lesson)

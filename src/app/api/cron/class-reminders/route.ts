@@ -60,12 +60,36 @@ export async function GET(request: Request) {
     if (!teacher || !student) continue
 
     try {
-      // Resolve both timezones BEFORE sending anything. If either is null, skip the
-      // whole lesson (no email sent, reminder flag NOT set) so the next run retries
-      // cleanly. Prevents the student email firing then the teacher email throwing,
-      // which would re-send the student reminder every run.
+      // Resolve both timezones FIRST. If either is null, requireTz throws and the
+      // lesson is skipped entirely — no flag write, no email — so the next run
+      // retries it cleanly.
       const studentTz = requireTz(student.timezone, 'cron:student')
       const teacherTz = requireTz(teacher.timezone, 'cron:teacher')
+
+      // Claim the lesson BEFORE sending anything. The flag write runs first and is
+      // verified (exactly one row must come back). The contract this gives us:
+      //   • flag write fails or doesn't land → nothing is sent and the whole lesson
+      //     is retried on the next run;
+      //   • flag write lands → duplicate sends are impossible, because the next run
+      //     no longer selects this lesson;
+      //   • a send failure AFTER the flag write loses that one reminder. Accepted
+      //     at-most-once behaviour: the portal still shows the class, and the other
+      //     reminder window (1h) covers it.
+      const { data: flagRow, error: flagErr } = await supabase
+        .from('lessons')
+        .update({ reminder_24_sent: true })
+        .eq('id', lesson.id)
+        // Test-and-set: an overlapping run matches 0 rows here and skips via the guard below.
+        .eq('reminder_24_sent', false)
+        .select('id')
+
+      if (flagErr || flagRow?.length !== 1) {
+        console.error(
+          `Skipping 24h reminder for lesson ${lesson.id}: reminder_24_sent write did not land`,
+          flagErr
+        )
+        continue
+      }
 
       // Email to student
       await resend.emails.send({
@@ -109,12 +133,6 @@ export async function GET(request: Request) {
         }),
       })
 
-      // Mark as sent so we don't send it again
-      await supabase
-        .from('lessons')
-        .update({ reminder_24_sent: true })
-        .eq('id', lesson.id)
-
     } catch (err) {
       console.error(`Failed to send 24h reminder for lesson ${lesson.id}:`, err)
       // Continue to next lesson — don't let one failure block the rest
@@ -155,12 +173,36 @@ export async function GET(request: Request) {
     if (!teacher || !student) continue
 
     try {
-      // Resolve both timezones BEFORE sending anything. If either is null, skip the
-      // whole lesson (no email sent, reminder flag NOT set) so the next run retries
-      // cleanly. Prevents the student email firing then the teacher email throwing,
-      // which would re-send the student reminder every run.
+      // Resolve both timezones FIRST. If either is null, requireTz throws and the
+      // lesson is skipped entirely — no flag write, no email — so the next run
+      // retries it cleanly.
       const studentTz = requireTz(student.timezone, 'cron:student')
       const teacherTz = requireTz(teacher.timezone, 'cron:teacher')
+
+      // Claim the lesson BEFORE sending anything. The flag write runs first and is
+      // verified (exactly one row must come back). The contract this gives us:
+      //   • flag write fails or doesn't land → nothing is sent and the whole lesson
+      //     is retried on the next run;
+      //   • flag write lands → duplicate sends are impossible, because the next run
+      //     no longer selects this lesson;
+      //   • a send failure AFTER the flag write loses that one reminder. Accepted
+      //     at-most-once behaviour: the portal still shows the class, and the 24h
+      //     reminder has already gone out.
+      const { data: flagRow, error: flagErr } = await supabase
+        .from('lessons')
+        .update({ reminder_1h_sent: true })
+        .eq('id', lesson.id)
+        // Test-and-set: an overlapping run matches 0 rows here and skips via the guard below.
+        .eq('reminder_1h_sent', false)
+        .select('id')
+
+      if (flagErr || flagRow?.length !== 1) {
+        console.error(
+          `Skipping 1h reminder for lesson ${lesson.id}: reminder_1h_sent write did not land`,
+          flagErr
+        )
+        continue
+      }
 
       // Email to student
       await resend.emails.send({
@@ -203,12 +245,6 @@ export async function GET(request: Request) {
           contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
-
-      // Mark as sent
-      await supabase
-        .from('lessons')
-        .update({ reminder_1h_sent: true })
-        .eq('id', lesson.id)
 
     } catch (err) {
       console.error(`Failed to send 1h reminder for lesson ${lesson.id}:`, err)

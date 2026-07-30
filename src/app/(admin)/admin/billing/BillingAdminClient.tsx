@@ -76,19 +76,12 @@ type ActiveTab = 'teacher_invoices' | 'student_billing' | 'company_billing'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+// billing_month is 'YYYY-MM-01'; the noon-UTC anchor already lands in
+// the right month at every real IANA offset, but pin to UTC so the
+// label's correctness is explicit rather than resting on that margin.
 function formatMonth(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00Z')
-  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-}
-
-function formatDateTime(dateStr: string): string {
-  const d = new Date(dateStr)
-  const day = String(d.getDate()).padStart(2, '0')
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const year = d.getFullYear()
-  const h = String(d.getHours()).padStart(2, '0')
-  const m = String(d.getMinutes()).padStart(2, '0')
-  return `${day}/${month}/${year} ${h}:${m}`
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 }
 
 // The From/To date pickers select LOCAL CALENDAR DAYS in the settings-driven
@@ -220,6 +213,14 @@ export default function BillingAdminClient({
   initialInvoiceStatus?: string
 }) {
   const supabase = createClient()
+
+  // On-screen instants render in exportTz - the same settings-driven
+  // zone the From/To filter bounds resolve in (resolveDayBounds) and the
+  // CSV exports use (NEW271). Shares formatInstantInTz with the CSV so
+  // the table and the export can never disagree on a timestamp. The old
+  // module-level version used local getters, i.e. accidental
+  // browser-zone rendering.
+  const formatDateTime = (dateStr: string) => formatInstantInTz(dateStr, exportTz)
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab ?? 'teacher_invoices')
 
@@ -769,10 +770,11 @@ export default function BillingAdminClient({
   // same per-row currency, the same status labels. Deliberately NOT a server-route
   // export - that would recompute billing in a second place and risk drifting
   // from the numbers the admin sees here.
-  // NEW271: the Date & Time column is the one intentional exception — it renders in
-  // the settings-driven export timezone (formatInstantInTz + exportTz) to agree with
-  // the server-route exports, so it can differ from the on-screen column, which
-  // stays in the admin's own browser timezone. The billing numbers still match 1:1.
+  // NEW271: the Date & Time column renders in the settings-driven export timezone
+  // (formatInstantInTz + exportTz) to agree with the server-route exports; the
+  // on-screen column now renders in that same exportTz (see formatDateTime in the
+  // component), so the table and this CSV always agree on a timestamp.
+  // The billing numbers still match 1:1.
   const buildStudentBillingCSV = (): string => {
     const headers = ['Student', 'Teacher', `Date & Time (${tzLabel(exportTz)})`, 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
     const rows = sbLessons.map(l => {

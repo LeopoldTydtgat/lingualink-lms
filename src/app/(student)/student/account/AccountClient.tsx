@@ -53,12 +53,15 @@ const STATUS_COLOURS: Record<string, { bg: string; color: string }> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Date-only DATE columns (trainings.start_date/end_date) parse as UTC
+// midnight, so components must be read with UTC getters or any browser
+// west of UTC renders the previous day.
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   const d = new Date(dateStr)
-  const day = String(d.getDate()).padStart(2, '0')
-  const month = String(d.getMonth() + 1).padStart(2, '0')
-  const year = d.getFullYear()
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const year = d.getUTCFullYear()
   return `${day}/${month}/${year}`
 }
 

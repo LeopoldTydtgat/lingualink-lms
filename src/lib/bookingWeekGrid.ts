@@ -174,6 +174,54 @@ export function getVisibleColumns(
   )
 }
 
+/**
+ * The grid body's per-column cell lookup: for each column key, a map from
+ * student-local wall minutes (hour * 60 + minute — the same keying
+ * collapseEmptyBands uses for rows) to the slot that renders on that row. A
+ * column with no slots yields an empty map, so every row renders grey there.
+ *
+ * DST FALL-BACK RULE (CAL2). On a fall-back day one wall-clock hour occurs
+ * TWICE, so two distinct UTC instants legitimately claim the same row key —
+ * e.g. in America/New_York on 2026-11-01 the wall time 01:00 is both
+ * 05:00:00Z (EDT, UTC-4) and 06:00:00Z (EST, UTC-5). The EARLIER instant wins
+ * the cell, decided by an explicit `new Date(startIso).getTime()` comparison:
+ * never by input order, and never by last-write-wins, which silently dropped
+ * the earlier instant out of the grid so it could never be booked. Keeping
+ * the earlier instant matches the 'first occurrence' disambiguation
+ * wallTimeToUtcMs applies to an ambiguous wall time (lib/utils/timezone.ts),
+ * so a duplicated wall hour resolves to the same instant here as it does
+ * everywhere else in the app. The later instant is simply not offered:
+ * rendering both — duplicate rows or a split cell — is a rejected design.
+ *
+ * Spring-forward needs no handling: the skipped wall hour does not exist in
+ * the timezone, so utcInstantToTzParts never reports those row keys for any
+ * instant and no slot can collide there.
+ */
+export function buildCellMaps(
+  columnKeys: string[],
+  validStartsByColumn: Record<string, GridStartSlot[]>,
+  studentTimezone: string,
+): Map<string, Map<number, GridStartSlot>> {
+  const cellMaps = new Map<string, Map<number, GridStartSlot>>()
+  for (const key of columnKeys) {
+    const m = new Map<number, GridStartSlot>()
+    for (const slot of validStartsByColumn[key]) {
+      const parts = utcInstantToTzParts(slot.startIso, studentTimezone)
+      const rowKey = parts.hour * 60 + parts.minute
+      const existing = m.get(rowKey)
+      // Explicit epoch-ms comparison — order-independent by construction.
+      if (
+        existing === undefined ||
+        new Date(slot.startIso).getTime() < new Date(existing.startIso).getTime()
+      ) {
+        m.set(rowKey, slot)
+      }
+    }
+    cellMaps.set(key, m)
+  }
+  return cellMaps
+}
+
 // Re-exported so grid consumers can share the row/step granularity constant
 // instead of hard-coding 30 again.
 export { SLOT_MINUTES, SLOT_MS }
