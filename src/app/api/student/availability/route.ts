@@ -122,7 +122,18 @@ export async function GET(req: NextRequest) {
     .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
     .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())
   if (excludeLessonId) bookedQuery = bookedQuery.neq('id', excludeLessonId)
-  const { data: bookedLessons } = await bookedQuery
+  const { data: bookedLessons, error: bookedError } = await bookedQuery
+
+  // Fail closed: destructuring data only left `booked` as [] on a query error,
+  // which the engine reads as "nothing booked" — every occupied slot would
+  // render available and the grid would offer already-taken times.
+  if (bookedError) {
+    console.error('[student availability] booked lessons query failed:', bookedError)
+    return NextResponse.json(
+      { error: 'Could not load availability. Please try again.' },
+      { status: 500 }
+    )
+  }
 
   const records: AvailabilityRecord[] = availabilityData ?? []
   const booked: BookedLesson[] = bookedLessons ?? []
