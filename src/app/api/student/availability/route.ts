@@ -84,6 +84,26 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
 
+  // CAL8: resolve the caller's own student row so their existing bookings
+  // with OTHER teachers can block the grid. Admin/staff callers have no
+  // students row -> null -> merge below skips itself.
+  const { data: callerStudent, error: callerStudentError } = await admin
+    .from('students')
+    .select('id')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+
+  // Fail closed, same reasoning as the booked-lessons query below: swallowing
+  // this error would leave callerStudent null and silently re-open the
+  // green-until-409 gap for every student whose row failed to load.
+  if (callerStudentError) {
+    console.error('[student availability] caller student lookup failed:', callerStudentError)
+    return NextResponse.json(
+      { error: 'Could not load availability. Please try again.' },
+      { status: 500 }
+    )
+  }
+
   const { data: teacherProfile, error: tzError } = await admin
     .from('profiles')
     .select('timezone')
@@ -135,8 +155,39 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // CAL8: the student's own scheduled lessons with OTHER teachers, same
+  // widened instant window. Same-teacher lessons are already in the teacher
+  // query above; .neq avoids double-listing them. Merged into `booked`
+  // below — the engine blocks by instant overlap regardless of which side
+  // of the clash the lesson sits on. Fail closed like the teacher query:
+  // an error here would silently re-open the exact green-until-409 gap
+  // this query exists to close.
+  // Admin/staff callers are short-circuited even if a dual profiles+students
+  // identity ever exists: the admin advisory grid must stay byte-identical
+  // (same reasoning as the excludeLessonId gating above).
+  let studentLessons: BookedLesson[] | null = null
+  if (callerStudent && !isAdmin) {
+    const { data: ownLessons, error: ownLessonsError } = await admin
+      .from('lessons')
+      .select('scheduled_at, duration_minutes')
+      .eq('student_id', callerStudent.id)
+      .eq('status', 'scheduled')
+      .neq('teacher_id', teacherId)
+      .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
+      .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())
+
+    if (ownLessonsError) {
+      console.error('[student availability] caller own lessons query failed:', ownLessonsError)
+      return NextResponse.json(
+        { error: 'Could not load availability. Please try again.' },
+        { status: 500 }
+      )
+    }
+    studentLessons = ownLessons
+  }
+
   const records: AvailabilityRecord[] = availabilityData ?? []
-  const booked: BookedLesson[] = bookedLessons ?? []
+  const booked: BookedLesson[] = [...(bookedLessons ?? []), ...(studentLessons ?? [])]
 
   const slotsByDate = buildWeekSlots({
     weekStart,

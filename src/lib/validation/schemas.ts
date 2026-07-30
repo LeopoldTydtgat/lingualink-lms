@@ -283,6 +283,16 @@ export const TeacherAvailabilitySchema = z.object({
   end_at: isoDateTime.optional().nullable(),
   is_available: z.boolean(),
 })
+  // Holidays are unavailability by definition, and nothing downstream enforces
+  // that. Both add-override paths, src/app/api/student/availability/slotEngine.ts
+  // and src/lib/availability.ts, select overrides on is_available alone with no
+  // type filter, while their holiday-blocking passes require !is_available. So a
+  // holiday row stored as available skips blocking AND mints a full day of
+  // bookable slots. This schema is the only gate.
+  .refine((val) => !(val.type === 'holiday' && val.is_available), {
+    error: 'Holiday periods cannot be marked available',
+    path: ['is_available'],
+  })
 
 export type TeacherAvailabilityInput = z.infer<typeof TeacherAvailabilitySchema>
 

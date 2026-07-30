@@ -728,7 +728,15 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       const startStr = `${dateStr}T${pad(Math.floor(startMin / 60))}:${pad(startMin % 60)}:00`
       const endStr = `${dateStr}T${pad(Math.floor(endMin / 60))}:${pad(endMin % 60)}:00`
 
-      if (dateStr < toLocalDateStr(tzTodayDate(displayTz))) return
+      // Reachable only when the clock crosses profile-tz midnight mid-drag:
+      // the column started on is now yesterday. startDrag/extendDrag already
+      // reject past slots, so no other path arrives here. setDrag(null) above
+      // has cleared the preview - without a message the selection would just
+      // vanish with no explanation. isSaving was never set true on this path.
+      if (dateStr < toLocalDateStr(tzTodayDate(displayTz))) {
+        setActionError('That day is now in the past. The date changed while you were dragging, so the block was not saved. Please try again.')
+        return
+      }
 
       setIsSaving(true)
       setActionError('')

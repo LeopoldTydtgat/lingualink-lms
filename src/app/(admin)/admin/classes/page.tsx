@@ -51,6 +51,7 @@ export default async function AdminClassesPage({
       teachers={teachers ?? []}
       initialDateFrom={todayKey}
       initialDateTo={todayKey}
+      adminTz={profile?.timezone ?? null}
     />
   )
 }

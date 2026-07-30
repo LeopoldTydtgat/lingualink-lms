@@ -445,9 +445,7 @@ export default function BillingClient({
 
                 {isExpanded && (
                   <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
-                    {lessons.length === 0 ? (
-                      <p className="text-sm text-gray-400">No billable classes for this month.</p>
-                    ) : (() => {
+                    {(() => {
                       const rows = lessons.map(lesson => ({
                         lesson,
                         bill: getBillability({
@@ -464,6 +462,15 @@ export default function BillingClient({
                         }),
                       }))
                       const total = rows.reduce((s, { bill }) => bill.billableToTeacher ? s + bill.amount : s, 0)
+                      // Only classes the teacher is actually paid for belong in the
+                      // invoice breakdown. Rows that bill nothing (e.g. a cancellation
+                      // made more than 24h ahead) are dropped from the list; `total` is
+                      // computed above over every row and is untouched by this filter,
+                      // because a non-billable row never contributed to it.
+                      const billableRows = rows.filter(({ bill }) => bill.billableToTeacher)
+                      if (billableRows.length === 0) {
+                        return <p className="text-sm text-gray-400">No billable classes for this month.</p>
+                      }
                       return (
                         <div>
                           <div
@@ -476,7 +483,7 @@ export default function BillingClient({
                             <span>Status</span>
                             <span style={{ textAlign: 'right' }}>Amount</span>
                           </div>
-                          {rows.map(({ lesson, bill }) => {
+                          {billableRows.map(({ lesson, bill }) => {
                             const lessonStyle = getLessonStatusStyle(lesson.status)
                             return (
                               <div

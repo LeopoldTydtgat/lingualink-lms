@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, teacherReportForfeitedEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, teacherReportMissingEmailContent } from '@/lib/email/templates'
 import { verifyCronAuth } from '@/lib/cron-auth'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 
@@ -202,12 +202,12 @@ export async function GET(request: Request) {
         const { error: emailErr } = await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: teacher.email,
-          subject: 'Lingualink Online - Class report deadline missed',
+          subject: 'Lingualink Online - We did not receive your class report',
           html: buildEmailTemplate({
             recipientName: teacher.full_name,
             recipientFallback: 'Teacher',
-            subject: 'Lingualink Online - Class report deadline missed',
-            bodyHtml: teacherReportForfeitedEmailContent(
+            subject: 'Lingualink Online - We did not receive your class report',
+            bodyHtml: teacherReportMissingEmailContent(
               student?.full_name ?? 'your student',
               lesson.scheduled_at,
               lesson.duration_minutes,
@@ -217,13 +217,13 @@ export async function GET(request: Request) {
           }),
         })
         if (emailErr) {
-          console.error(`Forfeiture email errored for report ${report.id}:`, emailErr)
+          console.error(`Report email errored for report ${report.id}:`, emailErr)
         }
       } else {
         console.error(`No teacher email for report ${report.id}; flag stands, email skipped`)
       }
     } catch (err) {
-      console.error(`Failed to send forfeiture email for report ${report.id}:`, err)
+      console.error(`Failed to send report email for report ${report.id}:`, err)
     }
 
     // ── Mark the lesson processed so it isn't revisited on later runs ─────────

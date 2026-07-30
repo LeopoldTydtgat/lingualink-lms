@@ -342,7 +342,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
               {cancellationBillability && (
                 cancellationBillability.billableToTeacher
                   ? <p className="text-xs" style={{ color: '#15803D' }}>You are paid for this class</p>
-                  : <p className="text-xs" style={{ color: '#6b7280' }}>Not paid - cancelled more than 24h in advance</p>
+                  : <p className="text-xs" style={{ color: '#6b7280' }}>Cancelled with more than 24h notice</p>
               )}
             </div>
           )}

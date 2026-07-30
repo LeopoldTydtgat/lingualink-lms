@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { formatInstantInTz } from '@/lib/exportTime'
 
 interface Teacher {
   id: string
@@ -32,6 +33,9 @@ interface Props {
   // "no date filter".
   initialDateFrom?: string
   initialDateTo?: string
+  // Admin's profile timezone; null when unset. Date & Time column renders
+  // in this zone so it agrees with the GET route's date-filter bucketing.
+  adminTz: string | null
 }
 
 // Maps raw DB status values to a display label and colour
@@ -58,6 +62,8 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
   }
 }
 
+// Browser-local fallback, used only when the admin profile has no timezone
+// (matches the GET route's own null-tz fail-safe).
 function formatDateTime(isoString: string): string {
   const d = new Date(isoString)
   const day = d.getDate().toString().padStart(2, '0')
@@ -68,7 +74,7 @@ function formatDateTime(isoString: string): string {
   return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
-export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '' }: Props) {
+export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '', adminTz }: Props) {
   const router = useRouter()
 
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -485,7 +491,7 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
 
                 {/* Date & time */}
                 <span style={{ fontSize: '13px', color: '#374151' }}>
-                  {formatDateTime(lesson.scheduled_at)}
+                  {adminTz ? formatInstantInTz(lesson.scheduled_at, adminTz) : formatDateTime(lesson.scheduled_at)}
                 </span>
 
                 {/* Duration */}
