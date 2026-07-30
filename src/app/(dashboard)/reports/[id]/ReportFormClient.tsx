@@ -82,6 +82,40 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; fg: string }> =
   reopened: { label: 'Reopened by admin', bg: '#FFF0E0', fg: '#C2410C' },
 }
 
+// Whether this class lands on the teacher's invoice, derived only from report
+// fields already in scope — no billing query, no rate, no getBillability call.
+// Deliberately silent in three cases: 'pending' (the outcome is not decided
+// yet), student no-show (the banner in the "What happened?" section already
+// states the teacher is still paid — a second panel would duplicate it), and
+// teacher no-show (that banner carries the sentence itself).
+function invoiceNotice(
+  status: string,
+  didClassHappen: boolean | null
+): { text: string; bg: string; fg: string } | null {
+  if (status === 'flagged') {
+    return {
+      text: 'This class is not included in your invoice because the report was not submitted in time. If something got in the way, contact admin and we can reopen the report so you can still complete it.',
+      bg: STATUS_CONFIG.pending.bg,
+      fg: STATUS_CONFIG.pending.fg,
+    }
+  }
+  if (status === 'reopened') {
+    return {
+      text: 'This report has been reopened. Submit it and the class will be included in your invoice.',
+      bg: STATUS_CONFIG.pending.bg,
+      fg: STATUS_CONFIG.pending.fg,
+    }
+  }
+  if (status === 'completed' && didClassHappen === true) {
+    return {
+      text: 'This class is included in your invoice.',
+      bg: STATUS_CONFIG.completed.bg,
+      fg: STATUS_CONFIG.completed.fg,
+    }
+  }
+  return null
+}
+
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
@@ -177,6 +211,9 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
 
   const isEditable = report.status === 'pending' || report.status === 'reopened'
   const statusInfo = STATUS_CONFIG[report.status] ?? STATUS_CONFIG.pending
+  // Settled facts from the saved row, not the live form state: the panel must
+  // report what the invoice will actually carry, not an unsaved selection.
+  const invoiceInfo = invoiceNotice(report.status, report.did_class_happen)
 
   function setSkillLevel(skillKey: string, level: string) {
     setLevelData(prev => ({ ...prev, [skillKey]: level }))
@@ -291,6 +328,16 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           </div>
         </div>
       </div>
+
+      {/* Invoice outcome — whether this class is paid */}
+      {invoiceInfo && (
+        <div
+          className="rounded-xl p-4 text-sm mb-6"
+          style={{ backgroundColor: invoiceInfo.bg, color: invoiceInfo.fg }}
+        >
+          {invoiceInfo.text}
+        </div>
+      )}
 
       {/* Did the class take place? (+ Student Confirmation sub-block) */}
       <section className={cardClass} style={cardStyle}>
@@ -566,7 +613,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           {noShowType === 'teacher' && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 mb-4">
               Please contact your student immediately to apologise for missing the class and
-              to explain what happened.
+              to explain what happened. This class is not included in your invoice.
             </div>
           )}
         </section>

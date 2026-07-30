@@ -136,7 +136,9 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
               student.full_name,
               lesson.scheduled_at,
               lesson.duration_minutes,
-              teacherTimezone
+              teacherTimezone,
+              'student',
+              !isRefundable
             ),
             contactEmail: 'teachers@lingualinkonline.com',
           }),

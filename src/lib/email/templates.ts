@@ -214,6 +214,8 @@ export function teacherCancellationEmailContent(
   scheduledAt: string,
   durationMinutes: number,
   teacherTimezone: string,
+  cancelledBy: 'teacher' | 'student' | 'admin',
+  studentCancelledUnder24h?: boolean,
   cancellationReason?: string
 ): string {
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
@@ -224,9 +226,19 @@ export function teacherCancellationEmailContent(
   if (cancellationReason) {
     rows.push({ label: 'Reason', value: cancellationReason })
   }
+  let intro: string
+  if (cancelledBy === 'teacher') {
+    intro = `Your cancellation of the class with <strong style="color:#FF8303;">${studentName}</strong> is confirmed.`
+  } else if (cancelledBy === 'student') {
+    intro = studentCancelledUnder24h === true
+      ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student. Because the cancellation was made less than 24 hours before the class, it is still included in your invoice.`
+      : `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student with more than 24 hours' notice.`
+  } else {
+    intro = `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by admin.`
+  }
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled. Your schedule has been updated.
+      ${intro}
     </p>
     ${buildDetailsTable('Cancellation details', rows)}
     ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}

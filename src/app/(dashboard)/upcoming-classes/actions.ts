@@ -142,7 +142,8 @@ export async function teacherCancelLesson(
         student.full_name,
         lesson.scheduled_at,
         lesson.duration_minutes,
-        requireTz(teacherProfile.timezone, 'cancel-by-teacher:teacher')
+        requireTz(teacherProfile.timezone, 'cancel-by-teacher:teacher'),
+        'teacher'
       )
       await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
