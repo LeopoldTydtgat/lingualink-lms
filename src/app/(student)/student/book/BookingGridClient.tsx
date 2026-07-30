@@ -23,9 +23,9 @@ import {
   getValidStartsByColumn,
   collapseEmptyBands,
   getVisibleColumns,
+  buildCellMaps,
   SLOT_MINUTES,
   type SlotsResponse,
-  type GridStartSlot,
 } from '@/lib/bookingWeekGrid'
 
 // ─── Grid cell colours ────────────────────────────────────────────────────────
@@ -617,19 +617,10 @@ export default function BookingGridClient({
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
-  // cell hits, so every row renders grey there. On a DST fall-back day two
-  // instants can share a wall-clock row; the later write wins the cell — a
-  // known Stage B limitation, the earlier instant is simply not offered in
-  // the grid.
-  const cellMaps = new Map<string, Map<number, GridStartSlot>>()
-  for (const key of columnKeys) {
-    const m = new Map<number, GridStartSlot>()
-    for (const slot of validStartsByColumn[key]) {
-      const parts = utcInstantToTzParts(slot.startIso, studentTimezone)
-      m.set(parts.hour * 60 + parts.minute, slot)
-    }
-    cellMaps.set(key, m)
-  }
+  // cell hits, so every row renders grey there. On a DST fall-back day the
+  // duplicated wall hour resolves to the EARLIER of the two instants (see the
+  // buildCellMaps docstring).
+  const cellMaps = buildCellMaps(columnKeys, validStartsByColumn, studentTimezone)
 
   // Backstop invalidation: whenever fresh availability lands or the duration
   // changes, drop a selection that is no longer a valid start for the current
