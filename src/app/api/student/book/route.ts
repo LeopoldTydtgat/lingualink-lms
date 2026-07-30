@@ -158,13 +158,31 @@ export async function POST(req: NextRequest) {
     const newStart = new Date(scheduledAt)
     const newEnd = new Date(newStart.getTime() + durationMinutes * 60 * 1000)
 
-    const { data: clashLessons } = await adminClient
+    // Reschedule self-clash: both clash checks run BEFORE
+    // reschedule_class_atomic cancels the old row, so without this exclusion the
+    // lesson being moved counts as a clash against itself and a small shift
+    // (e.g. +15 min) 409s. Applied conditionally — on a fresh book rescheduleId
+    // is unset and the query is exactly as before.
+    let teacherClashQuery = adminClient
       .from('lessons')
       .select('id, scheduled_at, duration_minutes')
       .eq('teacher_id', teacherId)
       .eq('status', 'scheduled')
       .lt('scheduled_at', newEnd.toISOString())
       .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+    if (rescheduleId) teacherClashQuery = teacherClashQuery.neq('id', rescheduleId)
+
+    const { data: clashLessons, error: teacherClashError } = await teacherClashQuery
+
+    // Fail closed: a query error previously yielded an empty list, which reads as
+    // "no clash" and lets the booking proceed straight past the overlap guard.
+    if (teacherClashError) {
+      console.error('[student book] teacher clash check failed:', teacherClashError)
+      return NextResponse.json(
+        { error: 'Could not verify availability. Please try again.' },
+        { status: 500 }
+      )
+    }
 
     const hasClash = (clashLessons ?? []).some(
       (l) =>
@@ -184,13 +202,27 @@ export async function POST(req: NextRequest) {
     // filter, same 90-minute back-window, same half-open JS overlap test) but
     // keyed on student_id. Backs the no_student_overlap DB exclusion constraint
     // the same way the teacher check backs no_teacher_overlap.
-    const { data: studentClashLessons } = await adminClient
+    // Same reschedule self-clash exclusion as the teacher check above — this is
+    // the check the student's own original lesson trips on a shift-in-place.
+    let studentClashQuery = adminClient
       .from('lessons')
       .select('id, scheduled_at, duration_minutes')
       .eq('student_id', studentId)
       .eq('status', 'scheduled')
       .lt('scheduled_at', newEnd.toISOString())
       .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+    if (rescheduleId) studentClashQuery = studentClashQuery.neq('id', rescheduleId)
+
+    const { data: studentClashLessons, error: studentClashError } = await studentClashQuery
+
+    // Fail closed, same reasoning as the teacher check above.
+    if (studentClashError) {
+      console.error('[student book] student clash check failed:', studentClashError)
+      return NextResponse.json(
+        { error: 'Could not verify availability. Please try again.' },
+        { status: 500 }
+      )
+    }
 
     const hasStudentClash = (studentClashLessons ?? []).some(
       (l) =>
