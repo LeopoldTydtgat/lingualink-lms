@@ -255,11 +255,19 @@ export async function POST(req: NextRequest) {
     let hoursLogId: string | null = null
 
     if (rescheduleId) {
+      // training_id and teacher_id are selected to feed the two guards below.
+      // training_id is ALSO an equality filter: reschedule_class_atomic refunds
+      // the old duration against p_training_id (this request's training), not
+      // against the old lesson's own training, so without this filter a lesson
+      // belonging to another still-active training would have its hours
+      // migrated onto this one. Scoped here it reads as not found and falls into
+      // the existing 404 'Original lesson not found or no longer reschedulable.'
       const { data: oldLesson, error: oldLessonError } = await adminClient
         .from('lessons')
-        .select('duration_minutes, teams_meeting_id, teams_join_url, scheduled_at')
+        .select('duration_minutes, teams_meeting_id, teams_join_url, scheduled_at, training_id, teacher_id')
         .eq('id', rescheduleId)
         .eq('student_id', studentId)
+        .eq('training_id', trainingId)
         .eq('status', 'scheduled')
         .maybeSingle()
 
@@ -267,6 +275,34 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: 'Original lesson not found or no longer reschedulable.' },
           { status: 404 }
+        )
+      }
+
+      // Teacher lock. Students may never move a lesson onto a different teacher;
+      // the client pins the teacher to rescheduleLesson.teacher_id, so this only
+      // fires on a forged POST. The 3b assignment check alone would allow any
+      // OTHER teacher assigned to the training, which is why this is separate.
+      if (teacherId !== oldLesson.teacher_id) {
+        return NextResponse.json(
+          {
+            error:
+              'You cannot change teacher when rescheduling. Please cancel and book a new class instead.',
+          },
+          { status: 400 }
+        )
+      }
+
+      // 24-hour rule on the OLD lesson. The NEW time is already gated at 3b;
+      // this is the missing half — the rule existed only as a disabled attribute
+      // on the client, so a lesson starting in 30 minutes, or a past lesson
+      // still sitting at 'scheduled', could be moved and its hours recovered.
+      // A past start makes this value negative, so one comparison covers both.
+      const hoursUntilOldClass =
+        (new Date(oldLesson.scheduled_at).getTime() - Date.now()) / (1000 * 60 * 60)
+      if (hoursUntilOldClass < 24) {
+        return NextResponse.json(
+          { error: 'Classes cannot be rescheduled within 24 hours of the start time.' },
+          { status: 403 }
         )
       }
 
