@@ -233,6 +233,8 @@ export async function PATCH(
           existing.scheduled_at,
           existing.duration_minutes,
           requireTz(teacherProfile.timezone, 'admin-cancel:teacher'),
+          'admin',
+          undefined,
           cancellation_reason ?? undefined
         )
         await resend.emails.send({
