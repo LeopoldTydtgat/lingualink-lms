@@ -309,8 +309,8 @@ export async function fetchWhatsNew(
       id: `report-flagged-${r.id}`,
       kind: 'report_missed',
       text: lesson
-        ? `Missed report: ${nameOf(lesson.student_id)}, ${formatClassDay(lesson.scheduled_at, tz)} - payment withheld`
-        : 'Missed report - payment withheld until completed',
+        ? `Report not submitted: ${nameOf(lesson.student_id)}, ${formatClassDay(lesson.scheduled_at, tz)}`
+        : 'A class report was not submitted in time',
       href: '/reports',
       at: r.flagged_at ?? r.updated_at ?? nowIso,
       attention: true,

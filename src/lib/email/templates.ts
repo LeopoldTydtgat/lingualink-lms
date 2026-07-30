@@ -233,7 +233,7 @@ export function teacherCancellationEmailContent(
   `
 }
 
-export function teacherReportForfeitedEmailContent(
+export function teacherReportMissingEmailContent(
   studentName: string,
   scheduledAt: string,
   durationMinutes: number,
@@ -242,10 +242,14 @@ export function teacherReportForfeitedEmailContent(
   const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      The 12-hour window to submit your class report for your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime} has now closed.
+      We did not receive your class report for your class with
+      <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime},
+      and the 12-hour submission window has now closed.
     </p>
     <p style="margin:0;font-size:15px;color:#111827;line-height:1.6;">
-      Because the report was not submitted within the deadline, payment for this class has been forfeited in line with the reporting policy. Please make sure future reports are completed within 12 hours of the class ending.
+      Classes without a submitted report are not included in your monthly
+      invoice. If something got in the way, just let us know - we can reopen
+      the report so you can still complete it.
     </p>
   `
 }
