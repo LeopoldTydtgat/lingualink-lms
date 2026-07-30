@@ -179,6 +179,32 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // 4b-2. Check the student is not already booked at this time. Mirrors the
+    // teacher check above exactly (same adminClient, same select, same status
+    // filter, same 90-minute back-window, same half-open JS overlap test) but
+    // keyed on student_id. Backs the no_student_overlap DB exclusion constraint
+    // the same way the teacher check backs no_teacher_overlap.
+    const { data: studentClashLessons } = await adminClient
+      .from('lessons')
+      .select('id, scheduled_at, duration_minutes')
+      .eq('student_id', studentId)
+      .eq('status', 'scheduled')
+      .lt('scheduled_at', newEnd.toISOString())
+      .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+    const hasStudentClash = (studentClashLessons ?? []).some(
+      (l) =>
+        new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000 >
+        newStart.getTime()
+    )
+
+    if (hasStudentClash) {
+      return NextResponse.json(
+        { error: 'You already have a class booked at this time.' },
+        { status: 409 }
+      )
+    }
+
     // ── 4c. Atomic hours reservation ──────────────────────────────────────────
     // Reschedule path uses reschedule_class_atomic, which cancels the old
     // lesson, refunds its hours, and deducts the new hours in a single
@@ -323,6 +349,12 @@ export async function POST(req: NextRequest) {
 
     if (lessonError || !newLesson) {
       const isSlotConflict = lessonError?.code === '23P01'
+      // A 23P01 carries the violated constraint name in the Postgres error text.
+      // no_student_overlap means the STUDENT already has an overlapping class;
+      // anything else (no_teacher_overlap) keeps the existing wording below.
+      const isStudentSlotConflict =
+        isSlotConflict &&
+        `${lessonError?.message ?? ''} ${lessonError?.details ?? ''}`.includes('no_student_overlap')
 
       if (rescheduleId) {
         // Reschedule recovery: reschedule_class_atomic has already cancelled
@@ -387,6 +419,13 @@ export async function POST(req: NextRequest) {
           )
         }
 
+        if (isStudentSlotConflict && !unwindError) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
+            { status: 409 }
+          )
+        }
+
         if (isSlotConflict && !unwindError) {
           // unwindRestored === true: original lesson is back at its original time.
           // The reschedule simply did not go through — original class is intact.
@@ -427,6 +466,13 @@ export async function POST(req: NextRequest) {
             lesson_id: null,
             error: refundError,
           })
+        }
+
+        if (isStudentSlotConflict) {
+          return NextResponse.json(
+            { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
+            { status: 409 }
+          )
         }
 
         if (isSlotConflict) {
