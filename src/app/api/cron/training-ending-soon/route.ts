@@ -51,6 +51,7 @@ export async function GET(request: Request) {
   }
 
   let sentCount = 0
+  let flagFailures = 0
 
   for (const training of trainings ?? []) {
     const student = Array.isArray(training.students)
@@ -81,16 +82,34 @@ export async function GET(request: Request) {
         }),
       })
 
-      await supabase
+      // The flag write is the only thing stopping this student from being emailed
+      // again on tomorrow's run, so its result must be checked rather than discarded:
+      // a silent failure here means a repeat email every single day. Service role, so
+      // no RLS filtering - a zero-row result means the id no longer matches.
+      const { data: flagged, error: flagError } = await supabase
         .from('trainings')
         .update({ training_ending_soon_sent: true })
         .eq('id', training.id)
+        .select('id')
 
-      sentCount++
+      if (flagError) {
+        console.error(
+          `Failed to set training_ending_soon_sent for training ${training.id}. The email WAS sent and will be sent again on the next daily run:`,
+          flagError
+        )
+        flagFailures++
+      } else if ((flagged?.length ?? 0) !== 1) {
+        console.error(
+          `Unexpected row count setting training_ending_soon_sent for training ${training.id}: ${flagged?.length ?? 0} rows affected. The email WAS sent and will be sent again on the next daily run.`
+        )
+        flagFailures++
+      } else {
+        sentCount++
+      }
     } catch (err) {
       console.error(`Failed to send training-ending-soon email for training ${training.id}:`, err)
     }
   }
 
-  return NextResponse.json({ ok: true, sent: sentCount })
+  return NextResponse.json({ ok: true, sent: sentCount, flagFailures })
 }
