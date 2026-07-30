@@ -592,7 +592,8 @@ export async function PATCH(
     }
   }
 
-  if (durationChanged || teacherChanged) {
+  // timeChanged included: a time-only move can cross a month boundary and re-bucket the lesson's amount — the recompute reconciles both months in one pass.
+  if (durationChanged || teacherChanged || timeChanged) {
     const teachersToRecompute: string[] = [existing.teacher_id]
     if (teacherChanged && fields.teacher_id) {
       teachersToRecompute.push(fields.teacher_id)
