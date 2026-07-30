@@ -24,13 +24,13 @@ export function relativeTime(iso: string): string {
 }
 
 // Severity colour per item kind (kinds emitted by lib/whatsNew.ts and
-// lib/studentWhatsNew.ts). Red for pay/access-impacting items, yellow for
-// action-needed items; any kind not listed (including future ones) falls back
-// to the grey default below.
+// lib/studentWhatsNew.ts). Red for student-side pay/access-impacting items,
+// yellow for action-needed items; any kind not listed (including future ones)
+// falls back to the grey default below.
 const DOT_COLOURS: Record<string, string> = {
-  report_missed: '#FD5602',
   hours_low: '#FD5602',
   training_ending: '#FD5602',
+  report_missed: '#FFB942',
   report_reopened: '#FFB942',
   invoice_reminder: '#FFB942',
   homework_assigned: '#FFB942',
