@@ -53,13 +53,11 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
       hasClassStarted(r, now)
   )
 
-  const completedReports = reports.filter(
-    r => r.status === 'completed'
-  )
-
-  const missedReports = reports.filter(
-    r => r.status === 'flagged'
-  )
+  // Submitted and not-submitted reports share one list, newest class first.
+  // .filter() returns a fresh array, so the .sort() never mutates the prop.
+  const completedReports = reports
+    .filter(r => r.status === 'completed' || r.status === 'flagged')
+    .sort((a, b) => reportSortKey(b) - reportSortKey(a))
 
   const filteredCompleted = completedReports.filter(r =>
     r.lesson?.student?.full_name
@@ -112,24 +110,6 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
           </div>
         )}
       </section>
-
-      {/* Missed reports */}
-      {missedReports.length > 0 && (
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <span className="font-semibold text-gray-800">Missed Reports</span>
-            <span style={{ fontSize: '12px', fontWeight: 600, borderRadius: '9999px', padding: '2px 10px', backgroundColor: '#FFEEE6', color: '#FD5602' }}>
-              {missedReports.length}
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {missedReports.map(report => (
-              <MissedReportCard key={report.id} report={report} isAdmin={isAdmin} />
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Completed reports */}
       <section>
@@ -267,15 +247,32 @@ function CompletedReportCard({
 }) {
   const lesson = report.lesson
   const student = lesson?.student
+  const [reopening, setReopening] = useState(false)
+  const [reopenError, setReopenError] = useState<string | null>(null)
 
   const statusConfig: Record<string, { label: string; bg: string; fg: string }> = {
     completed: { label: 'Class taken', bg: '#DCFCE7', fg: '#15803D' },
-    flagged: { label: 'Flagged — no report', bg: '#FFEEE6', fg: '#FD5602' },
+    flagged: { label: 'Report not submitted', bg: '#FFF8E8', fg: '#B45309' },
     reopened: { label: 'Reopened', bg: '#FFF0E0', fg: '#C2410C' },
     pending: { label: 'Pending', bg: '#FFF8E8', fg: '#B45309' },
   }
 
   const { label, bg, fg } = statusConfig[report.status] ?? statusConfig.completed
+
+  // Admin-only recovery path for a report that was never submitted.
+  const canReopen = isAdmin && report.status === 'flagged'
+
+  // Call the server action to reopen the report
+  async function handleReopen() {
+    setReopening(true)
+    setReopenError(null)
+    const result = await reopenReport(report.id)
+    if (result.error) {
+      setReopenError(result.error)
+      setReopening(false)
+    }
+    // On success, revalidatePath in the action refreshes the page automatically
+  }
 
   return (
     <div
@@ -303,6 +300,9 @@ function CompletedReportCard({
               ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
               : 'Unknown time'}
           </p>
+          {reopenError && (
+            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
+          )}
           {isAdmin && (
             <p className="text-xs text-gray-400">
               By {lesson?.teacher?.full_name ?? 'Unknown teacher'}
@@ -326,87 +326,7 @@ function CompletedReportCard({
         >
           View
         </Link>
-      </div>
-    </div>
-  )
-}
-
-// --- Missed report card ---
-function MissedReportCard({
-  report,
-  isAdmin,
-}: {
-  report: Report
-  isAdmin: boolean
-}) {
-  const lesson = report.lesson
-  const student = lesson?.student
-  const [reopening, setReopening] = useState(false)
-  const [reopenError, setReopenError] = useState<string | null>(null)
-
-  // Call the server action to reopen the report
-  async function handleReopen() {
-    setReopening(true)
-    setReopenError(null)
-    const result = await reopenReport(report.id)
-    if (result.error) {
-      setReopenError(result.error)
-      setReopening(false)
-    }
-    // On success, revalidatePath in the action refreshes the page automatically
-  }
-
-  return (
-    <div
-      className="rounded-xl p-4 flex items-center justify-between shadow-sm"
-      style={{ backgroundColor: '#FFF8F5', border: '1px solid #f3f4f6', borderLeft: '3px solid #FD5602' }}
-    >
-      <div className="flex items-center gap-4">
-        {student?.photo_url ? (
-          <img
-            src={student.photo_url}
-            alt={student.full_name}
-            className="w-10 h-10 rounded-full object-cover"
-          />
-        ) : (
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
-            style={{ backgroundColor: 'rgba(220,38,38,0.12)', color: '#dc2626' }}
-          >
-            {student?.full_name?.charAt(0) ?? '?'}
-          </div>
-        )}
-        <div>
-          <p className="font-semibold text-gray-900">
-            {student?.full_name ?? 'Unknown student'}
-          </p>
-          <p className="text-sm text-gray-500">
-            {lesson?.scheduled_at
-              ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
-              : 'Unknown time'}
-          </p>
-          {reopenError && (
-            <p className="text-xs text-red-500 mt-1">{reopenError}</p>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <span
-          className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
-          style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}
-        >
-          Missed — payment forfeited
-        </span>
-        <Link
-          href={`/reports/${report.id}`}
-          prefetch={false}
-          className="text-sm"
-          style={{ color: '#FF8303', fontWeight: 500 }}
-        >
-          View
-        </Link>
-        {isAdmin && (
+        {canReopen && (
           <button
             onClick={handleReopen}
             disabled={reopening}
@@ -418,6 +338,18 @@ function MissedReportCard({
       </div>
     </div>
   )
+}
+
+// --- Helper: sort key for the completed list ---
+// scheduled_at is the natural ordering key. A report whose lesson row is
+// missing (page.tsx flattens an absent join to null) falls back to its own
+// created_at, so it still sorts sensibly instead of crashing or sinking to
+// the epoch. An unparseable value sorts last rather than poisoning the sort
+// with NaN.
+function reportSortKey(report: Report): number {
+  const raw = report.lesson?.scheduled_at ?? report.created_at
+  const ms = raw ? new Date(raw).getTime() : NaN
+  return Number.isNaN(ms) ? 0 : ms
 }
 
 // --- Helper: has the lesson's class already started? ---
