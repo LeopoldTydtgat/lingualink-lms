@@ -72,13 +72,10 @@ export async function GET(request: Request) {
           subject: `Please upload your invoice for ${monthYear}`,
           bodyHtml: `
             <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-              It's the start of a new month — please remember to upload your invoice for <strong>${monthYear}</strong> via the teacher portal.
-            </p>
-            <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-              Invoices should be submitted between the <strong>1st and 10th of the month</strong>. Invoices received after the 10th will be processed the following month.
+              A new month has started - when you have a moment, please upload your invoice for <strong>${monthYear}</strong> via the teacher portal.
             </p>
             <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-              Please log in to your portal to upload your invoice.
+              The upload window runs from the <strong>1st to the 10th of the month</strong>. If an invoice arrives after the 10th, we simply process it in the following month's payment run - nothing is lost.
             </p>
             ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/billing`, 'Upload My Invoice')}
           `,
