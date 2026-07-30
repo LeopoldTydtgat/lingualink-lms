@@ -308,13 +308,23 @@ export async function POST(request: NextRequest) {
   const newStart = new Date(scheduledAtUtc)
   const newEnd = new Date(newStart.getTime() + duration_minutes * 60 * 1000)
 
-  const { data: clashLessons } = await adminClient
+  const { data: clashLessons, error: clashError } = await adminClient
     .from('lessons')
     .select('id, scheduled_at, duration_minutes')
     .eq('teacher_id', teacher_id)
     .eq('status', 'scheduled')
     .lt('scheduled_at', newEnd.toISOString())
     .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+  // Fail closed: a query error previously yielded an empty list, which reads as
+  // "no clash" and lets the booking proceed straight past the overlap guard.
+  if (clashError) {
+    console.error('[admin create class] teacher clash check failed:', clashError)
+    return NextResponse.json(
+      { error: 'Could not verify availability. Please try again.' },
+      { status: 500 }
+    )
+  }
 
   const hasClash = (clashLessons ?? []).some(
     (l) =>
@@ -334,13 +344,22 @@ export async function POST(request: NextRequest) {
   // 90-minute back-window, same half-open JS overlap test) but keyed on
   // student_id. Backs the no_student_overlap DB exclusion constraint the same
   // way the teacher check backs no_teacher_overlap.
-  const { data: studentClashLessons } = await adminClient
+  const { data: studentClashLessons, error: studentClashError } = await adminClient
     .from('lessons')
     .select('id, scheduled_at, duration_minutes')
     .eq('student_id', student_id)
     .eq('status', 'scheduled')
     .lt('scheduled_at', newEnd.toISOString())
     .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
+
+  // Fail closed, same reasoning as the teacher check above.
+  if (studentClashError) {
+    console.error('[admin create class] student clash check failed:', studentClashError)
+    return NextResponse.json(
+      { error: 'Could not verify availability. Please try again.' },
+      { status: 500 }
+    )
+  }
 
   const hasStudentClash = (studentClashLessons ?? []).some(
     (l) =>
