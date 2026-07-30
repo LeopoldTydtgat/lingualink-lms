@@ -46,61 +46,55 @@ export async function GET(request: Request) {
   // exists, the normal flow below flags it on the next run (its deadline is
   // already past). Bounded to 50 per run. Any failure here is logged and
   // swallowed so it never aborts the flagging pass that follows.
-  // Fetch candidates oldest-first and cap the candidate scan, but apply the
-  // per-run repair budget to the ORPHANS (below), not to this raw fetch. Most
-  // past-'scheduled' rows already have a report — grace-window lessons, and
-  // 'reopened' reports whose lesson stays 'scheduled' forever (the flagging pass
-  // never flips 'reopened' to 'missed') — so a plain unordered LIMIT would let
-  // that reported backlog crowd genuine orphans out of the window and silently
-  // starve the exact rows this sweep exists to repair. Oldest-first drains the
-  // most-overdue zombies, and hitting the candidate cap is logged so a growing
-  // backlog is visible rather than silent.
-  const CANDIDATE_LIMIT = 200
+  // The fetch is a PostgREST anti-join, so the database returns ONLY report-less
+  // lessons: reports() is a deliberately EMPTY embed, and .is('reports', null)
+  // filters the PARENT rows down to those with no related reports row (PostgREST
+  // "Null filtering on Embedded Resources"). Do NOT "simplify" that form: naming
+  // a column inside the parens, or filtering .is('reports.id', null) instead,
+  // filters the EMBED rather than the parent and silently returns every
+  // past-'scheduled' lesson again.
+  // Because reported rows can no longer enter the result set, REPAIR_LIMIT is a
+  // pure per-run repair budget rather than a scan window. Most past-'scheduled'
+  // rows do have a report — grace-window lessons, and 'reopened' reports whose
+  // lesson stays 'scheduled' forever (the flagging pass never flips 'reopened'
+  // to 'missed') — and under the old fetch-then-filter-in-JS approach that
+  // reported backlog permanently occupied the window head and starved the exact
+  // rows this sweep exists to repair. That is now impossible: hitting the cap
+  // only means more orphans exist than one run repairs, and oldest-first drains
+  // the most-overdue zombies first, so the remainder is repaired on later runs
+  // (benign back-pressure, not starvation).
   const REPAIR_LIMIT = 50
   try {
-    const { data: pastScheduled, error: sweepFetchErr } = await supabase
+    const { data: orphans, error: sweepFetchErr } = await supabase
       .from('lessons')
-      .select('id, teacher_id, scheduled_at, duration_minutes')
+      .select('id, teacher_id, scheduled_at, duration_minutes, reports()')
       .eq('status', 'scheduled')
       .lt('scheduled_at', now.toISOString())
+      .is('reports', null)
       .order('scheduled_at', { ascending: true })
-      .limit(CANDIDATE_LIMIT)
+      .limit(REPAIR_LIMIT)
 
     if (sweepFetchErr) {
-      console.error('[NEW258] repair sweep: failed to fetch past scheduled lessons:', sweepFetchErr)
-    } else if (pastScheduled && pastScheduled.length > 0) {
-      if (pastScheduled.length === CANDIDATE_LIMIT) {
-        console.warn(`[NEW258] repair sweep: candidate scan hit the ${CANDIDATE_LIMIT}-row cap; any orphans older than the scanned window wait for a later run`)
+      console.error('[NEW258] repair sweep: failed to fetch orphaned past scheduled lessons:', sweepFetchErr)
+    } else if (orphans && orphans.length > 0) {
+      if (orphans.length === REPAIR_LIMIT) {
+        console.log(`[NEW258] repair sweep: hit the ${REPAIR_LIMIT}-row repair budget this run; any remaining orphans are repaired on later runs`)
       }
-      // No NOT EXISTS in the JS client: fetch report rows for these lesson ids
-      // and filter the orphans in code.
-      const lessonIds = pastScheduled.map((l) => l.id)
-      const { data: existingReports, error: sweepReportsErr } = await supabase
-        .from('reports')
-        .select('lesson_id')
-        .in('lesson_id', lessonIds)
 
-      if (sweepReportsErr) {
-        console.error('[NEW258] repair sweep: failed to fetch existing reports:', sweepReportsErr)
-      } else {
-        const hasReport = new Set((existingReports ?? []).map((r) => r.lesson_id))
-        const orphans = pastScheduled.filter((l) => !hasReport.has(l.id)).slice(0, REPAIR_LIMIT)
-
-        for (const lesson of orphans) {
-          const classEndsAtIso = new Date(
-            new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
-          ).toISOString()
-          const { error: repairErr } = await createPendingReport(
-            supabase,
-            lesson.id,
-            lesson.teacher_id,
-            classEndsAtIso
-          )
-          if (repairErr) {
-            console.error(`[NEW258] repair sweep: failed to create pending report for lesson ${lesson.id}:`, repairErr)
-          } else {
-            console.log(`[NEW258] repair sweep: created missing pending report for lesson ${lesson.id}`)
-          }
+      for (const lesson of orphans) {
+        const classEndsAtIso = new Date(
+          new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60 * 1000
+        ).toISOString()
+        const { error: repairErr } = await createPendingReport(
+          supabase,
+          lesson.id,
+          lesson.teacher_id,
+          classEndsAtIso
+        )
+        if (repairErr) {
+          console.error(`[NEW258] repair sweep: failed to create pending report for lesson ${lesson.id}:`, repairErr)
+        } else {
+          console.log(`[NEW258] repair sweep: created missing pending report for lesson ${lesson.id}`)
         }
       }
     }
