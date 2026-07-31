@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
+import { getLocalDateKey } from '@/lib/utils/timezone'
 import StudentsClient from './StudentsClient'
 
 export default async function StudentsPage() {
@@ -11,11 +12,19 @@ export default async function StudentsPage() {
   // Get current user's profile to check role
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, timezone')
     .eq('id', user.id)
     .maybeSingle()
 
   const isAdmin = profile?.role === 'admin'
+
+  // Fail-SAFE: the viewer's zone decides which calendar day it is for the
+  // current/past split. A null zone must not crash this list, so fall back to
+  // UTC and log. Teachers always have a timezone in practice.
+  const viewerTimezone = profile?.timezone ?? null
+  if (!viewerTimezone) {
+    console.error('CRITICAL: viewer timezone is null on students list - training current/past split may be off by a day', { user_id: user.id })
+  }
 
   const adminClient = createAdminClient()
   const now = new Date()
@@ -115,8 +124,12 @@ export default async function StudentsPage() {
   const visibleTrainings = flatTrainings.filter((t: { id: string }) => activeTrainingIds.has(t.id))
 
   // Split into current and past
-  const currentTrainings = visibleTrainings.filter((t: { end_date: string | null }) => !t.end_date || new Date(t.end_date) >= now)
-  const pastTrainings = visibleTrainings.filter((t: { end_date: string | null }) => t.end_date && new Date(t.end_date) < now)
+  // trainings.end_date is a DATE column, not an instant. Compare calendar dates
+  // in the viewer's zone so a training stays Current through the whole of its
+  // final day.
+  const todayKey = getLocalDateKey(now, viewerTimezone ?? 'UTC')
+  const currentTrainings = visibleTrainings.filter((t: { end_date: string | null }) => !t.end_date || t.end_date.slice(0, 10) >= todayKey)
+  const pastTrainings = visibleTrainings.filter((t: { end_date: string | null }) => !!t.end_date && t.end_date.slice(0, 10) < todayKey)
 
   return (
     <StudentsClient
