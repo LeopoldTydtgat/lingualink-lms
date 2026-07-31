@@ -104,12 +104,10 @@ function formatHours(hours: number): string {
   return `${h}h ${m}min`
 }
 
+// trainings.end_date is a DATE column, not an instant.
 function formatEndDate(isoDate: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  }).format(new Date(isoDate))
+  const [y, m, d] = isoDate.split('-').map(Number)
+  return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`
 }
 
 function getSecondsUntil(isoString: string, now: number): number {
