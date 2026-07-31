@@ -59,10 +59,9 @@ export interface BillabilityResult {
 //      Actor teacher -> never billable, whatever the status string says.
 //      Actor student / admin / unknown -> the notice-window rules (<24hr paid,
 //      24-48hr company-billed under a 48hr policy, otherwise nothing).
-//      OPEN QUESTION (client decision pending): admin cancellations currently
-//      run the same student notice window, so an admin <24hr cancel pays the
-//      teacher. Whether admin cancels should always/never pay is unresolved —
-//      behaviour deliberately left as the legacy bare-'cancelled' path.
+//      DECIDED (client, 27 Jul 2026): admin cancellations follow the same
+//      notice window as student cancellations, so an admin <24hr cancel pays
+//      the teacher. This is deliberate, not legacy fallthrough.
 export function getBillability(input: BillabilityInput): BillabilityResult {
   const { status, scheduledAt, cancelledAt, cancellationPolicy, hourlyRate, durationMinutes, cancelledBy, rescheduledBy } = input
 
@@ -128,10 +127,9 @@ export function getBillability(input: BillabilityInput): BillabilityResult {
     if (actor === 'teacher') return notBillable('Not billable')
 
     // Actor student -> the notice-window rules. Actor admin/unknown -> same
-    // window rules, i.e. the legacy bare-'cancelled' behaviour. OPEN QUESTION
-    // (pending client decision): whether admin cancellations should bypass the
-    // window (always or never pay the teacher) — until decided, admin follows
-    // the student window, so an admin <24hr cancel pays the teacher.
+    // window rules, i.e. the legacy bare-'cancelled' behaviour. DECIDED
+    // (client, 27 Jul 2026): admin follows the student window; an admin
+    // <24hr cancel pays the teacher.
     if (!cancelledAt) return notBillable('Not billable')
 
     const hoursNotice =
