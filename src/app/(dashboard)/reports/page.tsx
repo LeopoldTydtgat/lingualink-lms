@@ -45,9 +45,8 @@ export default async function ReportsPage() {
     `)
     .order('created_at', { ascending: false })
 
-  if (!isAdmin) {
-    query.eq('teacher_id', user.id)
-  }
+  // Teacher portal always scopes to the signed-in teacher's own reports; admin oversight of all reports lives at /admin/reports.
+  query.eq('teacher_id', user.id)
 
   const { data: rawReports, error } = await query
 

@@ -303,11 +303,6 @@ function CompletedReportCard({
           {reopenError && (
             <p className="text-xs text-red-500 mt-1">{reopenError}</p>
           )}
-          {isAdmin && (
-            <p className="text-xs text-gray-400">
-              By {lesson?.teacher?.full_name ?? 'Unknown teacher'}
-            </p>
-          )}
         </div>
       </div>
 
