@@ -43,6 +43,10 @@ export default async function ProgressPage() {
 
   // Get the most recent report that has level_data (for the radar chart)
   // We join through lessons to find reports for this student
+  // Only submitted reports (non-null completed_at) drive the level display -
+  // a report reopened by admin for correction is excluded until re-filed, and
+  // this also prevents Postgres NULLS-FIRST DESC ordering from promoting a
+  // reopened report to the top.
   const { data: reportsWithLevel } = await supabase
     .from('reports')
     .select(`
@@ -53,6 +57,7 @@ export default async function ProgressPage() {
     `)
     .eq('lessons.student_id', student.id)
     .not('level_data', 'is', null)
+    .not('completed_at', 'is', null)
     .order('completed_at', { ascending: false })
     .limit(1)
 
