@@ -172,9 +172,9 @@ function HoursTypeBadge({ type }: { type: string }) {
   const colour =
     type === 'add'
       ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-      : type === 'deduct' || type === 'class_booking'
+      : type === 'deduct' || type === 'class_booking' || type === 'teacher_no_show_clawback'
       ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
-      : type === 'cancellation_refund'
+      : type === 'cancellation_refund' || type === 'teacher_no_show_refund'
       ? { backgroundColor: '#dbeafe', color: '#1e40af' }
       : { backgroundColor: '#f3f4f6', color: '#6b7280' }
   const label: Record<string, string> = {
@@ -187,6 +187,8 @@ function HoursTypeBadge({ type }: { type: string }) {
     duration_change: 'Duration Changed',
     reschedule_reversal: 'Reschedule Reversed',
     booking_reversal: 'Booking Reversed',
+    teacher_no_show_refund: 'Teacher No-Show Refund',
+    teacher_no_show_clawback: 'No-Show Refund Reversed',
   }
   return (
     <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={colour}>
