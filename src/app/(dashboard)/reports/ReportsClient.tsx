@@ -264,8 +264,9 @@ function CompletedReportCard({
         : { label: 'Student absent', bg: '#FFF0E0', fg: '#C2410C' }
       : statusConfig[report.status] ?? statusConfig.completed
 
-  // Admin-only recovery path for a report that was never submitted.
-  const canReopen = isAdmin && report.status === 'flagged'
+  // Admin-only recovery path: a report that was never submitted ('flagged') and a
+  // submitted-but-wrong one ('completed') that needs correcting and re-filing.
+  const canReopen = isAdmin && (report.status === 'flagged' || report.status === 'completed')
 
   // Call the server action to reopen the report
   async function handleReopen() {

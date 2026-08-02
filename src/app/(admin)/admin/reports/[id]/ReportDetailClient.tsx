@@ -155,7 +155,7 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
         body: JSON.stringify({ action: 'reopen' }),
       });
       if (!res.ok) {
-        // Stay on the page - the report is still flagged and the admin can retry.
+        // Stay on the page - the report was not reopened and the admin can retry.
         setReopenError(await errorText(res, 'Reopen failed'));
         return;
       }
@@ -182,7 +182,7 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
           {report.status === 'completed' && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>Completed</span>}
           {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Pending</span>}
           {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Reopened</span>}
-          {report.status === 'flagged' && (
+          {(report.status === 'flagged' || report.status === 'completed') && (
             <button onClick={() => { setReopenError(''); setShowConfirm(true); }} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
         </div>
@@ -321,7 +321,7 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
             <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen this report?</h3>
-            <p className="text-sm text-gray-600 mb-5">The report will be reopened and the teacher will be able to submit it late.</p>
+            <p className="text-sm text-gray-600 mb-5">The report will be returned to the teacher to submit again. If the corrected report changes the class outcome, the student&apos;s hours and the teacher&apos;s pay will adjust automatically.</p>
             {reopenError && (
               <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
             )}

@@ -33,8 +33,9 @@ export async function reopenReport(reportId: string) {
 
   if (!isAdmin) return { error: 'Not authorised' }
 
-  // Only flagged reports may be reopened — matches the admin route's guard so
-  // both admin reopen paths behave identically (NEW270).
+  // Flagged (never submitted) and completed (submitted but wrong) reports may
+  // both be reopened - matches the admin route's guard, and the race predicate
+  // below mirrors it too, so both admin reopen paths behave identically (NEW270).
   const { data: existing } = await supabase
     .from('reports')
     .select('id, status')
@@ -42,20 +43,31 @@ export async function reopenReport(reportId: string) {
     .single()
 
   if (!existing) return { error: 'Report not found' }
-  if (existing.status !== 'flagged') {
-    return { error: 'Only flagged reports can be reopened' }
+  if (existing.status !== 'flagged' && existing.status !== 'completed') {
+    return { error: 'Only flagged or completed reports can be reopened' }
   }
 
-  const { error } = await supabase
+  // completed_at is cleared so a reopened report carries no stale submitted
+  // timestamp; complete_report_atomic stamps it fresh when the teacher re-files.
+  // The status predicate guards the race between the check above and this write;
+  // .select confirms a row was actually touched - zero rows means the status
+  // changed underneath us (or the write silently matched nothing).
+  const { data: updatedRows, error } = await supabase
     .from('reports')
     .update({
       status: 'reopened',
       flagged_at: null,
+      completed_at: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', reportId)
+    .in('status', ['flagged', 'completed'])
+    .select('id')
 
   if (error) return { error: error.message }
+  if (!updatedRows || updatedRows.length === 0) {
+    return { error: 'Report can no longer be reopened. Refresh and try again.' }
+  }
 
   // Refresh the reports page so the list updates immediately
   revalidatePath('/reports')
