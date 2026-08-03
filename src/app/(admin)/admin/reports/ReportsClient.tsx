@@ -287,9 +287,11 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                       <td className="py-3 px-3 text-gray-600 text-xs">
                         {r.status === 'flagged' && r.flagged_at
                           ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
-                          : r.status === 'reopened'
-                            ? '—'
-                            : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
+                          : r.status === 'completed' && r.completed_at
+                            ? `Submitted ${formatDateTime(r.completed_at, adminTimezone)}`
+                            : r.status === 'completed' || r.status === 'reopened'
+                              ? '—'
+                              : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2">
