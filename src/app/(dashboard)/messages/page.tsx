@@ -45,7 +45,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
   // blocking the page (fail-safe, matches the dashboard layout's stance on this column).
   const viewerTz = profile.timezone ?? 'UTC'
 
-  // â”€â”€ Pre-open admin conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Pre-open admin conversation --------------------------------
   // When the teacher clicks "Message admin" in the RightPanel, they arrive here
   // with ?openAdmin=true&adminId={id}. We read those params and fetch the admin
   // profile so MessagesClient can auto-select the conversation immediately.
@@ -130,7 +130,7 @@ export default async function MessagesPage({ searchParams }: PageProps) {
     }
   }
 
-  // â”€â”€ Build contacts list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Build contacts list ---------------------------------------
   // Fetch all messages involving this user, newest first
   const { data: messages } = await supabase
     .from('messages')
