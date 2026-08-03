@@ -113,7 +113,11 @@ export async function GET(
       return forbidden()
     }
 
-    const isAdmin = profile?.role === 'admin'
+    // status === 'current' is required alongside role === 'admin', matching
+    // requireStaff (src/lib/auth/requireStaff.ts) - the canonical active-account
+    // gate. A 'former'/'on_hold' admin profile carries no privilege here, on
+    // either the messages branch or (via isStaffOrAdmin) the support branch.
+    const isAdmin = profile?.role === 'admin' && profile?.status === 'current'
     // ROLE-5a: staff (account_types contains 'staff' AND status='current') read
     // support threads too, so they must be able to fetch support attachments.
     // Used ONLY by the support branch below — the messages branch keeps its

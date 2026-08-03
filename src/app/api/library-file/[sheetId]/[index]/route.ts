@@ -61,7 +61,7 @@ export async function GET(
 
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id, role, account_types')
+      .select('id, role, account_types, status')
       .eq('id', user.id)
       .maybeSingle()
 
@@ -105,7 +105,11 @@ export async function GET(
     const ownerOk = sheet.owner_id === null || sheet.owner_id === user.id
 
     let access = false
-    if (profile?.role === 'admin') {
+    // The admin tier additionally requires status === 'current', matching
+    // requireStaff (src/lib/auth/requireStaff.ts) - the canonical active-account
+    // gate. The teacher_exam / teacher / student tiers below are deliberately
+    // left as they are; their status handling is tracked separately (NEW368).
+    if (profile?.role === 'admin' && profile?.status === 'current') {
       access = true
     } else if (accountTypes.includes('teacher_exam')) {
       access = (isStudentAudience || allowedRoles.includes('teacher') || allowedRoles.includes('teacher_exam')) && ownerOk
