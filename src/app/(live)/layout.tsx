@@ -6,12 +6,15 @@
 // route group, (live) never inherits them. Do NOT add any chrome component here.
 //
 // Auth gate mirrors (dashboard)/layout.tsx exactly: getUser + redirect on no user,
-// THEN a profiles-row existence check as a defense-in-depth role backstop. The other
-// fields the (dashboard) fetch returns (full_name, email, photo_url, role, timezone)
-// are dropped here — none are rendered in this chrome-free layout — but the
+// THEN a profiles-row existence check as a defense-in-depth role backstop, THEN the
+// same mid-session status gate (status !== 'current' → /login?reason=deactivated).
+// The other fields the (dashboard) fetch returns (full_name, email, photo_url, role,
+// timezone) are dropped here — none are rendered in this chrome-free layout — but
+// `status` IS selected because the gate reads it, and the
 // `if (!profile) redirect('/login')` check itself is KEPT, so a logged-in non-teacher
 // (no profiles row, e.g. a student) is bounced. This keeps (live) never weaker than
-// (dashboard). src/proxy.ts remains the primary role gate, but it sits behind a 60s
+// (dashboard) on EITHER gate — the role backstop or the deactivation gate.
+// src/proxy.ts remains the primary role gate, but it sits behind a 60s
 // cross-subdomain role cache; this in-layout backstop closes that window for every
 // route ever added under (live).
 import { createClient } from '@/lib/supabase/server'
@@ -29,8 +32,9 @@ export default async function LiveLayout({
 
   // Role backstop — semantic mirror of (dashboard)/layout.tsx. Same admin
   // (service-role) client, same `profiles` table, same `.eq('id', user.id)` filter,
-  // same `if (!profile) redirect('/login')`. Only the minimal `id` column is selected
-  // (pure existence test — nothing from the row is rendered or passed to children).
+  // same `if (!profile) redirect('/login')`. Only `id` (the existence test) and
+  // `status` (the deactivation gate below) are selected — nothing from the row is
+  // rendered or passed to children.
   // `.maybeSingle()` (not `.single()`) because zero rows is the normal case for any
   // non-teacher auth user; the bounce is identical to (dashboard) — both leave
   // `profile` null on zero rows, and `id` is the PK so there is never more than one.
@@ -41,7 +45,7 @@ export default async function LiveLayout({
   // the error made both look like null and bounced the user to /login.
   const { data: profile, error: profileError } = await admin
     .from('profiles')
-    .select('id')
+    .select('id, status')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -51,6 +55,13 @@ export default async function LiveLayout({
   }
 
   if (!profile) redirect('/login')
+
+  // Mid-session deactivation gate: signIn blocks former/on_hold at login, but a
+  // status change while a session is live must also lock the portal shell.
+  // Allow-list on 'current', matching requireAdmin's canonical rule. Redirect
+  // only - a server-component layout cannot write cookies, so no signOut here;
+  // the login page explains via ?reason=deactivated.
+  if (profile.status !== 'current') redirect('/login?reason=deactivated')
 
   return <div className="min-h-screen" style={{ backgroundColor: '#f9fafb' }}>{children}</div>
 }
