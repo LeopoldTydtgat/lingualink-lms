@@ -45,6 +45,13 @@ export default async function DashboardLayout({
   // user somehow has no profiles row, fail safe.
   if (!profile) redirect('/login')
 
+  // Mid-session deactivation gate: signIn blocks former/on_hold at login, but a
+  // status change while a session is live must also lock the portal shell.
+  // Allow-list on 'current', matching requireAdmin's canonical rule. Redirect
+  // only - a server-component layout cannot write cookies, so no signOut here;
+  // the login page explains via ?reason=deactivated.
+  if (profile.status !== 'current') redirect('/login?reason=deactivated')
+
   // mirrors requireStaff() — display-only; the /admin routes are server-gated,
   // so this flag only controls whether the shortcut card renders.
   const showStaffTools =

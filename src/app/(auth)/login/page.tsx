@@ -57,6 +57,7 @@ function LoginPageContent() {
   }
 
   const idleSignOut = searchParams.get('reason') === 'idle'
+  const deactivated = searchParams.get('reason') === 'deactivated'
 
   return (
     <>
@@ -128,6 +129,20 @@ function LoginPageContent() {
                 marginBottom: '16px',
               }}>
                 You were signed out due to inactivity.
+              </div>
+            )}
+
+            {deactivated && (
+              <div style={{
+                padding: '12px 16px',
+                backgroundColor: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '8px',
+                fontSize: '13px',
+                color: '#92400e',
+                marginBottom: '16px',
+              }}>
+                This account is not active. Please contact admin.
               </div>
             )}
 
