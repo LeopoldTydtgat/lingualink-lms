@@ -18,7 +18,7 @@ export async function reopenReport(reportId: string) {
   // zero-row profile keeps isAdmin false and hits the denial below unchanged.
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, status')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -29,12 +29,15 @@ export async function reopenReport(reportId: string) {
 
   // Mirror the admin route's exact admin check
   // (src/app/api/admin/reports/[id]/route.ts): role === 'admin'
-  const isAdmin = profile?.role === 'admin'
+  // status === 'current' is now required too, per the canonical rule in
+  // lib/auth/requireAdmin.ts: authorised = required role AND active account.
+  const isAdmin = profile?.role === 'admin' && profile?.status === 'current'
 
   if (!isAdmin) return { error: 'Not authorised' }
 
-  // Only flagged reports may be reopened — matches the admin route's guard so
-  // both admin reopen paths behave identically (NEW270).
+  // Flagged (never submitted) and completed (submitted but wrong) reports may
+  // both be reopened - matches the admin route's guard, and the race predicate
+  // below mirrors it too, so both admin reopen paths behave identically (NEW270).
   const { data: existing } = await supabase
     .from('reports')
     .select('id, status')
@@ -42,20 +45,31 @@ export async function reopenReport(reportId: string) {
     .single()
 
   if (!existing) return { error: 'Report not found' }
-  if (existing.status !== 'flagged') {
-    return { error: 'Only flagged reports can be reopened' }
+  if (existing.status !== 'flagged' && existing.status !== 'completed') {
+    return { error: 'Only flagged or completed reports can be reopened' }
   }
 
-  const { error } = await supabase
+  // completed_at is cleared so a reopened report carries no stale submitted
+  // timestamp; complete_report_atomic stamps it fresh when the teacher re-files.
+  // The status predicate guards the race between the check above and this write;
+  // .select confirms a row was actually touched - zero rows means the status
+  // changed underneath us (or the write silently matched nothing).
+  const { data: updatedRows, error } = await supabase
     .from('reports')
     .update({
       status: 'reopened',
       flagged_at: null,
+      completed_at: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', reportId)
+    .in('status', ['flagged', 'completed'])
+    .select('id')
 
   if (error) return { error: error.message }
+  if (!updatedRows || updatedRows.length === 0) {
+    return { error: 'Report can no longer be reopened. Refresh and try again.' }
+  }
 
   // Refresh the reports page so the list updates immediately
   revalidatePath('/reports')
@@ -91,13 +105,21 @@ export async function submitReport(reportId: string, payload: SubmitReportInput)
   // teacher_id check unchanged.
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, status')
     .eq('id', user.id)
     .maybeSingle()
 
   if (profileError) {
     console.error('[reports/actions] profiles lookup failed:', profileError)
     return { error: 'Something went wrong. Please try again.' }
+  }
+
+  // Active-account gate covering BOTH arms below, admin and teacher alike, per the
+  // canonical rule in lib/auth/requireAdmin.ts: authorised = role AND status.
+  // complete_report_atomic is a pay path, so a former teacher must not file a
+  // report on their old lessons, nor a deactivated admin on anyone's behalf.
+  if (profile?.status !== 'current') {
+    return { error: 'Not authorised' }
   }
 
   const isAdmin = profile?.role === 'admin'

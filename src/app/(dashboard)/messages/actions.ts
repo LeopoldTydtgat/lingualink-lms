@@ -24,11 +24,16 @@ export async function sendMessage(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, full_name')
+    .select('role, full_name, status')
     .eq('id', user.id)
     .single()
 
   if (!profile) return { error: 'Profile not found' }
+
+  // Sender must be an active account. NEW346 gates the counterpart's status;
+  // this is the sender-side half - a deactivated teacher/admin holding a live
+  // session must not inject new messages.
+  if (profile.status !== 'current') return { error: 'Not authorised' }
 
   const senderType = profile.role === 'admin' ? 'admin' : 'teacher'
 
@@ -173,6 +178,18 @@ export async function editMessage(messageId: string, content: string) {
   if (message.sender_id !== user.id || message.sender_type === 'student') {
     return { error: 'You can only edit your own messages.' }
   }
+
+  // Sender-side status gate, mirroring sendMessage: a deactivated teacher/admin on
+  // a live session must not push new content into a thread by editing an old
+  // message. Fail closed on a lookup error, matching this file's existing pattern.
+  const { data: senderProfile, error: senderProfileError } = await adminDb
+    .from('profiles')
+    .select('status')
+    .eq('id', user.id)
+    .maybeSingle()
+
+  if (senderProfileError) return { error: 'Could not verify access. Please try again.' }
+  if (senderProfile?.status !== 'current') return { error: 'Not authorised' }
 
   // 15-minute edit window, checked against the DB row's created_at (never a
   // client-supplied timestamp). The client hides the Edit button past the window,

@@ -150,125 +150,122 @@ export async function proxy(request: NextRequest) {
     PUBLIC_API_PATHS.has(pathname)
 
   if (!isPublicPath && !user) {
-    const loginUrl = new URL(loginUrlForPath(pathname))
+    // Base arg is ignored for an absolute URL; it only kicks in when the
+    // NEXT_PUBLIC_*_URL env var is empty and loginUrlForPath returns a relative
+    // path — resolve against this request's origin instead of throwing.
+    const loginUrl = new URL(loginUrlForPath(pathname), request.url)
     loginUrl.searchParams.set('returnUrl', pathname)
     return withAuthCookies(NextResponse.redirect(loginUrl))
   }
 
-  // ── Per-request status check with 60-second cookie cache ─────────────────────
-  // Only runs for authenticated users on protected paths.
+  // ── Per-request status check ────────────────────────────────────────────────
+  // Only runs for authenticated users on protected paths, and now runs on every
+  // such request. The previous 60-second cookie cache was removed because its
+  // freshness marker (`ll_status_checked_at`) was a client-supplied cookie value
+  // we trusted verbatim: a non-browser client could keep sending a fresh
+  // timestamp and suppress the status check indefinitely. The role-based portal
+  // gate below also lived inside that cache, so it only ran on a cache miss.
   if (!isPublicPath && user) {
-    const checkedAt = request.cookies.get('ll_status_checked_at')?.value
-    const now = Math.floor(Date.now() / 1000)
-    const cacheValid = checkedAt && (now - parseInt(checkedAt, 10)) < 60
+    const adminDb = createAdminClient()
+    let status: string | null = null
+    let hasRecord = false
+    let hasProfile = false
+    let hasStudent = false
 
-    if (!cacheValid) {
-      const adminDb = createAdminClient()
-      let status: string | null = null
-      let hasRecord = false
-      let hasProfile = false
-      let hasStudent = false
+    // Try profiles first — teachers and admins (profiles.id === auth user id)
+    const { data: profile, error: profileError } = await adminDb
+      .from('profiles')
+      .select('status')
+      .eq('id', user.id)
+      .maybeSingle()
 
-      // Try profiles first — teachers and admins (profiles.id === auth user id)
-      const { data: profile, error: profileError } = await adminDb
-        .from('profiles')
+    // A failed query is not an inactive account. Fail open on a transient DB
+    // error: let the request continue, no signOut and no redirect — the next
+    // request re-checks.
+    if (profileError) {
+      console.error(
+        '[proxy] status check: profiles lookup failed — failing open',
+        profileError
+      )
+      return response
+    }
+
+    if (profile) {
+      hasRecord = true
+      hasProfile = true
+      status = profile.status ?? null
+    } else {
+      // Fall back to students table (students.auth_user_id === auth user id)
+      const { data: student, error: studentError } = await adminDb
+        .from('students')
         .select('status')
-        .eq('id', user.id)
+        .eq('auth_user_id', user.id)
         .maybeSingle()
 
-      // A failed query is not an inactive account. Fail open on a transient DB
-      // error: let the request continue, no signOut, no redirect, and no cache
-      // cookie written from an errored result — the next request re-checks.
-      if (profileError) {
+      // Same fail-open rule as the profiles branch above.
+      if (studentError) {
         console.error(
-          '[proxy] status check: profiles lookup failed — failing open',
-          profileError
+          '[proxy] status check: students lookup failed — failing open',
+          studentError
         )
         return response
       }
 
-      if (profile) {
+      if (student) {
         hasRecord = true
-        hasProfile = true
-        status = profile.status ?? null
-      } else {
-        // Fall back to students table (students.auth_user_id === auth user id)
-        const { data: student, error: studentError } = await adminDb
-          .from('students')
-          .select('status')
-          .eq('auth_user_id', user.id)
-          .maybeSingle()
-
-        // Same fail-open rule as the profiles branch above.
-        if (studentError) {
-          console.error(
-            '[proxy] status check: students lookup failed — failing open',
-            studentError
-          )
-          return response
-        }
-
-        if (student) {
-          hasRecord = true
-          hasStudent = true
-          status = student.status ?? null
-        }
+        hasStudent = true
+        status = student.status ?? null
       }
+    }
 
-      const blocked = !hasRecord || status === 'former' || status === 'on_hold'
+    const blocked = !hasRecord || status === 'former' || status === 'on_hold'
 
-      if (blocked) {
-        await supabase.auth.signOut()
-        const loginUrl = new URL(loginUrlForPath(pathname))
-        loginUrl.searchParams.set('error', 'account_inactive')
+    if (blocked) {
+      await supabase.auth.signOut()
+      // Base arg is ignored for an absolute URL; it only kicks in when the
+      // NEXT_PUBLIC_*_URL env var is empty and loginUrlForPath returns a
+      // relative path — resolve against this request's origin instead of
+      // throwing.
+      const loginUrl = new URL(loginUrlForPath(pathname), request.url)
+      loginUrl.searchParams.set('error', 'account_inactive')
 
-        // Build the redirect, but preserve the cookie state Supabase wrote onto
-        // `response` (where Supabase wrote auth-cookie clears)
-        const redirectResponse = withAuthCookies(NextResponse.redirect(loginUrl))
-        // Delete our own cache cookie on top of whatever Supabase set — must
-        // include `domain` so the browser clears the domain-scoped cookie, not
-        // a phantom host-only one.
-        redirectResponse.cookies.set({
-          name: 'll_status_checked_at',
-          value: '',
-          path: '/',
-          maxAge: 0,
-          ...(cookieDomain ? { domain: cookieDomain } : {}),
-        })
-        return redirectResponse
-      }
-
-      // ── Role-based portal gate ────────────────────────────────────────────
-      // A user with a profiles row (teacher/admin) must not browse student-
-      // portal pages; a student-only user (students row, no profiles row)
-      // must not browse teacher/admin pages. We don't gate '/' (root landing)
-      // or any /api/* route — those are intentionally cross-portal. Public
-      // paths are already excluded by the !isPublicPath branch we're in.
-      if (pathname !== '/' && !pathname.startsWith('/api/')) {
-        if (hasProfile && pathname.startsWith('/student/')) {
-          const teacherBase = portalUrl('teacher')
-          const target = isProductionHost(host) && teacherBase
-            ? `${teacherBase}/upcoming-classes`
-            : new URL('/upcoming-classes', request.url)
-          return withAuthCookies(NextResponse.redirect(target))
-        }
-        if (hasStudent && !hasProfile && !pathname.startsWith('/student/')) {
-          const studentBase = portalUrl('student')
-          const target = isProductionHost(host) && studentBase
-            ? `${studentBase}/student/my-classes`
-            : new URL('/student/my-classes', request.url)
-          return withAuthCookies(NextResponse.redirect(target))
-        }
-      }
-
-      // Status is current — stamp the cache cookie so we skip the DB hit for 60 s
-      response.cookies.set('ll_status_checked_at', String(now), {
-        httpOnly: true,
-        sameSite: 'lax',
+      // Build the redirect, but preserve the cookie state Supabase wrote onto
+      // `response` (where Supabase wrote auth-cookie clears)
+      const redirectResponse = withAuthCookies(NextResponse.redirect(loginUrl))
+      // Clear the legacy cookie left over from the removed 60-second status
+      // cache — browsers still hold stale copies. Must include `domain` so the
+      // browser clears the domain-scoped cookie, not a phantom host-only one.
+      redirectResponse.cookies.set({
+        name: 'll_status_checked_at',
+        value: '',
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        maxAge: 0,
         ...(cookieDomain ? { domain: cookieDomain } : {}),
       })
+      return redirectResponse
+    }
+
+    // ── Role-based portal gate ────────────────────────────────────────────
+    // A user with a profiles row (teacher/admin) must not browse student-
+    // portal pages; a student-only user (students row, no profiles row)
+    // must not browse teacher/admin pages. We don't gate '/' (root landing)
+    // or any /api/* route — those are intentionally cross-portal. Public
+    // paths are already excluded by the !isPublicPath branch we're in.
+    if (pathname !== '/' && !pathname.startsWith('/api/')) {
+      if (hasProfile && pathname.startsWith('/student/')) {
+        const teacherBase = portalUrl('teacher')
+        const target = isProductionHost(host) && teacherBase
+          ? `${teacherBase}/upcoming-classes`
+          : new URL('/upcoming-classes', request.url)
+        return withAuthCookies(NextResponse.redirect(target))
+      }
+      if (hasStudent && !hasProfile && !pathname.startsWith('/student/')) {
+        const studentBase = portalUrl('student')
+        const target = isProductionHost(host) && studentBase
+          ? `${studentBase}/student/my-classes`
+          : new URL('/student/my-classes', request.url)
+        return withAuthCookies(NextResponse.redirect(target))
+      }
     }
   }
 

@@ -83,6 +83,15 @@ function formatDate(iso: string, timezone: string) {
   }).format(new Date(iso))
 }
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+// trainings.end_date is a DATE column - a calendar date, not an instant.
+// Split the literal string; never round-trip through Date or a timezone.
+function formatDateOnly(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return `${String(d).padStart(2, '0')} ${MONTHS_SHORT[(m || 1) - 1]} ${y}`
+}
+
 function hoursFromMinutes(minutes: number) {
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
@@ -227,7 +236,7 @@ export default function ProgressClient({
   const totalHours = training?.total_hours ?? 0
   const hoursUsed = training ? parseFloat(training.hours_consumed.toString()) : 0
   const hoursRemaining = Math.max(0, totalHours - hoursUsed)
-  const endDate = training?.end_date ? formatDate(training.end_date, timezone) : '—'
+  const endDate = training?.end_date ? formatDateOnly(training.end_date) : '—'
   const hoursPct = totalHours > 0 ? Math.round((hoursUsed / totalHours) * 100) : 0
 
   // ----- Lesson history -----
@@ -307,6 +316,9 @@ export default function ProgressClient({
                 </span>
               </div>
               <ProgressBar value={hoursUsed} max={totalHours} />
+              <p className="text-xs" style={{ color: '#9ca3af', marginTop: '8px' }}>
+                Includes hours from classes cancelled less than 24 hours before the start time.
+              </p>
             </div>
           </Card>
         )}

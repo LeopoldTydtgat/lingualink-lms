@@ -103,8 +103,7 @@ export async function PUT(
 
   // Replace: clear the old set, then write the new one. Not atomic — a failure
   // between the two leaves the sheet untagged, which the error below reports so
-  // the admin can retry rather than silently believing it saved. Mirrors the
-  // established exercises replace in ../route.ts.
+  // the admin can retry rather than silently believing it saved.
   const { error: deleteError } = await adminClient
     .from('sheet_tags')
     .delete()

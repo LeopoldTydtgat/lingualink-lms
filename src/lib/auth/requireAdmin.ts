@@ -2,15 +2,20 @@ import { createClient } from '@/lib/supabase/server'
 import type { User } from '@supabase/supabase-js'
 
 /**
- * THE canonical admin rule — the single source of truth shared by the (admin)
- * layout, the admin pages, and every /api/admin route:
+ * ROLE-ONLY predicate:
  *
- *   isAdmin = role === 'admin'
+ *   isAdminProfile = role === 'admin'
  *
- * Use this predicate directly when the caller already fetched the profile row
- * it needs anyway (layout, pages); use requireAdmin() when the profile would
- * be fetched solely to authorise. Staff-permitted routes use requireStaff()
- * (role 'admin' OR account_types contains 'staff') instead — see
+ * It says NOTHING about whether the account is still active, so it is safe only
+ * where the caller has ALREADY gated profiles.status = 'current' by other means.
+ * The one place that holds today is a page under the (admin) route group: its
+ * layout calls requireStaff() (role 'admin' OR account_types contains 'staff',
+ * AND status 'current') before any page in the group renders.
+ *
+ * Anywhere that upstream gate is absent - every /api/admin route handler, since
+ * no layout wraps a route handler - use requireAdmin() below instead. That
+ * helper applies the FULL rule, role AND status. Staff-permitted routes use
+ * requireStaff() (role 'admin' OR account_types contains 'staff') instead, see
  * src/lib/auth/requireStaff.ts.
  */
 export function isAdminProfile(
@@ -20,18 +25,30 @@ export function isAdminProfile(
 }
 
 /**
- * Resolves the caller and returns them only if they are an admin.
+ * Resolves the caller and returns them only if they are a CURRENT admin.
  *
- * Applies the canonical rule above. Returns null for anonymous callers
- * AND for non-admins, so the
- * caller cannot accidentally treat "logged in" as "authorised".
+ * THE canonical admin rule, the single source of truth for every caller that
+ * authorises through this helper:
+ *
+ *   isCurrentAdmin = role === 'admin' AND status === 'current'
+ *
+ * status is the canonical active-account gate, matching requireStaff() and
+ * requireTeacher(). A deactivated admin (status 'former' or 'on_hold') is
+ * refused here even though their role is unchanged: proxy.ts blocks such an
+ * account at the portal, but only outside its 60s status-cookie cache, so a
+ * role-only check left every route this helper guards reachable by a former or
+ * on_hold admin holding a live session.
+ *
+ * Returns null for anonymous callers, for non-admins, AND for admins who are no
+ * longer current, so the caller cannot accidentally treat "logged in" as
+ * "authorised".
  *
  * Fail-closed: a confirmed-empty profiles read yields no profile, which is not
- * an admin. A profiles read that FAILS is not the same thing — it says nothing
+ * an admin. A profiles read that FAILS is not the same thing - it says nothing
  * about the caller's role, so it throws rather than silently demoting a real
  * admin on a transient DB error.
  *
- * Server-only — it reads the session cookie. Never import into a client component.
+ * Server-only - it reads the session cookie. Never import into a client component.
  */
 export async function requireAdmin(): Promise<User | null> {
   const supabase = await createClient()
@@ -41,7 +58,7 @@ export async function requireAdmin(): Promise<User | null> {
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, role, account_types')
+    .select('id, role, status')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -50,5 +67,8 @@ export async function requireAdmin(): Promise<User | null> {
     throw new Error('Failed to load profile')
   }
 
-  return isAdminProfile(profile) ? user : null
+  const isCurrentAdmin =
+    profile?.status === 'current' && isAdminProfile(profile)
+
+  return isCurrentAdmin ? user : null
 }

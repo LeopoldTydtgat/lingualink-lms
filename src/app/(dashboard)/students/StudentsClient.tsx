@@ -96,10 +96,6 @@ function TrainingCard({ training, isPast = false, isAdmin }: { training: Trainin
         )}
         <div className="min-w-0">
           <p className="font-semibold text-gray-900 truncate">{student.full_name}</p>
-          {/* Show assigned teacher name — useful for admin view */}
-          {isAdmin && training.profiles && (
-            <p className="text-xs text-gray-500 truncate">Teacher: {training.profiles.full_name}</p>
-          )}
         </div>
       </div>
 

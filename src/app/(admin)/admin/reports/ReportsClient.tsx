@@ -194,7 +194,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
         body: JSON.stringify({ action: 'reopen' }),
       });
       if (!res.ok) {
-        // Keep the modal open so the admin can retry - the report is still flagged.
+        // Keep the modal open so the admin can retry - the report was not reopened.
         setReopenError(await errorText(res, 'Reopen failed'));
         return;
       }
@@ -287,16 +287,18 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                       <td className="py-3 px-3 text-gray-600 text-xs">
                         {r.status === 'flagged' && r.flagged_at
                           ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
-                          : r.status === 'reopened'
-                            ? '—'
-                            : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
+                          : r.status === 'completed' && r.completed_at
+                            ? `Submitted ${formatDateTime(r.completed_at, adminTimezone)}`
+                            : r.status === 'completed' || r.status === 'reopened'
+                              ? '—'
+                              : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-2">
                           {(r.status === 'completed' || r.status === 'flagged') && (
                             <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                           )}
-                          {r.status === 'flagged' && (
+                          {(r.status === 'flagged' || r.status === 'completed') && (
                             <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
                           )}
                           {(r.status === 'pending' || r.status === 'reopened') && (
@@ -316,8 +318,8 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       {reopenId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
-            <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen flagged report?</h3>
-            <p className="text-sm text-gray-600 mb-5">This will reopen the report and allow the teacher to submit it late.</p>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Reopen this report?</h3>
+            <p className="text-sm text-gray-600 mb-5">The report will be returned to the teacher to submit again. If the corrected report changes the class outcome, the student&apos;s hours and the teacher&apos;s pay will adjust automatically.</p>
             {reopenError && (
               <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
             )}

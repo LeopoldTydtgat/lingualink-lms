@@ -257,10 +257,16 @@ function CompletedReportCard({
     pending: { label: 'Pending', bg: '#FFF8E8', fg: '#B45309' },
   }
 
-  const { label, bg, fg } = statusConfig[report.status] ?? statusConfig.completed
+  const { label, bg, fg } =
+    report.status === 'completed' && report.did_class_happen === false
+      ? report.no_show_type === 'teacher'
+        ? { label: 'Teacher absent', bg: '#FFEEE6', fg: '#FD5602' }
+        : { label: 'Student absent', bg: '#FFF0E0', fg: '#C2410C' }
+      : statusConfig[report.status] ?? statusConfig.completed
 
-  // Admin-only recovery path for a report that was never submitted.
-  const canReopen = isAdmin && report.status === 'flagged'
+  // Admin-only recovery path: a report that was never submitted ('flagged') and a
+  // submitted-but-wrong one ('completed') that needs correcting and re-filing.
+  const canReopen = isAdmin && (report.status === 'flagged' || report.status === 'completed')
 
   // Call the server action to reopen the report
   async function handleReopen() {
@@ -302,11 +308,6 @@ function CompletedReportCard({
           </p>
           {reopenError && (
             <p className="text-xs text-red-500 mt-1">{reopenError}</p>
-          )}
-          {isAdmin && (
-            <p className="text-xs text-gray-400">
-              By {lesson?.teacher?.full_name ?? 'Unknown teacher'}
-            </p>
           )}
         </div>
       </div>

@@ -143,18 +143,22 @@ export async function PATCH(
     .maybeSingle();
 
   if (!existing) return NextResponse.json({ error: 'Report not found' }, { status: 404 });
-  if (existing.status !== 'flagged') {
-    return NextResponse.json({ error: 'Only flagged reports can be reopened' }, { status: 400 });
+  if (existing.status !== 'flagged' && existing.status !== 'completed') {
+    return NextResponse.json({ error: 'Only flagged or completed reports can be reopened' }, { status: 400 });
   }
 
+  // Reopenable statuses: 'flagged' (never submitted) and 'completed' (submitted
+  // but wrong - the admin correction path). completed_at is cleared so a reopened
+  // report carries no stale submitted timestamp; complete_report_atomic stamps it
+  // fresh when the teacher re-files.
   // The status predicate guards the race between the check above and this
   // write; .select confirms a row was actually touched — zero rows means the
   // status changed underneath us (or the write silently matched nothing).
   const { data: updatedRows, error } = await supabase
     .from('reports')
-    .update({ status: 'reopened', flagged_at: null, updated_at: new Date().toISOString() })
+    .update({ status: 'reopened', flagged_at: null, completed_at: null, updated_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('status', 'flagged')
+    .in('status', ['flagged', 'completed'])
     .select('id');
 
   if (error) {
@@ -162,7 +166,7 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!updatedRows || updatedRows.length === 0) {
-    return NextResponse.json({ error: 'Report is no longer flagged. Refresh and try again.' }, { status: 409 });
+    return NextResponse.json({ error: 'Report can no longer be reopened. Refresh and try again.' }, { status: 409 });
   }
 
   return NextResponse.json({ success: true });
