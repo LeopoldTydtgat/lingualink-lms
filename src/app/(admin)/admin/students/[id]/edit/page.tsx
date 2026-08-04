@@ -43,7 +43,7 @@ export default async function EditStudentPage({
   const { data: student, error } = await supabase
     .from('students')
     .select(
-      'id, full_name, email, date_of_birth, phone, timezone, language_preference, status, customer_number, is_private, company_id, academic_advisor_id, native_language, learning_language, current_fluency_level, self_assessed_level, learning_goals, interests, cancellation_policy, admin_notes, teacher_notes'
+      'id, full_name, email, date_of_birth, phone, timezone, language_preference, status, customer_number, is_private, company_id, academic_advisor_id, native_language, learning_language, current_fluency_level, learning_goals, interests, cancellation_policy, admin_notes, teacher_notes'
     )
     .eq('id', id)
     .single()

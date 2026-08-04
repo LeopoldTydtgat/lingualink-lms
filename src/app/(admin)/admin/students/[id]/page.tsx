@@ -58,7 +58,7 @@ export default async function StudentDetailPage({
     ? await supabase
         .from('students')
         .select(`
-          id, full_name, email, phone, photo_url, status, timezone, language_preference, native_language, learning_language, current_fluency_level, self_assessed_level, learning_goals, interests, teacher_notes, email_bounced_at, email_bounce_reason,
+          id, full_name, email, phone, photo_url, status, timezone, language_preference, native_language, learning_language, current_fluency_level, learning_goals, interests, teacher_notes, email_bounced_at, email_bounce_reason,
           companies (
             id,
             name

@@ -10,7 +10,6 @@ type Student = {
   id: string
   full_name: string
   photo_url: string | null
-  self_assessed_level: string | null
   timezone: string | null
   learning_goals: string | null
   interests: string | null
@@ -255,10 +254,6 @@ export default function StudentDetailClient({
               <div>
                 <p className="text-gray-500">Assigned Teachers</p>
                 <p className="font-medium text-gray-900">{assignedTeacherNames.length ? assignedTeacherNames.join(', ') : '—'}</p>
-              </div>
-              <div>
-                <p className="text-gray-500">Student Level (self-assessed)</p>
-                <p className="font-medium text-gray-900">{student?.self_assessed_level ?? '—'}</p>
               </div>
               <div>
                 <p className="text-gray-500">Timezone</p>

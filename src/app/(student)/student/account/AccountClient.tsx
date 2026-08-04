@@ -21,7 +21,6 @@ interface Student {
   language_preference: string | null
   learning_goals: string | null
   interests: string | null
-  self_assessed_level: string | null
 }
 
 interface Training {
@@ -42,8 +41,6 @@ interface Props {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 const STATUS_COLOURS: Record<string, { bg: string; color: string }> = {
   active:    { bg: '#dcfce7', color: '#166534' },
@@ -149,7 +146,6 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
   // Learning profile
   const [learningGoals, setLearningGoals] = useState(student.learning_goals ?? '')
   const [interests, setInterests] = useState(student.interests ?? '')
-  const [selfLevel, setSelfLevel] = useState(student.self_assessed_level ?? '')
   const [learningSaving, setLearningSaving] = useState(false)
   const [learningSaved, setLearningSaved] = useState(false)
   const [learningError, setLearningError] = useState('')
@@ -242,7 +238,6 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
         body: JSON.stringify({
           learning_goals: learningGoals,
           interests,
-          self_assessed_level: selfLevel,
         }),
       })
       const json = await res.json().catch(() => ({}))
@@ -473,7 +468,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
           />
         </div>
 
-        <div style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '20px' }}>
           <label style={labelStyle}>Interests</label>
           <textarea
             style={{ ...inputStyle, height: '80px', resize: 'vertical' }}
@@ -481,23 +476,6 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             onChange={e => setInterests(e.target.value)}
             placeholder="e.g. Business, Travel, Technology, Culture…"
           />
-        </div>
-
-        <div style={{ marginBottom: '20px' }}>
-          <label style={labelStyle}>My English Level (self-assessed)</label>
-          <select
-            style={{ ...inputStyle, maxWidth: '200px' }}
-            value={selfLevel}
-            onChange={e => setSelfLevel(e.target.value)}
-          >
-            <option value="">I'm not sure</option>
-            {LEVELS.map(l => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-          <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-            No problem if you don't know — your teacher will assess your level during classes.
-          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

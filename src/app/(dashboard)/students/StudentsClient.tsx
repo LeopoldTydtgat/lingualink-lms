@@ -7,7 +7,6 @@ type Student = {
   id: string
   full_name: string
   photo_url: string | null
-  self_assessed_level: string | null
 }
 
 type Training = {

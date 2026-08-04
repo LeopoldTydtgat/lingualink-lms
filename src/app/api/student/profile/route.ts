@@ -11,7 +11,6 @@ const ALLOWED_TEXT_FIELDS = new Set([
   'language_preference',
   'learning_goals',
   'interests',
-  'self_assessed_level',
 ])
 
 // ── POST — photo upload (multipart/form-data) ─────────────────────────────────
