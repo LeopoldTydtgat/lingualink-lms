@@ -297,6 +297,32 @@ export function teacherRescheduledEmailContent(
   `
 }
 
+// The OUTGOING teacher of a class an admin reassigned to someone else. Kept
+// separate from teacherRescheduledEmailContent on purpose: the time did not
+// move, so "has been rescheduled" would misread — the class simply left this
+// teacher's schedule. scheduledAt/durationMinutes are the class as the outgoing
+// teacher knew it, rendered in THEIR timezone.
+export function teacherReassignedEmailContent(
+  studentName: string,
+  scheduledAt: string,
+  durationMinutes: number,
+  teacherTimezone: string
+): string {
+  const formattedTime = formatClassTime(scheduledAt, teacherTimezone, durationMinutes)
+  return `
+    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
+      Your class with <strong style="color:#FF8303;">${studentName}</strong> on ${formattedTime}
+      has been reassigned and removed from your schedule.
+    </p>
+    ${buildDetailsTable('Class details', [
+      { label: 'Date &amp; Time', value: formattedTime },
+      { label: 'Duration', value: `${durationMinutes} minutes` },
+      { label: 'Student', value: studentName },
+    ])}
+    ${buildButton(`${process.env.NEXT_PUBLIC_TEACHER_URL}/upcoming-classes`, 'View My Schedule')}
+  `
+}
+
 // ─── Student email content builders ───────────────────────────────────────────
 
 export function studentBookingConfirmationEmailContent(
