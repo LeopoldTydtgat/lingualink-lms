@@ -61,6 +61,9 @@ export async function POST(req: NextRequest) {
     }
     const data = parsed.data
 
+    // auth stores emails lowercased and both guard lookups below use .eq, so normalise once and use this everywhere.
+    const email = data.email.toLowerCase()
+
     // ── 2. Verify the requesting user is an admin ────────────────────────────
     const user = await requireAdmin()
     if (!user) {
@@ -69,14 +72,58 @@ export async function POST(req: NextRequest) {
 
     // ── Cross-role email guard: reject if a teacher already uses this email ──
     const guardClient = createAdminClient()
-    const { data: existingTeacher } = await guardClient
+    const { data: existingTeacher, error: existingTeacherError } = await guardClient
       .from('profiles')
       .select('id')
-      .eq('email', data.email)
+      .eq('email', email)
       .maybeSingle()
+    // A failed read is not "no teacher holds this email": leaving it
+    // undestructured let a lookup error pass the guard entirely. Fail loud.
+    if (existingTeacherError) {
+      console.error('Cross-role email guard error (student POST):', existingTeacherError)
+      return NextResponse.json(
+        { error: 'Failed to verify the email address.' },
+        { status: 500 }
+      )
+    }
     if (existingTeacher) {
       return NextResponse.json(
         { error: 'This email is already in use by a teacher account. Each email can only belong to one role.' },
+        { status: 409 }
+      )
+    }
+
+    // ── Same-role email guard: reject if a student already uses this email ───
+    // Pre-empts the generic 500 the UNIQUE students.email constraint would
+    // otherwise produce at the insert, and surfaces historic orphans (rows with
+    // null auth_user_id) as an actionable message. The UNIQUE constraint remains
+    // the actual enforcement; this guard is for error quality, and the race
+    // window between guard and insert is acceptable because the insert branch
+    // still rolls back correctly.
+    const { data: existingStudent, error: existingStudentError } = await guardClient
+      .from('students')
+      .select('id, auth_user_id')
+      .eq('email', email)
+      .maybeSingle()
+    if (existingStudentError) {
+      console.error('Student email guard error (student POST):', existingStudentError)
+      return NextResponse.json(
+        { error: 'Failed to verify the email address.' },
+        { status: 500 }
+      )
+    }
+    if (existingStudent && !existingStudent.auth_user_id) {
+      return NextResponse.json(
+        {
+          error:
+            'This email belongs to a partially created student account with no login. Delete that student record first, then create the account again.',
+        },
+        { status: 409 }
+      )
+    }
+    if (existingStudent) {
+      return NextResponse.json(
+        { error: 'This email is already in use by another student account.' },
         { status: 409 }
       )
     }
@@ -149,7 +196,7 @@ export async function POST(req: NextRequest) {
     // Throwaway password — never returned or logged. The student sets their
     // own password via the invite email sent after all inserts succeed.
     const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email: data.email,
+      email,
       password: generateThrowawayPassword(),
       email_confirm: true,
     })
@@ -176,7 +223,7 @@ export async function POST(req: NextRequest) {
       .insert({
         auth_user_id: newUserId,
         full_name: data.full_name,
-        email: data.email,
+        email,
         timezone: data.timezone,
         language_preference: data.language_preference ?? null,
         status: data.status,
@@ -393,7 +440,7 @@ export async function POST(req: NextRequest) {
     // "Forgot password" if the email did not go out.
     const { sent: inviteEmailSent } = await sendAccountInviteEmail(
       adminClient,
-      data.email,
+      email,
       data.full_name,
       'student'
     )
