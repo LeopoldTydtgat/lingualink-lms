@@ -200,9 +200,22 @@ export async function POST(req: NextRequest) {
       .select('id')
       .single()
 
+    // ── Rollback ordering rule (applies to EVERY failure branch below) ───────
+    // Never delete the auth user until the students row is confirmed gone:
+    // students.auth_user_id is ON DELETE SET NULL, so a students row that
+    // survives a failed delete would be left orphaned with a null auth_user_id
+    // while still holding the UNIQUE email, permanently blocking every later
+    // create for that address at the students insert.
     if (studentError || !studentRow) {
-      await adminClient.auth.admin.deleteUser(newUserId)
       console.error('Student row error:', studentError)
+
+      // Nothing to confirm gone on this branch — the students insert is what
+      // failed — so the auth user can be removed straight away.
+      const { error: authRollbackError } = await adminClient.auth.admin.deleteUser(newUserId)
+      if (authRollbackError) {
+        console.error('auth user rollback error (student POST):', authRollbackError)
+      }
+
       return NextResponse.json(
         { error: 'Failed to create student record.' },
         { status: 500 }
@@ -228,9 +241,37 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (trainingError || !trainingRow) {
-      await adminClient.from('students').delete().eq('id', studentId)
-      await adminClient.auth.admin.deleteUser(newUserId)
       console.error('Training insert error:', trainingError)
+
+      // Deleting the students row also unwinds any trainings row
+      // (trainings.student_id → students is ON DELETE CASCADE).
+      const { error: studentRollbackError } = await adminClient
+        .from('students')
+        .delete()
+        .eq('id', studentId)
+
+      if (studentRollbackError) {
+        // The students row survived and still holds the UNIQUE email. Deleting
+        // the auth user now would only orphan it (SET NULL) and lock the email
+        // out for good, so leave the pair intact and tell the admin.
+        console.error('student rollback error (student POST):', studentRollbackError)
+        return NextResponse.json(
+          {
+            error:
+              'Failed to create the training record, and cleanup of the partial student account also failed. Do not retry with this email - the partial account must be removed first.',
+          },
+          { status: 500 }
+        )
+      }
+
+      // Students row confirmed gone — safe to remove the auth user. A stranded
+      // auth user fails loudly at the next createUser, so a logged failure here
+      // does not change the response.
+      const { error: authRollbackError } = await adminClient.auth.admin.deleteUser(newUserId)
+      if (authRollbackError) {
+        console.error('auth user rollback error (student POST):', authRollbackError)
+      }
+
       return NextResponse.json(
         { error: 'Failed to create training record.' },
         { status: 500 }
@@ -256,26 +297,30 @@ export async function POST(req: NextRequest) {
       // assigned teacher would be unable to see or message the student, and the
       // notification below would announce an assignment that does not exist.
       // The insert is a single multi-row statement, so one bad row drops them
-      // all. Roll the create back in reverse creation order and fail loud —
-      // best-effort deletes, same style as the two failure branches above, but
-      // each error is logged so a stranded row is traceable.
+      // all. Roll the create back and fail loud — every rollback error is logged
+      // so a stranded row is traceable, and the auth user is only touched once
+      // the students row is confirmed gone (see the rule at step 4).
       if (ttError) {
         console.error('training_teachers insert error:', ttError)
 
-        const { error: trainingRollbackError } = await adminClient
-          .from('trainings')
-          .delete()
-          .eq('id', trainingId)
-        if (trainingRollbackError) {
-          console.error('training rollback error (student POST):', trainingRollbackError)
-        }
-
+        // One delete unwinds all three rows: trainings.student_id → students and
+        // training_teachers.training_id → trainings are both ON DELETE CASCADE.
         const { error: studentRollbackError } = await adminClient
           .from('students')
           .delete()
           .eq('id', studentId)
+
         if (studentRollbackError) {
+          // Same as step 5: the surviving students row still holds the UNIQUE
+          // email, so the auth user stays put rather than orphaning it.
           console.error('student rollback error (student POST):', studentRollbackError)
+          return NextResponse.json(
+            {
+              error:
+                'Failed to assign teachers to the new student, and cleanup of the partial student account also failed. Do not retry with this email - the partial account must be removed first.',
+            },
+            { status: 500 }
+          )
         }
 
         const { error: authRollbackError } = await adminClient.auth.admin.deleteUser(newUserId)
