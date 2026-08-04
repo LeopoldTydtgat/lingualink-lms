@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { DatePartInput } from '../../../_components/DatePartInput'
@@ -553,8 +554,21 @@ export default function EditStudentClient({
                 Could not load this student&apos;s training. Refresh the page - do not save until training details are visible.
               </LoadErrorBanner>
             ) : (
+              // Creating a training lives on the detail page, not here: it needs
+              // its own teacher list and POSTs to a different route, and this
+              // form has no state or fetching for either. The notice is a link
+              // rather than a dead sentence so the admin has somewhere to go.
               <p className="text-sm text-gray-500">
-                This student has no active training. Create a training to set the package, hours, end date and assigned teachers.
+                This student has no active training.{' '}
+                <Link
+                  href={`/admin/students/${id}`}
+                  prefetch={false}
+                  className="underline"
+                  style={{ color: '#FF8303' }}
+                >
+                  Create a training on the student&apos;s profile page
+                </Link>{' '}
+                to set the package, hours, end date and assigned teachers.
               </p>
             )}
           </Section>

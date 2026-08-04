@@ -151,6 +151,45 @@ export const CreateStudentSchema = z.object({
 
 export type CreateStudentInput = z.infer<typeof CreateStudentSchema>
 
+// ─── Create Training ──────────────────────────────────────────────────────────
+
+// Standalone training creation for a student who has NO active training
+// (POST /api/admin/students/[id]/trainings). The three training fields mirror
+// CreateStudentSchema's training block exactly — same 100-char package name,
+// same 500-hour ceiling, same 0.5-hour increments, same YYYY-MM-DD/'' → null
+// date handling — so a training created here can never hold a value the
+// create-student flow would have rejected.
+//
+// teacher_ids may legitimately be EMPTY: a training with nobody attached is a
+// valid intermediate state (the student simply cannot book until a teacher is
+// assigned), so unlike the student PATCH gate there is no min(1) here. The .max
+// is a payload cap only — CreateStudentSchema.assigned_teacher_ids carries no
+// ceiling, so this mirrors the only array cap convention in this file
+// (CreateCompanySchema.tags, max 50). Assignability (role/status) is NOT
+// checked here; the route re-validates every id against the same
+// role in ('teacher','admin') AND status = 'current' filter the create-student
+// route uses.
+export const CreateTrainingSchema = z.object({
+  package_name: z
+    .string()
+    .trim()
+    .min(1, 'Package name is required')
+    .max(100, 'Package name must be 100 characters or fewer'),
+  total_hours: z
+    .number()
+    .positive('Total hours must be a positive number')
+    .max(500, 'Total hours cannot exceed 500')
+    .multipleOf(0.5, 'Hours must be in 0.5-hour increments'),
+  end_date: dateString,
+  teacher_ids: z
+    .array(uuid)
+    .max(50, 'A training cannot have more than 50 assigned teachers')
+    .optional()
+    .default([]),
+})
+
+export type CreateTrainingInput = z.infer<typeof CreateTrainingSchema>
+
 // ─── Update Teacher ───────────────────────────────────────────────────────────
 
 export const UpdateTeacherSchema = z.object({

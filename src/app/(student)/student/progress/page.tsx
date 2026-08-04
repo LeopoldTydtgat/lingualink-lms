@@ -23,11 +23,19 @@ export default async function ProgressPage() {
     redirect('/student/account?confirm_tz=1')
   }
 
-  // Get the active training (most recent active, or most recent overall)
+  // Get the ACTIVE training. status must be filtered in SQL, not left to the
+  // ordering: without it this picked the newest row of ANY status, and Postgres
+  // sorts NULLs FIRST on DESC, so a historical training with a null start_date
+  // outranked the live one. Harmless while every student has exactly one
+  // training; wrong the moment a second one exists. At most one row can now
+  // match (one_active_training_per_student), so maybeSingle stays correct, and
+  // no active training legitimately yields null — ProgressClient already renders
+  // the "No active training found" state for it.
   const { data: training } = await supabase
     .from('trainings')
     .select('id, total_hours, hours_consumed, start_date, end_date, package_type, status')
     .eq('student_id', student.id)
+    .eq('status', 'active')
     .order('start_date', { ascending: false })
     .limit(1)
     .maybeSingle()

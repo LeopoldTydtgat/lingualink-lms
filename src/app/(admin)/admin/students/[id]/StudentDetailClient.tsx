@@ -8,6 +8,7 @@ import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
+import { DatePartInput } from '../../_components/DatePartInput'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -100,6 +101,27 @@ type Props = {
   student: Record<string, unknown>
   companyName: string | null
   activeTrain: Training | null
+  /**
+   * STRICT `status === 'active'` over ALL of the student's trainings. NOT
+   * `activeTrain !== null` — activeTrain deliberately falls back to the newest
+   * training of any status so the Training card still shows something once a
+   * package has ended. Everything that WRITES (Create Training, Add/Remove
+   * Hours) gates on this flag instead.
+   */
+  hasActiveTraining: boolean
+  /**
+   * Assignable teachers for the Create Training form: role teacher/admin,
+   * status 'current' — the same set the POST route re-validates against. Empty
+   * for staff viewers and whenever an active training already exists, because
+   * the form does not render in either case.
+   */
+  teacherOptions: Teacher[]
+  /**
+   * True when the assignable-teacher read failed. An empty picker is
+   * indistinguishable from "no teachers exist", so the form says so rather than
+   * letting an admin create a training with nobody attached by accident.
+   */
+  teacherOptionsLoadFailed: boolean
   hoursRemaining: number | null
   assignedTeachers: Teacher[]
   lessons: Lesson[]
@@ -438,6 +460,9 @@ export default function StudentDetailClient({
   student,
   companyName,
   activeTrain,
+  hasActiveTraining,
+  teacherOptions,
+  teacherOptionsLoadFailed,
   hoursRemaining,
   assignedTeachers,
   lessons,
@@ -461,6 +486,14 @@ export default function StudentDetailClient({
   const [hoursNotes, setHoursNotes] = useState('')
   const [hoursSaving, setHoursSaving] = useState(false)
   const [hoursError, setHoursError] = useState<string | null>(null)
+
+  // Create Training form state — only reachable when hasActiveTraining is false
+  const [trainingPackage, setTrainingPackage] = useState('')
+  const [trainingHours, setTrainingHours] = useState('')
+  const [trainingEndDate, setTrainingEndDate] = useState('')
+  const [trainingTeacherIds, setTrainingTeacherIds] = useState<string[]>([])
+  const [trainingSaving, setTrainingSaving] = useState(false)
+  const [trainingError, setTrainingError] = useState<string | null>(null)
 
   // Archive state
   const [archiving, setArchiving] = useState(false)
@@ -592,8 +625,73 @@ export default function StudentDetailClient({
     }
   }
 
+  function toggleTrainingTeacher(teacherId: string) {
+    setTrainingTeacherIds((prev) =>
+      prev.includes(teacherId)
+        ? prev.filter((t) => t !== teacherId)
+        : [...prev, teacherId]
+    )
+  }
+
+  async function handleCreateTraining() {
+    setTrainingError(null)
+    if (!trainingPackage.trim()) {
+      return setTrainingError('Package name is required.')
+    }
+    const hours = parseFloat(trainingHours)
+    if (!trainingHours || isNaN(hours) || hours <= 0) {
+      return setTrainingError('Enter a valid number of hours.')
+    }
+    setTrainingSaving(true)
+    try {
+      const res = await fetch(`/api/admin/students/${id}/trainings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          package_name: trainingPackage.trim(),
+          total_hours: hours,
+          end_date: trainingEndDate || null,
+          teacher_ids: trainingTeacherIds,
+        }),
+      })
+
+      // 409 (already has an active training), 404 and 422 all carry a message
+      // written for this admin — surface it verbatim. A non-JSON body (proxy
+      // error page, empty response) must not throw past that handling.
+      let data: { error?: string | null }
+      try {
+        data = await res.json()
+      } catch {
+        data = { error: null }
+      }
+
+      if (!res.ok) throw new Error(data.error || 'Failed to create the training.')
+
+      setTrainingPackage('')
+      setTrainingHours('')
+      setTrainingEndDate('')
+      setTrainingTeacherIds([])
+      // Re-runs the server component: hasActiveTraining flips true, so the new
+      // training renders in the Training card and this form disappears.
+      router.refresh()
+    } catch (err: unknown) {
+      setTrainingError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setTrainingSaving(false)
+    }
+  }
+
   async function handleHoursSubmit() {
     setHoursError(null)
+    // Both hour actions write to the ACTIVE training's balance. activeTrain is
+    // NOT proof one exists — it falls back to the newest training of any status
+    // — so without this guard a raw submit would either send a null training_id
+    // (answered with a raw Zod message) or move hours on a finished package.
+    if (!hasActiveTraining || !activeTrain) {
+      return setHoursError(
+        'This student has no active training. Create one on the Overview tab first.'
+      )
+    }
     if (!hoursAmount || isNaN(parseFloat(hoursAmount)) || parseFloat(hoursAmount) <= 0) {
       return setHoursError('Enter a valid number of hours.')
     }
@@ -892,7 +990,10 @@ export default function StudentDetailClient({
                 <InfoRow label="Status" value={activeTrain.status ?? null} />
               </>
             ) : (
-              <p className="text-sm text-gray-400">No active training.</p>
+              <p className="text-sm text-gray-400">
+                No active training.
+                {!isStaffView && ' Use the Create Training card below to start one.'}
+              </p>
             )}
           </div>
 
@@ -914,6 +1015,125 @@ export default function StudentDetailClient({
               </div>
             )}
           </div>
+
+          {/* Create Training — rendered ONLY when the student has no training
+              with status === 'active' (hasActiveTraining, strict). A second
+              active training is refused by create_training_atomic and by the
+              one_active_training_per_student partial unique index, so the form
+              must never sit next to a live one. Admin only: staff get no
+              mutation entry points on this page. */}
+          {!isStaffView && !hasActiveTraining && (
+          <div className="col-span-2 card-elevated p-5 space-y-4">
+            <div>
+              <h2 className="font-semibold text-gray-800">Create Training</h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                A training holds the package, the hours balance and the assigned teachers.
+                Hours can only be added once one exists.
+              </p>
+            </div>
+
+            {trainingError && (
+              <div className="px-4 py-3 rounded-lg text-sm"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                {trainingError}
+              </div>
+            )}
+
+            {teacherOptionsLoadFailed && (
+              <div
+                className="text-xs rounded-lg px-3 py-2"
+                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+              >
+                <p className="font-medium">
+                  The teacher list could not be loaded, so it may be incomplete. Reload the page before assigning teachers.
+                </p>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Package Name
+              </label>
+              <input
+                className={inputClass}
+                value={trainingPackage}
+                onChange={(e) => setTrainingPackage(e.target.value)}
+                placeholder="e.g. Standard 20hrs, Intensive B2"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Total Hours
+                </label>
+                <input
+                  type="number" min="0.5" step="0.5"
+                  className={inputClass}
+                  value={trainingHours}
+                  onChange={(e) => setTrainingHours(e.target.value)}
+                  placeholder="e.g. 20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date
+                  <span className="ml-1 text-gray-400 font-normal">(optional)</span>
+                </label>
+                <DatePartInput
+                  value={trainingEndDate}
+                  onChange={(v) => setTrainingEndDate(v)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assigned Teacher(s)
+              </label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {teacherOptions.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleTrainingTeacher(t.id)}
+                    className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                    style={
+                      trainingTeacherIds.includes(t.id)
+                        ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                        : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                    }
+                  >
+                    {t.full_name}
+                  </button>
+                ))}
+              </div>
+              {teacherOptions.length === 0 && !teacherOptionsLoadFailed && (
+                <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
+              )}
+              {/* Zero teachers is a legal selection — the training is created
+                  either way — but it is never what the admin meant to leave
+                  behind, so say what it costs the student. */}
+              {trainingTeacherIds.length === 0 && (
+                <p className="text-xs mt-2" style={{ color: '#B45309' }}>
+                  No teachers assigned — the student will not be able to book classes.
+                  Teachers can be added later from the Edit page.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={handleCreateTraining}
+                disabled={trainingSaving}
+                className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                style={{ backgroundColor: '#FF8303' }}
+              >
+                {trainingSaving ? 'Creating...' : 'Create Training'}
+              </button>
+            </div>
+          </div>
+          )}
 
           {/* Teacher notes */}
           <div className="card-elevated p-5 space-y-2">
@@ -1062,21 +1282,35 @@ export default function StudentDetailClient({
       {/* ── Hours Log ── */}
       {activeTab === 'hours' && (
         <div className="space-y-4">
-          {/* Add / Remove buttons */}
-          <div className="flex gap-3">
+          {/* Add / Remove buttons. Both post a training_id to the hours route,
+              which requires a uuid — with no active training the click could
+              only ever end in a raw Zod message, so the controls are disabled
+              and point at Create Training instead. Gated on hasActiveTraining,
+              not on activeTrain: that falls back to the newest training of any
+              status, so a finished package would leave both buttons live. */}
+          <div className="flex gap-3 items-center flex-wrap">
             <button
               onClick={() => setHoursAction(hoursAction === 'add' ? null : 'add')}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-white"
+              disabled={!hasActiveTraining}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
               style={{ backgroundColor: '#16a34a' }}
+              title={!hasActiveTraining ? 'This student has no active training — create one on the Overview tab first' : undefined}
             >
               + Add Hours
             </button>
             <button
               onClick={() => setHoursAction(hoursAction === 'remove' ? null : 'remove')}
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50"
+              disabled={!hasActiveTraining}
+              className="px-4 py-2 rounded-lg text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              title={!hasActiveTraining ? 'This student has no active training — create one on the Overview tab first' : undefined}
             >
               − Remove Hours
             </button>
+            {!hasActiveTraining && (
+              <span className="text-xs" style={{ color: '#B45309' }}>
+                No active training — create one on the Overview tab before adding or removing hours.
+              </span>
+            )}
           </div>
 
           {/* Inline add/remove form */}
