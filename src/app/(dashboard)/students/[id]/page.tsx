@@ -52,7 +52,6 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         id,
         full_name,
         photo_url,
-        self_assessed_level,
         timezone,
         learning_goals,
         interests,

@@ -27,14 +27,19 @@ export async function GET(req: NextRequest) {
   // independently on the write paths, e.g. student/book/route.ts), so the
   // 24hr-derived advisory cutoff below should not apply to them. Students
   // have no profiles row -> maybeSingle returns null -> isAdmin false.
+  // status === 'current' is required alongside the role/account_types check,
+  // matching requireStaff (src/lib/auth/requireStaff.ts) - the canonical
+  // active-account gate. A 'former'/'on_hold' profile therefore keeps neither
+  // the 24hr cutoff bypass nor the excludeLessonId privilege below.
   const { data: callerProfile } = await supabase
     .from('profiles')
-    .select('role, account_types')
+    .select('role, account_types, status')
     .eq('id', user.id)
     .maybeSingle()
   const isAdmin =
-    callerProfile?.role === 'admin' ||
-    callerProfile?.account_types?.includes('staff')
+    callerProfile?.status === 'current' &&
+    (callerProfile?.role === 'admin' ||
+      callerProfile?.account_types?.includes('staff'))
 
   const { searchParams } = new URL(req.url)
   const teacherId = searchParams.get('teacherId')

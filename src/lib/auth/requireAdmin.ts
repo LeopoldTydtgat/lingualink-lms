@@ -34,10 +34,9 @@ export function isAdminProfile(
  *
  * status is the canonical active-account gate, matching requireStaff() and
  * requireTeacher(). A deactivated admin (status 'former' or 'on_hold') is
- * refused here even though their role is unchanged: proxy.ts blocks such an
- * account at the portal, but only outside its 60s status-cookie cache, so a
- * role-only check left every route this helper guards reachable by a former or
- * on_hold admin holding a live session.
+ * refused here even though their role is unchanged: proxy.ts now status-gates
+ * every request unconditionally, so this helper's status check is defence-in-
+ * depth for route handlers, which must never rely on the proxy alone.
  *
  * Returns null for anonymous callers, for non-admins, AND for admins who are no
  * longer current, so the caller cannot accidentally treat "logged in" as

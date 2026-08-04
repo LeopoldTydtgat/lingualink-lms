@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
+import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent, teacherReassignedEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
@@ -327,10 +327,19 @@ export async function PATCH(
     console.warn('Reschedule name fetch failed, using fallbacks', { lesson_id: id, error: nameFetchError })
   }
 
+  // NEW358: the teacher-side context above still describes the OUTGOING teacher.
+  // Snapshot it before the reassignment block below overwrites it, so the
+  // reassignment email after the commit addresses the teacher who LOST the class.
+  // Captured unconditionally — it is only ever read under teacherChanged.
+  const oldTeacherName = teacherName
+  const oldTeacherEmail = teacherEmail
+  const oldTeacherTimezone = teacherTimezone
+
   // If the teacher was reassigned, swap the teacher-side context to the NEW
   // teacher so the Graph subject, student email teacherName, and teacher
-  // email recipient all reference the new teacher. The old teacher is no
-  // longer involved with this lesson and receives no notification.
+  // email recipient all reference the new teacher. The outgoing teacher is
+  // notified separately, by the dedicated reassignment email sent after the
+  // RPC commits (NEW358).
   if (teacherChanged && fields.teacher_id) {
     try {
       const { data: newTeacherRes } = await adminClient
@@ -353,9 +362,15 @@ export async function PATCH(
   // email times). error holds the human message; this endpoint's client renders it.
   let studentTz: string
   let teacherTz: string
+  let oldTeacherTz: string | null = null
   try {
     studentTz = requireTz(studentTimezone, 'admin-reschedule:student')
     teacherTz = requireTz(teacherTimezone, 'admin-reschedule:teacher')
+    // NEW358: the outgoing teacher's zone renders the reassignment email below, so it
+    // is a participant zone too on a reassignment. Validated here, pre-commit, for the
+    // same reason as the other two — after the write it would be too late to refuse,
+    // and the email would render the class in the wrong zone.
+    oldTeacherTz = teacherChanged ? requireTz(oldTeacherTimezone, 'admin-reassign:old-teacher') : null
   } catch {
     return NextResponse.json(
       { error: 'Cannot reschedule: a participant timezone is not set.', code: 'TIMEZONE_MISSING' },
@@ -464,18 +479,20 @@ export async function PATCH(
     }
   }
 
-  // Sync the Teams meeting when time or duration changes.
-  // updateTeamsMeeting preserves the join URL; teacher-only swaps skip Graph entirely.
+  // Sync the Teams meeting when time, duration, or teacher changes.
+  // updateTeamsMeeting preserves the join URL; a teacher-only swap runs it too, as a
+  // harmless resync with the unchanged time and duration.
   // Graph + email templates require canonical UTC; existing.scheduled_at already is.
   const newScheduledAt = scheduledAtUtc ?? existing.scheduled_at
   const newDuration = (fields.duration_minutes as number | undefined) ?? existing.duration_minutes
   const needsGraphUpdate = timeChanged || durationChanged || teacherChanged
   // The reschedule email fires ONLY when the class time actually changed. needsGraphUpdate
   // also covers duration and teacher changes (the Teams meeting must resync for those), but
-  // neither should email: the template says "has been rescheduled", which misreads when the
+  // neither should send it: the template says "has been rescheduled", which misreads when the
   // time is unchanged. Duration-only changes are visible in-portal (hours log + class card);
-  // teacher-only swaps are silent by product decision (Shannon notifies the student directly,
-  // and the class still shows in their portal with the same time and join link).
+  // a teacher-only swap likewise sends no reschedule email, but DOES send the outgoing teacher
+  // the dedicated reassignment email below (NEW358), while the student keeps the same time and
+  // join link.
 
   if (needsGraphUpdate) {
     if (existing.teams_meeting_id) {
@@ -589,6 +606,42 @@ export async function PATCH(
         })
       } catch (emailErr) {
         console.error('CRITICAL: [Email] Teacher reschedule email failed — lesson still updated:', emailErr)
+        Sentry.captureException(emailErr)
+      }
+    }
+  }
+
+  // NEW358: notify the OUTGOING teacher that the class left their schedule. Keyed on
+  // teacherChanged alone, independent of timeChanged: the two blocks above address the
+  // student and the NEW teacher, so without this the teacher who lost the class hears
+  // nothing. Sent after the RPC commit so no email can announce a reassignment that did
+  // not land, and built from existing.* — the class exactly as the outgoing teacher knew
+  // it — never the new time/duration, which are no longer theirs.
+  if (teacherChanged && oldTeacherTz) {
+    if (!oldTeacherEmail) {
+      console.warn('Reassignment email skipped: outgoing teacher has no email', { lesson_id: id })
+    } else {
+      try {
+        const emailBody = teacherReassignedEmailContent(
+          studentName,
+          existing.scheduled_at,
+          existing.duration_minutes,
+          oldTeacherTz
+        )
+        await resend.emails.send({
+          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+          to: oldTeacherEmail,
+          subject: 'Lingualink Online - Your class has been reassigned',
+          html: buildEmailTemplate({
+            recipientName: oldTeacherName,
+            recipientFallback: 'Teacher',
+            subject: 'Your class has been reassigned',
+            bodyHtml: emailBody,
+            contactEmail: 'teachers@lingualinkonline.com',
+          }),
+        })
+      } catch (emailErr) {
+        console.error('CRITICAL: [Email] Outgoing teacher reassignment email failed — lesson still updated:', emailErr)
         Sentry.captureException(emailErr)
       }
     }

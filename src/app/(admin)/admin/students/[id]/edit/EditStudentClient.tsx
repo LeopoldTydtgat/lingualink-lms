@@ -192,7 +192,6 @@ export default function EditStudentClient({
     native_language: (student.native_language as string) ?? '',
     learning_language: (student.learning_language as string) ?? 'English',
     current_fluency_level: (student.current_fluency_level as string) ?? '',
-    self_assessed_level: (student.self_assessed_level as string) ?? '',
     learning_goals: (student.learning_goals as string) ?? '',
     interests: (student.interests as string) ?? '',
     // Section C — Training Setup
@@ -267,7 +266,6 @@ export default function EditStudentClient({
           native_language: form.native_language || null,
           learning_language: form.learning_language || null,
           current_fluency_level: form.current_fluency_level || null,
-          self_assessed_level: form.self_assessed_level || null,
           learning_goals: form.learning_goals || null,
           interests: form.interests || null,
           ...(hasActiveTraining
@@ -502,15 +500,6 @@ export default function EditStudentClient({
               <select className={selectClass} value={form.current_fluency_level}
                 onChange={(e) => set('current_fluency_level', e.target.value)}>
                 <option value="">To be assessed</option>
-                {FLUENCY_LEVELS.map((l) => (
-                  <option key={l} value={l}>{l}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Self-Assessed Level">
-              <select className={selectClass} value={form.self_assessed_level}
-                onChange={(e) => set('self_assessed_level', e.target.value)}>
-                <option value="">— Select —</option>
                 {FLUENCY_LEVELS.map((l) => (
                   <option key={l} value={l}>{l}</option>
                 ))}

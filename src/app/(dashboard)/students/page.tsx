@@ -49,8 +49,7 @@ export default async function StudentsPage() {
       students (
         id,
         full_name,
-        photo_url,
-        self_assessed_level
+        photo_url
       ),
       profiles!trainings_teacher_id_fkey (
         id,

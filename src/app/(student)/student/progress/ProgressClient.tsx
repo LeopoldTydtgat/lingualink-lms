@@ -42,7 +42,7 @@ interface LevelData {
 }
 
 interface Props {
-  student: { id: string; full_name: string; timezone: string; self_assessed_level: string | null }
+  student: { id: string; full_name: string; timezone: string }
   training: Training | null
   completedLessons: Lesson[]
   latestLevelData: LevelData | null
@@ -259,16 +259,6 @@ export default function ProgressClient({
   const pending = Math.max(0, totalAssigned - totalCompleted)
   const exercisePct = totalAssigned === 0 ? 0 : Math.round((totalCompleted / totalAssigned) * 100)
 
-  const selfAssessedRow = student.self_assessed_level && (
-    <div
-      className="flex items-center gap-2 mt-4 pt-4"
-      style={{ borderTop: '1px solid #f3f4f6' }}
-    >
-      <span className="text-xs" style={{ color: '#9ca3af' }}>Your self-assessed level:</span>
-      <Pill>{student.self_assessed_level}</Pill>
-    </div>
-  )
-
   return (
     <div className="p-6">
 
@@ -377,22 +367,12 @@ export default function ProgressClient({
                 <p className="text-xs text-center" style={{ color: '#9ca3af' }}>
                   Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
                 </p>
-
-                {student.self_assessed_level && (
-                  <div className="flex items-center gap-2 pt-4" style={{ borderTop: '1px solid #f3f4f6', width: '100%', justifyContent: 'center' }}>
-                    <span className="text-xs" style={{ color: '#9ca3af' }}>Your self-assessed level:</span>
-                    <Pill>{student.self_assessed_level}</Pill>
-                  </div>
-                )}
               </div>
             </div>
           ) : (
-            <>
-              <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
-                Your level chart will appear here after your teacher submits your first assessment.
-              </p>
-              {selfAssessedRow}
-            </>
+            <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
+              Your level chart will appear here after your teacher submits your first assessment.
+            </p>
           )}
         </Card>
 

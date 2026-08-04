@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
-import { getMonthKeyInTz } from '@/lib/billing/monthRange'
+import { getDayKeyInTz, getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { NextRequest, NextResponse } from 'next/server'
@@ -189,14 +189,32 @@ export async function GET(
       case 'teacher-earnings': {
         filename = `lingualink-teacher-earnings-${Date.now()}.csv`
 
+        // fromDate/toDate feed TWO consumers with different strictness: Date.parse
+        // for the coarse UTC bound (lenient — it accepts 'YYYY-MM' and 'YYYY') and a
+        // 10-char lexical day-key compare below (strict). A value that is valid to
+        // the first and not the second passes the DB bound then rejects every day
+        // key, silently emitting an EMPTY earnings CSV. Reject it loudly instead —
+        // the admin UI's <input type="date"> always sends YYYY-MM-DD.
+        const DAY_PARAM = /^\d{4}-\d{2}-\d{2}$/
+        if ((fromDate && !DAY_PARAM.test(fromDate)) || (toDate && !DAY_PARAM.test(toDate))) {
+          return NextResponse.json(
+            { error: 'INVALID_DATE_RANGE', message: 'from/to must be YYYY-MM-DD.' },
+            { status: 400 }
+          )
+        }
+
         let lessonsQuery = supabase
           .from('lessons')
           .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, teacher_id')
           .neq('status', 'scheduled') // only settled lessons
           .order('scheduled_at', { ascending: false })
 
-        if (fromTs) lessonsQuery = lessonsQuery.gte('scheduled_at', fromTs)
-        if (toTs)   lessonsQuery = lessonsQuery.lte('scheduled_at', toTs)
+        // Coarse DB window only: widened by 1 day each side so a lesson that is
+        // inside the range on a teacher's LOCAL calendar can never be excluded by
+        // the UTC query bound (max real-world offset is UTC+14/-12). The exact
+        // per-teacher-local filter below is the authoritative range check.
+        if (fromDate) lessonsQuery = lessonsQuery.gte('scheduled_at', new Date(Date.parse(`${fromDate}T00:00:00.000Z`) - 86400000).toISOString())
+        if (toDate)   lessonsQuery = lessonsQuery.lte('scheduled_at', new Date(Date.parse(`${toDate}T23:59:59.999Z`) + 86400000).toISOString())
         if (teacherId) lessonsQuery = lessonsQuery.eq('teacher_id', teacherId)
 
         const { data: lessons, error: lErr } = await lessonsQuery
@@ -249,6 +267,21 @@ export async function GET(
           const report = reportMap[lesson.id]
           const profile = profileMap[lesson.teacher_id]
 
+          // Checked FIRST: the teacher's timezone now scopes the range as well as
+          // the month bucket, so a lesson cannot be range-filtered without it.
+          if (!profile?.timezone) {
+            missingTzTeachers.add(lesson.teacher_id)
+            continue
+          }
+
+          // Authoritative range check: the lesson's calendar day in the TEACHER's
+          // own timezone — the same zone the month bucketing and the invoice
+          // (recomputeAmounts.ts) use, so the export window and invoices.amount_eur
+          // agree at month boundaries. YYYY-MM-DD compares lexically.
+          const localDay = getDayKeyInTz(new Date(lesson.scheduled_at), profile.timezone)
+          if (fromDate && localDay < fromDate) continue
+          if (toDate && localDay > toDate) continue
+
           // Snapshot rate for this lesson, else the teacher's live rate (Decision A).
           // Resolved BEFORE the billable gate so getBillability is the single source
           // of truth for both the gate AND the per-lesson amount — mirrors the invoice
@@ -267,14 +300,12 @@ export async function GET(
           })
           if (!bill.billableToTeacher) continue
 
-          if (!profile?.timezone) {
-            missingTzTeachers.add(lesson.teacher_id)
-            continue
-          }
           // NEW271: Month buckets in the TEACHER's own timezone (matches NEW268 D3 /
           // recomputeAmounts.ts invoice basis). Display columns render in the export tz,
           // but the billing-period KEY is teacher-local so this CSV's Month/Total agree
           // with invoices.amount_eur and the invoice-status join keys correctly.
+          // The from/to range scoping above now resolves in this same teacher-local
+          // zone, so scoping and bucketing can no longer disagree at a boundary.
           const month = getMonthKeyInTz(new Date(lesson.scheduled_at), profile.timezone).slice(0, 7)
           const key = `${lesson.teacher_id}__${month}`
 

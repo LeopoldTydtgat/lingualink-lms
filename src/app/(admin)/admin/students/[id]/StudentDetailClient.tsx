@@ -870,7 +870,6 @@ export default function StudentDetailClient({
             <InfoRow label="Native Language" value={student.native_language as string} />
             <InfoRow label="Learning Language" value={student.learning_language as string} />
             <InfoRow label="Current Fluency Level" value={student.current_fluency_level as string} />
-            <InfoRow label="Self-Assessed Level" value={student.self_assessed_level as string} />
             <InfoRow label="Learning Goals" value={student.learning_goals as string} />
             <InfoRow label="Interests" value={student.interests as string} />
           </div>
