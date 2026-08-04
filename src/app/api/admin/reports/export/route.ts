@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import ExcelJS from 'exceljs';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
 import { getBillability } from '@/lib/billing/billability';
+import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates';
 
 export const runtime = 'nodejs';
 
@@ -29,6 +30,13 @@ export const runtime = 'nodejs';
 // call, so the reschedule-leg zeroing and cancellation-actor precedence now live
 // INSIDE getBillability (no local reschedule-leg branch here). 'scheduled' rows
 // are the only special case; see the derive block below.
+//
+// The teacher pay RATE feeding those columns resolves snapshot-first: the
+// per-lesson lesson_rate_snapshots rate when one exists, otherwise the teacher's
+// live profiles.hourly_rate (NEW268 Decision A), via the shared
+// fetchLessonRateMap / resolveLessonRate helpers in
+// src/lib/billing/lessonRates.ts — the exact same resolution the invoice
+// recompute and every other billing export use.
 
 // Flatten a Supabase nested join result to its first element (project rule).
 function firstOf<T>(v: T | T[] | null | undefined): T | null {
@@ -101,9 +109,8 @@ export async function GET(request: NextRequest) {
       .from('lessons')
       .select(`
         id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, teacher_id, student_id,
-        profiles!lessons_teacher_id_fkey ( full_name ),
+        profiles!lessons_teacher_id_fkey ( full_name, hourly_rate ),
         reports ( status, completed_at, feedback_text, did_class_happen, no_show_type, flagged_at ),
-        lesson_rate_snapshots ( hourly_rate ),
         lesson_join_clicks ( user_type, clicked_at )
       `)
       .gte('scheduled_at', gteIso)
@@ -120,6 +127,10 @@ export async function GET(request: NextRequest) {
     }
 
     const lessons = lessonsData ?? [];
+
+    // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+    // The teacher's live profiles.hourly_rate is used only as the fallback (NEW268 D1).
+    const rateMap = await fetchLessonRateMap(admin, lessons.map((l) => l.id as string));
 
     // Students by id.
     const studentIds = [...new Set(lessons.map((l) => l.student_id).filter(Boolean) as string[])];
@@ -150,7 +161,6 @@ export async function GET(request: NextRequest) {
     const derived = lessons.map((l) => {
       const teacher  = firstOf(l.profiles);
       const report   = firstOf(l.reports);
-      const rateSnap = firstOf(l.lesson_rate_snapshots);
       const student  = l.student_id ? studentMap[l.student_id] ?? null : null;
       const company  = student?.company_id ? companyMap[student.company_id] ?? null : null;
       const companyName: string | null = company ? company.name : null;
@@ -201,11 +211,10 @@ export async function GET(request: NextRequest) {
       const policyApplied: string =
         student?.cancellation_policy || company?.cancellation_policy || '24hr';
 
-      // Rate: per-lesson snapshot only; never substitute another number.
-      const rate: number | null =
-        rateSnap && rateSnap.hourly_rate !== null && rateSnap.hourly_rate !== undefined
-          ? Number(rateSnap.hourly_rate)
-          : null;
+      // Rate: per-lesson snapshot, else the teacher's live profiles.hourly_rate
+      // (NEW268 Decision A — same resolution as the invoice recompute and all
+      // other exports, via the shared resolveLessonRate helper).
+      const rate = resolveLessonRate(rateMap, l.id as string, Number(teacher?.hourly_rate ?? 0));
 
       // Teacher Billable / Amount Owed / Billable Under Policy all derive from
       // getBillability (single source of truth, shared with the invoice
@@ -228,16 +237,13 @@ export async function GET(request: NextRequest) {
           scheduledAt: l.scheduled_at,
           cancelledAt: l.cancelled_at ?? null,
           cancellationPolicy: policyApplied === '48hr' ? '48hr' : '24hr',
-          hourlyRate: rate ?? 0,
+          hourlyRate: rate,
           durationMinutes: l.duration_minutes,
           cancelledBy: l.cancelled_by ?? null,
           rescheduledBy: l.rescheduled_by ?? null,
         });
         teacherBillable = bill.billableToTeacher ? 'Yes' : 'No';
-        if (!bill.billableToTeacher) amountOwed = 0;
-        else if (rate !== null) amountOwed = bill.amount;
-        // billable with no snapshot rate: amountOwed stays null — never
-        // substitute another number.
+        amountOwed = bill.billableToTeacher ? bill.amount : 0;
         if (l.cancelled_at) {
           billableUnderPolicy = bill.billableToTeacher || bill.billable48hr ? 'Yes' : 'No';
         }
