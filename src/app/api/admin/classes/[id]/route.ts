@@ -708,12 +708,46 @@ export async function DELETE(
   // precisely the rows the export would bill. (This guard and both company-billing exports all call
   // the same threaded getBillability — no inline copy exists.) Clean >24h cancellations and
   // teacher-cancellations are not billable to the company and remain deletable.
-  const { data: student } = await adminClient
+  // Fail closed on the policy lookup. The 48hr branch of getBillability is the ONLY
+  // thing standing between a 24-48h cancellation of a 48hr-policy student and a hard
+  // delete of a company-billable row, so an unreadable or missing students row must
+  // block the delete — never fall back to '24hr', which is the permissive side and
+  // silently skips the 48hr guard.
+  const { data: student, error: studentError } = await adminClient
     .from('students')
     .select('cancellation_policy')
     .eq('id', lesson.student_id)
     .maybeSingle()
-  const policy = student?.cancellation_policy ?? '24hr'
+  if (studentError) {
+    console.error('CRITICAL: student cancellation_policy lookup failed — delete blocked:', {
+      lesson_id: id,
+      student_id: lesson.student_id,
+      error: studentError,
+    })
+    return NextResponse.json(
+      {
+        error: 'Could not verify the student cancellation policy. Delete blocked.',
+        code: 'STUDENT_POLICY_LOOKUP_FAILED',
+      },
+      { status: 500 }
+    )
+  }
+  if (!student) {
+    console.error('CRITICAL: no students row for lesson.student_id — delete blocked:', {
+      lesson_id: id,
+      student_id: lesson.student_id,
+    })
+    return NextResponse.json(
+      {
+        error: 'Could not verify the student cancellation policy. Delete blocked.',
+        code: 'STUDENT_NOT_FOUND',
+      },
+      { status: 500 }
+    )
+  }
+  // Row load is verified above, and students.cancellation_policy is NOT NULL DEFAULT '24hr'
+  // (baseline_schema.sql:1025), so the real stored value is used directly — no fallback.
+  const policy = student.cancellation_policy
   const { billableToTeacher, billable48hr } = getBillability({
     status: lesson.status,
     scheduledAt: lesson.scheduled_at,
