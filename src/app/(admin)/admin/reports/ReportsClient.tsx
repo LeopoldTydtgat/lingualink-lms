@@ -85,6 +85,14 @@ async function errorText(res: Response, fallback: string) {
   return `${fallback} (${res.status}).`;
 }
 
+// Result of the advisory "is this month's invoice already paid?" lookup that runs
+// while the reopen-confirmation modal is open.
+//   loading    - request in flight (render nothing; never a reason to wait)
+//   paid       - the month's invoice is status='paid'
+//   clear      - positively established as not paid
+//   unverified - the answer could not be established; NEVER shown as "not paid"
+type InvoiceCheck = 'loading' | 'paid' | 'clear' | 'unverified';
+
 // ─── Badges ───────────────────────────────────────────────────────────────────
 
 function ReportStatusBadge({ status }: { status: string }) {
@@ -131,6 +139,62 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [reopenId,      setReopenId]      = useState<string | null>(initialReopenId ?? null);
   const [reopenLoading, setReopenLoading] = useState(false);
   const [reopenError,   setReopenError]   = useState('');
+
+  // Advisory only. The recompute that follows a reopen skips invoices already
+  // marked paid, so a pay change on a paid month has to be settled by hand - the
+  // admin is told that here, before confirming. This check must NEVER disable or
+  // delay the confirm button, and a failed lookup shows "could not verify"
+  // instead of a false all-clear.
+  const [invoiceCheck, setInvoiceCheck] = useState<InvoiceCheck>('loading');
+  // Monotonic token: bumped on every open AND every close, so a slow response
+  // can never land in a modal that has since been closed or reopened for a
+  // different report.
+  const invoiceCheckTokenRef = useRef(0);
+
+  const startInvoiceCheck = useCallback((reportId: string) => {
+    const token = ++invoiceCheckTokenRef.current;
+    setInvoiceCheck('loading');
+    fetch(`/api/admin/reports/${reportId}/invoice-status`)
+      .then(async (res) => {
+        if (token !== invoiceCheckTokenRef.current) return;
+        if (!res.ok) { setInvoiceCheck('unverified'); return; }
+        const body = await res.json();
+        if (token !== invoiceCheckTokenRef.current) return;
+        // checked:false means the server could not establish the answer.
+        if (!body?.checked) { setInvoiceCheck('unverified'); return; }
+        setInvoiceCheck(body.invoicePaid === true ? 'paid' : 'clear');
+      })
+      .catch(() => {
+        // Network failure, or a body that is not JSON.
+        if (token !== invoiceCheckTokenRef.current) return;
+        setInvoiceCheck('unverified');
+      });
+  }, []);
+
+  function openReopen(reportId: string) {
+    setReopenError('');
+    setReopenId(reportId);
+    startInvoiceCheck(reportId);
+  }
+
+  // Resets to 'loading' so a reopened modal re-fetches rather than flashing the
+  // previous report's answer, and invalidates any in-flight response.
+  function closeReopen() {
+    invoiceCheckTokenRef.current++;
+    setInvoiceCheck('loading');
+    setReopenId(null);
+  }
+
+  // The ?reopen= deep link opens the modal on mount without going through the
+  // in-row Reopen button, so the paid-invoice check has to be fired here too.
+  // Ref-guarded to the mount-time seed only, mirroring the reopenId useState
+  // initialiser above (which likewise only applies initialReopenId once).
+  const deepLinkCheckedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkCheckedRef.current) return;
+    deepLinkCheckedRef.current = true;
+    if (initialReopenId) startInvoiceCheck(initialReopenId);
+  }, [initialReopenId, startInvoiceCheck]);
 
   // Seeded from the ?filter= deep link; the mount-time fetchReports effect below
   // then loads the list through the same query path as a manual dropdown pick.
@@ -199,7 +263,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
         return;
       }
       await fetchReports();
-      setReopenId(null);
+      closeReopen();
     } catch {
       setReopenError('Network error - the report was not reopened. Please try again.');
     } finally {
@@ -299,7 +363,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                             <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                           )}
                           {(r.status === 'flagged' || r.status === 'completed') && (
-                            <button onClick={() => { setReopenError(''); setReopenId(r.id); }} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
+                            <button onClick={() => openReopen(r.id)} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
                           )}
                           {(r.status === 'pending' || r.status === 'reopened') && (
                             <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
@@ -323,8 +387,16 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
             {reopenError && (
               <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
             )}
+            {invoiceCheck === 'paid' && (
+              <div className="text-sm rounded-lg p-3 mb-4" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+                This month&apos;s invoice is already marked paid - any pay change from this correction must be settled manually.
+              </div>
+            )}
+            {invoiceCheck === 'unverified' && (
+              <p className="text-xs text-gray-500 mb-4">Could not verify whether this month&apos;s invoice is already paid.</p>
+            )}
             <div className="flex gap-3 justify-end">
-              <button onClick={() => { setReopenError(''); setReopenId(null); }} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopenLoading}>Cancel</button>
+              <button onClick={() => { setReopenError(''); closeReopen(); }} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopenLoading}>Cancel</button>
               <button onClick={() => handleReopen(reopenId)} disabled={reopenLoading} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>
                 {reopenLoading ? 'Reopening…' : reopenError ? 'Try again' : 'Reopen Report'}
               </button>

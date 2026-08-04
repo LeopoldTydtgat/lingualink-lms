@@ -2,7 +2,7 @@
 
 // src/app/(admin)/admin/reports/[id]/ReportDetailClient.tsx
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -88,6 +88,14 @@ const CEFR_TO_NUM: Record<string, number> = {
   C2: 6,
 }
 
+// Result of the advisory "is this month's invoice already paid?" lookup that runs
+// while the reopen-confirmation modal is open.
+//   loading    - request in flight (render nothing; never a reason to wait)
+//   paid       - the month's invoice is status='paid'
+//   clear      - positively established as not paid
+//   unverified - the answer could not be established; NEVER shown as "not paid"
+type InvoiceCheck = 'loading' | 'paid' | 'clear' | 'unverified';
+
 const SKILLS = [
   { key: 'grammar',         label: 'Grammar' },
   { key: 'expression',      label: 'Expression' },
@@ -145,6 +153,50 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
   const [reopenError, setReopenError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Advisory only. The recompute that follows a reopen skips invoices already
+  // marked paid, so a pay change on a paid month has to be settled by hand - the
+  // admin is told that here, before confirming. This check must NEVER disable or
+  // delay the confirm button, and a failed lookup shows "could not verify"
+  // instead of a false all-clear.
+  const [invoiceCheck, setInvoiceCheck] = useState<InvoiceCheck>('loading');
+  // Monotonic token: bumped on every open AND every close, so a slow response
+  // can never land in a modal that has since been closed or reopened.
+  const invoiceCheckTokenRef = useRef(0);
+
+  function startInvoiceCheck() {
+    const token = ++invoiceCheckTokenRef.current;
+    setInvoiceCheck('loading');
+    fetch(`/api/admin/reports/${report.id}/invoice-status`)
+      .then(async (res) => {
+        if (token !== invoiceCheckTokenRef.current) return;
+        if (!res.ok) { setInvoiceCheck('unverified'); return; }
+        const body = await res.json();
+        if (token !== invoiceCheckTokenRef.current) return;
+        // checked:false means the server could not establish the answer.
+        if (!body?.checked) { setInvoiceCheck('unverified'); return; }
+        setInvoiceCheck(body.invoicePaid === true ? 'paid' : 'clear');
+      })
+      .catch(() => {
+        // Network failure, or a body that is not JSON.
+        if (token !== invoiceCheckTokenRef.current) return;
+        setInvoiceCheck('unverified');
+      });
+  }
+
+  function openConfirm() {
+    setReopenError('');
+    setShowConfirm(true);
+    startInvoiceCheck();
+  }
+
+  // Resets to 'loading' so a reopened modal re-fetches rather than flashing the
+  // previous answer, and invalidates any in-flight response.
+  function closeConfirm() {
+    invoiceCheckTokenRef.current++;
+    setInvoiceCheck('loading');
+    setShowConfirm(false);
+  }
+
   async function handleReopen() {
     setReopenError('');
     setReopening(true);
@@ -159,7 +211,7 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
         setReopenError(await errorText(res, 'Reopen failed'));
         return;
       }
-      setShowConfirm(false);
+      closeConfirm();
       router.push('/admin/reports');
     } catch {
       setReopenError('Network error - the report was not reopened. Please try again.');
@@ -183,7 +235,7 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
           {report.status === 'pending'   && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Pending</span>}
           {report.status === 'reopened'  && <span className="text-sm px-3 py-1 rounded-full font-medium" style={{ backgroundColor: '#FFF8E8', color: '#B45309' }}>Reopened</span>}
           {(report.status === 'flagged' || report.status === 'completed') && (
-            <button onClick={() => { setReopenError(''); setShowConfirm(true); }} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
+            <button onClick={openConfirm} className="text-sm font-medium text-white px-4 py-2 rounded-lg" style={{ backgroundColor: '#FF8303' }}>Reopen Report</button>
           )}
         </div>
       </div>
@@ -325,8 +377,16 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
             {reopenError && (
               <p className="text-sm mb-4" style={{ color: '#DC2626' }}>{reopenError}</p>
             )}
+            {invoiceCheck === 'paid' && (
+              <div className="text-sm rounded-lg p-3 mb-4" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+                This month&apos;s invoice is already marked paid - any pay change from this correction must be settled manually.
+              </div>
+            )}
+            {invoiceCheck === 'unverified' && (
+              <p className="text-xs text-gray-500 mb-4">Could not verify whether this month&apos;s invoice is already paid.</p>
+            )}
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setShowConfirm(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopening}>Cancel</button>
+              <button onClick={closeConfirm} className="px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50" disabled={reopening}>Cancel</button>
               <button onClick={handleReopen} disabled={reopening} className="px-4 py-2 text-sm text-white rounded-lg font-medium" style={{ backgroundColor: '#FF8303' }}>
                 {reopening ? 'Reopening…' : reopenError ? 'Try again' : 'Reopen Report'}
               </button>
