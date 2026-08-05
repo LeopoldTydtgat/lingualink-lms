@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { redirect, notFound } from 'next/navigation';
 import PastClassDetailClient from './PastClassDetailClient';
 import { requireTz } from '@/lib/time/requireTz';
+import { STUDENT_PAST_LESSON_STATUSES } from '@/lib/billing/billability';
 import type { Annotation } from '@/components/pdf/PdfViewer';
 
 // Shape handed to PastClassDetailClient as `lesson.report`. Kept in sync with the
@@ -62,6 +63,26 @@ export default async function PastClassDetailPage({
     .maybeSingle();
 
   if (!lesson) notFound();
+
+  // Student-visible-past gate, identical to the list page's: a settled history
+  // status, OR a 'scheduled' lesson whose END instant has passed (the class
+  // happened, the teacher's report just is not in yet). Ownership alone used to
+  // be the only gate here, so a direct URL reached a future or in-progress class
+  // and every excluded status ('missed', every cancellation) too - this closes
+  // all of those. This is a UTC INSTANT comparison against a timestamptz, not
+  // local calendar-date construction - which is what the repo's toISOString ban
+  // covers. `new Date().getTime()` rather than Date.now() because the
+  // react-hooks/purity rule (React Compiler, via eslint-config-next) mis-fires
+  // on Date.now() in async Server Components; same instant either way.
+  const nowMs = new Date().getTime();
+  const lessonEndMs =
+    new Date(lesson.scheduled_at as string).getTime() +
+    (lesson.duration_minutes as number) * 60000;
+  const isStudentVisiblePast =
+    (STUDENT_PAST_LESSON_STATUSES as readonly string[]).includes(lesson.status as string) ||
+    (lesson.status === 'scheduled' && lessonEndMs <= nowMs);
+
+  if (!isStudentVisiblePast) notFound();
 
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose

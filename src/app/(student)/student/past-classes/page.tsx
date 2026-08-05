@@ -34,7 +34,26 @@ export default async function PastClassesPage() {
     redirect('/student/account?confirm_tz=1');
   }
 
-  // Fetch all completed or no-show lessons for this student.
+  // One "now" for the whole request so the SQL prefilter and the JS end-time
+  // filter below can never straddle a tick. Both are UTC INSTANT comparisons
+  // against a timestamptz column, not local calendar-date construction - which
+  // is what the repo's toISOString ban covers.
+  // `new Date()` rather than Date.now(): the react-hooks/purity rule (React
+  // Compiler, via eslint-config-next) mis-fires on Date.now() in async Server
+  // Components. Same single instant, no file-wide rule disable needed.
+  const now = new Date();
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+
+  // Fetch this student's past lessons - report-independent by design (client
+  // approved): a class the teacher has not reported on yet is still 'scheduled'
+  // in the DB, so the settled-status set alone would hide an ended class until
+  // the report landed. 'scheduled' is admitted here and narrowed to ENDED rows
+  // by the JS filter below. STUDENT_PAST_LESSON_STATUSES itself stays
+  // settled-only: 'missed' and every cancellation remain excluded.
+  // The .lte() only trims FUTURE 'scheduled' rows - a report can only be filed
+  // once the class has started, so every settled row already has scheduled_at
+  // in the past and none are lost by it.
   // This RLS-bound query is the ownership gate: every lesson id it returns is
   // proven to belong to this student. Reports are NOT embedded here - see below.
   const { data: lessons } = await supabase
@@ -51,10 +70,20 @@ export default async function PastClassesPage() {
       )
     `)
     .eq('student_id', student.id)
-    .in('status', STUDENT_PAST_LESSON_STATUSES)
+    .in('status', [...STUDENT_PAST_LESSON_STATUSES, 'scheduled'])
+    .lte('scheduled_at', nowIso)
     .order('scheduled_at', { ascending: false });
 
-  const lessonRows = lessons ?? [];
+  // Settled rows pass straight through. A 'scheduled' row counts as past only
+  // once its END instant (start + duration) has passed, so a class that is
+  // currently IN PROGRESS never appears in the history list.
+  const lessonRows = (lessons ?? []).filter((lesson) => {
+    if (lesson.status !== 'scheduled') return true;
+    const endMs =
+      new Date(lesson.scheduled_at as string).getTime() +
+      (lesson.duration_minutes as number) * 60000;
+    return endMs <= nowMs;
+  });
 
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose
@@ -66,6 +95,8 @@ export default async function PastClassesPage() {
   // restricted to lesson ids the RLS-bound query above already proved belong to
   // this student - that filter IS the security boundary, because the admin client
   // bypasses RLS. Never widen this select list.
+  // An ended-but-unreported 'scheduled' lesson simply has no row here, so it maps
+  // to report: null and the client renders its awaiting-feedback state.
   const reportsByLessonId = new Map<string, StudentVisibleReport>();
 
   if (lessonRows.length > 0) {

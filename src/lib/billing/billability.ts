@@ -260,6 +260,12 @@ export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
 // class is an admin/teacher-pay concept, not something to surface to the student as a past
 // lesson. To let students SEE missed classes in history, drop the `s !== 'missed'` guard.
 // Equals ['completed','student_no_show','teacher_no_show'] today.
+// SCOPE NOTE: the student past-classes surfaces show MORE than this set. Both pages under
+// (student)/student/past-classes ALSO admit an ENDED 'scheduled' lesson - a class that
+// happened but whose report the teacher has not filed yet - via a page-level end-time gate
+// (client-approved: history must not wait on the report). That widening lives in those two
+// pages ONLY; this constant deliberately stays settled-only, so no other consumer inherits
+// it. Never add 'scheduled' here.
 export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
   SETTLED_LESSON_STATUSES.filter((s) => s !== 'missed' && !CANCELLED_STATUSES.includes(s))
 
