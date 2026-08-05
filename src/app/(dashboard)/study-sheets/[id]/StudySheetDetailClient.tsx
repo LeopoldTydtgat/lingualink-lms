@@ -30,6 +30,7 @@ type StudySheet = {
   difficulty: number
   content: { words?: Word[] } | null
   attachments: Attachment[] | null
+  audience: 'staff' | 'student'
 }
 
 type Props = {
@@ -128,6 +129,7 @@ export default function StudySheetDetailClient({
   const router = useRouter()
   const words: Word[] = sheet.content?.words ?? []
   const attachments = sheet.attachments ?? []
+  const isTeachingMaterial = sheet.audience === 'staff'
 
   // File management is owner-only and hidden inside the chrome-free live window
   // (a mid-class upload/delete makes no sense there and keeps the shared,
@@ -298,8 +300,9 @@ export default function StudySheetDetailClient({
         </div>
       </div>
 
-      {/* Vocabulary table */}
-      {words.length > 0 && (
+      {/* Vocabulary table - teaching-material sheets (audience='staff') are lesson
+          PDFs; vocabulary/activities do not apply and are hidden entirely. */}
+      {!isTeachingMaterial && words.length > 0 && (
         <div className="bg-white rounded-xl overflow-hidden shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-900">Vocabulary List</h2>
@@ -329,24 +332,26 @@ export default function StudySheetDetailClient({
       )}
 
       {/* Activities section (canonical activities table; replaces legacy exercises) */}
-      <div>
-        <h2 className="font-semibold text-gray-900 mb-4">
-          Activities
-          <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold align-middle" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{activities.length}</span>
-        </h2>
+      {!isTeachingMaterial && (
+        <div>
+          <h2 className="font-semibold text-gray-900 mb-4">
+            Activities
+            <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold align-middle" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{activities.length}</span>
+          </h2>
 
-        {activities.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-sm px-6 py-12 text-center text-gray-400 text-sm" style={{ border: '1px solid #f3f4f6' }}>
-            No activities yet
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {activities.map((activity) => (
-              <ActivityCard key={activity.id} activity={activity} />
-            ))}
-          </div>
-        )}
-      </div>
+          {activities.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm px-6 py-12 text-center text-gray-400 text-sm" style={{ border: '1px solid #f3f4f6' }}>
+              No activities yet
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {activities.map((activity) => (
+                <ActivityCard key={activity.id} activity={activity} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
