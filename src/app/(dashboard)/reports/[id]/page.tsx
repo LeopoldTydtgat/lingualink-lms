@@ -31,6 +31,8 @@ export default async function ReportPage({ params }: Props) {
       feedback_text,
       additional_details,
       level_data,
+      student_confirmed,
+      impersonation_note,
       deadline_at,
       completed_at,
       flagged_at,
