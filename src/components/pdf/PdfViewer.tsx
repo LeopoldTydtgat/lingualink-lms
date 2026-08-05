@@ -225,6 +225,13 @@ export type Annotation = StrokeAnnotation | TextAnnotation | ArrowAnnotation | S
 // so the change effect can tell "nothing to seed" apart from a real user edit.
 const EMPTY_ANNOTATIONS: Annotation[] = []
 
+// Stable shared empty-selection reference, mirroring EMPTY_ANNOTATIONS above.
+// selectedIds is always REPLACED, never mutated in place, so one shared array is
+// safe to reuse -- and reusing it keeps "deselect when nothing is selected" a
+// true no-op (React bails out on an identical reference), exactly as the old
+// setSelectedId(null) did when the id was already null.
+const NO_SELECTION: string[] = []
+
 // Per-page geometry of the displayed canvas, relative to the overlay wrapper.
 interface PageRect {
   left: number
@@ -518,7 +525,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
   // Which toolbar control (if any) is currently under the pointer; drives the hover
   // tint only (hoverFilterStyle) -- never read by click handlers or annotation logic.
-  // null = nothing hovered, matching editingId/selectedId below.
+  // null = nothing hovered, matching editingId below.
   const [hoverKey, setHoverKey] = useState<ToolbarHoverKey | null>(null)
 
   // Annotation state. `annotations` IS the array that gets saved in Milestone 4.
@@ -545,11 +552,15 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // selected colour, any mark, or the save path.
   const [colorOpen, setColorOpen] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
-  // A text box is either being EDITED (textarea) or SELECTED (outlined, with a
-  // control bar) -- never both. These two ids are kept mutually exclusive by
-  // enterEdit / selectBox below.
+  // A mark is either being EDITED (textarea) or SELECTED (outlined, with a
+  // control bar) -- never both. Editing is single by nature; SELECTION is a LIST
+  // so several marks can be held at once. Only single selection is reachable
+  // today: every current path sets exactly one id ([id]) and every deselect path
+  // sets the shared empty array. The two states stay mutually exclusive through
+  // enterEdit / selectBox below (entering edit clears the selection, selecting
+  // clears editing).
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>(NO_SELECTION)
   // Displayed geometry of each page canvas, so overlays can be placed exactly
   // on top of their canvas at the current zoom.
   const [pageRects, setPageRects] = useState<PageRect[]>([])
@@ -639,11 +650,26 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     (id: string) => {
       recordHistory()
       setAnnotations((anns) => anns.filter((a) => a.id !== id))
-      setSelectedId((prev) => (prev === id ? null : prev))
+      setSelectedIds((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : prev))
       setEditingId((prev) => (prev === id ? null : prev))
     },
     [recordHistory],
   )
+
+  // Delete EVERY currently selected mark as ONE undoable step: a single
+  // recordHistory() and a single setAnnotations, so one undo brings them all
+  // back together (and the change callback fires once). deleteBox above stays
+  // the single-id path used by the per-object control-bar x buttons. No-op when
+  // nothing is selected -- and specifically no history entry, so an empty
+  // Delete press never leaves a phantom undo step.
+  const deleteSelected = useCallback(() => {
+    if (selectedIds.length === 0) return
+    const doomed = new Set(selectedIds)
+    recordHistory()
+    setAnnotations((anns) => anns.filter((a) => !doomed.has(a.id)))
+    setSelectedIds(NO_SELECTION)
+    setEditingId(null)
+  }, [selectedIds, recordHistory])
 
   // Keep initialAnnotationsRef current for the load effect below. Declared
   // BEFORE the load effect so that on a commit where fileUrl AND
@@ -679,7 +705,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     if (annotationsRef.current !== seed) isSeedingRef.current = true
     setAnnotations(seed)
     setEditingId(null)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     setDraft(null)
     setPageRects([])
     setPdfLinks([])
@@ -1041,22 +1067,22 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     }
   }, [colorOpen])
 
-  // Delete / Backspace removes the selected box. Attached ONLY while a box is
+  // Delete / Backspace removes the selection. Attached ONLY while something is
   // selected and NOT being edited, so it never competes with the textarea (where
-  // Backspace must edit text). Routed through deleteBox so the key-delete is
-  // recorded in history like every other delete.
+  // Backspace must edit text). Routed through deleteSelected so the key-delete is
+  // recorded in history like every other delete, and so a multi-selection is
+  // removed as a single undo step.
   useEffect(() => {
-    if (!selectedId || editingId) return
-    const id = selectedId
+    if (selectedIds.length === 0 || editingId) return
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        deleteBox(id)
+        deleteSelected()
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [selectedId, editingId, deleteBox])
+  }, [selectedIds, editingId, deleteSelected])
 
   // Mirror the live draft so the pointer-up handler can read the full stroke
   // without a stale closure (and without nesting setState calls).
@@ -1184,17 +1210,17 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   function enterEdit(id: string) {
     recordHistory()
     if (editingId && editingId !== id) finishEditing(editingId)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     setEditingId(id)
   }
 
-  // Select `id` (the click / post-drag state). Commits any other open edit
-  // first, then makes selection and editing mutually exclusive. Selection is not
-  // an undoable action, so it does NOT record history.
+  // Select `id` (the click / post-drag state) as the ONLY selection. Commits any
+  // other open edit first, then makes selection and editing mutually exclusive.
+  // Selection is not an undoable action, so it does NOT record history.
   function selectBox(id: string) {
     if (editingId && editingId !== id) finishEditing(editingId)
     setEditingId(null)
-    setSelectedId(id)
+    setSelectedIds([id])
   }
 
   // A- / A+ : nudge one box's stored (scale-1) font size within the clamp range.
@@ -1231,7 +1257,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     if (readOnly) return
     if (editingId) finishEditing(editingId)
     // Switching tools drops any selection (the control bar is a Text-tool affordance).
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     // Clicking the active pen/text tool again toggles back to cursor; clicking
     // cursor (or a different tool) always selects that tool.
     setTool((prev) => (t !== 'cursor' && prev === t ? 'cursor' : t))
@@ -1246,7 +1272,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   function selectStamp(kind: 'star' | 'tick' | 'cross') {
     if (readOnly) return
     if (editingId) finishEditing(editingId)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     const sameActive = tool === 'stamp' && stampKind === kind
     setStampKind(kind)
     setTool(sameActive ? 'cursor' : 'stamp')
@@ -1263,7 +1289,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     setPast((p) => p.slice(0, -1))
     setAnnotations(prev)
     setEditingId(null)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     setDraft(null)
   }
   function redo() {
@@ -1275,7 +1301,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     setFuture((f) => f.slice(1))
     setAnnotations(next)
     setEditingId(null)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     setDraft(null)
   }
 
@@ -1283,7 +1309,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     recordHistory()
     setAnnotations([])
     setEditingId(null)
-    setSelectedId(null)
+    setSelectedIds(NO_SELECTION)
     setDraft(null)
     setShowClearConfirm(false)
   }
@@ -1315,13 +1341,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         finishEditing(editingId)
         return
       }
-      if (selectedId) {
-        setSelectedId(null)
+      if (selectedIds.length > 0) {
+        setSelectedIds(NO_SELECTION)
         return
       }
       const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
       const id = nextId()
-      setSelectedId(null)
+      setSelectedIds(NO_SELECTION)
       // Record before appending: one undo removes the whole box (typing into it
       // does not push, so the box and its text collapse into a single step).
       recordHistory()
@@ -1339,8 +1365,8 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       // clears the selection (click away to deselect) and places nothing; a
       // second click then places. Stamps have no editing state, so unlike text
       // there is no editing branch to commit first.
-      if (selectedId) {
-        setSelectedId(null)
+      if (selectedIds.length > 0) {
+        setSelectedIds(NO_SELECTION)
         return
       }
       const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
@@ -1352,7 +1378,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         { id, type: 'shape', kind: stampKind, pageIndex, color, x: f.x, y: f.y, size: STAMP_SIZE },
       ])
       // Select (never edit) the new stamp so its A- / A+ control shows at once.
-      setSelectedId(id)
+      setSelectedIds([id])
     }
   }
 
@@ -1704,7 +1730,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
   function renderTextBox(t: TextAnnotation, rect: PageRect) {
     const isEditing = t.id === editingId
-    const isSelected = t.id === selectedId
+    const isSelected = selectedIds.includes(t.id)
+    // The control bar belongs to ONE mark, so it shows only when this box is the
+    // SOLE selection (or is the box being edited). Identical to today's
+    // behaviour, where only a single selection is ever reachable.
+    const isSoleSelection = selectedIds.length === 1 && selectedIds[0] === t.id
     const interactive = tool === 'text'
     // Font / colour shared by both the textarea and the static text.
     const baseStyle: CSSProperties = {
@@ -1717,7 +1747,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // Anchor the control bar above the box by default; flip below when the box
     // sits too near the page top for the bar to fit above it.
     const below = t.y * rect.height < 40
-    const bar = isEditing || isSelected ? renderControlBar(t, below) : null
+    const bar = isEditing || isSoleSelection ? renderControlBar(t, below) : null
 
     // Wrapper pinned at the box's 0..1 top-left. It hugs the box (lineHeight 0
     // kills the inline-block descender gap) so the control bar, anchored to the
@@ -1804,7 +1834,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // stamp is selected it also hosts the A- / A+ / delete control bar.
   function renderShapeHitTarget(s: ShapeAnnotation, rect: PageRect) {
     const interactive = tool === 'stamp'
-    const isSelected = s.id === selectedId
+    // Same rule as the text box: the A- / A+ / delete bar belongs to ONE stamp,
+    // so it renders only when this stamp is the SOLE selection. (The selection
+    // FRAME, drawn in the page svg, still shows on every selected stamp.)
+    const isSoleSelection = selectedIds.length === 1 && selectedIds[0] === s.id
     const sidePx = s.size * scale
     // Flip the control bar below the stamp when its top edge sits too near the
     // page top for the bar to fit above (mirrors the text box's `below`).
@@ -1827,7 +1860,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           touchAction: interactive ? 'none' : 'auto',
         }}
       >
-        {isSelected ? renderShapeControlBar(s, below) : null}
+        {isSoleSelection ? renderShapeControlBar(s, below) : null}
       </div>
     )
   }
@@ -1983,7 +2016,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             // Tick / cross are stroked; width scales with the stamp (min 2px so a
             // tiny stamp stays visible). Star is filled with the stamp colour.
             const strokeW = Math.max(2, side * 0.12)
-            const isSelected = s.id === selectedId
+            const isSelected = selectedIds.includes(s.id)
             return (
               <g key={s.id}>
                 {isSelected ? (
@@ -2431,16 +2464,32 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
                   onMouseLeave={() => setHoverKey((k) => (k === sw.value ? null : k))}
                   onClick={() => {
                     setColor(sw.value)
-                    // If a mark is editing or selected, recolour THAT mark too (any type,
-                    // undoable). Only snapshot history when the colour actually changes,
-                    // so re-picking a mark's current colour is a true no-op.
-                    const target = editingId ?? selectedId
-                    if (target) {
-                      const current = annotationsRef.current.find((a) => a.id === target)
+                    // If a mark is being EDITED, recolour that one (any type, undoable).
+                    // Otherwise recolour EVERY selected mark, as ONE history entry and
+                    // ONE setAnnotations so the whole recolour is a single undo step.
+                    // Either way only marks whose colour actually DIFFERS are touched,
+                    // and history is snapshotted only when at least one will change --
+                    // so re-picking the current colour stays a true no-op (no phantom
+                    // undo step). editingId and selectedIds are mutually exclusive, so
+                    // this if/else reproduces the old `editingId ?? selectedId` target.
+                    if (editingId) {
+                      const current = annotationsRef.current.find((a) => a.id === editingId)
                       if (current && current.color !== sw.value) {
                         recordHistory()
                         setAnnotations((anns) =>
-                          anns.map((a) => (a.id === target ? { ...a, color: sw.value } : a)),
+                          anns.map((a) => (a.id === editingId ? { ...a, color: sw.value } : a)),
+                        )
+                      }
+                    } else if (selectedIds.length > 0) {
+                      const targets = new Set(
+                        annotationsRef.current
+                          .filter((a) => selectedIds.includes(a.id) && a.color !== sw.value)
+                          .map((a) => a.id),
+                      )
+                      if (targets.size > 0) {
+                        recordHistory()
+                        setAnnotations((anns) =>
+                          anns.map((a) => (targets.has(a.id) ? { ...a, color: sw.value } : a)),
                         )
                       }
                     }
