@@ -85,6 +85,27 @@ const STAMP_STEP = 6
 // Maximum number of undo restore points kept (oldest dropped past this).
 const HISTORY_LIMIT = 50
 
+// --- Cursor (selection) tool geometry ---------------------------------------
+// Every cursor-tool measurement runs in RENDERED PIXEL space, never in the 0..1
+// fraction space marks are stored in: fractions are anisotropic (x and y scale
+// by different amounts), so any distance computed in fraction space would be
+// wrong. Click tolerance around a thin stroke / arrow, in rendered px; the real
+// hit width is max(renderedStrokeWidth, this).
+const HIT_TOLERANCE = 8
+// Total pointer travel (|dx| + |dy| in client px) at or under which a press-drag
+// counts as a plain click rather than a marquee.
+const MARQUEE_MIN_DRAG = 4
+// How far the arrowhead reaches from an arrow's END point, in multiples of the
+// RENDERED line width. Derived from the marker attributes at the render site
+// (viewBox "0 0 10 10", markerWidth / markerHeight 8, refX 8, refY 5, and the
+// default markerUnits "strokeWidth"): one viewBox unit is 8/10 = 0.8 line
+// widths, and the reference point sits at (8, 5) inside the marker viewport. So
+// the head reaches 8 * 0.8 back along the line, 8 * 0.2 past the tip, and 8 / 2
+// to each side. Keep these in step with that <marker> if it is ever retuned.
+const ARROW_HEAD_BACK = 6.4
+const ARROW_HEAD_FRONT = 1.6
+const ARROW_HEAD_SIDE = 4
+
 // Custom pen cursor: a lucide "pencil" rendered as an inline SVG data URI, with
 // the hotspot at the pen tip (lower-left, "2 21"). A wider white outline sits
 // behind the black pencil so the cursor stays visible over dark page areas.
@@ -274,6 +295,39 @@ interface RawLinkAnnotation {
   url?: unknown
   rect?: unknown
 }
+// A rectangle in RENDERED px, relative to a page overlay's top-left corner.
+// Cursor-tool hit testing and marquee intersection both work in this space.
+interface PxRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+// In-progress marquee (rubber-band) drag; cursor tool only, and always local to
+// the ONE page the drag started on. `x0/y0` is the anchor in overlay-local px;
+// the pointer-down client coords are kept so the click-vs-drag threshold is
+// measured in raw pointer travel, independent of zoom.
+interface MarqueeDrag {
+  pageIndex: number
+  // The pointer that ARMED the drag. Every later event must match it, so a
+  // second pointer (a palm or a stray finger landing while the pen is
+  // mid-marquee) can never drive, commit or cancel someone else's gesture.
+  pointerId: number
+  clientX: number
+  clientY: number
+  x0: number
+  y0: number
+  additive: boolean // shift held at pointer-down: ADD to the existing selection
+  moved: boolean
+}
+// The marquee as rendered: page-local px corners on ONE page.
+interface MarqueeRect {
+  pageIndex: number
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
 
 function clamp01(n: number): number {
   return n < 0 ? 0 : n > 1 ? 1 : n
@@ -358,6 +412,181 @@ function starPath(cx: number, cy: number, outer: number): string {
 // in one place (down seeds the draft, move extends it, up commits).
 function isDrawingTool(t: Tool): boolean {
   return t === 'pen' || t === 'highlighter' || t === 'underline' || t === 'arrow'
+}
+
+// --- Cursor-tool geometry (every input and output is in RENDERED px) --------
+
+// Pointer position relative to a page overlay, clamped to the page, together
+// with that page's rendered size. One getBoundingClientRect for both, since
+// every cursor-tool computation needs the pair.
+function overlayPoint(
+  el: HTMLElement,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number; w: number; h: number } {
+  const r = el.getBoundingClientRect()
+  const w = r.width
+  const h = r.height
+  return {
+    x: w > 0 ? clamp01((clientX - r.left) / w) * w : 0,
+    y: h > 0 ? clamp01((clientY - r.top) / h) * h : 0,
+    w,
+    h,
+  }
+}
+
+// Standard rect intersection: ANY overlap counts (the Figma / Miro marquee rule,
+// deliberately NOT full enclosure).
+function rectsOverlap(a: PxRect, b: PxRect): boolean {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom
+}
+
+// Shortest distance from (px, py) to the segment (ax, ay)-(bx, by).
+function pointSegmentDistance(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const vx = bx - ax
+  const vy = by - ay
+  const len2 = vx * vx + vy * vy
+  if (len2 === 0) return Math.hypot(px - ax, py - ay)
+  const raw = ((px - ax) * vx + (py - ay) * vy) / len2
+  const t = raw < 0 ? 0 : raw > 1 ? 1 : raw
+  return Math.hypot(px - (ax + t * vx), py - (ay + t * vy))
+}
+
+// How a text box's rendered box is obtained. The DOM is the ONLY source of truth
+// for text size (never an estimate from character count), so this is supplied by
+// the component from its live element map.
+type TextBoxMeasure = (id: string) => PxRect | null
+// For call sites that can never be handed a text annotation (the stroke / arrow
+// selection outlines), so no measurement is needed.
+const NO_TEXT_MEASURE: TextBoxMeasure = () => null
+
+// Painting order inside a page overlay: the svg draws strokes, then arrows, then
+// stamps, and the text boxes are DOM siblings AFTER that svg, so text always
+// paints on top. Higher rank = drawn later; ties are broken by array order at
+// the call site. Used to resolve overlapping hits ("topmost wins").
+function layerRank(a: Annotation): number {
+  return a.type === 'stroke' ? 0 : a.type === 'arrow' ? 1 : a.type === 'shape' ? 2 : 3
+}
+
+// Rendered bounding box of one annotation in overlay-local px; w/h are the
+// page's rendered size. Returns null when the box cannot be determined (a text
+// box with no mounted node, or a stroke with no points), which every caller
+// treats as "not selectable".
+function annotationBounds(
+  a: Annotation,
+  w: number,
+  h: number,
+  scale: number,
+  measureText: TextBoxMeasure,
+): PxRect | null {
+  if (a.type === 'text') return measureText(a.id)
+  if (a.type === 'shape') {
+    // The rendered square -- the same box the stamp's selection rect surrounds.
+    const half = (a.size * scale) / 2
+    const cx = a.x * w
+    const cy = a.y * h
+    return { left: cx - half, top: cy - half, right: cx + half, bottom: cy + half }
+  }
+  if (a.type === 'arrow') {
+    const lineW = a.width * scale
+    const half = lineW / 2
+    const sx = a.start.x * w
+    const sy = a.start.y * h
+    const ex = a.end.x * w
+    const ey = a.end.y * h
+    // The line itself, padded by half its rendered width.
+    let minX = Math.min(sx, ex) - half
+    let minY = Math.min(sy, ey) - half
+    let maxX = Math.max(sx, ex) + half
+    let maxY = Math.max(sy, ey) + half
+    // Then grow to cover the arrowhead drawn at the END point. The head rotates
+    // with the line (orient="auto"), so fold in the four corners of its marker
+    // viewport expressed in the arrow's own frame -- padding isotropically by
+    // its longest reach instead would inflate the box by ~2x across a
+    // horizontal arrow, which shows up directly as a too-tall selection outline.
+    const dx = ex - sx
+    const dy = ey - sy
+    const len = Math.hypot(dx, dy)
+    if (len === 0) {
+      // No direction to orient the head by: fall back to its longest reach.
+      const r = ARROW_HEAD_BACK * lineW
+      minX = Math.min(minX, ex - r)
+      minY = Math.min(minY, ey - r)
+      maxX = Math.max(maxX, ex + r)
+      maxY = Math.max(maxY, ey + r)
+    } else {
+      const ux = dx / len
+      const uy = dy / len
+      for (const along of [-ARROW_HEAD_BACK * lineW, ARROW_HEAD_FRONT * lineW]) {
+        for (const side of [-ARROW_HEAD_SIDE * lineW, ARROW_HEAD_SIDE * lineW]) {
+          const cx = ex + ux * along - uy * side
+          const cy = ey + uy * along + ux * side
+          if (cx < minX) minX = cx
+          if (cx > maxX) maxX = cx
+          if (cy < minY) minY = cy
+          if (cy > maxY) maxY = cy
+        }
+      }
+    }
+    return { left: minX, top: minY, right: maxX, bottom: maxY }
+  }
+  const half = (a.width * scale) / 2
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of a.points) {
+    const x = p.x * w
+    const y = p.y * h
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null
+  return { left: minX - half, top: minY - half, right: maxX + half, bottom: maxY + half }
+}
+
+// Does a click at (px, py) hit this annotation? Strokes and arrows use a
+// distance-to-segment test so a thin line still has a usable click target (a
+// single-point stroke -- a dot / tap -- is treated as a point with the same
+// tolerance); stamps and text boxes use their rendered box.
+function annotationHitsPoint(
+  a: Annotation,
+  px: number,
+  py: number,
+  w: number,
+  h: number,
+  scale: number,
+  measureText: TextBoxMeasure,
+): boolean {
+  if (a.type === 'stroke') {
+    const tolerance = Math.max(a.width * scale, HIT_TOLERANCE)
+    const pts = a.points
+    const first = pts[0]
+    if (!first) return false
+    if (pts.length === 1) return Math.hypot(px - first.x * w, py - first.y * h) <= tolerance
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p = pts[i]
+      const q = pts[i + 1]
+      if (!p || !q) continue
+      if (pointSegmentDistance(px, py, p.x * w, p.y * h, q.x * w, q.y * h) <= tolerance) return true
+    }
+    return false
+  }
+  if (a.type === 'arrow') {
+    const tolerance = Math.max(a.width * scale, HIT_TOLERANCE)
+    return pointSegmentDistance(px, py, a.start.x * w, a.start.y * h, a.end.x * w, a.end.y * h) <= tolerance
+  }
+  const b = annotationBounds(a, w, h, scale, measureText)
+  return b !== null && px >= b.left && px <= b.right && py >= b.top && py <= b.bottom
 }
 
 // Editable text box: a focused, auto-growing textarea. Kept as its own
@@ -487,6 +716,16 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   const latestDraftRef = useRef<Draft | null>(null)
   // In-progress text-box drag.
   const dragRef = useRef<DragState | null>(null)
+  // In-progress marquee drag (cursor tool). A ref as well as state because the
+  // move / up handlers must read it synchronously, and because the click-vs-drag
+  // threshold flips `moved` without a re-render.
+  const marqueeRef = useRef<MarqueeDrag | null>(null)
+  // Live DOM nodes of the committed text boxes, keyed by annotation id, so the
+  // cursor tool can hit-test / marquee against a text box's REAL rendered size
+  // instead of estimating it from character count. Registered by renderTextBox's
+  // wrapper ref (which exists in both its editing and committed branches) and
+  // deleted when that wrapper unmounts.
+  const textBoxElsRef = useRef<Map<string, HTMLElement>>(new Map())
   // Pre-gesture annotation snapshot, captured at drag-start and pushed onto the
   // undo stack only if the drag actually moved the box (so a live drag's many
   // per-pixel updates collapse into one undo step). See onTextPointerUp.
@@ -552,6 +791,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // selected colour, any mark, or the save path.
   const [colorOpen, setColorOpen] = useState(false)
   const [draft, setDraft] = useState<Draft | null>(null)
+  // The rubber-band rectangle while a marquee drag is running (cursor tool), or
+  // null. Purely transient UI: it lives on ONE page, never touches `annotations`
+  // and never records history, exactly like the selection it produces.
+  const [marquee, setMarquee] = useState<MarqueeRect | null>(null)
   // A mark is either being EDITED (textarea) or SELECTED (outlined, with a
   // control bar) -- never both. Editing is single by nature; SELECTION is a LIST
   // so several marks can be held at once. Only single selection is reachable
@@ -577,6 +820,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // snapshots between the two stacks. `past` is capped at HISTORY_LIMIT.
   const [past, setPast] = useState<Annotation[][]>([])
   const [future, setFuture] = useState<Annotation[][]>([])
+
+  // The cursor tool is a real SELECTION tool only in an editable viewer. In
+  // read-only review mode it stays exactly what it has always been: an inert,
+  // click-through overlay. Every new selection path is gated on this.
+  const cursorSelect = tool === 'cursor' && !readOnly
 
   function nextId(): string {
     idCounterRef.current += 1
@@ -707,6 +955,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     setEditingId(null)
     setSelectedIds(NO_SELECTION)
     setDraft(null)
+    // Any in-progress marquee dies with the old document: its rubber band is in
+    // the old page's geometry, and leaving the drag armed would let the next
+    // hover paint a stale rectangle.
+    marqueeRef.current = null
+    setMarquee(null)
     setPageRects([])
     setPdfLinks([])
     setPast([])
@@ -1069,12 +1322,21 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
   // Delete / Backspace removes the selection. Attached ONLY while something is
   // selected and NOT being edited, so it never competes with the textarea (where
-  // Backspace must edit text). Routed through deleteSelected so the key-delete is
-  // recorded in history like every other delete, and so a multi-selection is
-  // removed as a single undo step.
+  // Backspace must edit text). Also guards against any other form control (e.g.
+  // the page-number input) being focused, since typing in it must never delete
+  // marks. Routed through deleteSelected so the key-delete is recorded in
+  // history like every other delete, and so a multi-selection is removed as a
+  // single undo step.
   useEffect(() => {
     if (selectedIds.length === 0 || editingId) return
     function onKey(e: KeyboardEvent) {
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         deleteSelected()
@@ -1083,6 +1345,21 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [selectedIds, editingId, deleteSelected])
+
+  // Escape clears the CURSOR tool's selection. Attached ONLY while the cursor
+  // tool actually has a selection and nothing is being edited, so it never
+  // competes with the textarea's own Escape (which commits the box) and leaves
+  // every other tool's behaviour untouched. Clearing a selection is not an
+  // undoable action, so nothing is recorded.
+  useEffect(() => {
+    if (!cursorSelect) return
+    if (selectedIds.length === 0 || editingId) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setSelectedIds(NO_SELECTION)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [cursorSelect, selectedIds, editingId])
 
   // Mirror the live draft so the pointer-up handler can read the full stroke
   // without a stale closure (and without nesting setState calls).
@@ -1314,6 +1591,141 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     setShowClearConfirm(false)
   }
 
+  // --- Cursor (selection) tool ----------------------------------------------
+
+  // Measure the committed text boxes of ONE page overlay, in overlay-local px.
+  // Built once per gesture from the live DOM (the only source of truth for a
+  // text box's rendered size); a box with no mounted node measures to null and
+  // is therefore not selectable.
+  function measureTextBoxes(overlay: HTMLElement): TextBoxMeasure {
+    const or = overlay.getBoundingClientRect()
+    return (id: string) => {
+      const el = textBoxElsRef.current.get(id)
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      if (r.width <= 0 || r.height <= 0) return null
+      return {
+        left: r.left - or.left,
+        top: r.top - or.top,
+        right: r.right - or.left,
+        bottom: r.bottom - or.top,
+      }
+    }
+  }
+
+  // Drop an in-progress marquee, leaving the selection exactly as it was.
+  function cancelMarquee() {
+    marqueeRef.current = null
+    setMarquee(null)
+  }
+
+  // Does this event belong to the pointer that armed the current marquee? Touch
+  // can never arm one (the cursor branch bails on it), so a touch event is
+  // rejected outright rather than relying on pointer ids alone -- a finger must
+  // keep scrolling the document even while a pen marquee is running.
+  function ownsMarquee(e: ReactPointerEvent<HTMLDivElement>): MarqueeDrag | null {
+    const m = marqueeRef.current
+    if (!m) return null
+    if (e.pointerType === 'touch') return null
+    return e.pointerId === m.pointerId ? m : null
+  }
+
+  // Extend an armed marquee. A no-op under every other tool, because marqueeRef
+  // is only ever armed by the cursor branch of onOverlayPointerDown.
+  function updateMarquee(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
+    const m = ownsMarquee(e)
+    if (!m) return
+    // Self-heal, checked BEFORE the page guard so it still fires when the
+    // pointer has wandered onto another page: a pointer-up we never saw (release
+    // outside the window, alt-tab, a gesture stolen by the OS) would otherwise
+    // leave the drag armed and let a plain hover paint a marquee.
+    if (e.buttons === 0) {
+      cancelMarquee()
+      return
+    }
+    // Geometry is only meaningful against the page the drag started on (with
+    // pointer capture held, that is the only overlay these events reach).
+    if (m.pageIndex !== pageIndex) return
+    if (!m.moved && Math.abs(e.clientX - m.clientX) + Math.abs(e.clientY - m.clientY) <= MARQUEE_MIN_DRAG) {
+      return
+    }
+    m.moved = true
+    const pt = overlayPoint(e.currentTarget, e.clientX, e.clientY)
+    setMarquee({ pageIndex, x0: m.x0, y0: m.y0, x1: pt.x, y1: pt.y })
+  }
+
+  // Complete an armed marquee on pointer-up: a real drag selects every mark on
+  // THIS page whose bounding box INTERSECTS the rectangle (partial overlap is
+  // enough), a sub-threshold drag is a plain click. Selection is not undoable,
+  // so nothing here touches the annotations array or the history stacks.
+  function finishMarquee(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
+    const m = ownsMarquee(e)
+    if (!m) return
+    cancelMarquee()
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    // The gesture must end on the page it started on -- it always does while
+    // pointer capture holds, but capture is best-effort. If it was refused and
+    // the release landed on another page, drop the gesture (state is already
+    // clean) rather than selecting from a rectangle measured against the wrong
+    // page geometry.
+    if (m.pageIndex !== pageIndex) return
+    if (!m.moved) {
+      // A plain click on empty space clears the selection. With shift held it is
+      // left alone: an additive gesture that caught nothing must never wipe what
+      // is already selected.
+      if (!m.additive) setSelectedIds(NO_SELECTION)
+      return
+    }
+    const pt = overlayPoint(el, e.clientX, e.clientY)
+    const box: PxRect = {
+      left: Math.min(m.x0, pt.x),
+      top: Math.min(m.y0, pt.y),
+      right: Math.max(m.x0, pt.x),
+      bottom: Math.max(m.y0, pt.y),
+    }
+    const measure = measureTextBoxes(el)
+    const hits: string[] = []
+    for (const a of annotations) {
+      if (a.pageIndex !== pageIndex) continue
+      const b = annotationBounds(a, pt.w, pt.h, scale, measure)
+      if (b && rectsOverlap(b, box)) hits.push(a.id)
+    }
+    setSelectedIds((prev) => {
+      if (!m.additive) return hits.length === 0 ? NO_SELECTION : hits
+      const merged = prev.slice()
+      for (const id of hits) if (!merged.includes(id)) merged.push(id)
+      // Nothing new caught: keep the exact previous array so React bails out.
+      return merged.length === prev.length ? prev : merged
+    })
+  }
+
+  // The MARQUEE'S OWN pointer was cancelled (palm rejection on the pen, a
+  // gesture taken over by the browser): drop the rubber band and leave the
+  // selection untouched. ownsMarquee is what makes this safe in cursor mode,
+  // where touchAction stays permissive: the browser fires pointercancel for
+  // every touch it takes over for panning, and those must NOT destroy a pen
+  // marquee. Armed only by the cursor tool, so no drawing / text / stamp gesture
+  // can reach this either.
+  function onOverlayPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!ownsMarquee(e)) return
+    cancelMarquee()
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+  }
+
   // --- Pointer handling on a page overlay -----------------------------------
 
   function onOverlayPointerDown(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
@@ -1379,17 +1791,100 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       ])
       // Select (never edit) the new stamp so its A- / A+ control shows at once.
       setSelectedIds([id])
+    } else if (cursorSelect) {
+      // CURSOR = selection tool. Unreachable in read-only, where the overlay is
+      // still click-through (cursorSelect is false).
+      //
+      // TOUCH IS DELIBERATELY UNTOUCHED: a single finger must keep SCROLLING the
+      // document mid-lesson, so we bail out before any capture / preventDefault.
+      if (e.pointerType === 'touch') return
+      // Primary button only. A right-click gets no matching pointer-up, so arming
+      // a marquee on it would leave the drag armed after the context menu.
+      if (e.button !== 0) return
+      // Only the bare overlay starts a selection: a press that landed on a
+      // baked-in link hotspot or an open control bar belongs to that element (the
+      // same guard the text / stamp branches use), so links keep working exactly
+      // as before.
+      if (e.target !== e.currentTarget) return
+      // Interaction hygiene: commit any open text edit first (mirrors the text
+      // branch above). selectBox below would also commit it, but the shift-toggle
+      // and marquee paths do not go through selectBox.
+      if (editingId) finishEditing(editingId)
+
+      const el = e.currentTarget
+      const pt = overlayPoint(el, e.clientX, e.clientY)
+      const measure = measureTextBoxes(el)
+      // Topmost hit wins: scan this page's marks in painting order (array order
+      // within a layer, layers per layerRank) and keep the LAST one that hits.
+      let hitId: string | null = null
+      let hitRank = -1
+      for (const a of annotations) {
+        if (a.pageIndex !== pageIndex) continue
+        if (!annotationHitsPoint(a, pt.x, pt.y, pt.w, pt.h, scale, measure)) continue
+        const rank = layerRank(a)
+        if (rank >= hitRank) {
+          hitRank = rank
+          hitId = a.id
+        }
+      }
+
+      if (hitId !== null) {
+        const id = hitId
+        if (e.shiftKey) {
+          // Shift+click toggles ONE mark in / out and leaves the rest alone.
+          setEditingId(null)
+          setSelectedIds((prev) => {
+            if (!prev.includes(id)) return [...prev, id]
+            const next = prev.filter((s) => s !== id)
+            return next.length === 0 ? NO_SELECTION : next
+          })
+        } else {
+          // Plain click on a mark: it becomes the ONLY selection.
+          selectBox(id)
+        }
+        return
+      }
+
+      // Empty space: arm a marquee. The selection is NOT changed yet -- a plain
+      // click clears it on pointer-up, and a shift+marquee must still see the
+      // current selection to add to it. Pointer capture keeps a fast drag that
+      // leaves the overlay flowing here until the pointer is released.
+      if (typeof el.setPointerCapture === 'function') {
+        try {
+          el.setPointerCapture(e.pointerId)
+        } catch {
+          // Ignore: capture is a best-effort optimisation.
+        }
+      }
+      marqueeRef.current = {
+        pageIndex,
+        pointerId: e.pointerId,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        x0: pt.x,
+        y0: pt.y,
+        additive: e.shiftKey,
+        moved: false,
+      }
     }
   }
 
   function onOverlayPointerMove(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
-    if (!isDrawingTool(tool)) return
+    if (!isDrawingTool(tool)) {
+      // Cursor tool: extend an armed marquee. A no-op under every other tool.
+      updateMarquee(e, pageIndex)
+      return
+    }
     const f = pointFraction(e.currentTarget, e.clientX, e.clientY)
     setDraft((d) => (d && d.pageIndex === pageIndex ? { pageIndex, points: [...d.points, f] } : d))
   }
 
   function onOverlayPointerUp(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
-    if (!isDrawingTool(tool)) return
+    if (!isDrawingTool(tool)) {
+      // Cursor tool: complete an armed marquee. A no-op under every other tool.
+      finishMarquee(e, pageIndex)
+      return
+    }
     const el = e.currentTarget
     if (typeof el.releasePointerCapture === 'function') {
       try {
@@ -1760,10 +2255,19 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       lineHeight: 0,
       pointerEvents: 'none',
     }
+    // Register the wrapper for cursor-tool hit testing / marquee intersection.
+    // The wrapper is absolutely positioned and shrinks to fit, and the control
+    // bar inside it is out of flow, so its box IS the text box's rendered box --
+    // a real measurement, never an estimate. Registered in both branches below
+    // and removed when the wrapper unmounts.
+    const registerBox = (el: HTMLDivElement | null) => {
+      if (el) textBoxElsRef.current.set(t.id, el)
+      else textBoxElsRef.current.delete(t.id)
+    }
 
     if (isEditing) {
       return (
-        <div key={t.id} style={wrapperStyle}>
+        <div key={t.id} ref={registerBox} style={wrapperStyle}>
           <EditableTextBox
             value={t.text}
             widthPx={TEXT_BOX_WIDTH * scale}
@@ -1793,7 +2297,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     }
 
     return (
-      <div key={t.id} style={wrapperStyle}>
+      <div key={t.id} ref={registerBox} style={wrapperStyle}>
         <div
           onPointerDown={(e) => onTextPointerDown(e, t, rect)}
           onPointerMove={onTextPointerMove}
@@ -1887,6 +2391,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       drawingHere && draft && tool === 'arrow' ? draft.points[draft.points.length - 1] : undefined
 
     const pageLinks = pdfLinks.filter((l) => l.pageIndex === pageIndex)
+    // Strokes and arrows have no DOM node of their own, so their selection
+    // outline is drawn in this page's svg, from the same pixel bounding box the
+    // marquee intersects. Text boxes (their own orange outline) and stamps
+    // (their own selection frame) are unchanged.
+    const outlinedMarks = [...pageStrokes, ...pageArrows].filter((a) => selectedIds.includes(a.id))
 
     return (
       <div
@@ -1894,14 +2403,22 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         onPointerDown={(e) => onOverlayPointerDown(e, pageIndex)}
         onPointerMove={(e) => onOverlayPointerMove(e, pageIndex)}
         onPointerUp={(e) => onOverlayPointerUp(e, pageIndex)}
+        onPointerCancel={onOverlayPointerCancel}
         style={{
           position: 'absolute',
           left: rect.left,
           top: rect.top,
           width: rect.width,
           height: rect.height,
-          // Click-through in cursor mode so scroll / zoom work normally.
-          pointerEvents: tool === 'cursor' ? 'none' : 'auto',
+          // Click-through in READ-ONLY cursor mode, so scroll / zoom work exactly
+          // as they always have. In an editable viewer the cursor tool is a real
+          // selection tool, so the overlay must receive mouse / pen events; touch
+          // still scrolls the document because touchAction stays permissive below
+          // and every cursor-tool handler rejects pointerType 'touch' (the down
+          // branch returns before any capture, and ownsMarquee rejects it on
+          // move / up / cancel). No wheel handler is attached anywhere, so wheel
+          // scrolling passes straight through to the scroll container.
+          pointerEvents: tool === 'cursor' && !cursorSelect ? 'none' : 'auto',
           cursor: isDrawingTool(tool) ? PEN_CURSOR : tool === 'text' ? 'text' : 'default',
           touchAction: tool === 'cursor' ? 'auto' : 'none',
           userSelect: 'none',
@@ -2069,6 +2586,28 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               </g>
             )
           })}
+          {/* Selection outline for a selected stroke / arrow: a dashed orange
+              bounding box, drawn after the marks so a highlighter can never sit
+              on top of it. Same accent and 3px offset as the stamp's selection
+              frame; dashed so it reads as a selection, not as a drawn mark. */}
+          {outlinedMarks.map((a) => {
+            const b = annotationBounds(a, rect.width, rect.height, scale, NO_TEXT_MEASURE)
+            if (!b) return null
+            return (
+              <rect
+                key={`sel-${a.id}`}
+                x={round1(b.left - 3)}
+                y={round1(b.top - 3)}
+                width={round1(b.right - b.left + 6)}
+                height={round1(b.bottom - b.top + 6)}
+                rx={3}
+                fill="none"
+                stroke={ORANGE}
+                strokeWidth={1}
+                strokeDasharray="4 3"
+              />
+            )
+          })}
           {drawingHere && draft && tool !== 'arrow' ? (
             <path
               d={strokePath(draft.points, rect.width, rect.height)}
@@ -2090,6 +2629,20 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
               strokeWidth={ARROW_WIDTH * scale}
               strokeLinecap="round"
               markerEnd="url(#arrowhead-draft)"
+            />
+          ) : null}
+          {/* Marquee (rubber band), drawn last so it sits above every mark. Lives
+              only on the page the drag started on. */}
+          {marquee && marquee.pageIndex === pageIndex ? (
+            <rect
+              x={round1(Math.min(marquee.x0, marquee.x1))}
+              y={round1(Math.min(marquee.y0, marquee.y1))}
+              width={round1(Math.abs(marquee.x1 - marquee.x0))}
+              height={round1(Math.abs(marquee.y1 - marquee.y0))}
+              fill="rgba(255, 131, 3, 0.10)"
+              stroke={ORANGE}
+              strokeWidth={1}
+              strokeDasharray="4 3"
             />
           ) : null}
         </svg>
