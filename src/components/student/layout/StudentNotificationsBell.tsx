@@ -160,9 +160,9 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
 
     establish()
 
-    // Heal on focus/visibility, copied from BillingRealtimeRefresher. BOTH listeners
-    // are needed: tab-switch fires visibilitychange but not focus; alt-tabbing back to
-    // the window fires focus. The debounce collapses a double-fire into one refresh.
+    // Heal on focus/visibility. BOTH listeners are needed: tab-switch fires
+    // visibilitychange but not focus; alt-tabbing back to the window fires focus. The
+    // debounce collapses a double-fire into one refresh.
     const heal = () => {
       scheduleRefresh()
       if (health === 'none' || health === 'unhealthy') establish()
@@ -193,8 +193,12 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   }, [router, studentId])
 
   // Effective marker = the later of the server-provided stamp and the local
-  // open-of-dropdown stamp. The server action refreshes the route, so seenAt
-  // advances on its own; useState would otherwise pin us to the mount-time value.
+  // open-of-dropdown stamp. markStudentWhatsNewSeen writes students.whats_new_seen_at
+  // but does NOT revalidate, so the `seenAt` prop does not advance on its own — it
+  // only catches up when something else re-runs the student layout (a dismiss or
+  // clear-all refresh, the realtime/heal refresh above, or a navigation). The local
+  // stamp is therefore what clears the badge immediately, and taking the LATER of the
+  // two means a lagging prop can never un-see rows the user has already opened.
   const effectiveSeenAt =
     localSeenAt != null && (seenAt == null || localSeenAt > seenAt) ? localSeenAt : seenAt
   const isSeen = (item: WhatsNewItem) => effectiveSeenAt != null && item.at <= effectiveSeenAt

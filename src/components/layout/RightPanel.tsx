@@ -121,12 +121,10 @@ export default function RightPanel({
   const [whatsNewExpanded, setWhatsNewExpanded] = useState(false)
   const [expandHovered, setExpandHovered] = useState(false)
   const [clearAllHovered, setClearAllHovered] = useState(false)
-  // Set by a successful "Clear all" and then NEVER reset for the life of this
-  // mount — the old bell reset it on dropdown close, and this card has no
-  // equivalent close event. It only swaps the empty-state copy to a friendlier
-  // "All caught up", so the visible consequence is that a feed which later
-  // refills and is dismissed row-by-row also reads "All caught up" instead of
-  // "No new activity". Cosmetic and accepted. Not set when the drain throws.
+  // Set by a successful "Clear all" — swaps the empty-state copy to a friendlier
+  // "All caught up". Not set when the drain throws. The old bell reset it on
+  // dropdown close and this card has no equivalent close event, so the reset is
+  // keyed on the feed refilling instead (see the adjustment below visibleWhatsNew).
   const [clearedJustNow, setClearedJustNow] = useState(false)
   // Staff Tools is collapsed by default; the header row toggles it.
   const [staffToolsOpen, setStaffToolsOpen] = useState(false)
@@ -172,11 +170,18 @@ export default function RightPanel({
 
   // Realtime: refresh the feed when any source table it is built from changes in
   // another session. Moved here verbatim from the deleted NotificationsBell, which
-  // used to own the only What's New subscription. Mirrors BillingRealtimeRefresher —
-  // one channel, postgres_changes scoped to this teacher wherever a teacher_id
-  // column exists, and a debounced router.refresh(). This ONLY asks Next.js to
-  // re-run the layout; the server refetch (fetchWhatsNew) stays the single source
-  // of truth for what shows, and dismiss logic is untouched.
+  // used to own the only What's New subscription. One channel, postgres_changes
+  // scoped to this teacher wherever a teacher_id column exists, and a debounced
+  // router.refresh(). This ONLY asks Next.js to re-run the layout; the server
+  // refetch (fetchWhatsNew) stays the single source of truth for what shows, and
+  // dismiss logic is untouched.
+  //
+  // This is now the (dashboard) layout's ONLY realtime refresher. It absorbed the
+  // deleted BillingRealtimeRefresher, whose subscription (lessons filtered to this
+  // same teacher_id) and focus refresh were both strict subsets of what runs here —
+  // two components mounted in one layout meant two router.refresh() calls per focus,
+  // and router.refresh() re-runs the whole layout, so the billing summary this panel
+  // renders is recomputed by the refresh below exactly as it was before.
   //
   // The teacherId prop is deliberately NOT used as the filter key even though it
   // holds the same uuid: awaiting a real auth.getUser() also guarantees the shared
@@ -273,9 +278,10 @@ export default function RightPanel({
 
     void establish()
 
-    // Heal on focus/visibility, copied from BillingRealtimeRefresher. BOTH listeners
-    // are needed: tab-switch fires visibilitychange but not focus; alt-tabbing back to
-    // the window fires focus. The debounce collapses a double-fire into one refresh.
+    // Heal on focus/visibility. BOTH listeners are needed: tab-switch fires
+    // visibilitychange but not focus; alt-tabbing back to the window fires focus. The
+    // debounce collapses a double-fire into one refresh — and since this is the only
+    // refresher left in the layout, exactly one refresh now fires per focus event.
     const heal = () => {
       scheduleRefresh()
       if (health === 'none' || health === 'unhealthy') void establish()
@@ -308,7 +314,13 @@ export default function RightPanel({
   const classEndTime = nextLesson
     ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
     : null
-  const classEnded = classEndTime ? Date.now() > classEndTime : false
+  // Reads the component's own 1s tick (`now`, set at mount and by the countdown
+  // interval above) rather than Date.now(): the render path stays pure, and this
+  // agrees with remainingSeconds below instead of drifting a tick apart from it.
+  // Pre-mount `now` is 0, so this is false during SSR/hydration — harmless, as the
+  // only consumer is already gated on `mounted`. The interval that advances `now`
+  // exists whenever classEndTime is non-null (both require nextLesson).
+  const classEnded = classEndTime ? now > classEndTime : false
   const remainingSeconds = classEndTime != null
     ? Math.max(0, Math.floor((classEndTime - now) / 1000))
     : 0
@@ -321,6 +333,19 @@ export default function RightPanel({
   // excluded BEFORE the 3-row slice so hiding one surfaces the next.
   const visibleWhatsNew = whatsNewItems.filter((i) => !hiddenKeys.has(i.id))
   const shownWhatsNew = whatsNewExpanded ? visibleWhatsNew : visibleWhatsNew.slice(0, 3)
+
+  // "All caught up" describes the feed a Clear all drained, so it must not outlive it:
+  // reset as soon as the card has rows again, and a feed that later refills and is
+  // dismissed row-by-row reads "No new activity" as it should. Keyed on the VISIBLE
+  // count, not whatsNewItems.length — optimistically-hidden rows are not arrivals, so
+  // a router.refresh() landing mid-drain (server items still present, every one of
+  // them hidden) cannot flip the copy back early.
+  //
+  // Adjusted during render rather than in an effect: React re-runs THIS component with
+  // the new value before committing, so the card never paints the stale copy for a
+  // frame. The `clearedJustNow &&` guard is what terminates it — once set to false the
+  // condition is false, so the adjustment costs exactly one extra pass and never loops.
+  if (clearedJustNow && visibleWhatsNew.length > 0) setClearedJustNow(false)
 
   // Dismiss one item: hide it locally for instant feedback, AWAIT the write, then
   // refresh so the server feed becomes the source of truth.

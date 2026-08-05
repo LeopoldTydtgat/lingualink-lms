@@ -1,5 +1,7 @@
 // src/components/student/layout/StudentRightPanel.tsx
-// Help & Support section removed — the ChatWidget floating bubble replaces it.
+// No Help & Support section here. The ChatWidget bubble that once replaced it is
+// teacher-portal only — it is mounted in (dashboard)/layout.tsx and nowhere in the
+// student layout, so nothing in this panel should reference it.
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
