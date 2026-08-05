@@ -93,8 +93,13 @@ const HISTORY_LIMIT = 50
 // hit width is max(renderedStrokeWidth, this).
 const HIT_TOLERANCE = 8
 // Total pointer travel (|dx| + |dy| in client px) at or under which a press-drag
-// counts as a plain click rather than a marquee.
+// counts as a plain click rather than a marquee. The drag-move of a selection
+// uses the SAME threshold, so both gestures agree on what a click is.
 const MARQUEE_MIN_DRAG = 4
+// How far a pasted copy sits from its source, in RENDERED px (converted to a
+// fraction against each mark's own page). Cumulative across repeated pastes,
+// because every paste re-seeds the internal clipboard with what it just placed.
+const PASTE_OFFSET_PX = 16
 // How far the arrowhead reaches from an arrow's END point, in multiples of the
 // RENDERED line width. Derived from the marker attributes at the render site
 // (viewBox "0 0 10 10", markerWidth / markerHeight 8, refX 8, refY 5, and the
@@ -327,6 +332,38 @@ interface MarqueeRect {
   y0: number
   x1: number
   y1: number
+}
+// Per-page geometry + delta limits for a translation (a drag-move or a paste),
+// computed once per gesture. `pages` holds the RENDERED size of every page that
+// carries a mark being translated, so ONE px delta converts into that page's own
+// (anisotropic) fraction space. The four scalars are the px delta range --
+// intersected across every page involved -- within which no page's union
+// bounding box leaves 0..1. The DELTA is clamped, never the individual points:
+// clamping points would deform a stroke instead of moving it.
+interface MoveLimits {
+  pages: Map<number, { w: number; h: number }>
+  dxLo: number
+  dxHi: number
+  dyLo: number
+  dyHi: number
+}
+// In-progress drag-move of the selection (cursor tool, mouse / pen only).
+interface MoveDrag {
+  // The pointer that ARMED the drag, exactly like MarqueeDrag: every later event
+  // must match it, so a second pointer (a palm, a stray finger) can never drive
+  // or end someone else's gesture.
+  pointerId: number
+  clientX: number
+  clientY: number
+  // Pre-drag geometry of every mark being moved, keyed by its ARRAY INDEX (the
+  // id is re-checked on every move). Index-keyed rather than id-keyed so a legacy
+  // payload carrying duplicate ids cannot make one mark be replaced by a copy of
+  // the other, and so a mid-drag array change makes the drag stop instead of
+  // translating the wrong mark. Each move translates from THIS snapshot rather
+  // than incrementally, so the drag is idempotent and cannot accumulate drift.
+  origins: Map<number, Annotation>
+  limits: MoveLimits
+  moved: boolean
 }
 
 function clamp01(n: number): number {
@@ -589,6 +626,94 @@ function annotationHitsPoint(
   return b !== null && px >= b.left && px <= b.right && py >= b.top && py <= b.bottom
 }
 
+// --- Translation (drag-move and paste) --------------------------------------
+
+function clampRange(n: number, lo: number, hi: number): number {
+  return n < lo ? lo : n > hi ? hi : n
+}
+
+// The stored 0..1 coordinates a translation actually moves: every point of a
+// stroke, both endpoints of an arrow, and the single anchor of a text box /
+// stamp. Feeds the union bounding box the delta clamp works against.
+function annotationPoints(a: Annotation): { x: number; y: number }[] {
+  if (a.type === 'stroke') return a.points
+  if (a.type === 'arrow') return [a.start, a.end]
+  return [{ x: a.x, y: a.y }]
+}
+
+// Delta limits for translating `marks`. Per page, the union box of their stored
+// fractions may not leave 0..1, which becomes a px range for that page (fraction
+// x that page's RENDERED size). The ranges are INTERSECTED across pages, so one
+// page pinned against an edge stops the whole multi-page gesture -- that is what
+// "clamp the delta, not the coordinates" means for a multi-mark selection. A
+// mark on a page with no measured rect is skipped: it cannot be converted to px,
+// so it simply does not move and constrains nothing.
+function moveLimits(marks: Annotation[], rects: PageRect[]): MoveLimits {
+  const per = new Map<
+    number,
+    { w: number; h: number; minX: number; minY: number; maxX: number; maxY: number }
+  >()
+  for (const a of marks) {
+    const rect = rects[a.pageIndex]
+    if (!rect || rect.width <= 0 || rect.height <= 0) continue
+    let box = per.get(a.pageIndex)
+    if (!box) {
+      box = { w: rect.width, h: rect.height, minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+      per.set(a.pageIndex, box)
+    }
+    for (const p of annotationPoints(a)) {
+      if (p.x < box.minX) box.minX = p.x
+      if (p.x > box.maxX) box.maxX = p.x
+      if (p.y < box.minY) box.minY = p.y
+      if (p.y > box.maxY) box.maxY = p.y
+    }
+  }
+  const pages = new Map<number, { w: number; h: number }>()
+  let dxLo = -Infinity
+  let dxHi = Infinity
+  let dyLo = -Infinity
+  let dyHi = Infinity
+  for (const [pageIndex, box] of per) {
+    pages.set(pageIndex, { w: box.w, h: box.h })
+    // A page whose marks carry no coordinates at all (only an empty stroke) has
+    // nothing to keep on the page, so it constrains nothing.
+    if (!Number.isFinite(box.minX) || !Number.isFinite(box.minY)) continue
+    dxLo = Math.max(dxLo, -box.minX * box.w)
+    dxHi = Math.min(dxHi, (1 - box.maxX) * box.w)
+    dyLo = Math.max(dyLo, -box.minY * box.h)
+    dyHi = Math.min(dyHi, (1 - box.maxY) * box.h)
+  }
+  return { pages, dxLo, dxHi, dyLo, dyHi }
+}
+
+// Move one mark by a FRACTION delta (already clamped by the caller), returning a
+// NEW object that shares no nested point with the original. `id` is a parameter
+// so the same helper serves the drag (keep the id) and paste (mint a fresh one);
+// pageIndex, colour, width, opacity, text, size and kind all carry over
+// untouched, so the saved payload shape is identical. Each union member is
+// spread in its own branch so the result stays a narrowed Annotation.
+function translateAnnotation(a: Annotation, fdx: number, fdy: number, id: string): Annotation {
+  if (a.type === 'stroke') {
+    return { ...a, id, points: a.points.map((p) => ({ x: p.x + fdx, y: p.y + fdy })) }
+  }
+  if (a.type === 'arrow') {
+    return {
+      ...a,
+      id,
+      start: { x: a.start.x + fdx, y: a.start.y + fdy },
+      end: { x: a.end.x + fdx, y: a.end.y + fdy },
+    }
+  }
+  if (a.type === 'text') return { ...a, id, x: a.x + fdx, y: a.y + fdy }
+  return { ...a, id, x: a.x + fdx, y: a.y + fdy }
+}
+
+// Deep copy of one mark: the translate helper with a zero delta, so the copy
+// shares no nested object with the original.
+function cloneAnnotation(a: Annotation): Annotation {
+  return translateAnnotation(a, 0, 0, a.id)
+}
+
 // Editable text box: a focused, auto-growing textarea. Kept as its own
 // component so the focus + auto-height effects have a stable home (the parent
 // renders overlays from a plain map, which cannot host hooks).
@@ -720,6 +845,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // move / up handlers must read it synchronously, and because the click-vs-drag
   // threshold flips `moved` without a re-render.
   const marqueeRef = useRef<MarqueeDrag | null>(null)
+  // In-progress drag-move of the selection (cursor tool). A ref for the same
+  // reasons as marqueeRef: the move / up handlers must read it synchronously, and
+  // the click-vs-drag threshold flips `moved` without a re-render. Only one of
+  // the two is ever armed -- a press either hits a mark (move) or lands on empty
+  // space (marquee).
+  const moveRef = useRef<MoveDrag | null>(null)
+  // INTERNAL copy/paste clipboard -- deliberately not the system clipboard and no
+  // clipboard API: it holds whole Annotation objects no other app could consume,
+  // and lesson marks must not leave the page. It survives deselect and tool
+  // switches, is re-seeded by each paste so repeated pastes stack, and is cleared
+  // by the document-load effect alongside the marquee.
+  const clipboardRef = useRef<Annotation[]>([])
   // Live DOM nodes of the committed text boxes, keyed by annotation id, so the
   // cursor tool can hit-test / marquee against a text box's REAL rendered size
   // instead of estimating it from character count. Registered by renderTextBox's
@@ -826,10 +963,14 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // click-through overlay. Every new selection path is gated on this.
   const cursorSelect = tool === 'cursor' && !readOnly
 
-  function nextId(): string {
+  // useCallback (over a plain function) purely so the copy/paste key effect can
+  // list it as a dependency without re-subscribing its listener on every render.
+  // It reads and bumps a ref only, so the identity is genuinely stable and every
+  // existing call site behaves byte-for-byte as before.
+  const nextId = useCallback((): string => {
     idCounterRef.current += 1
     return `a${idCounterRef.current}`
-  }
+  }, [])
 
   // Set the scale so page 1 exactly fills the available container width,
   // clamped to the zoom range. Reads only refs, so it is stable.
@@ -950,6 +1091,19 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // setAnnotations bail (no re-render, so the change effect never runs to consume
     // the flag); arming it then would wrongly suppress the NEXT real edit.
     const seed = initialAnnotationsRef.current ?? EMPTY_ANNOTATIONS
+    // Ids are minted as a1, a2, ... from a counter that starts at 0 on EVERY
+    // mount, while a seed carries the ids an EARLIER mount minted and saved. So
+    // advance the counter past every a<N> in the seed: without this the first new
+    // mark (or the first paste) on a seeded document re-mints an id the seed
+    // already uses, and duplicate ids break React keys, make delete / recolour hit
+    // both marks, and let a drag-move overwrite one mark with a copy of the other.
+    // The counter only ever grows, so ids stay unique across document swaps too.
+    for (const a of seed) {
+      const m = /^a(\d+)$/.exec(a.id)
+      if (!m) continue
+      const n = Number(m[1])
+      if (Number.isFinite(n) && n > idCounterRef.current) idCounterRef.current = n
+    }
     if (annotationsRef.current !== seed) isSeedingRef.current = true
     setAnnotations(seed)
     setEditingId(null)
@@ -960,6 +1114,12 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // hover paint a stale rectangle.
     marqueeRef.current = null
     setMarquee(null)
+    // Same reasoning for an in-progress drag-move (its origin geometry belongs to
+    // the old document) and for the internal clipboard (pasting the old
+    // document's marks here would place them by fractions that mean nothing on
+    // these pages, and could land on a page index that no longer exists).
+    moveRef.current = null
+    clipboardRef.current = []
     setPageRects([])
     setPdfLinks([])
     setPast([])
@@ -1361,6 +1521,69 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     return () => document.removeEventListener('keydown', onKey)
   }, [cursorSelect, selectedIds, editingId])
 
+  // Ctrl/Cmd + C / V against the INTERNAL clipboard (clipboardRef) -- never the
+  // system clipboard and no clipboard API, so nothing leaves the page. Copy deep-
+  // copies the selection and changes nothing else: no state, no history. Paste
+  // mints fresh ids, offsets the copies by PASTE_OFFSET_PX and appends them in
+  // ONE setAnnotations behind ONE recordHistory, so a whole paste is a single
+  // undo step, then selects the pasted set. Guards mirror the Delete listener
+  // above: never in read-only, never while a text box is being edited, and never
+  // while a form control (e.g. the page-number input) has focus. Paste only
+  // lands in cursor mode, so the pasted selection's outline is always clearable
+  // by Escape.
+  useEffect(() => {
+    if (readOnly) return
+    function onKey(e: KeyboardEvent) {
+      if (!e.ctrlKey && !e.metaKey) return
+      // AltGr on international Windows layouts reports ctrlKey AND altKey, so an
+      // AltGr chord must never be read as Ctrl+C / Ctrl+V.
+      if (e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key !== 'c' && key !== 'v') return
+      if (editingId) return
+      const target = e.target
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return
+      }
+      if (key === 'c') {
+        if (selectedIds.length === 0) return
+        // Filter the annotations array (not selectedIds) so the copies keep their
+        // painting order. Deliberately NOT preventDefault: the browser's own copy
+        // of a real text selection elsewhere on the page must keep working -- this
+        // clipboard is separate and purely additive.
+        const wanted = new Set(selectedIds)
+        clipboardRef.current = annotationsRef.current.filter((a) => wanted.has(a.id)).map(cloneAnnotation)
+        return
+      }
+      if (!cursorSelect) return
+      const clip = clipboardRef.current
+      if (clip.length === 0) return
+      e.preventDefault()
+      // The +16px offset runs through the SAME union-delta clamp as a drag, so a
+      // paste can never land outside the page; each mark keeps its own pageIndex
+      // and is converted against that page's rendered size.
+      const limits = moveLimits(clip, pageRects)
+      const dx = clampRange(PASTE_OFFSET_PX, limits.dxLo, limits.dxHi)
+      const dy = clampRange(PASTE_OFFSET_PX, limits.dyLo, limits.dyHi)
+      const pasted = clip.map((a) => {
+        const p = limits.pages.get(a.pageIndex)
+        return translateAnnotation(a, p ? dx / p.w : 0, p ? dy / p.h : 0, nextId())
+      })
+      recordHistory()
+      setAnnotations((anns) => [...anns, ...pasted])
+      setSelectedIds(pasted.map((a) => a.id))
+      // Re-seed the clipboard with what was just placed so the NEXT paste offsets
+      // from HERE and repeated pastes stack visibly. Annotations are never mutated
+      // in place, so sharing these objects with the annotations array is safe.
+      clipboardRef.current = pasted
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [readOnly, editingId, selectedIds, pageRects, recordHistory, nextId, cursorSelect])
+
   // Mirror the live draft so the pointer-up handler can read the full stroke
   // without a stale closure (and without nesting setState calls).
   useEffect(() => {
@@ -1706,6 +1929,99 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     })
   }
 
+  // Does this event belong to the pointer that armed the current drag-move?
+  // Mirrors ownsMarquee, including the outright touch rejection: touch can never
+  // arm a move (the cursor branch bails before anything), and a finger must keep
+  // scrolling the document even while a pen drag is running.
+  function ownsMove(e: ReactPointerEvent<HTMLDivElement>): MoveDrag | null {
+    const m = moveRef.current
+    if (!m) return null
+    if (e.pointerType === 'touch') return null
+    return e.pointerId === m.pointerId ? m : null
+  }
+
+  // Forget an armed drag-move and push its pre-drag snapshot as ONE undo step --
+  // but only if the gesture actually moved something, so a plain select-click
+  // adds nothing to history (the same rule, and the same pendingPastRef, as the
+  // text-box and stamp drags, which can never be armed at the same time as this
+  // one: different tools). Shared by the normal pointer-up path (finishMove) and
+  // by the stale-drag sweep at the start of the next cursor gesture, which is why
+  // it takes no event and pushes rather than discards: dropping the snapshot
+  // would make the next undo jump straight past that move.
+  function commitMove() {
+    const m = moveRef.current
+    if (!m) return
+    moveRef.current = null
+    if (m.moved) {
+      const snap = pendingPastRef.current
+      if (snap) {
+        setPast((p) => (p.length >= HISTORY_LIMIT ? [...p.slice(1), snap] : [...p, snap]))
+        setFuture([])
+      }
+    }
+    pendingPastRef.current = null
+  }
+
+  // End an armed drag-move on ITS OWN pointer, returning true when the event
+  // belonged to it.
+  function finishMove(e: ReactPointerEvent<HTMLDivElement>): boolean {
+    if (!ownsMove(e)) return false
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    commitMove()
+    return true
+  }
+
+  // Translate every selected mark to follow an armed drag. Returns true when the
+  // event belonged to that drag, so the caller knows not to fall through to the
+  // marquee. Deliberately page-INDEPENDENT (no pageIndex guard, unlike the
+  // marquee): the delta is measured in client px and converted against each
+  // mark's OWN page, so the gesture stays correct even if pointer capture was
+  // refused and the events land on a different page's overlay.
+  function updateMove(e: ReactPointerEvent<HTMLDivElement>): boolean {
+    const m = ownsMove(e)
+    if (!m) return false
+    // Self-heal a pointer-up we never saw (released outside the window, alt-tab,
+    // a gesture stolen by the OS): end the drag where it stands rather than leave
+    // it armed, which would let a plain hover keep dragging the marks around.
+    if (e.buttons === 0) {
+      finishMove(e)
+      return true
+    }
+    const rawDx = e.clientX - m.clientX
+    const rawDy = e.clientY - m.clientY
+    // Same click-vs-drag threshold as the marquee, measured on RAW pointer travel
+    // so it is independent of zoom and of the clamp below.
+    if (!m.moved && Math.abs(rawDx) + Math.abs(rawDy) <= MARQUEE_MIN_DRAG) return true
+    const dx = clampRange(rawDx, m.limits.dxLo, m.limits.dxHi)
+    const dy = clampRange(rawDy, m.limits.dyLo, m.limits.dyHi)
+    // The clamp can swallow the WHOLE delta (every page's union box already
+    // pinned against the edge being dragged towards). Nothing would move, so the
+    // gesture stays a click: flipping `moved` here would push a phantom undo step
+    // and wipe the redo stack for a drag that changed nothing.
+    if (!m.moved && dx === 0 && dy === 0) return true
+    m.moved = true
+    setAnnotations((anns) =>
+      anns.map((a, i) => {
+        const origin = m.origins.get(i)
+        // Index match plus an id match: an array that changed under the drag (a
+        // Delete keypress mid-gesture) stops the move instead of translating the
+        // wrong mark.
+        if (!origin || origin.id !== a.id) return a
+        const p = m.limits.pages.get(origin.pageIndex)
+        if (!p) return a
+        return translateAnnotation(origin, dx / p.w, dy / p.h, origin.id)
+      }),
+    )
+    return true
+  }
+
   // The MARQUEE'S OWN pointer was cancelled (palm rejection on the pen, a
   // gesture taken over by the browser): drop the rubber band and leave the
   // selection untouched. ownsMarquee is what makes this safe in cursor mode,
@@ -1714,6 +2030,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // marquee. Armed only by the cursor tool, so no drawing / text / stamp gesture
   // can reach this either.
   function onOverlayPointerCancel(e: ReactPointerEvent<HTMLDivElement>) {
+    // A cancelled drag-move ENDS where it stands: the marks were already
+    // translated live, so committing (one undo step, exactly what a normal
+    // release would have pushed) leaves the result visible and undoable instead
+    // of silently snapping it back mid-lesson.
+    if (finishMove(e)) return
     if (!ownsMarquee(e)) return
     cancelMarquee()
     const el = e.currentTarget
@@ -1810,6 +2131,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       // branch above). selectBox below would also commit it, but the shift-toggle
       // and marquee paths do not go through selectBox.
       if (editingId) finishEditing(editingId)
+      // Sweep up a drag-move whose pointer-up we never saw (pointer capture is
+      // best-effort; if it was refused and the release landed off every overlay,
+      // no handler ran). A mouse reuses the same pointerId, so leaving it armed
+      // would let THIS gesture drive the previous drag's marks. Committing rather
+      // than discarding keeps that move one undo step. A no-op when nothing is
+      // armed, which is the normal case.
+      commitMove()
 
       const el = e.currentTarget
       const pt = overlayPoint(el, e.clientX, e.clientY)
@@ -1831,16 +2159,59 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       if (hitId !== null) {
         const id = hitId
         if (e.shiftKey) {
-          // Shift+click toggles ONE mark in / out and leaves the rest alone.
+          // Shift+click toggles ONE mark in / out and leaves the rest alone. It
+          // is a PURE toggle and never arms a drag: a toggle that also moved
+          // marks would make de-selecting one of an overlapping pair impossible.
           setEditingId(null)
           setSelectedIds((prev) => {
             if (!prev.includes(id)) return [...prev, id]
             const next = prev.filter((s) => s !== id)
             return next.length === 0 ? NO_SELECTION : next
           })
-        } else {
-          // Plain click on a mark: it becomes the ONLY selection.
-          selectBox(id)
+          return
+        }
+        // Plain press on a mark. A mark that is NOT already selected becomes the
+        // ONLY selection (unchanged); a mark that IS already selected keeps the
+        // whole selection, so the drag below moves every selected mark together.
+        // Either way the SAME gesture may continue into a drag-move -- under the
+        // 4px threshold it stays exactly the click it has always been.
+        const inSelection = selectedIds.includes(id)
+        if (!inSelection) selectBox(id)
+        // Indexed, not id-keyed (see MoveDrag.origins), and built by scanning the
+        // array rather than by find(): a first-match lookup could pick a different
+        // mark than the topmost one the hit test above actually chose.
+        const wanted = new Set(inSelection ? selectedIds : [id])
+        const origins = new Map<number, Annotation>()
+        annotations.forEach((a, i) => {
+          if (wanted.has(a.id)) origins.set(i, a)
+        })
+        const limits = moveLimits(Array.from(origins.values()), pageRects)
+        // A press that could move nothing -- no mark captured, or no measured page
+        // geometry to convert a px delta against -- stays a plain click. Arming a
+        // drag that cannot translate anything would push a phantom undo step (and
+        // wipe the redo stack) on release.
+        if (origins.size === 0 || limits.pages.size === 0) return
+        // Capture keeps a fast drag that leaves the overlay flowing to these
+        // handlers until the pointer is released (same as the marquee arm).
+        if (typeof el.setPointerCapture === 'function') {
+          try {
+            el.setPointerCapture(e.pointerId)
+          } catch {
+            // Ignore: capture is a best-effort optimisation.
+          }
+        }
+        // Snapshot the pre-drag array now (the pendingPastRef pattern the text-box
+        // drag already uses); finishMove pushes it ONLY if the drag actually
+        // moved, so the whole multi-mark move is one undo step and a no-move press
+        // adds nothing to history.
+        pendingPastRef.current = annotationsRef.current
+        moveRef.current = {
+          pointerId: e.pointerId,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          origins,
+          limits,
+          moved: false,
         }
         return
       }
@@ -1871,7 +2242,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
   function onOverlayPointerMove(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
     if (!isDrawingTool(tool)) {
-      // Cursor tool: extend an armed marquee. A no-op under every other tool.
+      // Cursor tool: a drag-move of the selection is handled first. Only one of
+      // the two can ever be armed (a press either hit a mark or landed on empty
+      // space), so this is an ordering statement, not a conflict resolution.
+      if (updateMove(e)) return
+      // Extend an armed marquee. A no-op under every other tool.
       updateMarquee(e, pageIndex)
       return
     }
@@ -1881,7 +2256,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
 
   function onOverlayPointerUp(e: ReactPointerEvent<HTMLDivElement>, pageIndex: number) {
     if (!isDrawingTool(tool)) {
-      // Cursor tool: complete an armed marquee. A no-op under every other tool.
+      // Cursor tool: complete an armed drag-move first (see onOverlayPointerMove
+      // -- the two are mutually exclusive), else an armed marquee. Both are a
+      // no-op under every other tool.
+      if (finishMove(e)) return
       finishMarquee(e, pageIndex)
       return
     }
