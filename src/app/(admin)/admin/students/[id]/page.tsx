@@ -135,6 +135,50 @@ export default async function StudentDetailPage({
     trainingsArr[0] ??
     null
 
+  // STRICT active check, deliberately NOT `activeTrain !== null`: activeTrain
+  // falls back to the newest training of ANY status so the Training card still
+  // shows something for a student whose package ended. The Create Training form
+  // and the hours controls must key off the real thing — offering a second
+  // ACTIVE training would be refused by create_training_atomic and by the
+  // one_active_training_per_student index, and adding hours to a finished
+  // training would move a balance nobody can spend.
+  const hasActiveTraining = trainingsArr.some(
+    (t: { status: string | null }) => t.status === 'active'
+  )
+
+  // Assignable-teacher picks for the Create Training form. Same role/status
+  // filter as students/new/page.tsx:31-36 and edit/page.tsx:109-114 — the
+  // canonical definition of an assignable teacher, and the same set
+  // POST /api/admin/students/[id]/trainings re-validates against, so the form
+  // can never offer a pick the route rejects. Skipped entirely when the form
+  // will not render: staff get no mutation entry points on this page, and a
+  // student with an active training gets no form.
+  const needTeacherOptions = !isStaffView && !hasActiveTraining
+
+  const { data: teacherRows, error: teacherRowsError } = needTeacherOptions
+    ? await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('role', ['teacher', 'admin'])
+        .eq('status', 'current')
+        .order('full_name')
+    : { data: null, error: null }
+
+  if (teacherRowsError) {
+    console.error('[student detail] assignable teachers query failed:', teacherRowsError)
+  }
+
+  const teacherOptions: { id: string; full_name: string }[] = (teacherRows ?? []).map(
+    (t: { id: string; full_name: string }) => ({ id: t.id, full_name: t.full_name })
+  )
+
+  // An empty picker reads as "there are no teachers", which is exactly what a
+  // failed read also produces. Zero teachers is a legal selection here, so the
+  // form is not blocked — but it must say the list could not be loaded rather
+  // than let an admin create a training with nobody attached by accident.
+  const teacherOptionsLoadFailed =
+    needTeacherOptions && (Boolean(teacherRowsError) || !teacherRows)
+
   // Flatten assigned teachers from training_teachers
   const assignedTeachers: { id: string; full_name: string }[] = []
   if (activeTrain) {
@@ -420,6 +464,9 @@ export default async function StudentDetailPage({
       student={student}
       companyName={company?.name ?? null}
       activeTrain={activeTrain}
+      hasActiveTraining={hasActiveTraining}
+      teacherOptions={teacherOptions}
+      teacherOptionsLoadFailed={teacherOptionsLoadFailed}
       hoursRemaining={hoursRemaining}
       assignedTeachers={assignedTeachers}
       lessons={flatLessons}

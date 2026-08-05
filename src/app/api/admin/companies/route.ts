@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
+import { CreateCompanySchema } from '@/lib/validation/schemas'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ companies: companies ?? [] })
 }
 
-// ─── POST — create company (unchanged) ───────────────────────────────────────
+// ─── POST — create company ───────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -47,25 +48,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     // --- 2. Validate ---
-    if (!body.name?.trim()) {
-      return NextResponse.json({ error: 'Company name is required.' }, { status: 400 })
+    // companies carries CHECK constraints on type, status and
+    // cancellation_policy. Parsing here turns a value outside those sets into a
+    // 400 instead of a 23514 the insert below would surface as an opaque 500 —
+    // and a silently-stored bad cancellation_policy never matches the '48hr'
+    // test in getBillability, quietly dropping the company's 24-48hr billing.
+    const parsed = CreateCompanySchema.safeParse(body)
+    if (!parsed.success) {
+      console.error('Company create validation failed:', parsed.error.issues)
+      return NextResponse.json({ error: 'Invalid request data.' }, { status: 400 })
     }
+    const fields = parsed.data
     // --- 3. Insert ---
+    // Built from the PARSED data only — `body` is not read past this point.
+    // name arrives already trimmed; the enums are guaranteed present, so their
+    // old `??` defaults are gone. The optional text fields keep the previous
+    // empty-string-clears-the-field shape.
     const adminClient = createAdminClient()
     const { data: company, error: insertError } = await adminClient
       .from('companies')
       .insert({
-        name: body.name.trim(),
-        type: body.type || null,
-        contact_name: body.contact_name || null,
-        contact_email: body.contact_email || null,
-        contact_phone: body.contact_phone || null,
-        country: body.country || null,
-        billing_email: body.billing_email || null,
-        cancellation_policy: body.cancellation_policy ?? '24hr',
-        tags: body.tags ?? [],
-        notes: body.notes || null,
-        status: body.status ?? 'active',
+        name: fields.name,
+        type: fields.type,
+        contact_name: fields.contact_name || null,
+        contact_email: fields.contact_email || null,
+        contact_phone: fields.contact_phone || null,
+        country: fields.country || null,
+        billing_email: fields.billing_email || null,
+        cancellation_policy: fields.cancellation_policy,
+        tags: fields.tags ?? [],
+        notes: fields.notes || null,
+        status: fields.status,
       })
       .select('id')
       .single()

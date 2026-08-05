@@ -14,7 +14,10 @@ import { scrubEvent } from '@/lib/sentry-scrub'
 const isProduction = process.env.NODE_ENV === 'production'
 
 Sentry.init({
-  dsn: process.env.SENTRY_DSN,
+  // Client bundle: Next.js only inlines NEXT_PUBLIC_-prefixed vars into browser
+  // code, so the DSN must come from NEXT_PUBLIC_SENTRY_DSN. This is the public
+  // ingest DSN and is safe to expose in the bundle (see M-15 above).
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
   environment: process.env.NODE_ENV,
   tracesSampleRate: isProduction ? 0.1 : 1.0,
   replaysSessionSampleRate: 0.0,
@@ -24,3 +27,5 @@ Sentry.init({
     return event
   },
 })
+
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart

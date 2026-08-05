@@ -73,6 +73,7 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [deleteBlocked, setDeleteBlocked] = useState(false)
 
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState(0)
@@ -99,11 +100,15 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
   async function handleDelete() {
     setDeleting(true)
     setDeleteError('')
+    setDeleteBlocked(false)
     try {
       const res = await fetch(`/api/admin/classes/${lesson.id}`, { method: 'DELETE' })
       const data = await res.json()
       if (!res.ok) {
-        setDeleteError(data.error ?? 'Failed to delete. Please try again.')
+        setDeleteBlocked(res.status === 422)
+        setDeleteError(res.status === 422
+          ? `Delete blocked: ${data.error ?? '...'}`
+          : (data.error ?? 'Failed to delete. Please try again.'))
         return
       }
       window.location.href = '/admin/classes'
@@ -200,7 +205,7 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
             </button>
           )}
           <button
-            onClick={() => { setDeleteError(''); setShowDeleteModal(true) }}
+            onClick={() => { setDeleteError(''); setDeleteBlocked(false); setShowDeleteModal(true) }}
             style={{
               padding: '8px 16px', borderRadius: '7px', border: 'none',
               backgroundColor: '#FEF2F2', fontSize: '13px', fontWeight: 600,
@@ -396,20 +401,22 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
                       backgroundColor: 'white', fontSize: '13px', cursor: deleting ? 'not-allowed' : 'pointer', color: '#374151',
                     }}
                   >
-                    Go Back
+                    {deleteBlocked ? 'Close' : 'Go Back'}
                   </button>
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    style={{
-                      padding: '9px 18px', borderRadius: '7px', border: 'none',
-                      backgroundColor: deleting ? '#E5E7EB' : '#DC2626',
-                      color: deleting ? '#9CA3AF' : 'white',
-                      fontSize: '13px', fontWeight: 600, cursor: deleting ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {deleting ? 'Deleting...' : 'Yes, Delete Class'}
-                  </button>
+                  {!deleteBlocked && (
+                    <button
+                      onClick={handleDelete}
+                      disabled={deleting}
+                      style={{
+                        padding: '9px 18px', borderRadius: '7px', border: 'none',
+                        backgroundColor: deleting ? '#E5E7EB' : '#DC2626',
+                        color: deleting ? '#9CA3AF' : 'white',
+                        fontSize: '13px', fontWeight: 600, cursor: deleting ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {deleting ? 'Deleting...' : 'Yes, Delete Class'}
+                    </button>
+                  )}
                 </div>
               </>
             )}

@@ -22,6 +22,15 @@ const optionalEmail = z
     z.string().email('Must be a valid email address').optional().nullable()
   )
 
+// Same '' → null coercion as optionalEmail, with the 320-character ceiling used
+// for the companies contact_email / billing_email fields. Kept separate rather
+// than widening optionalEmail so the teacher paypal_email rules are untouched.
+const optionalCompanyEmail = z
+  .preprocess(
+    (val) => (val === '' ? null : val),
+    z.string().max(320).email('Must be a valid email address').optional().nullable()
+  )
+
 // ─── Allowed enum values ──────────────────────────────────────────────────────
 
 const ACCOUNT_TYPES = [
@@ -39,6 +48,13 @@ const CEFR_LEVELS = [
   'B1', 'B2',
   'C1', 'C2',
 ] as const
+
+// Mirror the live CHECK constraints on public.companies exactly. A value outside
+// these sets must be rejected as a 400 by the company routes before it reaches
+// the DB, where it would raise a 23514 and surface as an opaque 500.
+const COMPANY_TYPE = ['b2b', 'enterprise', 'partner'] as const
+
+const COMPANY_STATUS = ['active', 'former'] as const
 
 // ─── Create Teacher ───────────────────────────────────────────────────────────
 
@@ -135,6 +151,45 @@ export const CreateStudentSchema = z.object({
 
 export type CreateStudentInput = z.infer<typeof CreateStudentSchema>
 
+// ─── Create Training ──────────────────────────────────────────────────────────
+
+// Standalone training creation for a student who has NO active training
+// (POST /api/admin/students/[id]/trainings). The three training fields mirror
+// CreateStudentSchema's training block exactly — same 100-char package name,
+// same 500-hour ceiling, same 0.5-hour increments, same YYYY-MM-DD/'' → null
+// date handling — so a training created here can never hold a value the
+// create-student flow would have rejected.
+//
+// teacher_ids may legitimately be EMPTY: a training with nobody attached is a
+// valid intermediate state (the student simply cannot book until a teacher is
+// assigned), so unlike the student PATCH gate there is no min(1) here. The .max
+// is a payload cap only — CreateStudentSchema.assigned_teacher_ids carries no
+// ceiling, so this mirrors the only array cap convention in this file
+// (CreateCompanySchema.tags, max 50). Assignability (role/status) is NOT
+// checked here; the route re-validates every id against the same
+// role in ('teacher','admin') AND status = 'current' filter the create-student
+// route uses.
+export const CreateTrainingSchema = z.object({
+  package_name: z
+    .string()
+    .trim()
+    .min(1, 'Package name is required')
+    .max(100, 'Package name must be 100 characters or fewer'),
+  total_hours: z
+    .number()
+    .positive('Total hours must be a positive number')
+    .max(500, 'Total hours cannot exceed 500')
+    .multipleOf(0.5, 'Hours must be in 0.5-hour increments'),
+  end_date: dateString,
+  teacher_ids: z
+    .array(uuid)
+    .max(50, 'A training cannot have more than 50 assigned teachers')
+    .optional()
+    .default([]),
+})
+
+export type CreateTrainingInput = z.infer<typeof CreateTrainingSchema>
+
 // ─── Update Teacher ───────────────────────────────────────────────────────────
 
 export const UpdateTeacherSchema = z.object({
@@ -208,6 +263,63 @@ export const UpdateStudentSchema = z.object({
 })
 
 export type UpdateStudentInput = z.infer<typeof UpdateStudentSchema>
+
+// ─── Create Company ───────────────────────────────────────────────────────────
+
+// type / status / cancellation_policy are REQUIRED non-nullable enums: the live
+// companies CHECK constraints reject anything else, and both DB defaults and the
+// old `?? '24hr'` / `?? 'active'` route coalescing hid a bad or missing value
+// instead of reporting it. name is trimmed before its length checks, so a
+// whitespace-only name fails min(1) exactly as the old !body.name?.trim() did.
+export const CreateCompanySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Company name is required')
+    .max(200, 'Company name must be 200 characters or fewer'),
+  type: z.enum(COMPANY_TYPE),
+  cancellation_policy: z.enum(CANCELLATION_POLICY),
+  status: z.enum(COMPANY_STATUS),
+
+  contact_name: z.string().max(200).optional().nullable(),
+  contact_phone: z.string().max(200).optional().nullable(),
+  country: z.string().max(200).optional().nullable(),
+  contact_email: optionalCompanyEmail,
+  billing_email: optionalCompanyEmail,
+  tags: z.array(z.string().max(100)).max(50, 'A company cannot have more than 50 tags').optional(),
+  notes: z.string().max(5000).optional().nullable(),
+})
+
+export type CreateCompanyInput = z.infer<typeof CreateCompanySchema>
+
+// ─── Update Company ───────────────────────────────────────────────────────────
+
+// Every field optional so a partial PATCH such as { status } stays legal. No
+// .default() anywhere: a default would materialise a key the caller never sent,
+// and the PATCH route writes exactly the keys present in the parsed result.
+// The three enums stay non-nullable — an explicit null is now a 400 rather than
+// being silently coalesced to '24hr' / 'active'.
+export const UpdateCompanySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Company name is required')
+    .max(200, 'Company name must be 200 characters or fewer')
+    .optional(),
+  type: z.enum(COMPANY_TYPE).optional(),
+  cancellation_policy: z.enum(CANCELLATION_POLICY).optional(),
+  status: z.enum(COMPANY_STATUS).optional(),
+
+  contact_name: z.string().max(200).optional().nullable(),
+  contact_phone: z.string().max(200).optional().nullable(),
+  country: z.string().max(200).optional().nullable(),
+  contact_email: optionalCompanyEmail,
+  billing_email: optionalCompanyEmail,
+  tags: z.array(z.string().max(100)).max(50, 'A company cannot have more than 50 tags').optional(),
+  notes: z.string().max(5000).optional().nullable(),
+})
+
+export type UpdateCompanyInput = z.infer<typeof UpdateCompanySchema>
 
 // ─── Teacher-authored student notes ────────────────────────────────────────────
 
