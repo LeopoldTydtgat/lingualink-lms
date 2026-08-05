@@ -240,6 +240,8 @@ export async function fetchWhatsNew(
     if (new Date(r.assigned_at).getTime() < nowMs - 7 * 24 * 60 * 60 * 1000) continue
     const t = trainingById.get(r.training_id)
     if (!t) continue
+    // Assignment to a non-active training must not announce a new student.
+    if (t.status !== 'active') continue
     items.push({
       id: `assigned-${r.training_id}`,
       kind: 'student_assigned',
