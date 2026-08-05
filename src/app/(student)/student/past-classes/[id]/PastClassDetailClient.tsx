@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -158,7 +157,6 @@ export default function PastClassDetailClient({
   studentId,
   studentTimezone,
 }: Props) {
-  const router = useRouter();
   const { dateStr, timeStr } = formatDateTime(lesson.scheduled_at, studentTimezone);
 
   // Review form state
@@ -167,6 +165,7 @@ export default function PastClassDetailClient({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitted, setSubmitted] = useState(!!existingReview);
+  const [skippedForNow, setSkippedForNow] = useState(false);
 
   // Build radar chart data from report level_data
   const radarData = SKILLS.map((skill) => ({
@@ -381,7 +380,7 @@ export default function PastClassDetailClient({
       )}
 
       {/* ── Review section ── */}
-      {lesson.status === 'completed' && (
+      {lesson.status === 'completed' && !skippedForNow && (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-1">
             <CardHeader icon={Star} label={submitted ? 'YOUR REVIEW' : 'LEAVE A REVIEW'} />
@@ -435,7 +434,7 @@ export default function PastClassDetailClient({
                   {submitting ? 'Submitting...' : 'Submit Review'}
                 </button>
                 <button
-                  onClick={() => router.push('/student/past-classes')}
+                  onClick={() => setSkippedForNow(true)}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
                   style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
                 >
