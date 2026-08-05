@@ -29,10 +29,6 @@ export default async function DashboardLayout({
   // A query error and a genuinely missing row are different failures: the first is
   // transient and must surface, the second is a real "no profile" state. Discarding
   // the error made both look like null and bounced the user to /login.
-  //
-  // whats_new_seen_at is deliberately NOT selected: the notifications bell owned the
-  // only seen/unseen split and it is gone — the What's New card renders one flat
-  // list, so nothing in this layout reads the stamp any more.
   const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('id, full_name, email, photo_url, role, timezone, account_types, status')
