@@ -121,7 +121,8 @@ export default function RightPanel({
   const [viewAllHovered, setViewAllHovered] = useState(false)
   // Optimistically hidden keys: rows the user just dismissed, removed immediately
   // while the server write + router.refresh() catch up. Cleared naturally once the
-  // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys).
+  // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys);
+  // a write that fails removes its own key again so the row comes straight back.
   // Mirrors NotificationsBell so both surfaces get the same per-item cross.
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
 
@@ -186,6 +187,11 @@ export default function RightPanel({
   // Dismiss one item: hide it locally for instant feedback, AWAIT the write, then
   // refresh so the server feed becomes the source of truth. Same await-then-refresh
   // order as NotificationsBell.handleDismiss.
+  //
+  // The action THROWS when the write fails, and the catch REVERTS the optimistic
+  // hide. The revert is mandatory: router.refresh() re-runs the server layout but
+  // preserves client state, so a key left in hiddenKeys would keep hiding a row
+  // the server still returns — invisible until a full page reload.
   const handleDismiss = async (key: string) => {
     setHiddenKeys((prev) => {
       const next = new Set(prev)
@@ -195,7 +201,12 @@ export default function RightPanel({
     try {
       await dismissWhatsNewItem(key)
     } catch {
-      // write failed; the next full load will restore the row honestly
+      // Write failed — un-hide the row so the panel stays honest.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
     router.refresh()
   }

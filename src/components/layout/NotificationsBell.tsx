@@ -20,7 +20,8 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
   const [localSeenAt, setLocalSeenAt] = useState<string | null>(seenAt)
   // Optimistically hidden keys: rows the user just dismissed, removed immediately
   // while the server write + router.refresh() catch up. Cleared naturally when the
-  // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys).
+  // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys);
+  // a write that fails removes its own key again so the row comes straight back.
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
   const [clearAllHovered, setClearAllHovered] = useState(false)
   // True only for the window between a successful "Clear all" and the next dropdown
@@ -143,6 +144,11 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
   // the refresh matters — the passive RightPanel reads the same array straight
   // from props with no optimistic hide, so the refetch must run after the row is
   // committed or the panel would keep showing the dismissed item.
+  //
+  // The action THROWS when the write fails, and the catch REVERTS the optimistic
+  // hide. The revert is mandatory: router.refresh() re-runs the server layout but
+  // preserves client state, so a key left in hiddenKeys would keep hiding a row
+  // the server still returns — invisible until a full page reload.
   const handleDismiss = async (key: string) => {
     setHiddenKeys((prev) => {
       const next = new Set(prev)
@@ -152,7 +158,12 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
     try {
       await dismissWhatsNewItem(key)
     } catch {
-      // write failed; the next full load will restore the row honestly
+      // Write failed — un-hide the row so the feed stays honest.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
     router.refresh()
   }
@@ -162,6 +173,13 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
   // (clearAllWhatsNew recomputes and dismisses every page), flag "All caught up"
   // on success, and refresh so the passive RightPanel reconciles too. Same
   // await-then-refresh order as handleDismiss.
+  //
+  // On failure the action throws, every key hidden by THIS invocation is restored
+  // (same reason as handleDismiss — refresh does not reset client state) and
+  // clearedJustNow stays false, so the empty state can never claim "All caught up"
+  // over a feed that did not drain. The keys are guaranteed absent from hiddenKeys
+  // beforehand because visibleItems is already filtered by it, so deleting them
+  // restores exactly the pre-click state.
   const handleClearAll = async () => {
     const keys = visibleItems.map((i) => i.id)
     if (keys.length === 0) return
@@ -174,7 +192,12 @@ export default function NotificationsBell({ items, seenAt }: NotificationsBellPr
       await clearAllWhatsNew()
       setClearedJustNow(true)
     } catch {
-      // write failed; the next full load will restore the rows honestly
+      // Drain failed — un-hide every row this invocation hid.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        keys.forEach((k) => next.delete(k))
+        return next
+      })
     }
     router.refresh()
   }

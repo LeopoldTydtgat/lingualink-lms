@@ -33,7 +33,8 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   const [localSeenAt, setLocalSeenAt] = useState<string | null>(seenAt)
   // Optimistically hidden keys: rows the user just dismissed, removed immediately
   // while the server write + router.refresh() catch up. Cleared naturally when the
-  // refreshed props no longer contain them (fetchStudentWhatsNew filters dismissed keys).
+  // refreshed props no longer contain them (fetchStudentWhatsNew filters dismissed keys);
+  // a write that fails removes its own key again so the row comes straight back.
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
   const [clearAllHovered, setClearAllHovered] = useState(false)
   // True only for the window between a successful "Clear all" and the next dropdown
@@ -137,6 +138,11 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   // Dismiss one item: hide it locally for instant bell feedback, AWAIT the write,
   // then refresh so the server feed becomes the source of truth. Awaiting before
   // the refresh mirrors the teacher bell's choreography.
+  //
+  // The action THROWS when the write fails, and the catch REVERTS the optimistic
+  // hide. The revert is mandatory: router.refresh() re-runs the server layout but
+  // preserves client state, so a key left in hiddenKeys would keep hiding a row
+  // the server still returns — invisible until a full page reload.
   const handleDismiss = async (key: string) => {
     setHiddenKeys((prev) => {
       const next = new Set(prev)
@@ -146,7 +152,12 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
     try {
       await dismissStudentWhatsNewItem(key)
     } catch {
-      // write failed; the next full load will restore the row honestly
+      // Write failed — un-hide the row so the feed stays honest.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
     router.refresh()
   }
@@ -156,6 +167,13 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   // (clearAllStudentWhatsNew recomputes and dismisses every page), flag "All
   // caught up" on success, and refresh. Same await-then-refresh order as
   // handleDismiss.
+  //
+  // On failure the action throws, every key hidden by THIS invocation is restored
+  // (same reason as handleDismiss — refresh does not reset client state) and
+  // clearedJustNow stays false, so the empty state can never claim "All caught up"
+  // over a feed that did not drain. The keys are guaranteed absent from hiddenKeys
+  // beforehand because visibleItems is already filtered by it, so deleting them
+  // restores exactly the pre-click state.
   const handleClearAll = async () => {
     const keys = visibleItems.map((i) => i.id)
     if (keys.length === 0) return
@@ -168,7 +186,12 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
       await clearAllStudentWhatsNew()
       setClearedJustNow(true)
     } catch {
-      // write failed; the next full load will restore the rows honestly
+      // Drain failed — un-hide every row this invocation hid.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        keys.forEach((k) => next.delete(k))
+        return next
+      })
     }
     router.refresh()
   }
