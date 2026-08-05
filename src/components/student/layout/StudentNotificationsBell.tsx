@@ -75,15 +75,40 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   }, [open])
 
   // Realtime: refresh the feed when any source table it is built from changes in
-  // another session. Mirrors the teacher bell — one channel, postgres_changes
-  // scoped to this student wherever a student_id column exists, and a debounced
-  // router.refresh(). This ONLY asks Next.js to re-run the layout; the server
-  // refetch (fetchStudentWhatsNew) stays the single source of truth for what
-  // shows, and seen/dismiss logic is untouched. Unlike the teacher bell there is
-  // no auth.getUser() resolve here: the students table PK arrives as a prop, and
+  // another session. Mirrors the teacher feed (RightPanel) — one channel,
+  // postgres_changes scoped to this student wherever a student_id column exists,
+  // and a debounced router.refresh(). This ONLY asks Next.js to re-run the layout;
+  // the server refetch (fetchStudentWhatsNew) stays the single source of truth for
+  // what shows, and seen/dismiss logic is untouched. Unlike the teacher feed there
+  // is no auth.getUser() resolve here: the students table PK arrives as a prop, and
   // it — not the auth uid — is what student_id columns hold.
+  //
+  // That prop-only setup is exactly what can race the shared browser client's
+  // realtime JWT seeding (supabase/client.ts wires realtime.setAuth from an async
+  // getSession()): a channel that joins before the socket holds a token has its
+  // RLS-filtered events silently dropped, and the bell then stays dead for the whole
+  // mount. The resolution is NOT to block on auth here — the identity rule above
+  // keeps the auth uid out of this component — but to make that state RECOVERABLE:
+  // the subscribe status callback marks a token-less join (which comes back
+  // CHANNEL_ERROR) unhealthy, and the focus/visibility heal below tears the channel
+  // down and re-runs the SAME establish() the initial setup uses, by which point
+  // setAuth has long since run. A bad seed therefore self-corrects on next focus
+  // instead of persisting.
+  //
+  // The heal's refresh also covers cross-tab dismissals: a dismissal writes to a
+  // table this channel deliberately does NOT subscribe to (audit decision — no
+  // dismissal-table subscriptions), so only a refetch reconciles a feed that was
+  // drained in another tab.
   useEffect(() => {
     const supabase = createClient()
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let disposed = false
+    // 'none' = never established; 'connecting' = subscribe() has not reported yet;
+    // 'healthy' = SUBSCRIBED; 'unhealthy' = the socket reported CHANNEL_ERROR /
+    // TIMED_OUT / CLOSED. Only 'none' and 'unhealthy' let the heal re-establish, so
+    // a focus burst cannot stack duplicate channels. No timers and no reconnect
+    // loop — focus IS the retry.
+    let health: 'none' | 'connecting' | 'healthy' | 'unhealthy' = 'none'
 
     // Coalesce a burst of events (e.g. a rebooking that DELETEs then INSERTs) into a
     // single refresh within 800ms.
@@ -95,22 +120,75 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
       }, 800)
     }
 
-    const channel = supabase
-      .channel(`student-whats-new-${studentId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `student_id=eq.${studentId}` }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments', filter: `student_id=eq.${studentId}` }, scheduleRefresh)
-      // trainings changes are low volume, so this subscription is unfiltered: a
-      // trainings change anywhere triggers this student's refetch. The refetch is
-      // student-scoped by RLS so it cannot leak other students' data.
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'trainings' }, scheduleRefresh)
-      .subscribe()
+    const establish = () => {
+      if (disposed) return
+      health = 'connecting'
+
+      // Drop any previous channel BEFORE opening the new one so a re-establish can
+      // never leave an orphan subscription on the shared socket.
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
+
+      const ch = supabase
+        .channel(`student-whats-new-${studentId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `student_id=eq.${studentId}` }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'assignments', filter: `student_id=eq.${studentId}` }, scheduleRefresh)
+        // trainings changes are low volume, so this subscription is unfiltered: a
+        // trainings change anywhere triggers this student's refetch. The refetch is
+        // student-scoped by RLS so it cannot leak other students' data.
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'trainings' }, scheduleRefresh)
+
+      channel = ch
+      // `status` is typed as the REALTIME_SUBSCRIBE_STATES enum, which @supabase/
+      // supabase-js does not re-export; widening the parameter to string keeps the
+      // literal comparisons legal without importing from @supabase/realtime-js.
+      ch.subscribe((status: string) => {
+        // Ignore a late callback from a channel we already replaced or removed:
+        // removeChannel() fires 'CLOSED' on the OLD channel, which would otherwise
+        // mark a perfectly healthy fresh one as dead.
+        if (ch !== channel) return
+        if (status === 'SUBSCRIBED') {
+          health = 'healthy'
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          health = 'unhealthy'
+        }
+      })
+    }
+
+    establish()
+
+    // Heal on focus/visibility, copied from BillingRealtimeRefresher. BOTH listeners
+    // are needed: tab-switch fires visibilitychange but not focus; alt-tabbing back to
+    // the window fires focus. The debounce collapses a double-fire into one refresh.
+    const heal = () => {
+      scheduleRefresh()
+      if (health === 'none' || health === 'unhealthy') establish()
+    }
+    function onFocus() {
+      heal()
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') heal()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
+      disposed = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
       if (refreshDebounceRef.current) {
         clearTimeout(refreshDebounceRef.current)
         refreshDebounceRef.current = null
       }
-      supabase.removeChannel(channel)
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
     }
   }, [router, studentId])
 

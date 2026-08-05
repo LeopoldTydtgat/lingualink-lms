@@ -183,10 +183,28 @@ export default function RightPanel({
   // browser client has finished seeding the socket JWT (see supabase/client.ts)
   // before .subscribe() runs. Swapping in the prop would let subscribe race that
   // seeding and silently drop RLS-filtered events.
+  //
+  // A null/failed getUser() is NOT terminal. It used to be: the async setup
+  // returned, no channel was ever created, nothing retried, and the card silently
+  // stopped receiving cross-session updates for the whole mount. Now the attempt
+  // leaves `health` at 'unhealthy' and returns, and the focus/visibility heal below
+  // calls establish() again on the next foreground. Deliberately no error UI — this
+  // is a background feed, and a navigation still re-renders the server-fetched items.
+  //
+  // The heal also covers events Realtime dropped while the tab slept AND cross-tab
+  // dismissals: a dismissal writes to a table this channel deliberately does NOT
+  // subscribe to (audit decision — no dismissal-table subscriptions), so only the
+  // refresh reconciles a feed drained in another tab.
   useEffect(() => {
     const supabase = createClient()
     let channel: ReturnType<typeof supabase.channel> | null = null
-    let cancelled = false
+    let disposed = false
+    // 'none' = never established; 'connecting' = an establish() is in flight or its
+    // subscribe() has not reported yet; 'healthy' = SUBSCRIBED; 'unhealthy' = the
+    // socket reported CHANNEL_ERROR / TIMED_OUT / CLOSED, or auth was unavailable.
+    // Only 'none' and 'unhealthy' let the heal re-establish, so a focus burst cannot
+    // stack duplicate channels. No timers and no reconnect loop — focus IS the retry.
+    let health: 'none' | 'connecting' | 'healthy' | 'unhealthy' = 'none'
 
     // Coalesce a burst of events (e.g. a rebooking that DELETEs then INSERTs) into a
     // single refresh within 800ms.
@@ -198,12 +216,34 @@ export default function RightPanel({
       }, 800)
     }
 
-    void (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user || cancelled) return
-      const uid = user.id
+    const establish = async () => {
+      if (disposed || health === 'connecting') return
+      health = 'connecting'
 
-      channel = supabase
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+
+      if (disposed) return
+      if (!uid) {
+        health = 'unhealthy'
+        return
+      }
+
+      // Drop any previous channel BEFORE opening the new one so a re-establish can
+      // never leave an orphan subscription on the shared socket.
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
+
+      const ch = supabase
         .channel(`whats-new-${uid}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'reports', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
@@ -213,16 +253,55 @@ export default function RightPanel({
         // trainings change anywhere triggers this teacher's refetch. The refetch is
         // teacher-scoped by RLS so it cannot leak other teachers' data; low volume.
         .on('postgres_changes', { event: '*', schema: 'public', table: 'trainings' }, scheduleRefresh)
-        .subscribe()
-    })()
+
+      channel = ch
+      // `status` is typed as the REALTIME_SUBSCRIBE_STATES enum, which @supabase/
+      // supabase-js does not re-export; widening the parameter to string keeps the
+      // literal comparisons legal without importing from @supabase/realtime-js.
+      ch.subscribe((status: string) => {
+        // Ignore a late callback from a channel we already replaced or removed:
+        // removeChannel() fires 'CLOSED' on the OLD channel, which would otherwise
+        // mark a perfectly healthy fresh one as dead.
+        if (ch !== channel) return
+        if (status === 'SUBSCRIBED') {
+          health = 'healthy'
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          health = 'unhealthy'
+        }
+      })
+    }
+
+    void establish()
+
+    // Heal on focus/visibility, copied from BillingRealtimeRefresher. BOTH listeners
+    // are needed: tab-switch fires visibilitychange but not focus; alt-tabbing back to
+    // the window fires focus. The debounce collapses a double-fire into one refresh.
+    const heal = () => {
+      scheduleRefresh()
+      if (health === 'none' || health === 'unhealthy') void establish()
+    }
+    function onFocus() {
+      heal()
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') heal()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
 
     return () => {
-      cancelled = true
+      disposed = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
       if (refreshDebounceRef.current) {
         clearTimeout(refreshDebounceRef.current)
         refreshDebounceRef.current = null
       }
-      if (channel) supabase.removeChannel(channel)
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
     }
   }, [router])
 
