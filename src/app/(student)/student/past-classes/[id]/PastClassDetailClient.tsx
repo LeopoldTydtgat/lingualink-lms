@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -158,7 +157,6 @@ export default function PastClassDetailClient({
   studentId,
   studentTimezone,
 }: Props) {
-  const router = useRouter();
   const { dateStr, timeStr } = formatDateTime(lesson.scheduled_at, studentTimezone);
 
   // Review form state
@@ -167,6 +165,15 @@ export default function PastClassDetailClient({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitted, setSubmitted] = useState(!!existingReview);
+  const [skippedForNow, setSkippedForNow] = useState(false);
+
+  // An ended class whose teacher has not filed the report yet is still
+  // 'scheduled' in the DB; the server page admits it only once its end instant
+  // has passed. Every report-derived section below renders an explicit pending
+  // state for it rather than the "didn't leave feedback" copy, which would be
+  // wrong - the teacher simply has not written it yet. Nothing about report
+  // deadlines or teacher pay is surfaced to the student.
+  const awaitingReport = lesson.status === 'scheduled';
 
   // Build radar chart data from report level_data
   const radarData = SKILLS.map((skill) => ({
@@ -175,9 +182,12 @@ export default function PastClassDetailClient({
     fullMark: 6,
   }));
 
-  const hasLevelData =
+  // Optional-chained throughout: a null report yields undefined -> false here,
+  // so the radar is never rendered from absent level_data.
+  const hasLevelData = Boolean(
     lesson.report?.level_data &&
-    Object.values(lesson.report.level_data).some((v) => v);
+      Object.values(lesson.report.level_data).some((v) => v)
+  );
 
   const hasSheets = assignments.some((a) => a.study_sheet);
 
@@ -255,8 +265,19 @@ export default function PastClassDetailClient({
             <p className="text-sm text-gray-500 mt-0.5">
               {dateStr} · {timeStr} · {lesson.duration_minutes} min
             </p>
-            <div className="mt-1.5">
+            <div className="mt-1.5 flex items-center gap-2">
+              {/* PastClassStatusTag returns null for any status it does not
+                  know, 'scheduled' included, so it cannot mislabel an
+                  ended-but-unreported class; the neutral pill stands in. */}
               <PastClassStatusTag status={lesson.status} />
+              {awaitingReport && (
+                <span
+                  className="text-xs font-medium px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: '#f3f4f6', color: '#6b7280' }}
+                >
+                  Feedback pending
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -273,6 +294,10 @@ export default function PastClassDetailClient({
         {lesson.report?.feedback_text ? (
           <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">
             {lesson.report.feedback_text}
+          </p>
+        ) : awaitingReport ? (
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            Your teacher&apos;s feedback will appear here soon.
           </p>
         ) : (
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
@@ -343,7 +368,7 @@ export default function PastClassDetailClient({
       {/* ── RIGHT COLUMN ── */}
       <div className="lg:col-span-1">
       {/* ── Level radar chart ── */}
-      {hasLevelData && (
+      {hasLevelData ? (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
@@ -378,10 +403,24 @@ export default function PastClassDetailClient({
             })}
           </div>
         </div>
-      )}
+      ) : awaitingReport ? (
+        /* Ended class, report not filed yet: keep the section visible with an
+           explicit pending message instead of rendering an empty radar. */
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-3">
+            <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
+          </div>
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            Your teacher&apos;s assessment of your level will appear here soon.
+          </p>
+        </div>
+      ) : null}
 
       {/* ── Review section ── */}
-      {lesson.status === 'completed' && (
+      {/* Unchanged and report-independent: gated on 'completed' alone, so an
+          ended-but-unreported ('scheduled') class shows no review form, and
+          nothing inside this block reads lesson.report. */}
+      {lesson.status === 'completed' && !skippedForNow && (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-1">
             <CardHeader icon={Star} label={submitted ? 'YOUR REVIEW' : 'LEAVE A REVIEW'} />
@@ -435,7 +474,7 @@ export default function PastClassDetailClient({
                   {submitting ? 'Submitting...' : 'Submit Review'}
                 </button>
                 <button
-                  onClick={() => router.push('/student/past-classes')}
+                  onClick={() => setSkippedForNow(true)}
                   className="px-4 py-2 rounded-lg text-sm font-medium"
                   style={{ border: '1px solid #E0DFDC', color: '#4b5563' }}
                 >

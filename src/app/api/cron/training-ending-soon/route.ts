@@ -86,6 +86,10 @@ export async function GET(request: Request) {
       // again on tomorrow's run, so its result must be checked rather than discarded:
       // a silent failure here means a repeat email every single day. Service role, so
       // no RLS filtering - a zero-row result means the id no longer matches.
+      //
+      // Deliberately does NOT stamp updated_at: this is a notification
+      // bookkeeping flag, not a student-visible change. Stamping it would
+      // re-badge the student What's New feed. Do not "fix".
       const { data: flagged, error: flagError } = await supabase
         .from('trainings')
         .update({ training_ending_soon_sent: true })

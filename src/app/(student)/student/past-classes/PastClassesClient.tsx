@@ -311,7 +311,20 @@ function ClassRow({
       </div>
 
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        {/* PastClassStatusTag returns null for any status it does not know,
+            including the ended-but-unreported 'scheduled' rows the server page
+            now admits - so it never mislabels one. The neutral pill below
+            stands in for it. Nothing about teacher pay or report deadlines is
+            ever surfaced to the student. */}
         <PastClassStatusTag status={lesson.status} />
+        {lesson.status === 'scheduled' && (
+          <span
+            className="text-xs font-medium px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: '#f3f4f6', color: '#6b7280' }}
+          >
+            Feedback pending
+          </span>
+        )}
         {needsReview && (
           <span
             className="text-xs font-medium px-2 py-0.5 rounded-full"
@@ -375,6 +388,9 @@ export default function PastClassesClient({
     setDismissLoaded(true);
   }, [lessons]);
 
+  // Unchanged: gated on 'completed' alone, so an ended-but-unreported
+  // ('scheduled') lesson never raises the review prompt. This filter never
+  // reads l.report, so a null report cannot break it.
   const promptLesson = useMemo(() => {
     if (!dismissLoaded) return null;
     const candidates = lessons
@@ -457,8 +473,10 @@ export default function PastClassesClient({
       {/* Page header */}
       <div style={{ borderBottom: '1px solid #E0DFDC', paddingBottom: '16px', marginBottom: '24px', width: '100%' }}>
         <h1 className="text-2xl font-bold text-gray-900">Past Classes</h1>
+        {/* Deliberately not "completed": the list also carries ended classes
+            whose report is still pending, and those are not completed lessons. */}
         <p className="text-sm text-gray-500 mt-1">
-          {lessons.length} class{lessons.length !== 1 ? 'es' : ''} completed
+          {lessons.length} past class{lessons.length !== 1 ? 'es' : ''}
         </p>
       </div>
 

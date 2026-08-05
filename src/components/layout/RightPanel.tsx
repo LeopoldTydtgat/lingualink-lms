@@ -3,13 +3,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench } from 'lucide-react'
+import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
 import { WeekGridSpot } from '@/components/WeekGridSpot'
-import { dismissWhatsNewItem } from '@/app/(dashboard)/actions/whatsNewDismiss'
+import { createClient } from '@/lib/supabase/client'
+import { dismissWhatsNewItem, clearAllWhatsNew } from '@/app/(dashboard)/actions/whatsNewDismiss'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,7 +32,6 @@ type RightPanelProps = {
   offeredMinutes?: number
   minAvailableHours?: number | null
   whatsNewItems?: WhatsNewItem[]
-  whatsNewSeenAt?: string | null
   showStaffTools?: boolean
 }
 
@@ -108,7 +108,6 @@ export default function RightPanel({
   offeredMinutes = 0,
   minAvailableHours = null,
   whatsNewItems = [],
-  whatsNewSeenAt = null,
   showStaffTools = false,
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
@@ -118,15 +117,25 @@ export default function RightPanel({
   const [mounted, setMounted] = useState(false)
   const [now, setNow] = useState(0)
   const [joinHovered, setJoinHovered] = useState(false)
-  const [viewAllHovered, setViewAllHovered] = useState(false)
+  // What's New shows 3 rows by default and expands in place to the full feed.
+  const [whatsNewExpanded, setWhatsNewExpanded] = useState(false)
+  const [expandHovered, setExpandHovered] = useState(false)
+  const [clearAllHovered, setClearAllHovered] = useState(false)
+  // Set by a successful "Clear all" — swaps the empty-state copy to a friendlier
+  // "All caught up". Not set when the drain throws. The old bell reset it on
+  // dropdown close and this card has no equivalent close event, so the reset is
+  // keyed on the feed refilling instead (see the adjustment below visibleWhatsNew).
+  const [clearedJustNow, setClearedJustNow] = useState(false)
+  // Staff Tools is collapsed by default; the header row toggles it.
+  const [staffToolsOpen, setStaffToolsOpen] = useState(false)
   // Optimistically hidden keys: rows the user just dismissed, removed immediately
   // while the server write + router.refresh() catch up. Cleared naturally once the
   // refreshed props no longer contain them (fetchWhatsNew filters dismissed keys);
   // a write that fails removes its own key again so the row comes straight back.
-  // Mirrors NotificationsBell so both surfaces get the same per-item cross.
   const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set())
 
   const panelRef = useRef<HTMLElement>(null)
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleWheel = (e: React.WheelEvent<HTMLElement>) => {
     const panel = panelRef.current
@@ -159,34 +168,187 @@ export default function RightPanel({
     return () => clearInterval(timer)
   }, [teacherId, nextLesson])
 
+  // Realtime: refresh the feed when any source table it is built from changes in
+  // another session. Moved here verbatim from the deleted NotificationsBell, which
+  // used to own the only What's New subscription. One channel, postgres_changes
+  // scoped to this teacher wherever a teacher_id column exists, and a debounced
+  // router.refresh(). This ONLY asks Next.js to re-run the layout; the server
+  // refetch (fetchWhatsNew) stays the single source of truth for what shows, and
+  // dismiss logic is untouched.
+  //
+  // This is now the (dashboard) layout's ONLY realtime refresher. It absorbed the
+  // deleted BillingRealtimeRefresher, whose subscription (lessons filtered to this
+  // same teacher_id) and focus refresh were both strict subsets of what runs here —
+  // two components mounted in one layout meant two router.refresh() calls per focus,
+  // and router.refresh() re-runs the whole layout, so the billing summary this panel
+  // renders is recomputed by the refresh below exactly as it was before.
+  //
+  // The teacherId prop is deliberately NOT used as the filter key even though it
+  // holds the same uuid: awaiting a real auth.getUser() also guarantees the shared
+  // browser client has finished seeding the socket JWT (see supabase/client.ts)
+  // before .subscribe() runs. Swapping in the prop would let subscribe race that
+  // seeding and silently drop RLS-filtered events.
+  //
+  // A null/failed getUser() is NOT terminal. It used to be: the async setup
+  // returned, no channel was ever created, nothing retried, and the card silently
+  // stopped receiving cross-session updates for the whole mount. Now the attempt
+  // leaves `health` at 'unhealthy' and returns, and the focus/visibility heal below
+  // calls establish() again on the next foreground. Deliberately no error UI — this
+  // is a background feed, and a navigation still re-renders the server-fetched items.
+  //
+  // The heal also covers events Realtime dropped while the tab slept AND cross-tab
+  // dismissals: a dismissal writes to a table this channel deliberately does NOT
+  // subscribe to (audit decision — no dismissal-table subscriptions), so only the
+  // refresh reconciles a feed drained in another tab.
+  useEffect(() => {
+    const supabase = createClient()
+    let channel: ReturnType<typeof supabase.channel> | null = null
+    let disposed = false
+    // 'none' = never established; 'connecting' = an establish() is in flight or its
+    // subscribe() has not reported yet; 'healthy' = SUBSCRIBED; 'unhealthy' = the
+    // socket reported CHANNEL_ERROR / TIMED_OUT / CLOSED, or auth was unavailable.
+    // Only 'none' and 'unhealthy' let the heal re-establish, so a focus burst cannot
+    // stack duplicate channels. No timers and no reconnect loop — focus IS the retry.
+    let health: 'none' | 'connecting' | 'healthy' | 'unhealthy' = 'none'
+
+    // Coalesce a burst of events (e.g. a rebooking that DELETEs then INSERTs) into a
+    // single refresh within 800ms.
+    const scheduleRefresh = () => {
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current)
+      refreshDebounceRef.current = setTimeout(() => {
+        refreshDebounceRef.current = null
+        router.refresh()
+      }, 800)
+    }
+
+    const establish = async () => {
+      if (disposed || health === 'connecting') return
+      health = 'connecting'
+
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+
+      if (disposed) return
+      if (!uid) {
+        health = 'unhealthy'
+        return
+      }
+
+      // Drop any previous channel BEFORE opening the new one so a re-establish can
+      // never leave an orphan subscription on the shared socket.
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
+
+      const ch = supabase
+        .channel(`whats-new-${uid}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'reports', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'invoices', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'training_teachers', filter: `teacher_id=eq.${uid}` }, scheduleRefresh)
+        // trainings has no teacher_id column, so this subscription is unfiltered: a
+        // trainings change anywhere triggers this teacher's refetch. The refetch is
+        // teacher-scoped by RLS so it cannot leak other teachers' data; low volume.
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'trainings' }, scheduleRefresh)
+
+      channel = ch
+      // `status` is typed as the REALTIME_SUBSCRIBE_STATES enum, which @supabase/
+      // supabase-js does not re-export; widening the parameter to string keeps the
+      // literal comparisons legal without importing from @supabase/realtime-js.
+      ch.subscribe((status: string) => {
+        // Ignore a late callback from a channel we already replaced or removed:
+        // removeChannel() fires 'CLOSED' on the OLD channel, which would otherwise
+        // mark a perfectly healthy fresh one as dead.
+        if (ch !== channel) return
+        if (status === 'SUBSCRIBED') {
+          health = 'healthy'
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          health = 'unhealthy'
+        }
+      })
+    }
+
+    void establish()
+
+    // Heal on focus/visibility. BOTH listeners are needed: tab-switch fires
+    // visibilitychange but not focus; alt-tabbing back to the window fires focus. The
+    // debounce collapses a double-fire into one refresh — and since this is the only
+    // refresher left in the layout, exactly one refresh now fires per focus event.
+    const heal = () => {
+      scheduleRefresh()
+      if (health === 'none' || health === 'unhealthy') void establish()
+    }
+    function onFocus() {
+      heal()
+    }
+    function onVisibility() {
+      if (document.visibilityState === 'visible') heal()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      disposed = true
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      if (refreshDebounceRef.current) {
+        clearTimeout(refreshDebounceRef.current)
+        refreshDebounceRef.current = null
+      }
+      if (channel) {
+        const stale = channel
+        channel = null
+        supabase.removeChannel(stale)
+      }
+    }
+  }, [router])
+
   const classEndTime = nextLesson
     ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
     : null
-  const classEnded = classEndTime ? Date.now() > classEndTime : false
+  // Reads the component's own 1s tick (`now`, set at mount and by the countdown
+  // interval above) rather than Date.now(): the render path stays pure, and this
+  // agrees with remainingSeconds below instead of drifting a tick apart from it.
+  // Pre-mount `now` is 0, so this is false during SSR/hydration — harmless, as the
+  // only consumer is already gated on `mounted`. The interval that advances `now`
+  // exists whenever classEndTime is non-null (both require nextLesson).
+  const classEnded = classEndTime ? now > classEndTime : false
   const remainingSeconds = classEndTime != null
     ? Math.max(0, Math.floor((classEndTime - now) / 1000))
     : 0
   const isJoinable = mounted && nextLesson != null && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
-  // What's New seen split. The panel is passive — it never stamps; it only reads
-  // the server-provided marker to separate fresh from already-seen items. ISO UTC
-  // strings compare lexicographically in chronological order. Order within each
-  // group is preserved from fetchWhatsNew (attention first, then newest). The
-  // panel shows at most 3 items total: unseen first, then seen items fill any
-  // remaining slots under an "Earlier" divider. "View all" opens the bell for
-  // the rest.
-  const isWhatsNewSeen = (item: WhatsNewItem) => whatsNewSeenAt != null && item.at <= whatsNewSeenAt
-  // Exclude optimistically-dismissed rows BEFORE slicing so hiding one surfaces
-  // the next within the 3-item cap.
+  // What's New is one flat list — no seen/unseen split, no "Earlier" divider. Order
+  // is exactly what fetchWhatsNew returns (attention items first, then newest
+  // first); the panel never re-sorts, so an urgent item with an old synthetic
+  // timestamp cannot sink below fresher chatter. Optimistically-dismissed rows are
+  // excluded BEFORE the 3-row slice so hiding one surfaces the next.
   const visibleWhatsNew = whatsNewItems.filter((i) => !hiddenKeys.has(i.id))
-  const unseenWhatsNew = visibleWhatsNew.filter((i) => !isWhatsNewSeen(i)).slice(0, 3)
-  const seenWhatsNew = visibleWhatsNew
-    .filter((i) => isWhatsNewSeen(i))
-    .slice(0, Math.max(0, 3 - unseenWhatsNew.length))
+  const shownWhatsNew = whatsNewExpanded ? visibleWhatsNew : visibleWhatsNew.slice(0, 3)
+
+  // "All caught up" describes the feed a Clear all drained, so it must not outlive it:
+  // reset as soon as the card has rows again, and a feed that later refills and is
+  // dismissed row-by-row reads "No new activity" as it should. Keyed on the VISIBLE
+  // count, not whatsNewItems.length — optimistically-hidden rows are not arrivals, so
+  // a router.refresh() landing mid-drain (server items still present, every one of
+  // them hidden) cannot flip the copy back early.
+  //
+  // Adjusted during render rather than in an effect: React re-runs THIS component with
+  // the new value before committing, so the card never paints the stale copy for a
+  // frame. The `clearedJustNow &&` guard is what terminates it — once set to false the
+  // condition is false, so the adjustment costs exactly one extra pass and never loops.
+  if (clearedJustNow && visibleWhatsNew.length > 0) setClearedJustNow(false)
 
   // Dismiss one item: hide it locally for instant feedback, AWAIT the write, then
-  // refresh so the server feed becomes the source of truth. Same await-then-refresh
-  // order as NotificationsBell.handleDismiss.
+  // refresh so the server feed becomes the source of truth.
   //
   // The action THROWS when the write fails, and the catch REVERTS the optimistic
   // hide. The revert is mandatory: router.refresh() re-runs the server layout but
@@ -211,6 +373,45 @@ export default function RightPanel({
     router.refresh()
   }
 
+  // Clear the WHOLE feed, not just the 3 visible rows. Optimistically hide every
+  // currently-visible key for instant feedback, then AWAIT the server drain
+  // (clearAllWhatsNew recomputes and dismisses every page), flag "All caught up"
+  // on success, and refresh. Same await-then-refresh order as handleDismiss.
+  //
+  // On a thrown failure every key hidden by THIS invocation is restored (same
+  // reason as handleDismiss — refresh does not reset client state) and
+  // clearedJustNow stays false. The keys are guaranteed absent from hiddenKeys
+  // beforehand because visibleWhatsNew is already filtered by it, so deleting them
+  // restores exactly the pre-click state.
+  //
+  // An expired session is covered by that same catch: clearAllWhatsNew THROWS on a
+  // null auth.getUser() rather than resolving, so a session that drains nothing can
+  // no longer reach the success path here. The catch reverts the optimistic hide and
+  // clearedJustNow stays false, so the card can never read "All caught up" over an
+  // undrained feed.
+  const handleClearAll = async () => {
+    const keys = visibleWhatsNew.map((i) => i.id)
+    if (keys.length === 0) return
+    setHiddenKeys((prev) => {
+      const next = new Set(prev)
+      keys.forEach((k) => next.add(k))
+      return next
+    })
+    try {
+      await clearAllWhatsNew()
+      setClearedJustNow(true)
+      setWhatsNewExpanded(false)
+    } catch {
+      // Drain failed — un-hide every row this invocation hid.
+      setHiddenKeys((prev) => {
+        const next = new Set(prev)
+        keys.forEach((k) => next.delete(k))
+        return next
+      })
+    }
+    router.refresh()
+  }
+
   // Availability ring. All inputs are server props (no Date, no state) so this is
   // hydration-safe. pct is null when there is no numeric target — the card then
   // shows offered hours without a ring rather than inventing a percentage.
@@ -222,7 +423,9 @@ export default function RightPanel({
 
   return (
     <aside ref={panelRef} onWheel={handleWheel} className="w-72 flex flex-col shrink-0 overflow-y-auto thin-scroll" style={{ backgroundColor: '#F7F8FA', borderLeft: '1px solid #E5E7EB' }}>
-      <div className="p-4 space-y-4">
+      {/* pb-24 keeps the last card clear of the floating ChatWidget launcher
+          (fixed bottom-6 right-6, 52px tall → occupies the bottom 76px). */}
+      <div className="px-4 pt-4 pb-24 space-y-4">
 
         {/* ── NEXT CLASS ── */}
         <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
@@ -320,36 +523,82 @@ export default function RightPanel({
           )}
         </section>
 
-        {/* ── STAFF TOOLS ── */}
-        {showStaffTools && (
-          <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <div className="flex items-center gap-2 mb-2">
-              <Wrench size={14} color="#FF8303" style={{ flexShrink: 0 }} />
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Staff Tools</p>
+        {/* ── WHAT'S NEW ── */}
+        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What&apos;s New</p>
+            {visibleWhatsNew.length > 0 && (
+              <button
+                type="button"
+                onClick={handleClearAll}
+                onMouseEnter={() => setClearAllHovered(true)}
+                onMouseLeave={() => setClearAllHovered(false)}
+                style={{
+                  marginLeft: 'auto',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: clearAllHovered ? '#FF8303' : '#9ca3af',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  transition: 'color 0.15s ease',
+                }}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          {visibleWhatsNew.length === 0 ? (
+            clearedJustNow ? (
+              <p className="text-sm text-gray-500">All caught up</p>
+            ) : (
+              <p className="text-sm text-gray-500">No new activity</p>
+            )
+          ) : (
+            <div className="flex flex-col">
+              {shownWhatsNew.map((item) => (
+                <WhatsNewRow
+                  key={item.id}
+                  item={item}
+                  mounted={mounted}
+                  seen={false}
+                  onDismiss={() => handleDismiss(item.id)}
+                  onClick={() => {
+                    const targetPath = item.href.split('?')[0].split('#')[0]
+                    if (pathname !== targetPath) router.push(item.href)
+                  }}
+                />
+              ))}
             </div>
-            <PanelButton
-              className="w-full text-sm mb-2"
-              onClick={() => router.push('/admin/classes')}
+          )}
+
+          {visibleWhatsNew.length > 3 && (
+            <button
+              type="button"
+              onClick={() => setWhatsNewExpanded((v) => !v)}
+              aria-expanded={whatsNewExpanded}
+              onMouseEnter={() => setExpandHovered(true)}
+              onMouseLeave={() => setExpandHovered(false)}
+              style={{
+                marginTop: '8px',
+                alignSelf: 'flex-start',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: expandHovered ? '#FD5602' : '#FF8303',
+                backgroundColor: 'transparent',
+                border: 'none',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                transition: 'color 0.15s ease',
+              }}
             >
-              <CalendarClock size={14} className="mr-2" />
-              Manage Classes
-            </PanelButton>
-            <PanelButton
-              className="w-full text-sm mb-2"
-              onClick={() => router.push('/admin/students')}
-            >
-              <BookOpen size={14} className="mr-2" />
-              Students
-            </PanelButton>
-            <PanelButton
-              className="w-full text-sm"
-              onClick={() => router.push('/admin/support')}
-            >
-              <ArrowRight size={14} className="mr-2" />
-              Support Inbox
-            </PanelButton>
-          </section>
-        )}
+              {whatsNewExpanded ? 'Show less' : `View all (${visibleWhatsNew.length})`}
+            </button>
+          )}
+        </section>
 
         {/* ── BILLING SUMMARY ── */}
         <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
@@ -379,6 +628,62 @@ export default function RightPanel({
             <ArrowRight size={14} className="ml-2" />
           </PanelButton>
         </section>
+
+        {/* ── STAFF TOOLS ── collapsed by default */}
+        {showStaffTools && (
+          <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+            <button
+              type="button"
+              onClick={() => setStaffToolsOpen((v) => !v)}
+              aria-expanded={staffToolsOpen}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                width: '100%',
+                padding: 0,
+                border: 'none',
+                backgroundColor: 'transparent',
+                cursor: 'pointer',
+                marginBottom: staffToolsOpen ? '8px' : 0,
+              }}
+            >
+              <Wrench size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Staff Tools</p>
+              <span style={{ marginLeft: 'auto', display: 'flex' }}>
+                {staffToolsOpen
+                  ? <ChevronUp size={14} color="#9ca3af" />
+                  : <ChevronDown size={14} color="#9ca3af" />}
+              </span>
+            </button>
+
+            {staffToolsOpen && (
+              <>
+                <PanelButton
+                  className="w-full text-sm mb-2"
+                  onClick={() => router.push('/admin/classes')}
+                >
+                  <CalendarClock size={14} className="mr-2" />
+                  Manage Classes
+                </PanelButton>
+                <PanelButton
+                  className="w-full text-sm mb-2"
+                  onClick={() => router.push('/admin/students')}
+                >
+                  <BookOpen size={14} className="mr-2" />
+                  Students
+                </PanelButton>
+                <PanelButton
+                  className="w-full text-sm"
+                  onClick={() => router.push('/admin/support')}
+                >
+                  <ArrowRight size={14} className="mr-2" />
+                  Support Inbox
+                </PanelButton>
+              </>
+            )}
+          </section>
+        )}
 
         {/* ── AVAILABILITY ── */}
         <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
@@ -448,76 +753,6 @@ export default function RightPanel({
                 Edit availability
               </PanelButton>
             </>
-          )}
-        </section>
-
-        {/* ── WHAT'S NEW ── */}
-        <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles size={14} color="#FF8303" style={{ flexShrink: 0 }} />
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">What&apos;s New</p>
-          </div>
-          {whatsNewItems.length === 0 ? (
-            <p className="text-sm text-gray-500">No new activity</p>
-          ) : (
-            <div className="flex flex-col">
-              {unseenWhatsNew.map((item) => (
-                <WhatsNewRow
-                  key={item.id}
-                  item={item}
-                  mounted={mounted}
-                  seen={false}
-                  onDismiss={() => handleDismiss(item.id)}
-                  onClick={() => {
-                    const targetPath = item.href.split('?')[0].split('#')[0]
-                    if (pathname !== targetPath) router.push(item.href)
-                  }}
-                />
-              ))}
-              {seenWhatsNew.length > 0 && (
-                <>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 8px 4px' }}>
-                    <span className="text-gray-400 uppercase tracking-wider" style={{ fontSize: '11px' }}>Earlier</span>
-                    <span style={{ flex: 1, height: '1px', backgroundColor: '#f3f4f6' }} />
-                  </div>
-                  {seenWhatsNew.map((item) => (
-                    <WhatsNewRow
-                      key={item.id}
-                      item={item}
-                      mounted={mounted}
-                      seen={true}
-                      onDismiss={() => handleDismiss(item.id)}
-                      onClick={() => {
-                    const targetPath = item.href.split('?')[0].split('#')[0]
-                    if (pathname !== targetPath) router.push(item.href)
-                  }}
-                    />
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-          {whatsNewItems.length > 3 && (
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-whats-new'))}
-              onMouseEnter={() => setViewAllHovered(true)}
-              onMouseLeave={() => setViewAllHovered(false)}
-              style={{
-                marginTop: '8px',
-                alignSelf: 'flex-start',
-                fontSize: '12px',
-                fontWeight: 600,
-                color: viewAllHovered ? '#FD5602' : '#FF8303',
-                backgroundColor: 'transparent',
-                border: 'none',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                transition: 'color 0.15s ease',
-              }}
-            >
-              View all
-            </button>
           )}
         </section>
 

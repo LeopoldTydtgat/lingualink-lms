@@ -106,6 +106,8 @@ export async function fetchStudentWhatsNew(
       .eq('student_id', studentId)
       .gte('assigned_at', sinceIso),
     // Active trainings — hours-low / ending checks (state, not windowed).
+    // updated_at is the row's own last-change instant and is load-bearing for
+    // BOTH items' `at` (see the born-seen note on each below), not decorative.
     supabase
       .from('trainings')
       .select('id, total_hours, hours_consumed, end_date, updated_at')
@@ -185,17 +187,37 @@ export async function fetchStudentWhatsNew(
     })
   }
 
-  // Hours low / Training ending (state, attention). Same stable synthetic
-  // timestamps as the teacher feed so a "seen" stamp taken today permanently
-  // covers them rather than them re-appearing unseen.
+  // Hours low / Training ending (state, attention). Both use a synthetic `at`
+  // rather than an event timestamp, so both must respect the BORN-SEEN rule: an
+  // item's `at` may never predate the moment it could actually have entered the
+  // feed. The bell marks everything with at <= the seen stamp as already seen,
+  // so a backdated `at` on a brand-new item is covered by any earlier bell-open
+  // stamp — the item arrives pre-seen and never badges.
   for (const t of trainingsRes.data ?? []) {
     const remaining = Number(t.total_hours) - Number(t.hours_consumed)
     if (remaining < 2) {
       items.push({
-        id: `hours-low-${t.id}`,
+        // Episode key. A dismissal is permanent for its key, so the key must change
+        // whenever the condition can resolve and re-trigger — otherwise one dismiss
+        // (or Clear all) buries this warning for good. total_hours changes on a
+        // top-up / package edit, which is exactly what ends a low-hours episode, so
+        // a later re-drop under 2h produces a new key and surfaces again. The raw
+        // Supabase value is interpolated as-is (no Number()): the key only needs to
+        // be stable and to change on top-up, not to be arithmetic. Accepted edge: a
+        // cancellation refund that lifts hours back over 2 without touching
+        // total_hours, followed by a re-drop, keeps the same key and stays
+        // suppressed — no episode boundary for that path exists in the data.
+        id: `hours-low-${t.id}-${t.total_hours}`,
         kind: 'hours_low',
         // Stable `at` = when the training row last changed (the hours mutation
         // that dropped it under 2h), so a seen-stamp covers it. Falls back to nowIso.
+        //
+        // BORN-SEEN: no clamp is needed here. This condition can only start when
+        // total_hours or hours_consumed changes, and those columns are mutated
+        // only by the atomic hours RPCs, which set updated_at = now() in the same
+        // UPDATE — so updated_at IS the instant the item became true, never older.
+        // The nowIso fallback is the current instant, also never older. Nothing
+        // here may be swapped for created_at or an end-date-derived value.
         text: 'You have less than 2 hours remaining',
         href: '/student/account',
         at: t.updated_at ?? nowIso,
@@ -207,10 +229,36 @@ export async function fetchStudentWhatsNew(
       // Stable `at` = the moment this training entered the 14-day warning window
       // (end_date minus 14 days, as a UTC instant). Pure Date.UTC on the split
       // date parts — no toISOString on a local date, no tz drift.
+      //
+      // BORN-SEEN CLAMP: that window start can be up to 14 days in the PAST the
+      // very first time this item appears — a training whose end_date is set
+      // (on creation, or on an edit) with the date already inside the window
+      // enters the feed backdated, and any earlier bell-open stamp then marks it
+      // seen on arrival, so it never badges. Clamping to the LATER of the window
+      // start and trainings.updated_at fixes that: updated_at is the row's own
+      // last-change instant and so cannot precede the write that put this
+      // training in the window.
+      //
+      // The max() is computed numerically, NOT by comparing the strings:
+      // updated_at arrives in PostgREST's '+00:00' shape while the window start
+      // is JS 'Z' shape, and those two shapes do not sort correctly against each
+      // other lexicographically. The winner is re-serialised through
+      // toISOString() so `at` keeps exactly the ISO shape it has today whichever
+      // side wins — the bell's isSeen compares `at` against the seen stamp as a
+      // string, so the shape must stay stable.
       const [ey, em, ed] = t.end_date.split('-').map(Number)
-      const enteredWindowAt = new Date(Date.UTC(ey, (em || 1) - 1, ed - 14)).toISOString()
+      const windowStartMs = Date.UTC(ey, (em || 1) - 1, ed - 14)
+      const updatedAtMs = t.updated_at ? new Date(t.updated_at).getTime() : NaN
+      const enteredWindowAt = new Date(
+        Number.isNaN(updatedAtMs) ? windowStartMs : Math.max(windowStartMs, updatedAtMs),
+      ).toISOString()
       items.push({
-        id: `training-ending-${t.id}`,
+        // Episode key. A dismissal is permanent for its key, so the key carries the
+        // literal 'YYYY-MM-DD' end_date: extending a training changes end_date and
+        // ends the ending-soon episode, so the extended training gets a new key and
+        // warns again when it nears its own end. A fixed `training-ending-<id>` key
+        // would silence every future extension of the same training.
+        id: `training-ending-${t.id}-${t.end_date}`,
         kind: 'training_ending',
         text: `Your training ends on ${formatDateOnly(t.end_date)}`,
         href: '/student/account',

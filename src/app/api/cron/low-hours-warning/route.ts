@@ -74,6 +74,10 @@ export async function GET(request: Request) {
       })
 
       // Mark warning as sent so we don't email them again for this training
+      //
+      // Deliberately does NOT stamp updated_at: this is a notification
+      // bookkeeping flag, not a student-visible change. Stamping it would
+      // re-badge the student What's New feed. Do not "fix".
       await supabase
         .from('trainings')
         .update({ low_hours_warning_sent: true })

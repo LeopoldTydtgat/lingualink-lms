@@ -139,7 +139,7 @@ export default function MaterialFileViewer({
               ) : (
                 // PdfViewer replaces the native <iframe>: it renders the PDF through
                 // the same proxy with its own toolbar and carries NO download/print.
-                <PdfViewer fileUrl={fileUrl} />
+                <PdfViewer fileUrl={fileUrl} readOnly />
               )
             ) : isImage ? (
               <img

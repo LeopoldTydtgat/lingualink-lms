@@ -24,14 +24,24 @@ import { fetchStudentWhatsNew } from '@/lib/studentWhatsNew'
 // FAILURE MODEL: supabase-js RESOLVES with { error } on a PostgREST failure — it
 // does not throw. Every write below binds and checks that error, logs it, and
 // throws, so a denied or failed write surfaces to the caller instead of reading
-// as success.
+// as success. A missing session THROWS for the same reason: an expired session
+// writes nothing, and returning early would report that as success — the bell
+// would flag "All caught up" over a feed it never drained. So does a students-row
+// lookup that fails or returns no row. The sole caller (StudentNotificationsBell)
+// reverts its optimistic hide on that throw.
+//
+// The empty-itemKey guard is deliberately NOT a throw: invalid input is a no-op,
+// not a session failure, and there is nothing for the caller to revert.
 
 export async function dismissStudentWhatsNewItem(itemKey: string): Promise<void> {
   if (typeof itemKey !== 'string' || itemKey.length === 0) return
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) {
+    console.error('[dismissStudentWhatsNewItem] no session (auth.getUser returned no user) — dismissal not written')
+    throw new Error('WHATS_NEW_DISMISS_FAILED')
+  }
 
   const { error } = await supabase
     .from('student_whats_new_dismissals')
@@ -57,16 +67,32 @@ export async function dismissStudentWhatsNewItem(itemKey: string): Promise<void>
 export async function clearAllStudentWhatsNew(): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) {
+    console.error('[clearAllStudentWhatsNew] no session (auth.getUser returned no user) — feed not drained')
+    throw new Error('WHATS_NEW_CLEAR_FAILED')
+  }
 
   // Resolve the students table PK from the auth uid — the feed queries scope on
   // students.id while the dismissal rows key on auth.uid() (identity rule above).
-  const { data: student } = await supabase
+  // The query error is bound and checked SEPARATELY from a null row: a transient
+  // PostgREST/RLS failure and a genuinely missing students row are different
+  // causes, so they get different log lines even though both abort the drain with
+  // the same thrown constant. Conflating them would hide a broken query behind a
+  // "no such student" reading.
+  const { data: student, error: studentError } = await supabase
     .from('students')
     .select('id')
     .eq('auth_user_id', user.id)
     .maybeSingle()
-  if (!student) return
+
+  if (studentError) {
+    console.error('[clearAllStudentWhatsNew] students lookup failed (query error, not a missing row) — feed not drained:', studentError)
+    throw new Error('WHATS_NEW_CLEAR_FAILED')
+  }
+  if (!student) {
+    console.error('[clearAllStudentWhatsNew] no students row for this auth uid (lookup succeeded, zero rows) — feed not drained')
+    throw new Error('WHATS_NEW_CLEAR_FAILED')
+  }
 
   let drained = false
 

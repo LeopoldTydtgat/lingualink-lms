@@ -234,6 +234,14 @@ export async function PATCH(
       const trainingUpdate: Record<string, unknown> = {}
       if (package_name !== undefined) trainingUpdate.package_name = package_name
       if (end_date !== undefined) trainingUpdate.end_date = end_date
+      // updated_at MUST be stamped on every trainings mutation. The student
+      // What's New feed clamps the training-ending item's `at` to
+      // max(window start, trainings.updated_at) (src/lib/studentWhatsNew.ts:
+      // 249-254), so an end_date set here with the date already inside the
+      // 14-day window would otherwise arrive backdated and be born seen —
+      // silently never badging. A UTC instant for a timestamptz column, not
+      // local date construction, so toISOString() is correct here.
+      trainingUpdate.updated_at = new Date().toISOString()
 
       const { error: trainingError } = await adminClient
         .from('trainings')

@@ -1,9 +1,12 @@
 // src/components/layout/whatsNewUi.tsx
 'use client'
 
-// Shared What's New presentation, reused by the dashboard right panel and the
-// top-header notifications bell so both render identical rows. Leaf module: both
-// consumers import from here (clean import direction), no logic lives elsewhere.
+// Shared What's New presentation, reused by the teacher dashboard right panel and
+// the student notifications bell so both render identical rows. (The teacher
+// top-header bell was removed — the right-panel card inherited its job — so the
+// `seen` styling below is now exercised only by the student bell.) Leaf module:
+// every consumer imports from here (clean import direction), no logic lives
+// elsewhere.
 
 import { useState } from 'react'
 import { X } from 'lucide-react'

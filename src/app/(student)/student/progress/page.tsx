@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import ProgressClient from './ProgressClient'
 
@@ -49,29 +50,60 @@ export default async function ProgressPage() {
     .in('status', ['completed', 'student_no_show'])
     .order('scheduled_at', { ascending: false })
 
-  // Get the most recent report that has level_data (for the radar chart)
-  // We join through lessons to find reports for this student
+  // Ownership gate for the report read below. Deliberately every lesson of this
+  // student regardless of status, matching the previous lessons!inner(student_id)
+  // filter: a report can exist on any past lesson, not just the hours-consuming
+  // ones fetched above. This RLS-bound query returns ids only.
+  const { data: studentLessonIdRows } = await supabase
+    .from('lessons')
+    .select('id')
+    .eq('student_id', student.id)
+
+  const studentLessonIds = (studentLessonIdRows ?? []).map((l) => l.id as string)
+
+  // Get the most recent report that has level_data (for the radar chart).
+  // public.reports has RLS policies for teachers and admins only - there is no
+  // student SELECT policy, and that is deliberate: a student policy would expose
+  // the whole row including student_confirmed and impersonation_note (a fraud flag
+  // the teacher writes ABOUT the student), and column-level REVOKE cannot separate
+  // students from teachers because both share the `authenticated` role.
+  // So read the safe columns server-side through the service-role client, exactly
+  // as (dashboard)/account/page.tsx reads student_reviews. The .in() filter is
+  // restricted to lesson ids the RLS-bound query above already proved belong to
+  // this student - that filter IS the security boundary, because the admin client
+  // bypasses RLS. Never widen this select list.
   // Only submitted reports (non-null completed_at) drive the level display -
   // a report reopened by admin for correction is excluded until re-filed, and
   // this also prevents Postgres NULLS-FIRST DESC ordering from promoting a
   // reopened report to the top.
-  const { data: reportsWithLevel } = await supabase
-    .from('reports')
-    .select(`
-      id,
-      level_data,
-      completed_at,
-      lessons!inner(student_id)
-    `)
-    .eq('lessons.student_id', student.id)
-    .not('level_data', 'is', null)
-    .not('completed_at', 'is', null)
-    .order('completed_at', { ascending: false })
-    .limit(1)
+  let latestLevelReport: {
+    level_data: Record<string, string> | null
+    completed_at: string | null
+  } | null = null
 
-  const latestLevelReport = reportsWithLevel && reportsWithLevel.length > 0
-    ? reportsWithLevel[0]
-    : null
+  if (studentLessonIds.length > 0) {
+    const admin = createAdminClient()
+    const { data: reportsWithLevel, error: reportsError } = await admin
+      .from('reports')
+      .select('level_data, completed_at')
+      .in('lesson_id', studentLessonIds)
+      .not('level_data', 'is', null)
+      .not('completed_at', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+
+    if (reportsError) {
+      // Fail soft: the page still renders, the radar chart just shows its
+      // "no assessment yet" state instead of 500-ing the whole progress view.
+      console.error('[student/progress] reports fetch failed:', reportsError)
+    } else if (reportsWithLevel && reportsWithLevel.length > 0) {
+      const row = reportsWithLevel[0]
+      latestLevelReport = {
+        level_data: (row.level_data ?? null) as Record<string, string> | null,
+        completed_at: (row.completed_at ?? null) as string | null,
+      }
+    }
+  }
 
   // Assignments with sheet activity/attempt state so Progress counts match the
   // layout's visible-assignment rule (NEW345 bimodal completion, single-sourced).

@@ -37,7 +37,7 @@ export async function loadStudySheetDetail(id: string) {
 
   const { data: sheet } = await supabase
     .from('study_sheets')
-    .select('id, title, category, level, difficulty, content, attachments, owner_id, is_active')
+    .select('id, title, category, level, difficulty, content, attachments, owner_id, is_active, audience')
     .eq('id', id)
     .eq('is_active', true)
     .maybeSingle()

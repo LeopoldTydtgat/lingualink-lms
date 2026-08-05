@@ -196,8 +196,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   const [feedbackText, setFeedbackText] = useState(report.feedback_text ?? '')
   const [additionalDetails, setAdditionalDetails] = useState(report.additional_details ?? '')
   const [levelData, setLevelData] = useState<Record<string, string>>(report.level_data ?? {})
+  // Fail-safe direction: the attestation must be actively given, never fabricated by
+  // a default; also preserves a saved false on reopened reports.
   const [studentConfirmed, setStudentConfirmed] = useState<boolean>(
-    report.student_confirmed ?? true
+    report.student_confirmed ?? false
   )
   const [impersonationNote, setImpersonationNote] = useState<string>(
     report.impersonation_note ?? ''
@@ -234,7 +236,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
     }
     // If teacher unchecked the confirmation, require a note
     if (didClassHappen && !studentConfirmed && !impersonationNote.trim()) {
-      setError('Please provide a note about who attended the class.')
+      setError('Please confirm the student attended the class, or provide a note about who did.')
       return
     }
     if (didClassHappen && feedbackText.trim().length < 150) {
