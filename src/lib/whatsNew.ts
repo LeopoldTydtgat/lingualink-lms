@@ -10,6 +10,12 @@
 // id) are filtered out BEFORE the cap, so dismissing one item surfaces the next
 // older one rather than leaving a gap.
 //
+// Dismissal is PERMANENT per key, so state items whose condition can resolve and
+// later re-trigger carry an episode component in their id (invoice month, hours
+// balance, end date). A key that never changes would suppress the warning for
+// good; see the id comments on the invoice-reminder, hours-low and
+// training-ending items below.
+//
 // Date rules (root CLAUDE.md): booked-class time is formatted in the teacher's
 // account timezone via utcInstantToTzParts — never toISOString for local dates,
 // never toLocaleTimeString. Date-only columns (end_date, billing_month) are
@@ -351,7 +357,17 @@ export async function fetchWhatsNew(
     const remaining = Number(t.total_hours) - Number(t.hours_consumed)
     if (remaining < 2) {
       items.push({
-        id: `hours-low-${t.id}`,
+        // Episode key. A dismissal is permanent for its key, so the key must change
+        // whenever the condition can resolve and re-trigger — otherwise one dismiss
+        // (or Clear all) buries this warning for good. total_hours changes on a
+        // top-up / package edit, which is exactly what ends a low-hours episode, so
+        // a later re-drop under 2h produces a new key and surfaces again. The raw
+        // Supabase value is interpolated as-is (no Number()): the key only needs to
+        // be stable and to change on top-up, not to be arithmetic. Accepted edge: a
+        // cancellation refund that lifts hours back over 2 without touching
+        // total_hours, followed by a re-drop, keeps the same key and stays
+        // suppressed — no episode boundary for that path exists in the data.
+        id: `hours-low-${t.id}-${t.total_hours}`,
         kind: 'hours_low',
         // Stable `at` = when the training row last changed (the hours mutation that
         // dropped it under 2h), so a seen-stamp covers it. Falls back to nowIso.
@@ -369,7 +385,12 @@ export async function fetchWhatsNew(
       const [ey, em, ed] = t.end_date.split('-').map(Number)
       const enteredWindowAt = new Date(Date.UTC(ey, (em || 1) - 1, ed - 14)).toISOString()
       items.push({
-        id: `training-ending-${t.id}`,
+        // Episode key. A dismissal is permanent for its key, so the key carries the
+        // literal 'YYYY-MM-DD' end_date: extending a training changes end_date and
+        // ends the ending-soon episode, so the extended training gets a new key and
+        // warns again when it nears its own end. A fixed `training-ending-<id>` key
+        // would silence every future extension of the same training.
+        id: `training-ending-${t.id}-${t.end_date}`,
         kind: 'training_ending',
         text: `${nameOf(t.student_id)}'s training ends on ${formatDateOnly(t.end_date)}`,
         href: '/students',
