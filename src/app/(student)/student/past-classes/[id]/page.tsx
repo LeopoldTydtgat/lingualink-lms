@@ -1,8 +1,20 @@
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { redirect, notFound } from 'next/navigation';
 import PastClassDetailClient from './PastClassDetailClient';
 import { requireTz } from '@/lib/time/requireTz';
 import type { Annotation } from '@/components/pdf/PdfViewer';
+
+// Shape handed to PastClassDetailClient as `lesson.report`. Kept in sync with the
+// client's own Report interface - the select list below must cover exactly these
+// fields and nothing else.
+type StudentVisibleReport = {
+  id: string;
+  feedback_text: string | null;
+  did_class_happen: boolean | null;
+  level_data: Record<string, string> | null;
+  additional_details: string | null;
+};
 
 export default async function PastClassDetailPage({
   params,
@@ -28,7 +40,9 @@ export default async function PastClassDetailPage({
     redirect('/student/account?confirm_tz=1');
   }
 
-  // Fetch the lesson — confirm it belongs to this student
+  // Fetch the lesson — confirm it belongs to this student.
+  // This RLS-bound query is the ownership gate for the report read below; the
+  // report is NOT embedded here.
   const { data: lesson } = await supabase
     .from('lessons')
     .select(`
@@ -41,13 +55,6 @@ export default async function PastClassDetailPage({
         full_name,
         photo_url,
         bio
-      ),
-      reports (
-        id,
-        feedback_text,
-        did_class_happen,
-        level_data,
-        additional_details
       )
     `)
     .eq('id', id)
@@ -55,6 +62,39 @@ export default async function PastClassDetailPage({
     .maybeSingle();
 
   if (!lesson) notFound();
+
+  // public.reports has RLS policies for teachers and admins only - there is no
+  // student SELECT policy, and that is deliberate: a student policy would expose
+  // the whole row including student_confirmed and impersonation_note (a fraud flag
+  // the teacher writes ABOUT the student), and column-level REVOKE cannot separate
+  // students from teachers because both share the `authenticated` role.
+  // So read the safe columns server-side through the service-role client, exactly
+  // as (dashboard)/account/page.tsx reads student_reviews. Ownership was already
+  // established by the RLS-bound lesson query above, which returns a row only when
+  // this lesson is this student's - reaching this line IS the security boundary,
+  // because the admin client bypasses RLS. Never widen this select list.
+  // reports has a UNIQUE constraint on lesson_id, so maybeSingle() is exact.
+  const admin = createAdminClient();
+  const { data: reportRow, error: reportError } = await admin
+    .from('reports')
+    .select('id, feedback_text, did_class_happen, level_data, additional_details')
+    .eq('lesson_id', id)
+    .maybeSingle();
+
+  if (reportError) {
+    // Fail soft: the page still renders with the no-feedback placeholder.
+    console.error('[student/past-classes/[id]] report fetch failed:', reportError);
+  }
+
+  const report: StudentVisibleReport | null = reportRow
+    ? {
+        id: reportRow.id as string,
+        feedback_text: (reportRow.feedback_text ?? null) as string | null,
+        did_class_happen: (reportRow.did_class_happen ?? null) as boolean | null,
+        level_data: (reportRow.level_data ?? null) as Record<string, string> | null,
+        additional_details: (reportRow.additional_details ?? null) as string | null,
+      }
+    : null;
 
   // Fetch assignments for this lesson (study sheets the teacher assigned)
   const { data: assignments } = await supabase
@@ -94,7 +134,7 @@ export default async function PastClassDetailPage({
   const flatLesson = {
     ...lesson,
     teacher: Array.isArray(lesson.teacher) ? lesson.teacher[0] : lesson.teacher,
-    report: Array.isArray(lesson.reports) ? lesson.reports[0] : lesson.reports ?? null,
+    report,
   };
 
   const flatAssignments = (assignments ?? []).map((a) => ({

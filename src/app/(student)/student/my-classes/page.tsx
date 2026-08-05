@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
@@ -103,7 +104,8 @@ export default async function MyClassesPage() {
   )
 
   // Find the most recent completed lesson to pull its feedback
-  // This becomes the "About This Class" recap on the next class card
+  // This becomes the "About This Class" recap on the next class card.
+  // This RLS-bound query is the ownership gate for the report read below.
   const { data: lastLesson } = await supabase
     .from('lessons')
     .select('id')
@@ -113,15 +115,33 @@ export default async function MyClassesPage() {
     .limit(1)
     .maybeSingle()
 
+  // public.reports has RLS policies for teachers and admins only - there is no
+  // student SELECT policy, and that is deliberate: a student policy would expose
+  // the whole row including student_confirmed and impersonation_note (a fraud flag
+  // the teacher writes ABOUT the student), and column-level REVOKE cannot separate
+  // students from teachers because both share the `authenticated` role.
+  // So read the safe column server-side through the service-role client, exactly
+  // as (dashboard)/account/page.tsx reads student_reviews. The lesson_id filter is
+  // pinned to the lesson the RLS-bound query above already proved belongs to this
+  // student - that filter IS the security boundary, because the admin client
+  // bypasses RLS. Never widen this select list.
+  // reports has a UNIQUE constraint on lesson_id, so maybeSingle() is exact.
   let lastFeedback: string | null = null
   if (lastLesson) {
-    const { data: report } = await supabase
+    const admin = createAdminClient()
+    const { data: report, error: reportError } = await admin
       .from('reports')
       .select('feedback_text')
       .eq('lesson_id', lastLesson.id)
       .eq('did_class_happen', true)
       .maybeSingle()
-    lastFeedback = report?.feedback_text ?? null
+
+    if (reportError) {
+      // Fail soft: the card simply drops the "About This Class" recap.
+      console.error('[student/my-classes] report fetch failed:', reportError)
+    } else {
+      lastFeedback = (report?.feedback_text ?? null) as string | null
+    }
   }
 
   return (
