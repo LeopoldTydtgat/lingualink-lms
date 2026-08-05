@@ -280,11 +280,11 @@ export default function RightPanel({
   // beforehand because visibleWhatsNew is already filtered by it, so deleting them
   // restores exactly the pre-click state.
   //
-  // KNOWN GAP (pre-existing, in the action): clearAllWhatsNew RESOLVES rather than
-  // throws when its own auth.getUser() yields no user, so an expired session
-  // drains nothing yet still reaches the success path here — the card would show
-  // "All caught up" over an undrained feed. Closing it requires the server action
-  // to throw on a null user; deliberately not changed alongside the bell removal.
+  // An expired session is covered by that same catch: clearAllWhatsNew THROWS on a
+  // null auth.getUser() rather than resolving, so a session that drains nothing can
+  // no longer reach the success path here. The catch reverts the optimistic hide and
+  // clearedJustNow stays false, so the card can never read "All caught up" over an
+  // undrained feed.
   const handleClearAll = async () => {
     const keys = visibleWhatsNew.map((i) => i.id)
     if (keys.length === 0) return

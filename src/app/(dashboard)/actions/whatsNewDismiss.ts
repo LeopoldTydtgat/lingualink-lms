@@ -17,15 +17,23 @@ import { fetchWhatsNew } from '@/lib/whatsNew'
 // FAILURE MODEL: supabase-js RESOLVES with { error } on a PostgREST failure — it
 // does not throw. Every write below binds and checks that error, logs it, and
 // throws, so a denied or failed write surfaces to the caller instead of reading
-// as success. The sole caller (the RightPanel What's New card) reverts its
-// optimistic hide on that throw.
+// as success. A missing session THROWS for the same reason: an expired session
+// writes nothing, and returning early would report that as success — the card
+// would flag "All caught up" over a feed it never drained. The sole caller (the
+// RightPanel What's New card) reverts its optimistic hide on that throw.
+//
+// The empty-itemKey guard is deliberately NOT a throw: invalid input is a no-op,
+// not a session failure, and there is nothing for the caller to revert.
 
 export async function dismissWhatsNewItem(itemKey: string): Promise<void> {
   if (typeof itemKey !== 'string' || itemKey.length === 0) return
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) {
+    console.error('[dismissWhatsNewItem] no session (auth.getUser returned no user) — dismissal not written')
+    throw new Error('WHATS_NEW_DISMISS_FAILED')
+  }
 
   const { error } = await supabase
     .from('whats_new_dismissals')
@@ -50,7 +58,10 @@ export async function dismissWhatsNewItem(itemKey: string): Promise<void> {
 export async function clearAllWhatsNew(): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+  if (!user) {
+    console.error('[clearAllWhatsNew] no session (auth.getUser returned no user) — feed not drained')
+    throw new Error('WHATS_NEW_CLEAR_FAILED')
+  }
 
   let drained = false
 
