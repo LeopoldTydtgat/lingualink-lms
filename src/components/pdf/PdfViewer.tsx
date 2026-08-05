@@ -870,6 +870,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   // Always mirrors the latest annotations (kept in sync by an effect below) so
   // history snapshots read the true-current array, never a stale closure value.
   const annotationsRef = useRef<Annotation[]>([])
+  // Always mirrors the live `currentPage` (1-based; kept in sync by an effect
+  // below, same pattern as annotationsRef) so the paste handler can read the page
+  // the reader is LOOKING AT without taking currentPage as a dependency: it
+  // changes on every scroll, which would re-subscribe the key listener constantly.
+  const currentPageRef = useRef(1)
   // Latest initialAnnotations, mirrored so the document-load effect can seed
   // from the current prop WITHOUT taking initialAnnotations as a dependency
   // (which would re-run the whole load -- and wipe edits -- on every new array).
@@ -1521,10 +1526,17 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     return () => document.removeEventListener('keydown', onKey)
   }, [cursorSelect, selectedIds, editingId])
 
+  // Mirror the live page number into a ref for the paste handler below. Kept as a
+  // ref rather than a dependency on purpose -- see currentPageRef's declaration.
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
+
   // Ctrl/Cmd + C / V against the INTERNAL clipboard (clipboardRef) -- never the
   // system clipboard and no clipboard API, so nothing leaves the page. Copy deep-
   // copies the selection and changes nothing else: no state, no history. Paste
-  // mints fresh ids, offsets the copies by PASTE_OFFSET_PX and appends them in
+  // mints fresh ids, lands every copy on the page CURRENTLY BEING VIEWED (the
+  // PowerPoint slide-paste model -- see the paste branch) and appends them in
   // ONE setAnnotations behind ONE recordHistory, so a whole paste is a single
   // undo step, then selects the pasted set. Guards mirror the Delete listener
   // above: never in read-only, never while a text box is being edited, and never
@@ -1562,22 +1574,45 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       const clip = clipboardRef.current
       if (clip.length === 0) return
       e.preventDefault()
+      // Slide-paste model (PowerPoint): the copies land on the page the reader is
+      // LOOKING AT, not on the page each was copied from, so a multi-page
+      // selection collapses onto this one page.
+      const targetPage = currentPageRef.current - 1
+      // Re-page FIRST, then clamp: the limits -- and the px -> fraction
+      // conversion -- must both be computed against the TARGET page's rendered
+      // size, so a mark arriving from a differently sized page still cannot land
+      // outside 0..1. `sameSource` is captured here because the re-paged copy no
+      // longer remembers where it came from.
+      const retargeted: { mark: Annotation; sameSource: boolean }[] = clip.map((a) => {
+        const sameSource = a.pageIndex === targetPage
+        return { mark: sameSource ? a : { ...a, pageIndex: targetPage }, sameSource }
+      })
       // The +16px offset runs through the SAME union-delta clamp as a drag, so a
-      // paste can never land outside the page; each mark keeps its own pageIndex
-      // and is converted against that page's rendered size.
-      const limits = moveLimits(clip, pageRects)
+      // paste can never land outside the page.
+      const limits = moveLimits(
+        retargeted.map((r) => r.mark),
+        pageRects,
+      )
       const dx = clampRange(PASTE_OFFSET_PX, limits.dxLo, limits.dxHi)
       const dy = clampRange(PASTE_OFFSET_PX, limits.dyLo, limits.dyHi)
-      const pasted = clip.map((a) => {
-        const p = limits.pages.get(a.pageIndex)
-        return translateAnnotation(a, p ? dx / p.w : 0, p ? dy / p.h : 0, nextId())
+      // Undefined when the target page has no measured rect: the marks then paste
+      // with a zero offset rather than not at all.
+      const targetRect = limits.pages.get(targetPage)
+      const pasted = retargeted.map(({ mark, sameSource }) => {
+        // A mark copied FROM the viewed page keeps the historical +16px stagger
+        // (cumulative, because each paste re-seeds the clipboard with what it
+        // placed); one arriving from another page lands at its identical stored
+        // fraction, so a collapsed group keeps its relative layout.
+        const p = sameSource ? targetRect : undefined
+        return translateAnnotation(mark, p ? dx / p.w : 0, p ? dy / p.h : 0, nextId())
       })
       recordHistory()
       setAnnotations((anns) => [...anns, ...pasted])
       setSelectedIds(pasted.map((a) => a.id))
-      // Re-seed the clipboard with what was just placed so the NEXT paste offsets
-      // from HERE and repeated pastes stack visibly. Annotations are never mutated
-      // in place, so sharing these objects with the annotations array is safe.
+      // Re-seed the clipboard with what was just placed -- it now carries the
+      // TARGET pageIndex, so a repeat paste on this page counts as same-source and
+      // stacks visibly. Annotations are never mutated in place, so sharing these
+      // objects with the annotations array is safe.
       clipboardRef.current = pasted
     }
     document.addEventListener('keydown', onKey)
