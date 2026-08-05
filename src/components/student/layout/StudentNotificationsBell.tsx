@@ -50,15 +50,25 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
     setMounted(true)
   }, [])
 
-  // Persist the seen stamp when the dropdown OPENS (server-side), but only advance
-  // the LOCAL stamp when it CLOSES — so rows keep their unseen styling while being
-  // read, and the badge clears once the user is done. Skips the initial mount (no
-  // open→close transition), so nothing is marked seen until the user actually opens.
+  // BOTH seen stamps are taken on the OPEN transition — the server one
+  // (markStudentWhatsNewSeen) and the local one — so they anchor on the same
+  // moment. Advancing the LOCAL stamp on CLOSE instead marked every item that
+  // ARRIVED while the popover was open as already seen, and the badge is hidden
+  // while open (the `!open` guard on the badge below), so such an item was never
+  // badged at all: it was born seen and silently vanished. Anchoring on open
+  // leaves it with at > stamp, so it badges as soon as the dropdown closes.
+  // Accepted trade: rows now take their dimmed "seen" styling when the dropdown
+  // opens rather than after it closes. Skips the initial mount (no false open
+  // transition), so nothing is marked seen until the user actually opens it.
+  //
+  // clearedJustNow still resets on CLOSE — it is scoped to "since the last
+  // successful Clear all until the dropdown next closes" and is independent of
+  // seen state, so it deliberately stays in the close branch.
   useEffect(() => {
     if (open && !prevOpen.current) {
       markStudentWhatsNewSeen().catch(() => {})
-    } else if (!open && prevOpen.current) {
       setLocalSeenAt(new Date().toISOString())
+    } else if (!open && prevOpen.current) {
       setClearedJustNow(false)
     }
     prevOpen.current = open
@@ -105,7 +115,7 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   }, [router, studentId])
 
   // Effective marker = the later of the server-provided stamp and the local
-  // close-of-dropdown stamp. The server action refreshes the route, so seenAt
+  // open-of-dropdown stamp. The server action refreshes the route, so seenAt
   // advances on its own; useState would otherwise pin us to the mount-time value.
   const effectiveSeenAt =
     localSeenAt != null && (seenAt == null || localSeenAt > seenAt) ? localSeenAt : seenAt
