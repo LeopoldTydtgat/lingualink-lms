@@ -1,0 +1,10 @@
+﻿-- 20260805090000_s476_rpc_updated_at_stamps.sql
+-- S476: add updated_at = now() to the trainings UPDATE in the four hours-
+-- mutating RPCs that were missing it: book_class_atomic, refund_hours_atomic,
+-- reschedule_class_atomic, unwind_reschedule_atomic. The student What's New
+-- feed keys hours-low / training-ending seen-tracking on trainings.updated_at;
+-- a mutation that skips the stamp makes a newly-true warning arrive pre-seen
+-- (born-seen defect). Applied live via SQL Editor 5 Aug 2026 using
+-- CREATE OR REPLACE (grants preserved, no re-REVOKE needed).
+-- Full definitions live in the SQL Editor history for 5 Aug 2026; each change
+-- is one added line in the trainings UPDATE of each function.
