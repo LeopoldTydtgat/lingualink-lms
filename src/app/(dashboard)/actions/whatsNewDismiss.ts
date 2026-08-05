@@ -3,12 +3,12 @@
 import { createClient } from '@/lib/supabase/server'
 import { fetchWhatsNew } from '@/lib/whatsNew'
 
-// Per-item dismissal of the teacher What's New feed. Mirrors the auth structure
-// of actions/whatsNewSeen.ts (session client establishes identity) EXCEPT the
-// write goes through the regular RLS-scoped server client, not the admin client:
-// public.whats_new_dismissals has normal grants and an RLS policy that lets a
-// teacher select/insert only their own rows (teacher_id = auth.uid()), so RLS —
-// not the service role — enforces ownership.
+// Per-item dismissal of the teacher What's New feed. Identity is established from
+// the RLS-scoped session client, and the write goes through that SAME client
+// rather than the service-role admin client: public.whats_new_dismissals has
+// normal grants and an RLS policy that lets a teacher select/insert only their
+// own rows (teacher_id = auth.uid()), so RLS — not the service role — enforces
+// ownership.
 //
 // item_key == WhatsNewItem.id (the synthetic feed key, e.g. `booked-<uuid>`).
 // Upserts are idempotent: the UNIQUE(teacher_id, item_key) constraint plus
@@ -17,7 +17,8 @@ import { fetchWhatsNew } from '@/lib/whatsNew'
 // FAILURE MODEL: supabase-js RESOLVES with { error } on a PostgREST failure — it
 // does not throw. Every write below binds and checks that error, logs it, and
 // throws, so a denied or failed write surfaces to the caller instead of reading
-// as success.
+// as success. The sole caller (the RightPanel What's New card) reverts its
+// optimistic hide on that throw.
 
 export async function dismissWhatsNewItem(itemKey: string): Promise<void> {
   if (typeof itemKey !== 'string' || itemKey.length === 0) return
@@ -39,13 +40,13 @@ export async function dismissWhatsNewItem(itemKey: string): Promise<void> {
   }
 }
 
-// Clear the ENTIRE feed, not just the visible page. The client never supplies
-// keys — this recomputes the feed server-side and dismisses everything it finds.
-// fetchWhatsNew caps at 6 and filters already-dismissed keys, so each pass returns
-// the next undismissed page; dismissing every returned id and re-fetching drains
-// the feed page by page. The 10-iteration cap is a pure loop guard: a failed write
-// now throws on the spot, and exhausting the cap without an empty fetch means the
-// feed did not drain — that also throws rather than reporting a false success.
+// Clear the ENTIRE feed, not just the rows currently on screen. The client never
+// supplies keys — this recomputes the feed server-side and dismisses everything it
+// finds. fetchWhatsNew caps at 6 and filters already-dismissed keys, so each pass
+// returns the next undismissed page; dismissing every returned id and re-fetching
+// drains the feed page by page. The 10-iteration cap is a pure loop guard: a failed
+// write now throws on the spot, and exhausting the cap without an empty fetch means
+// the feed did not drain — that also throws rather than reporting a false success.
 export async function clearAllWhatsNew(): Promise<void> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

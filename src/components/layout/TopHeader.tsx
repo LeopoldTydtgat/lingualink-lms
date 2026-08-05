@@ -2,19 +2,15 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { UserCircle, CalendarDays, ChevronDown, MessageSquare } from 'lucide-react'
-import NotificationsBell from './NotificationsBell'
 import HeaderShortcut from './HeaderShortcut'
-import type { WhatsNewItem } from '@/lib/whatsNew'
 
 type TopHeaderProps = {
   teacherName: string
   teacherPhotoUrl: string | null
-  whatsNewItems: WhatsNewItem[]
-  whatsNewSeenAt: string | null
   unreadMessageCount: number
 }
 
-export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems, whatsNewSeenAt, unreadMessageCount }: TopHeaderProps) {
+export default function TopHeader({ teacherName, teacherPhotoUrl, unreadMessageCount }: TopHeaderProps) {
   return (
     <header
       style={{
@@ -27,8 +23,8 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems,
         padding: '0 24px',
         flexShrink: 0,
         // Header must stack above all page-content sticky elements (page stickies
-        // stay <= 20); dropdowns inside the header (e.g. NotificationsBell) rely
-        // on this to paint above the Schedule page's sticky toolbar (zIndex: 20).
+        // stay <= 20) so it paints above the Schedule page's sticky toolbar
+        // (zIndex: 20).
         zIndex: 40,
       }}
     >
@@ -47,9 +43,6 @@ export default function TopHeader({ teacherName, teacherPhotoUrl, whatsNewItems,
             </span>
           )}
         </HeaderShortcut>
-
-        {/* Notifications bell — client island */}
-        <NotificationsBell items={whatsNewItems} seenAt={whatsNewSeenAt} />
 
         {/* Vertical divider */}
         <div style={{ width: '1px', height: '24px', backgroundColor: '#E0DFDC' }} />

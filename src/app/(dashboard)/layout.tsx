@@ -30,9 +30,13 @@ export default async function DashboardLayout({
   // A query error and a genuinely missing row are different failures: the first is
   // transient and must surface, the second is a real "no profile" state. Discarding
   // the error made both look like null and bounced the user to /login.
+  //
+  // whats_new_seen_at is deliberately NOT selected: the notifications bell owned the
+  // only seen/unseen split and it is gone — the What's New card renders one flat
+  // list, so nothing in this layout reads the stamp any more.
   const { data: profile, error: profileError } = await admin
     .from('profiles')
-    .select('id, full_name, email, photo_url, role, timezone, whats_new_seen_at, account_types, status')
+    .select('id, full_name, email, photo_url, role, timezone, account_types, status')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -196,7 +200,7 @@ export default async function DashboardLayout({
   const billingData = { currentAmount, projectedAmount }
 
   // What's New feed — teacher-scoped, uses the same anon server client the
-  // students/lessons lookups above use.
+  // students/lessons lookups above use. Sole consumer is the RightPanel card.
   const whatsNewItems = await fetchWhatsNew(supabase, profile.id)
 
   // ── Availability ring: weekly offered hours vs the admin minimum target ────
@@ -278,8 +282,6 @@ export default async function DashboardLayout({
           <TopHeader
             teacherName={profile?.full_name ?? 'Teacher'}
             teacherPhotoUrl={profile?.photo_url ?? null}
-            whatsNewItems={whatsNewItems}
-            whatsNewSeenAt={profile.whats_new_seen_at ?? null}
             unreadMessageCount={unreadCount ?? 0}
           />
           <div className="flex flex-1 overflow-hidden">
@@ -302,7 +304,6 @@ export default async function DashboardLayout({
               offeredMinutes={offeredMinutes}
               minAvailableHours={minAvailableHours}
               whatsNewItems={whatsNewItems}
-              whatsNewSeenAt={profile.whats_new_seen_at ?? null}
               showStaffTools={showStaffTools}
             />
           </div>
