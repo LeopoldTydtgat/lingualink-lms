@@ -67,6 +67,20 @@ type Assignment = {
   }
 }
 
+// One live teaching-material homework grant. Deliberately NOT an Assignment:
+// a material grant carries no completion state and no sheet metadata (the sheet
+// is audience='staff'), only a page range and whether the student has drawn on it
+// yet. `hasWork` is derived server-side so the student's annotation layer itself
+// never reaches this bundle.
+type MaterialHomework = {
+  id: string
+  title: string
+  page_start: number | null
+  page_end: number | null
+  assigned_at: string
+  hasWork: boolean
+}
+
 type Props = {
   training: Training
   upcomingLessons: Lesson[]
@@ -79,6 +93,10 @@ type Props = {
   currentUserId: string
   assignments: Assignment[]
   assignedTeacherNames: string[]
+  materialAssignments: MaterialHomework[]
+  // The homework query failed upstream. Distinct from an empty list: the section
+  // shows an error note rather than silently reading as "no homework".
+  materialLoadFailed: boolean
 }
 
 const TABS = ['General Info', 'Next Classes', 'Past Classes', 'Messages']
@@ -96,6 +114,18 @@ function pastLessonCategory(
   if (report && report.did_class_happen) return 'Class taken'
   if (report && !report.did_class_happen) return 'Absent'
   return 'No report'
+}
+
+// Page-range label for a material homework grant. page_start / page_end are
+// 1-based and inclusive; both null means the whole document. A half-null range is
+// forbidden by the table's CHECK constraint but is labelled defensively rather
+// than rendering an empty badge. Mirrors the student portal's own label helper.
+function pageRangeLabel(pageStart: number | null, pageEnd: number | null): string {
+  if (pageStart === null && pageEnd === null) return 'Whole document'
+  if (pageStart !== null && pageEnd !== null) {
+    return pageStart === pageEnd ? `Page ${pageStart}` : `Pages ${pageStart}-${pageEnd}`
+  }
+  return `Page ${pageStart ?? pageEnd}`
 }
 
 // Label for a NON-cancelled lesson status. Cancelled-family rows are handled
@@ -122,6 +152,8 @@ export default function StudentDetailClient({
   viewerTz,
   assignments,
   assignedTeacherNames,
+  materialAssignments,
+  materialLoadFailed,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState('General Info')
@@ -389,6 +421,76 @@ export default function StudentDetailClient({
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* -- Homework (teaching-material grants, view-only) -- */}
+        {/* Rendered when there is something to say: live grants, or a failed
+            lookup. An empty list stays silent, exactly like the block above. */}
+        {(materialLoadFailed || materialAssignments.length > 0) && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+              <h3 className="text-base font-semibold text-gray-900">
+                Homework
+                {!materialLoadFailed && (
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{materialAssignments.length}</span>
+                )}
+              </h3>
+            </div>
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
+              {materialLoadFailed ? (
+                <p className="px-4 py-3 text-sm" style={{ color: '#FD5602' }}>
+                  Could not load this student&apos;s homework. Please refresh the page.
+                </p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50">
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Material</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Pages</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Date Assigned</th>
+                      <th className="text-left px-4 py-3 font-medium text-gray-500">Student Work</th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materialAssignments.map(m => (
+                      <tr key={m.id} className="border-b border-gray-50 last:border-0">
+                        <td className="px-4 py-3 font-medium text-gray-900">{m.title}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: '#FFF0E0', color: '#FF8303' }}>
+                            {pageRangeLabel(m.page_start, m.page_end)}
+                          </span>
+                        </td>
+                        {/* assigned_at is a timestamptz INSTANT — formatInstantDate projects it
+                            into the viewer's own zone. Never formatDate, which is UTC-pinned
+                            for the DATE columns on trainings. */}
+                        <td className="px-4 py-3 text-gray-500">{formatInstantDate(m.assigned_at, viewerTz)}</td>
+                        <td className="px-4 py-3">
+                          {/* State colours as inline styles — Tailwind v4 never applies a
+                              dynamically constructed colour class. */}
+                          <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: m.hasWork ? '#FF8303' : '#9ca3af' }}>
+                            <span style={{ width: '7px', height: '7px', borderRadius: '9999px', backgroundColor: m.hasWork ? '#FF8303' : '#9ca3af', flexShrink: 0 }} />
+                            {m.hasWork ? 'Has work' : 'Untouched'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Link
+                            href={`/students/${training.id}/homework/${m.id}`}
+                            prefetch={false}
+                            className="text-xs font-semibold"
+                            style={{ color: '#FF8303' }}
+                          >
+                            View
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         )}
