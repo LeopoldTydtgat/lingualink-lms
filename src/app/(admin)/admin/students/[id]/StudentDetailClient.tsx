@@ -9,6 +9,7 @@ import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
 import { DatePartInput } from '../../_components/DatePartInput'
+import AssignMaterialHomeworkModal from './AssignMaterialHomeworkModal'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -40,6 +41,33 @@ export type Assignment = {
     category: string | null
     level: string | null
   }
+}
+
+/**
+ * One teaching-material homework grant (a material_assignments row), live OR
+ * revoked. Revoke is semantic — revoked_at is stamped and the row is kept as the
+ * audit trail of what was handed out — so both states render here.
+ *
+ * `sheet_title` is null when the sheet title could not be read; the granted
+ * filename on the row is the fallback and is always present.
+ */
+export type MaterialHomework = {
+  id: string
+  sheet_title: string | null
+  attachment_name: string
+  page_start: number | null
+  page_end: number | null
+  assigned_at: string
+  revoked_at: string | null
+}
+
+export type MaterialAttachment = { name: string; type: string }
+
+/** One assignable teaching material: active, audience='staff'. */
+export type MaterialSheetOption = {
+  id: string
+  title: string
+  attachments: MaterialAttachment[]
 }
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -137,6 +165,21 @@ type Props = {
    */
   purgePreflightFailed: boolean
   assignments: Assignment[]
+  /** Teaching-material homework grants for this student, live AND revoked, newest first. */
+  materialHomework: MaterialHomework[]
+  /**
+   * True when the material_assignments read failed. An empty list is
+   * indistinguishable from a failed read, so the section shows the reason
+   * instead of claiming this student has no homework.
+   */
+  materialHomeworkLoadFailed: boolean
+  /** Assignable teaching material (active, audience='staff') for the assign modal. */
+  materialSheets: MaterialSheetOption[]
+  /**
+   * True when the teaching-material list failed to load. Same hazard as above:
+   * an empty picker would otherwise read as "there is none".
+   */
+  materialSheetsLoadFailed: boolean
   /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
   isStaffView?: boolean
   /** IANA zone of the viewing admin/staff account. Every rendered instant is projected through it. */
@@ -473,6 +516,10 @@ export default function StudentDetailClient({
   purgeBlockedBy,
   purgePreflightFailed,
   assignments: initialAssignments,
+  materialHomework,
+  materialHomeworkLoadFailed,
+  materialSheets,
+  materialSheetsLoadFailed,
   isStaffView = false,
   adminTz,
 }: Props) {
@@ -521,6 +568,21 @@ export default function StudentDetailClient({
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
+
+  // Teaching-material homework state
+  const [localMaterial, setLocalMaterial] = useState<MaterialHomework[]>(materialHomework)
+  const [confirmMaterialRevokeId, setConfirmMaterialRevokeId] = useState<string | null>(null)
+  const [revokingMaterialId, setRevokingMaterialId] = useState<string | null>(null)
+  const [materialRevokeError, setMaterialRevokeError] = useState<string | null>(null)
+  const [showAssignMaterial, setShowAssignMaterial] = useState(false)
+
+  // Both mutations in this section (assign, revoke) re-run the server component
+  // via router.refresh() rather than guessing the new row state locally. The
+  // seeded copy above would otherwise keep showing the pre-refresh list, so it
+  // follows the incoming prop.
+  useEffect(() => {
+    setLocalMaterial(materialHomework)
+  }, [materialHomework])
 
   const id = student.id as string
   const fullName = (student.full_name as string | null) || (student.email as string | null) || 'this account'
@@ -764,6 +826,35 @@ export default function StudentDetailClient({
       setRevokeError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
       setRevokingId(null)
+    }
+  }
+
+  async function handleMaterialRevoke(assignmentId: string) {
+    setRevokingMaterialId(assignmentId)
+    setMaterialRevokeError(null)
+    try {
+      // The teacher revoke route is reused deliberately, and is not a teacher-only
+      // endpoint: its gate is a USER-SCOPED select of the row, which the
+      // "Admins read all material assignments" (is_admin()) SELECT policy passes.
+      // The revoke write itself already runs on the service-role client behind
+      // that gate, so an admin revoke needs no separate endpoint. It is a
+      // SEMANTIC revoke — revoked_at is stamped and the row (with the student's
+      // annotation layer) is kept.
+      const res = await fetch(`/api/teacher/material-assignments/${assignmentId}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to revoke this homework task.')
+      }
+      setConfirmMaterialRevokeId(null)
+      // Re-read rather than stamping a revoked_at here: the row's real state
+      // comes back from the database, never from a guess made in the browser.
+      router.refresh()
+    } catch (err: unknown) {
+      setMaterialRevokeError(err instanceof Error ? err.message : 'Something went wrong.')
+    } finally {
+      setRevokingMaterialId(null)
     }
   }
 
@@ -1609,6 +1700,150 @@ export default function StudentDetailClient({
               </tbody>
             </table>
           </div>
+
+          {/* ── Homework (Teaching Material) ── */}
+          <div className="flex items-center justify-between pt-4">
+            <h3 className="text-sm font-semibold text-gray-800">Homework (Teaching Material)</h3>
+            <button
+              onClick={() => { setMaterialRevokeError(null); setShowAssignMaterial(true) }}
+              disabled={materialSheets.length === 0}
+              title={
+                materialSheets.length > 0
+                  ? undefined
+                  : materialSheetsLoadFailed
+                    ? 'The teaching-material list could not be loaded, so nothing can be assigned right now.'
+                    : 'There is no active teaching material to assign.'
+              }
+              className="text-xs font-medium px-3 py-1.5 rounded-md"
+              style={
+                materialSheets.length === 0
+                  ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
+                  : { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }
+              }
+            >
+              Assign teaching material
+            </button>
+          </div>
+
+          {materialSheetsLoadFailed && (
+            <div className="px-4 py-3 rounded-lg text-sm"
+              style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+              The teaching-material list could not be loaded, so nothing can be assigned right now.
+              This does not mean there is none — refresh the page to try again.
+            </div>
+          )}
+
+          {materialRevokeError && (
+            <div className="px-4 py-3 rounded-lg text-sm"
+              style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+              {materialRevokeError}
+            </div>
+          )}
+
+          {materialHomeworkLoadFailed ? (
+            <div className="card-elevated px-4 py-8 text-center text-sm"
+              style={{ color: '#dc2626' }}>
+              The homework list could not be loaded. This is not an empty list — the grants are
+              still there. Refresh the page to try again.
+            </div>
+          ) : (
+            <div className="card-elevated overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Material</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Pages</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Date Assigned</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {localMaterial.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="text-center py-10 text-gray-400">
+                        No teaching material assigned yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    localMaterial.map((hw) => {
+                      const isConfirming = confirmMaterialRevokeId === hw.id
+                      const isRevoking = revokingMaterialId === hw.id
+                      const isLive = hw.revoked_at === null
+                      return (
+                        <tr key={hw.id} className="border-b border-gray-50">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-gray-900">
+                              {hw.sheet_title ?? hw.attachment_name}
+                            </p>
+                            {hw.sheet_title && (
+                              <p className="text-xs text-gray-400 mt-0.5">{hw.attachment_name}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                            >
+                              {hw.page_start === null || hw.page_end === null
+                                ? 'Whole document'
+                                : `Pages ${hw.page_start}-${hw.page_end}`}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">
+                            {new Date(hw.assigned_at).toLocaleDateString('en-GB', {
+                              day: '2-digit', month: 'short', year: 'numeric',
+                              timeZone: adminTz,
+                            })}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={
+                                isLive
+                                  ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                                  : { backgroundColor: '#f3f4f6', color: '#6b7280' }
+                              }
+                            >
+                              {isLive ? 'Live' : 'Revoked'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {!isLive ? null : isConfirming ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => setConfirmMaterialRevokeId(null)}
+                                  disabled={isRevoking}
+                                  className="text-xs px-3 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  onClick={() => handleMaterialRevoke(hw.id)}
+                                  disabled={isRevoking}
+                                  className="text-xs px-3 py-1 rounded text-white disabled:opacity-50"
+                                  style={{ backgroundColor: '#dc2626' }}
+                                >
+                                  {isRevoking ? 'Revoking…' : 'Confirm Revoke'}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setMaterialRevokeError(null); setConfirmMaterialRevokeId(hw.id) }}
+                                className="text-xs underline text-red-400 hover:text-red-600"
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -1817,6 +2052,18 @@ export default function StudentDetailClient({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ─── Assign teaching material ─────────────────────────────────────────── */}
+      {/* Mounted only while open, so nothing about it runs on a normal page load. */}
+      {showAssignMaterial && (
+        <AssignMaterialHomeworkModal
+          studentId={id}
+          studentName={fullName}
+          sheets={materialSheets}
+          onClose={() => setShowAssignMaterial(false)}
+          onAssigned={() => router.refresh()}
+        />
       )}
     </div>
   )

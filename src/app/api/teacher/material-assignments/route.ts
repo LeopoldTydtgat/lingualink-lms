@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import { PDFDocument } from 'pdf-lib'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -7,12 +6,7 @@ import { checkEmailDispatchLimit } from '@/lib/rateLimit'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentMaterialHomeworkAssignedEmailContent } from '@/lib/email/templates'
 import { MaterialAssignmentCreateSchema } from '@/lib/validation/schemas'
-
-const BUCKET = 'library-files'
-
-// Only the two fields this route reads. Teacher uploads store { name, type };
-// admin-library uploads may carry more. Nothing here consumes anything else.
-type Attachment = { name: string; type: string }
+import { runMaterialAssignPreflight } from '@/lib/materials/materialAssignPreflight'
 
 type StudentOption = { id: string; full_name: string }
 
@@ -209,117 +203,29 @@ export async function POST(request: Request) {
 
     // --- Read-only pre-flight validation (service role) ----------------------
     // None of this is authorisation - the INSERT's RLS policy is. This only
-    // stops a grant being written that the file route could never satisfy.
+    // stops a grant being written that the file route could never satisfy:
+    // sheet active + audience='staff', the attachment at this index exists and
+    // its name passes the file route's charset gate, it is a PDF, and (when both
+    // bounds are set) the page range fits the REAL document.
+    //
+    // Shared verbatim with POST /api/admin/material-assignments so the two
+    // assign paths cannot drift. The helper returns this route's exact statuses,
+    // bodies and error codes, and logs under this route's own prefix.
     const adminClient = createAdminClient()
 
-    const { data: sheet, error: sheetError } = await adminClient
-      .from('study_sheets')
-      .select('id, is_active, audience, attachments')
-      .eq('id', study_sheet_id)
-      .maybeSingle()
+    const preflight = await runMaterialAssignPreflight(
+      adminClient,
+      {
+        studySheetId: study_sheet_id,
+        attachmentIndex: attachment_index,
+        pageStart,
+        pageEnd,
+      },
+      '[teacher/material-assignments]'
+    )
 
-    if (sheetError) {
-      console.error('[teacher/material-assignments] study_sheets lookup failed:', sheetError)
-      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
-    }
-    // audience='staff' is what makes a sheet teaching material. A student
-    // worksheet (audience='student') is assigned through the assignments table
-    // by /api/teacher/library/assign, never as a page-scoped material grant.
-    if (!sheet || sheet.is_active !== true || sheet.audience !== 'staff') {
-      return NextResponse.json({ error: 'Teaching material not found.' }, { status: 404 })
-    }
-
-    const attachments: Attachment[] = Array.isArray(sheet.attachments) ? sheet.attachments : []
-
-    // Resolution is POSITIONAL here and name-first everywhere afterwards: the
-    // teacher picks a position in the CURRENT attachments array, and the name
-    // resolved from it is stored on the row so a later reorder/removal cannot
-    // shift the grant onto a different PDF (see
-    // /api/material-assignment-file/[assignmentId]). attachment_name is never
-    // taken from the request body.
-    const attachment = attachments[attachment_index]
-
-    // Same filename charset gate the file route applies before building the
-    // storage path - a name that fails it could never be served, so the grant
-    // must not be written.
-    if (
-      !attachment ||
-      typeof attachment.name !== 'string' ||
-      !/^[a-zA-Z0-9._-]+$/.test(attachment.name)
-    ) {
-      return NextResponse.json({ error: 'That file is not on this sheet.' }, { status: 404 })
-    }
-
-    // Same PDF gate as the file route (attachment.type === 'application/pdf').
-    // That route refuses anything else outright, so a non-PDF grant would be
-    // permanently unserveable.
-    if (attachment.type !== 'application/pdf') {
-      return NextResponse.json(
-        {
-          error: 'Only PDF files can be assigned as homework.',
-          code: 'ATTACHMENT_NOT_PDF',
-        },
-        { status: 422 }
-      )
-    }
-
-    // --- Page range vs the REAL document -------------------------------------
-    // Checked at assign time so a typo fails here, in front of the teacher,
-    // instead of 422-ing the student when they open the homework. Skipped for a
-    // whole-document grant (both null): there is no range to outrun, and the
-    // file route resolves the range against the live file on every request
-    // anyway.
-    if (pageStart !== null && pageEnd !== null) {
-      const storagePath = `${study_sheet_id}/${attachment.name}`
-      const { data: fileData, error: downloadError } = await adminClient.storage
-        .from(BUCKET)
-        .download(storagePath)
-
-      if (downloadError || !fileData) {
-        console.error(
-          `[teacher/material-assignments] storage download failed (sheet ${study_sheet_id}, file ${attachment.name}):`,
-          downloadError
-        )
-        return NextResponse.json(
-          {
-            error: 'This PDF could not be read, so a page range cannot be assigned for it.',
-            code: 'PDF_LOAD_FAILED',
-          },
-          { status: 422 }
-        )
-      }
-
-      let pageCount: number
-      try {
-        const sourcePdf = await PDFDocument.load(new Uint8Array(await fileData.arrayBuffer()))
-        pageCount = sourcePdf.getPageCount()
-      } catch (loadError) {
-        // Unreadable / encrypted source: the file route fails closed on the same
-        // load, so never write a grant against it.
-        console.error(
-          `[teacher/material-assignments] PDF load failed (sheet ${study_sheet_id}, file ${attachment.name}):`,
-          loadError
-        )
-        return NextResponse.json(
-          {
-            error: 'This PDF could not be read, so a page range cannot be assigned for it.',
-            code: 'PDF_LOAD_FAILED',
-          },
-          { status: 422 }
-        )
-      }
-
-      // pageEnd >= pageStart is already guaranteed by the schema, so bounding
-      // the end bounds the whole range.
-      if (pageCount < 1 || pageEnd > pageCount) {
-        return NextResponse.json(
-          {
-            error: `This file has ${pageCount} page${pageCount === 1 ? '' : 's'}, so pages ${pageStart}-${pageEnd} cannot be assigned.`,
-            code: 'PAGE_RANGE_UNSATISFIABLE',
-          },
-          { status: 422 }
-        )
-      }
+    if (!preflight.ok) {
+      return NextResponse.json(preflight.body, { status: preflight.status })
     }
 
     // --- THE GATE: the insert itself, on the USER-SCOPED client ---------------
@@ -334,7 +240,9 @@ export async function POST(request: Request) {
         student_id,
         study_sheet_id,
         attachment_index,
-        attachment_name: attachment.name,
+        // Resolved server-side from the index by the preflight, never taken from
+        // the request body.
+        attachment_name: preflight.attachmentName,
         page_start: pageStart,
         page_end: pageEnd,
         assigned_by: user.id,
