@@ -282,7 +282,7 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
           {materialAssignments.length > 0 && (
             <div className="mb-8">
               <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-                From Your Teacher&apos;s Material
+                Homework Tasks
               </h2>
               <div className="flex flex-col gap-3">
                 {materialAssignments.map((m) => (

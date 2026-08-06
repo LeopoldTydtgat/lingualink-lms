@@ -517,7 +517,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                   className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-colors"
                   style={{ color: '#FF8303', borderColor: '#FFD9A8', backgroundColor: '#FFF3E0' }}
                 >
-                  + Assign Teaching Material
+                  + Assign from Teaching Material
                 </button>
               </div>
             )}
