@@ -14,7 +14,6 @@ type StudentVisibleReport = {
   feedback_text: string | null;
   did_class_happen: boolean | null;
   level_data: Record<string, string> | null;
-  additional_details: string | null;
 };
 
 // Minimal shape of a study_sheets.attachments entry - only the field the display
@@ -127,11 +126,14 @@ export default async function PastClassDetailPage({
   // established by the RLS-bound lesson query above, which returns a row only when
   // this lesson is this student's - reaching this line IS the security boundary,
   // because the admin client bypasses RLS. Never widen this select list.
+  // additional_details is deliberately absent: it is the teacher's admin-facing
+  // account of the class (required on a no-show) and is read only by admin and
+  // by whichever teacher currently owns the report row.
   // reports has a UNIQUE constraint on lesson_id, so maybeSingle() is exact.
   const admin = createAdminClient();
   const { data: reportRow, error: reportError } = await admin
     .from('reports')
-    .select('id, feedback_text, did_class_happen, level_data, additional_details')
+    .select('id, feedback_text, did_class_happen, level_data')
     .eq('lesson_id', id)
     .maybeSingle();
 
@@ -146,7 +148,6 @@ export default async function PastClassDetailPage({
         feedback_text: (reportRow.feedback_text ?? null) as string | null,
         did_class_happen: (reportRow.did_class_happen ?? null) as boolean | null,
         level_data: (reportRow.level_data ?? null) as Record<string, string> | null,
-        additional_details: (reportRow.additional_details ?? null) as string | null,
       }
     : null;
 

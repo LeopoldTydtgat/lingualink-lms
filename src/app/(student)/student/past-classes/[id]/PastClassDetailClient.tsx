@@ -28,7 +28,6 @@ interface Report {
   feedback_text: string | null;
   did_class_happen: boolean | null;
   level_data: Record<string, string> | null;
-  additional_details: string | null;
 }
 
 interface Teacher {
