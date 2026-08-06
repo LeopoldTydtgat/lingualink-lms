@@ -4,6 +4,7 @@ import { useState } from 'react'
 import GeneralAvailability from './tabs/GeneralAvailability'
 import DayToDay from './tabs/DayToDay'
 import Holidays from './tabs/Holidays'
+import CalendarSubscriptionCard from '@/components/shared/CalendarSubscriptionCard'
 
 interface Profile {
   id: string
@@ -123,6 +124,14 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
             onAvailabilityChange={setAvailability}
           />
         )}
+      </div>
+
+      {/* Live calendar subscription. Sits at page level rather than inside the
+          Day to Day tab so it is reachable from whichever tab is open, while
+          still landing directly under that tab's one-shot Export button, which
+          it complements: Export is a snapshot, this stays in sync. */}
+      <div style={{ marginTop: '24px' }}>
+        <CalendarSubscriptionCard />
       </div>
     </div>
   )

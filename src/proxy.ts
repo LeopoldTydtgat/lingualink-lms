@@ -147,7 +147,12 @@ export async function proxy(request: NextRequest) {
     pathname === '/reset-password' ||
     pathname === '/student/forgot-password' ||
     pathname === '/student/reset-password' ||
-    PUBLIC_API_PATHS.has(pathname)
+    PUBLIC_API_PATHS.has(pathname) ||
+    // Calendar-feed subscription URLs are polled by calendar apps with no
+    // session; the token in the URL path is the auth and the route returns a
+    // uniform 404 for unknown tokens. The session-authenticated token-issuing
+    // route lives under /api/calendar-subscription/ and stays behind this gate.
+    pathname.startsWith('/api/calendar-feed/')
 
   if (!isPublicPath && !user) {
     // Base arg is ignored for an absolute URL; it only kicks in when the

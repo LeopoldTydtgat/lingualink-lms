@@ -22,6 +22,7 @@ import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
 import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
+import CalendarSubscriptionCard from '@/components/shared/CalendarSubscriptionCard'
 
 interface Teacher {
   id: string
@@ -1046,6 +1047,10 @@ export default function MyClassesClient({
           )}
         </div>
       )}
+
+      {/* Live calendar subscription. Outside the lessons block so it shows even
+          with an empty schedule - a student can subscribe before booking. */}
+      <CalendarSubscriptionCard />
     </div>
   )
 }
