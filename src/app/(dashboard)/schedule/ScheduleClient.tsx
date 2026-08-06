@@ -59,7 +59,8 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
         </p>
       </div>
 
-      {/* Tab buttons */}
+      {/* Tab buttons — the calendar subscription trigger rides the same row,
+          pushed right, so it is reachable from any tab without scrolling. */}
       <div className="flex gap-6 items-end mb-6">
         {TABS.map(tab => {
           const isActive = activeTab === tab.id
@@ -98,6 +99,9 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
             </button>
           )
         })}
+        <div style={{ marginLeft: 'auto', paddingBottom: '2px' }}>
+          <CalendarSubscriptionCard />
+        </div>
       </div>
 
       {/* Tab content — all three tabs receive the FULL availability array */}
@@ -124,14 +128,6 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
             onAvailabilityChange={setAvailability}
           />
         )}
-      </div>
-
-      {/* Live calendar subscription. Sits at page level rather than inside the
-          Day to Day tab so it is reachable from whichever tab is open, while
-          still landing directly under that tab's one-shot Export button, which
-          it complements: Export is a snapshot, this stays in sync. */}
-      <div style={{ marginTop: '24px' }}>
-        <CalendarSubscriptionCard />
       </div>
     </div>
   )
