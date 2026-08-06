@@ -568,6 +568,7 @@ export default function StudentDetailClient({
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
+  const [showAllAssignments, setShowAllAssignments] = useState(false)
 
   // Teaching-material homework state
   const [localMaterial, setLocalMaterial] = useState<MaterialHomework[]>(materialHomework)
@@ -575,6 +576,7 @@ export default function StudentDetailClient({
   const [revokingMaterialId, setRevokingMaterialId] = useState<string | null>(null)
   const [materialRevokeError, setMaterialRevokeError] = useState<string | null>(null)
   const [showAssignMaterial, setShowAssignMaterial] = useState(false)
+  const [showRevokedMaterial, setShowRevokedMaterial] = useState(false)
 
   // Both mutations in this section (assign, revoke) re-run the server component
   // via router.refresh() rather than guessing the new row state locally. The
@@ -857,6 +859,19 @@ export default function StudentDetailClient({
       setRevokingMaterialId(null)
     }
   }
+
+  // Collapsed to the 5 most recent by default — localAssignments already
+  // arrives newest-first (assigned_at descending, from the fetch), so this is
+  // a plain slice, not a re-sort — toggled on to show the rest.
+  const visibleAssignments = showAllAssignments ? localAssignments : localAssignments.slice(0, 5)
+
+  // Revoked rows stay in localMaterial (the audit trail), but are hidden from
+  // the table by default — a pure client-side filter over the already-fetched
+  // list, toggled on to show them back.
+  const revokedMaterialCount = localMaterial.filter((hw) => hw.revoked_at !== null).length
+  const visibleMaterial = showRevokedMaterial
+    ? localMaterial
+    : localMaterial.filter((hw) => hw.revoked_at === null)
 
   const allTabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'overview', label: 'Overview' },
@@ -1619,14 +1634,14 @@ export default function StudentDetailClient({
                 </tr>
               </thead>
               <tbody>
-                {localAssignments.length === 0 ? (
+                {visibleAssignments.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-10 text-gray-400">
                       No study sheets assigned yet.
                     </td>
                   </tr>
                 ) : (
-                  localAssignments.map((assignment) => {
+                  visibleAssignments.map((assignment) => {
                     const isConfirming = confirmRevokeId === assignment.id
                     const isRevoking = revokingId === assignment.id
                     return (
@@ -1701,6 +1716,18 @@ export default function StudentDetailClient({
             </table>
           </div>
 
+          {localAssignments.length > 5 && (
+            <button
+              onClick={() => setShowAllAssignments((v) => !v)}
+              className="text-xs font-medium underline"
+              style={{ color: '#6b7280' }}
+            >
+              {showAllAssignments
+                ? 'Show fewer'
+                : `Show all (${localAssignments.length})`}
+            </button>
+          )}
+
           {/* ── Homework (Teaching Material) ── */}
           <div className="flex items-center justify-between pt-4">
             <h3 className="text-sm font-semibold text-gray-800">Homework (Teaching Material)</h3>
@@ -1714,12 +1741,8 @@ export default function StudentDetailClient({
                     ? 'The teaching-material list could not be loaded, so nothing can be assigned right now.'
                     : 'There is no active teaching material to assign.'
               }
-              className="text-xs font-medium px-3 py-1.5 rounded-md"
-              style={
-                materialSheets.length === 0
-                  ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
-                  : { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }
-              }
+              className="btn-primary-hover px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ backgroundColor: '#FF8303' }}
             >
               Assign teaching material
             </button>
@@ -1759,14 +1782,16 @@ export default function StudentDetailClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {localMaterial.length === 0 ? (
+                  {visibleMaterial.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="text-center py-10 text-gray-400">
-                        No teaching material assigned yet.
+                        {localMaterial.length === 0
+                          ? 'No teaching material assigned yet.'
+                          : 'No live teaching material — all assignments are revoked.'}
                       </td>
                     </tr>
                   ) : (
-                    localMaterial.map((hw) => {
+                    visibleMaterial.map((hw) => {
                       const isConfirming = confirmMaterialRevokeId === hw.id
                       const isRevoking = revokingMaterialId === hw.id
                       const isLive = hw.revoked_at === null
@@ -1843,6 +1868,18 @@ export default function StudentDetailClient({
                 </tbody>
               </table>
             </div>
+          )}
+
+          {!materialHomeworkLoadFailed && revokedMaterialCount > 0 && (
+            <button
+              onClick={() => setShowRevokedMaterial((v) => !v)}
+              className="text-xs font-medium underline"
+              style={{ color: '#6b7280' }}
+            >
+              {showRevokedMaterial
+                ? 'Hide revoked'
+                : `Show revoked (${revokedMaterialCount})`}
+            </button>
           )}
         </div>
       )}

@@ -52,6 +52,7 @@ export default function AssignMaterialHomeworkModal({
 
   const selectedSheet = sheets.find((s) => s.id === sheetId) ?? null
   const attachments = selectedSheet?.attachments ?? []
+  const pdfCount = selectedSheet ? pdfIndexes(selectedSheet).length : 0
 
   function handleSheetChange(nextSheetId: string) {
     setSubmitError(null)
@@ -186,32 +187,44 @@ export default function AssignMaterialHomeworkModal({
           })}
         </select>
 
-        {/* File */}
-        <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
+        {/* File — hidden entirely when the sheet has exactly one PDF: the
+            auto-select logic in handleSheetChange already picked it, so
+            there is nothing left to choose. */}
         {!selectedSheet ? (
-          <p className="text-sm text-gray-400 mb-4">Choose a teaching material first.</p>
-        ) : attachments.length === 0 ? (
-          <p className="text-sm text-gray-400 mb-4">This material has no files to assign.</p>
-        ) : (
-          <select
-            value={attachmentIndex === null ? '' : String(attachmentIndex)}
-            onChange={(e) =>
-              setAttachmentIndex(e.target.value === '' ? null : Number(e.target.value))
-            }
-            disabled={submitting}
-            className={`${inputClass} mb-4 disabled:opacity-50`}
-          >
-            <option value="">Choose a file...</option>
-            {attachments.map((att, idx) => {
-              const isPdf = att.type === 'application/pdf'
-              return (
-                <option key={`${att.name}-${idx}`} value={String(idx)} disabled={!isPdf}>
-                  {isPdf ? att.name : `${att.name} (PDF only)`}
-                </option>
-              )
-            })}
-          </select>
-        )}
+          <>
+            <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
+            <p className="text-sm text-gray-400 mb-4">Choose a teaching material first.</p>
+          </>
+        ) : pdfCount === 0 ? (
+          <>
+            <label className="block text-sm font-medium text-gray-700 mb-1">File</label>
+            <p className="text-sm text-gray-400 mb-4">This material has no files to assign.</p>
+          </>
+        ) : pdfCount >= 2 ? (
+          <>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              This material has multiple files - choose one
+            </label>
+            <select
+              value={attachmentIndex === null ? '' : String(attachmentIndex)}
+              onChange={(e) =>
+                setAttachmentIndex(e.target.value === '' ? null : Number(e.target.value))
+              }
+              disabled={submitting}
+              className={`${inputClass} mb-4 disabled:opacity-50`}
+            >
+              <option value="">Choose a file...</option>
+              {attachments.map((att, idx) => {
+                const isPdf = att.type === 'application/pdf'
+                return (
+                  <option key={`${att.name}-${idx}`} value={String(idx)} disabled={!isPdf}>
+                    {isPdf ? att.name : `${att.name} (PDF only)`}
+                  </option>
+                )
+              })}
+            </select>
+          </>
+        ) : null}
 
         {/* Page range */}
         <label className="block text-sm font-medium text-gray-700 mb-1">Pages (optional)</label>
