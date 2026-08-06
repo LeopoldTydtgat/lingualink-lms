@@ -246,8 +246,8 @@ export async function GET(
       // corner at 45 degrees. Width is linear in font size, so one measurement
       // at size 1 gives the per-unit width.
       const unitWidth = font.widthOfTextAtSize(label, 1)
-      const maxSize = Math.min(width, height) * 0.18
-      const size = Math.max(12, Math.min(maxSize, (Math.hypot(width, height) * 0.7) / unitWidth))
+      const maxSize = Math.min(width, height) * 0.12
+      const size = Math.max(8, Math.min(maxSize, (Math.hypot(width, height) * 0.467) / unitWidth))
       const textWidth = unitWidth * size
 
       // drawText anchors at the baseline start and rotates about that anchor, so
@@ -266,7 +266,7 @@ export async function GET(
         // Grey at low opacity: unmistakably present on every page, but light
         // enough that the material underneath stays readable.
         color: rgb(0.45, 0.45, 0.45),
-        opacity: 0.18,
+        opacity: 0.07,
         rotate: degrees(45),
       })
     }
