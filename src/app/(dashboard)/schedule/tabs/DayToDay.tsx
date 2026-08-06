@@ -6,6 +6,7 @@ import { localTimeToUtcMs } from '@/lib/availability'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { getMondayWeekStart, addDays, getWeekDays, formatWeekLabel } from '@/lib/utils/week'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
+import { buildIcsCalendar } from '@/lib/ics'
 import { Download } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
 
@@ -36,21 +37,6 @@ const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'Ju
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
-}
-
-// Format an ISO datetime string as a UTC ICS timestamp e.g. "20260414T080000Z"
-function toIcsDate(isoStr: string): string {
-  const d = new Date(isoStr)
-  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`
-}
-
-// Escape a TEXT value for ICS (RFC 5545): backslash first, then ';' ',' and newlines.
-function escapeIcsText(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r\n|\n/g, '\\n')
 }
 
 // Build local date string YYYY-MM-DD without UTC conversion.
@@ -831,27 +817,16 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         setTimeout(() => setExportMsg(''), 3000)
         return
       }
-      const stamp = toIcsDate(new Date().toISOString())
-      const lines = [
-        'BEGIN:VCALENDAR',
-        'VERSION:2.0',
-        'PRODID:-//LinguaLink Online//Teacher Portal//EN',
-      ]
-      upcoming.forEach(c => {
-        const endsAt = new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString()
-        lines.push(
-          'BEGIN:VEVENT',
-          `UID:${c.id}@lingualinkonline.com`,
-          `DTSTAMP:${stamp}`,
-          `DTSTART:${toIcsDate(c.scheduled_at)}`,
-          `DTEND:${toIcsDate(endsAt)}`,
-          `SUMMARY:${escapeIcsText(c.student_name)}`,
-          `DESCRIPTION:${escapeIcsText(`Class with ${c.student_name}`)}`,
-          'END:VEVENT',
-        )
-      })
-      lines.push('END:VCALENDAR')
-      const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' })
+      const icsText = buildIcsCalendar(
+        upcoming.map(c => ({
+          uid: `${c.id}@lingualinkonline.com`,
+          startIso: c.scheduled_at,
+          endIso: new Date(new Date(c.scheduled_at).getTime() + c.duration_minutes * 60_000).toISOString(),
+          summary: c.student_name,
+          description: `Class with ${c.student_name}`,
+        }))
+      )
+      const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
