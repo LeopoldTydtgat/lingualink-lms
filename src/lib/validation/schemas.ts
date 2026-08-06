@@ -515,3 +515,59 @@ export const JoinClickSchema = z.object({
 })
 
 export type JoinClickInput = z.infer<typeof JoinClickSchema>
+
+// --- Teaching-material homework grant (material_assignments) ------------------
+//
+// Body of POST /api/teacher/material-assignments. The page-range rules MIRROR
+// the live CHECK constraint material_assignments_page_range:
+//
+//   (page_start is null and page_end is null)
+//   or (page_start >= 1 and page_end >= page_start)
+//
+// They are duplicated here on purpose: a half-filled or inverted range must come
+// back as a readable 422 for the teacher, not as an opaque 23514 from Postgres.
+// The DB constraint remains the authority - this schema only front-runs it.
+export const MaterialAssignmentCreateSchema = z
+  .object({
+    student_id: uuid,
+    study_sheet_id: uuid,
+    attachment_index: z
+      .number()
+      .int()
+      .min(0, 'Choose a file from this sheet'),
+    page_start: z
+      .number()
+      .int()
+      .min(1, 'The first page must be 1 or higher')
+      .optional()
+      .nullable(),
+    page_end: z
+      .number()
+      .int()
+      .min(1, 'The last page must be 1 or higher')
+      .optional()
+      .nullable(),
+  })
+  .superRefine((val, ctx) => {
+    const hasStart = val.page_start !== null && val.page_start !== undefined
+    const hasEnd = val.page_end !== null && val.page_end !== undefined
+
+    if (hasStart !== hasEnd) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['page_end'],
+        message: 'Give both a first and a last page, or leave both empty for the whole document',
+      })
+      return
+    }
+
+    if (hasStart && hasEnd && (val.page_end as number) < (val.page_start as number)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['page_end'],
+        message: 'The last page cannot come before the first page',
+      })
+    }
+  })
+
+export type MaterialAssignmentCreateInput = z.infer<typeof MaterialAssignmentCreateSchema>
