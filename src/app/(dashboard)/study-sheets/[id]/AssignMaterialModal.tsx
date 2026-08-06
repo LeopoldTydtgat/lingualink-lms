@@ -31,6 +31,10 @@ type Props = {
   sheetId: string
   sheetTitle: string
   attachments: Attachment[]
+  // Pre-selects a student when the caller already knows which one (the class
+  // report form opens this from a lesson). Purely a convenience: the student
+  // list, and the grant itself, are still decided by the API route.
+  initialStudentId?: string
   onClose: () => void
 }
 
@@ -59,6 +63,7 @@ export default function AssignMaterialModal({
   sheetId,
   sheetTitle,
   attachments,
+  initialStudentId,
   onClose,
 }: Props) {
   // Only PDFs can be assigned: the file route rebuilds the document page by page
@@ -70,7 +75,7 @@ export default function AssignMaterialModal({
   const [attachmentIndex, setAttachmentIndex] = useState<number | null>(
     pdfOptions.length === 1 ? pdfOptions[0].idx : null
   )
-  const [studentId, setStudentId] = useState('')
+  const [studentId, setStudentId] = useState(initialStudentId ?? '')
   const [pageStart, setPageStart] = useState('')
   const [pageEnd, setPageEnd] = useState('')
 
@@ -129,6 +134,18 @@ export default function AssignMaterialModal({
   useEffect(() => {
     void load()
   }, [load])
+
+  // A prefilled student the loaded list does not contain must be dropped. A
+  // controlled <select> whose value matches no <option> deselects every option
+  // and renders blank - it does NOT fall back to the "Choose a student..."
+  // placeholder - and Assign would stay enabled on an id the route will refuse.
+  // Options are only ever built from `students`, so a teacher-made choice can
+  // never trip this.
+  useEffect(() => {
+    if (loading || !studentId) return
+    if (students.some(s => s.id === studentId)) return
+    setStudentId('')
+  }, [loading, students, studentId])
 
   // Kick off the fade once a row is marked for highlighting.
   useEffect(() => {
