@@ -627,6 +627,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           <SectionHeader>
             Additional Details{didClassHappen === false && <span className="text-red-500 ml-1">*</span>}
           </SectionHeader>
+          <p className="text-xs text-gray-500 mb-3">Your student never sees this. It is visible to admin and to the teacher assigned to this class.</p>
           {didClassHappen === false && (
             <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}
