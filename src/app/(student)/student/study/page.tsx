@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
 import StudyClient from './StudyClient'
@@ -39,6 +40,76 @@ export default async function StudyPage() {
     `)
     .eq('student_id', student.id)
     .order('assigned_at', { ascending: false })
+
+  // --- Teaching-material homework grants -----------------------------------
+  // USER-SCOPED read: the material_assignments SELECT policy is the gate, exactly
+  // as in /student/study/material/[assignmentId] and /api/material-assignment-file.
+  // `revoked_at is null` is already encoded in the student policy; it is repeated
+  // here only as the list filter this page needs, never as a re-derived gate.
+  //
+  // Explicit column list, never select('*'): material_assignments carries a
+  // column-level UPDATE grant (annotations, updated_at only).
+  //
+  // A query error is NOT an empty grant list, but this is one block on a page
+  // that must still render its assignments and practice library, so the failure
+  // is logged and the material list falls back to empty rather than crashing.
+  const { data: materialRaw, error: materialError } = await supabase
+    .from('material_assignments')
+    .select('id, study_sheet_id, attachment_name, page_start, page_end, assigned_at')
+    .eq('student_id', student.id)
+    .is('revoked_at', null)
+    .order('assigned_at', { ascending: false })
+
+  if (materialError) {
+    console.error('[student/study] material_assignments lookup failed:', materialError)
+  }
+
+  const materialRows = materialError ? [] : (materialRaw ?? [])
+
+  // Material grants are always issued against audience='staff' sheets
+  // (api/teacher/material-assignments/route.ts), and the student SELECT policy on
+  // study_sheets requires audience='student' - so a user-scoped read returns
+  // NOTHING and there would be no title to show. Read TITLES ONLY on the
+  // service-role client, mirroring /student/study/material/[assignmentId].
+  //
+  // DISPLAY-ONLY, never an access gate: authorisation was settled by the
+  // RLS-bound read above, and the bytes are gated again, independently, by
+  // /api/material-assignment-file. This is a Server Component, so nothing
+  // service-role reaches the client bundle - only the plain title strings do.
+  //
+  // Fail soft: a failed lookup or a missing sheet falls back to a generic label
+  // so the grant still lists and still opens.
+  const materialSheetIds = [
+    ...new Set(materialRows.map((m) => m.study_sheet_id as string)),
+  ]
+
+  const materialTitles = new Map<string, string>()
+  if (materialSheetIds.length > 0) {
+    const adminClient = createAdminClient()
+    const { data: materialSheetRows, error: materialSheetError } = await adminClient
+      .from('study_sheets')
+      .select('id, title')
+      .in('id', materialSheetIds)
+
+    if (materialSheetError) {
+      console.error('[student/study] study_sheets title lookup failed:', materialSheetError)
+    }
+
+    for (const row of materialSheetRows ?? []) {
+      if (typeof row.title === 'string' && row.title.length > 0) {
+        materialTitles.set(row.id as string, row.title)
+      }
+    }
+  }
+
+  const materialAssignments = materialRows.map((m) => ({
+    id: m.id as string,
+    title: materialTitles.get(m.study_sheet_id as string) ?? 'Teaching material',
+    attachment_name: m.attachment_name as string,
+    page_start: m.page_start as number | null,
+    page_end: m.page_end as number | null,
+    assigned_at: m.assigned_at as string,
+  }))
 
   // Fetch all active study sheets for the "Practice on Your Own" library
   const { data: libraryRaw } = await supabase
@@ -119,6 +190,7 @@ export default async function StudyPage() {
       completedAssignmentIds={completedAssignmentIds}
       practicedSheetIds={practicedSheetIds}
       library={library}
+      materialAssignments={materialAssignments}
     />
   )
 }
