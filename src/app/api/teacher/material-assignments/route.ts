@@ -3,6 +3,9 @@ import { PDFDocument } from 'pdf-lib'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkEmailDispatchLimit } from '@/lib/rateLimit'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate, studentMaterialHomeworkAssignedEmailContent } from '@/lib/email/templates'
 import { MaterialAssignmentCreateSchema } from '@/lib/validation/schemas'
 
 const BUCKET = 'library-files'
@@ -364,6 +367,72 @@ export async function POST(request: Request) {
     if (!inserted) {
       console.error('[teacher/material-assignments] insert returned no row')
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // --- Notification email (best-effort, never affects the response) ---------
+    // The grant row already exists by this point, so NO outcome below may change
+    // what this route returns: a rate-limit block, a failed lookup, a missing
+    // address and a Resend failure all still yield the 201. Own try/catch so a
+    // throw cannot fall into the outer handler and turn a written grant into a
+    // 500. Revoke stays silent - only an insert notifies.
+    try {
+      // 20 dispatches per user per hour. A block SKIPS the send; it is never a
+      // 429, because the assignment itself succeeded.
+      const limit = await checkEmailDispatchLimit(user.id)
+      if (limit.blocked) {
+        console.error(
+          `[teacher/material-assignments] email dispatch rate-limited, skipping send (assignment ${inserted.id})`
+        )
+      } else {
+        // Teacher display name from the SESSION profile on the user-scoped
+        // client - never from the request body. A lookup failure is not worth
+        // losing the email over: continue with null, and the template renders
+        // the nameless variant rather than an empty name slot.
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (profileError) {
+          console.error('[teacher/material-assignments] profiles lookup failed:', profileError)
+        }
+        const teacherName = profile?.full_name ?? null
+
+        // Service role, reusing the instance built for the pre-flight checks:
+        // students.email is not readable under the teacher's own RLS. The error
+        // is BOUND and checked - discarding it would make a transient DB failure
+        // indistinguishable from a student who has no address on file.
+        const { data: student, error: studentError } = await adminClient
+          .from('students')
+          .select('email, full_name')
+          .eq('id', student_id)
+          .maybeSingle()
+
+        if (studentError) {
+          console.error('[teacher/material-assignments] student lookup failed:', studentError)
+        } else if (!student || !student.email) {
+          console.error(
+            `[teacher/material-assignments] no email address for student ${student_id}, skipping send`
+          )
+        } else {
+          const subject = 'Lingualink Online - Your teacher has assigned you a homework task'
+          await resend.emails.send({
+            from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+            to: student.email,
+            subject,
+            html: buildEmailTemplate({
+              recipientName: student.full_name,
+              recipientFallback: 'Student',
+              subject,
+              bodyHtml: studentMaterialHomeworkAssignedEmailContent(teacherName),
+              contactEmail: 'support@lingualinkonline.com',
+            }),
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[teacher/material-assignments] email dispatch failed:', err)
     }
 
     return NextResponse.json({ id: inserted.id }, { status: 201 })
