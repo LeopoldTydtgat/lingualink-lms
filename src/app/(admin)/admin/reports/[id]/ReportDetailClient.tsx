@@ -5,17 +5,13 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-
-interface LevelData {
-  grammar?:        string;
-  expression?:     string;
-  comprehension?:  string;
-  vocabulary?:     string;
-  accent?:         string;
-  overall_spoken?: string;
-  overall_written?: string;
-  [key: string]:   string | undefined;
-}
+import {
+  CEFR_MAX_VALUE,
+  hasUsableLevelData,
+  listUnassessedSkillLabels,
+  toRadarData,
+  type LevelData,
+} from '@/lib/levels/levelData';
 
 interface Report {
   id:                 string;
@@ -79,15 +75,6 @@ async function errorText(res: Response, fallback: string) {
   return `${fallback} (${res.status}).`;
 }
 
-const CEFR_TO_NUM: Record<string, number> = {
-  A1: 1,
-  A2: 2,
-  B1: 3,
-  B2: 4,
-  C1: 5,
-  C2: 6,
-}
-
 // Result of the advisory "is this month's invoice already paid?" lookup that runs
 // while the reopen-confirmation modal is open.
 //   loading    - request in flight (render nothing; never a reason to wait)
@@ -96,19 +83,20 @@ const CEFR_TO_NUM: Record<string, number> = {
 //   unverified - the answer could not be established; NEVER shown as "not paid"
 type InvoiceCheck = 'loading' | 'paid' | 'clear' | 'unverified';
 
-const SKILLS = [
-  { key: 'grammar',         label: 'Grammar' },
-  { key: 'expression',      label: 'Expression' },
-  { key: 'comprehension',   label: 'Comprehension' },
-  { key: 'vocabulary',      label: 'Vocabulary' },
-  { key: 'accent',          label: 'Accent' },
-  { key: 'overall_spoken',  label: 'Spoken' },
-  { key: 'overall_written', label: 'Written' },
-];
-
+// Hand-rolled SVG radar, deliberately NOT recharts - only its data, its scale
+// and its labels come from the shared module, so it stays in step with the two
+// student charts without pulling a charting library into the admin bundle.
+// Skills the teacher left ungraded are DROPPED (they used to be plotted at the
+// centre, which read as a failing grade); the caller names them underneath.
 function RadarChart({ levelData }: { levelData: LevelData }) {
   const size = 280; const cx = size / 2; const cy = size / 2;
-  const maxRadius = 90; const n = SKILLS.length;
+  const maxRadius = 90;
+  const points = toRadarData(levelData);
+  const n = points.length;
+
+  // The caller gates on hasUsableLevelData, so n >= 1 here; this only keeps the
+  // angle maths below from dividing by zero if that ever stops being true.
+  if (n === 0) return null;
 
   function angle(i: number) { return (Math.PI * 2 * i) / n - Math.PI / 2; }
   function axisPoint(i: number, fraction: number) {
@@ -117,11 +105,12 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
   }
 
   const gridPolygons = [0.2, 0.4, 0.6, 0.8, 1].map((f) =>
-    SKILLS.map((_, i) => { const p = axisPoint(i, f); return `${p.x},${p.y}`; }).join(' ')
+    points.map((_, i) => { const p = axisPoint(i, f); return `${p.x},${p.y}`; }).join(' ')
   );
-  const dataPoints  = SKILLS.map((s, i) => axisPoint(i, (CEFR_TO_NUM[levelData[s.key] ?? ''] ?? 0) / 6));
+  // Fixed A1..C2 radial domain, matching both recharts surfaces.
+  const dataPoints  = points.map((s, i) => axisPoint(i, s.value / CEFR_MAX_VALUE));
   const dataPolygon = dataPoints.map((p) => `${p.x},${p.y}`).join(' ');
-  const labelPoints = SKILLS.map((_, i) => {
+  const labelPoints = points.map((_, i) => {
     const r = maxRadius + 20;
     return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) };
   });
@@ -129,17 +118,15 @@ function RadarChart({ levelData }: { levelData: LevelData }) {
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
       {gridPolygons.map((pts, gi) => <polygon key={gi} points={pts} fill="none" stroke="#E5E7EB" strokeWidth="1" />)}
-      {SKILLS.map((_, i) => { const end = axisPoint(i, 1); return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#E5E7EB" strokeWidth="1" />; })}
+      {points.map((_, i) => { const end = axisPoint(i, 1); return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#E5E7EB" strokeWidth="1" />; })}
       <polygon points={dataPolygon} fill="#FF8303" fillOpacity={0.25} stroke="#FF8303" strokeWidth="2" />
       {dataPoints.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={4} fill="#FF8303" />)}
-      {SKILLS.map((s, i) => {
+      {points.map((s, i) => {
         const lp = labelPoints[i];
-        const val = levelData[s.key];
-        const cefrLabel = val ?? '';
         return (
-          <g key={i}>
-            <text x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="Inter, sans-serif" fill="#374151" fontWeight="500">{s.label}</text>
-            {cefrLabel && <text x={lp.x} y={lp.y + 12} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="Inter, sans-serif" fill="#FF8303" fontWeight="600">{cefrLabel}</text>}
+          <g key={s.key}>
+            <text x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="Inter, sans-serif" fill="#374151" fontWeight="500">{s.skill}</text>
+            <text x={lp.x} y={lp.y + 12} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="Inter, sans-serif" fill="#FF8303" fontWeight="600">{s.level}</text>
           </g>
         );
       })}
@@ -220,8 +207,12 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
     }
   }
 
-  const hasLevelData = report.level_data &&
-    Object.values(report.level_data).some((v) => v !== undefined && v !== null);
+  // Shared predicate. This used to accept any non-null value, so a row of empty
+  // strings drew a collapsed all-zero radar here while the two student surfaces
+  // showed their empty state for the same report.
+  const hasLevelData = hasUsableLevelData(report.level_data);
+  const assessedSkills = toRadarData(report.level_data);
+  const unassessedSkills = listUnassessedSkillLabels(report.level_data);
 
   return (
     <div className="p-6">
@@ -336,18 +327,19 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
           <div className="flex flex-col items-center">
             <RadarChart levelData={report.level_data!} />
             <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
-              {SKILLS.map((s) => {
-                const val = report.level_data![s.key];
-                const cefrLabel = val ?? '—';
-                return (
-                  <div key={s.key} className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#FF8303' }} />
-                    <span className="text-gray-500">{s.label}:</span>
-                    <span className="font-medium" style={{ color: '#FF8303' }}>{cefrLabel}</span>
-                  </div>
-                );
-              })}
+              {assessedSkills.map((s) => (
+                <div key={s.key} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#FF8303' }} />
+                  <span className="text-gray-500">{s.skill}:</span>
+                  <span className="font-medium" style={{ color: '#FF8303' }}>{s.level}</span>
+                </div>
+              ))}
             </div>
+            {unassessedSkills.length > 0 && (
+              <p className="mt-3 text-xs text-gray-500">
+                Not yet assessed: {unassessedSkills.join(', ')}
+              </p>
+            )}
           </div>
         </div>
       )}

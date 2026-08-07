@@ -8,6 +8,7 @@ import { X } from 'lucide-react'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
+import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS } from '@/lib/levels/levelData'
 
 // --- Types ---
 
@@ -56,24 +57,12 @@ type Props = {
   materialSheets: MaterialSheet[]
 }
 
-const CEFR_LEVELS = [
-  'A1',
-  'A2',
-  'B1',
-  'B2',
-  'C1',
-  'C2',
-]
-
-const SKILLS = [
-  { key: 'grammar', label: 'Grammar' },
-  { key: 'expression', label: 'Expression' },
-  { key: 'comprehension', label: 'Comprehension' },
-  { key: 'vocabulary', label: 'Vocabulary' },
-  { key: 'accent', label: 'Accent' },
-  { key: 'overall_spoken', label: 'Overall Spoken Level' },
-  { key: 'overall_written', label: 'Overall Written Level' },
-]
+// This form is the ONLY writer of reports.level_data, so its keys and its level
+// values are taken from the same module every reader imports - a renamed key
+// here can no longer leave the charts reading a key nothing writes. The on-screen
+// wording stays the form's own: SKILL_FORM_LABELS spells out "Overall Spoken
+// Level" for an input row, where a chart axis needs the short "Spoken".
+const SKILLS = SKILL_KEYS.map((key) => ({ key, label: SKILL_FORM_LABELS[key] }))
 
 const CEFR_DESCRIPTIONS: Record<string, string> = {
   A1: 'Can understand and use very basic expressions. Introduces themselves and asks/answers simple questions.',
@@ -154,7 +143,9 @@ function LevelTrack({
   editable: boolean
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
-  const selectedIndex = value ? CEFR_LEVELS.indexOf(value) : -1
+  // Widened to readonly string[]: the saved value arrives as a plain string from
+  // the report row, which need not be one of the six literals.
+  const selectedIndex = value ? (CEFR_LEVELS as readonly string[]).indexOf(value) : -1
 
   return (
     <div className="flex flex-1" style={{ maxWidth: `${CEFR_LEVELS.length * 72}px` }}>

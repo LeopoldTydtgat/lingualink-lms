@@ -8,8 +8,15 @@ import {
   RadarChart,
   PolarGrid,
   PolarAngleAxis,
+  PolarRadiusAxis,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  CEFR_MAX_VALUE,
+  hasUsableLevelData,
+  listUnassessedSkillLabels,
+  toRadarData,
+} from '@/lib/levels/levelData';
 import {
   MessageSquareText,
   BookOpen,
@@ -79,27 +86,10 @@ interface Props {
 
 // ─── CEFR level → numeric for radar chart ─────────────────────────────────────
 
-const LEVEL_ORDER = [
-  'A1', 'A2',
-  'B1', 'B2',
-  'C1', 'C2',
-];
-
-function levelToNumber(level: string | undefined): number {
-  if (!level) return 0;
-  const idx = LEVEL_ORDER.indexOf(level);
-  return idx === -1 ? 0 : idx + 1;
-}
-
-const SKILLS = [
-  { key: 'grammar', label: 'Grammar' },
-  { key: 'expression', label: 'Expression' },
-  { key: 'comprehension', label: 'Comprehension' },
-  { key: 'vocabulary', label: 'Vocabulary' },
-  { key: 'accent', label: 'Accent' },
-  { key: 'overall_spoken', label: 'Spoken' },
-  { key: 'overall_written', label: 'Written' },
-];
+// The skill keys, their short labels and the CEFR-to-number scale now live in
+// one module that the report form (the only writer) and all three chart
+// surfaces import, so they cannot drift apart again.
+// See src/lib/levels/levelData.ts.
 
 // ─── Design system ────────────────────────────────────────────────────────────
 
@@ -174,19 +164,19 @@ export default function PastClassDetailClient({
   // deadlines or teacher pay is surfaced to the student.
   const awaitingReport = lesson.status === 'scheduled';
 
-  // Build radar chart data from report level_data
-  const radarData = SKILLS.map((skill) => ({
-    skill: skill.label,
-    value: levelToNumber(lesson.report?.level_data?.[skill.key]),
-    fullMark: 6,
-  }));
+  // Build radar chart data from report level_data. Shared with the Progress and
+  // admin surfaces: same presence predicate, same canonical order, same
+  // 1..CEFR_MAX_VALUE scale. Skills the teacher left blank are DROPPED from the
+  // chart - they used to be plotted at zero, which drew a spike to the centre
+  // that read as a failing grade rather than as "not graded". They are named
+  // underneath instead.
+  const levelData = lesson.report?.level_data ?? null;
+  const radarData = toRadarData(levelData);
+  const unassessedSkills = listUnassessedSkillLabels(levelData);
 
-  // Optional-chained throughout: a null report yields undefined -> false here,
-  // so the radar is never rendered from absent level_data.
-  const hasLevelData = Boolean(
-    lesson.report?.level_data &&
-      Object.values(lesson.report.level_data).some((v) => v)
-  );
+  // A null report, jsonb null, {} and empty-string values all yield false here,
+  // so the radar is never rendered from unusable level_data.
+  const hasLevelData = hasUsableLevelData(levelData);
 
   const hasSheets = assignments.some((a) => a.study_sheet);
 
@@ -380,6 +370,14 @@ export default function PastClassDetailClient({
                   dataKey="skill"
                   tick={{ fontSize: 12, fill: '#6b7280' }}
                 />
+                {/* Fixed A1..C2 domain so a B1 sits at the same radius here, on
+                    Progress and on the admin report. Without it recharts derives
+                    the radius from this one report's values. */}
+                <PolarRadiusAxis
+                  domain={[0, CEFR_MAX_VALUE]}
+                  tick={false}
+                  axisLine={false}
+                />
                 <Radar
                   name="Level"
                   dataKey="value"
@@ -392,15 +390,17 @@ export default function PastClassDetailClient({
           </div>
           {/* Level labels reference */}
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 justify-center">
-            {SKILLS.map((skill) => {
-              const level = lesson.report?.level_data?.[skill.key];
-              return level ? (
-                <span key={skill.key} className="text-xs text-gray-500">
-                  <span className="font-medium text-gray-700">{skill.label}:</span> {level}
-                </span>
-              ) : null;
-            })}
+            {radarData.map((d) => (
+              <span key={d.key} className="text-xs text-gray-500">
+                <span className="font-medium text-gray-700">{d.skill}:</span> {d.level}
+              </span>
+            ))}
           </div>
+          {unassessedSkills.length > 0 && (
+            <p className="text-xs text-center mt-2" style={{ color: '#9ca3af' }}>
+              Not yet assessed: {unassessedSkills.join(', ')}
+            </p>
+          )}
         </div>
       ) : awaitingReport ? (
         /* Ended class, report not filed yet: keep the section visible with an
@@ -411,6 +411,26 @@ export default function PastClassDetailClient({
           </div>
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
             Your teacher&apos;s assessment of your level will appear here soon.
+          </p>
+        </div>
+      ) : lesson.report ? (
+        /* The report is filed but carries no usable level assessment - a no-show,
+           or a class where no skill was graded. This section used to disappear
+           entirely, which read as though the card did not exist; it now states
+           the outcome, matching the teacher-feedback card above, which always
+           renders an empty state of its own. Split on did_class_happen: when the
+           class never took place (a student/teacher no-show), the "didn't record"
+           copy would wrongly imply the teacher skipped paperwork - so that case
+           gets its own copy. null/absent (a reopened report) keeps the original
+           copy; it is not a third outcome. */
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-3">
+            <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
+          </div>
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            {lesson.report.did_class_happen === false
+              ? 'This class did not take place, so there is no level assessment.'
+              : "Your teacher didn't record a level assessment for this class."}
           </p>
         </div>
       ) : null}
