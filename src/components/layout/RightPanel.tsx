@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
-import { formatRemainingCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown, formatRemainingCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
@@ -312,16 +312,26 @@ export default function RightPanel({
     }
   }, [router])
 
-  const classEndTime = nextLesson
-    ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
+  const lessonStartMs = nextLesson ? new Date(nextLesson.scheduled_at).getTime() : null
+  const classEndTime = lessonStartMs !== null && nextLesson
+    ? lessonStartMs + nextLesson.duration_minutes * 60 * 1000
     : null
-  // Reads the component's own 1s tick (`now`, set at mount and by the countdown
-  // interval above) rather than Date.now(): the render path stays pure, and this
-  // agrees with remainingSeconds below instead of drifting a tick apart from it.
-  // Pre-mount `now` is 0, so this is false during SSR/hydration — harmless, as the
-  // only consumer is already gated on `mounted`. The interval that advances `now`
-  // exists whenever classEndTime is non-null (both require nextLesson).
-  const classEnded = classEndTime ? now > classEndTime : false
+  // Liveness comes from the shared half-open [start, end) window in
+  // describeLessonCountdown, the same definition the upcoming-classes cards use, so a
+  // panel heading can never disagree with the card beside it. Only `live` is taken:
+  // this panel keeps its own hero formatter (formatCountdown, zero-padded HH:MM:SS),
+  // which countdown.ts deliberately does NOT share with the cards.
+  //
+  // Both of these read the component's own 1s tick (`now`, set at mount and by the
+  // countdown interval above) rather than Date.now(): the render path stays pure, and
+  // they agree with remainingSeconds below instead of drifting a tick apart from it.
+  const isLive = mounted && lessonStartMs !== null && classEndTime !== null
+    ? describeLessonCountdown(lessonStartMs, classEndTime, now).live
+    : false
+  // now >= end, not now > end: the end instant is NOT teaching time. This previously
+  // used `>` here while the student panel used `>=`, so at the exact end instant the
+  // teacher read "In class 00:00" and the student read "Class has ended".
+  const classEnded = mounted && classEndTime !== null ? now >= classEndTime : false
   const remainingSeconds = classEndTime != null
     ? Math.max(0, Math.floor((classEndTime - now) / 1000))
     : 0
@@ -432,7 +442,7 @@ export default function RightPanel({
         <section className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="flex items-center gap-2 mb-2">
             <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Next Class</p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{isLive ? 'In Class' : 'Next Class'}</p>
           </div>
 
           {!nextLesson ? (
@@ -442,7 +452,7 @@ export default function RightPanel({
               {/* Countdown — big bold live HH:MM:SS hero, matches student panel */}
               {mounted && secondsUntil !== null && classEnded ? (
                 <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class has ended</p>
-              ) : mounted && secondsUntil !== null && secondsUntil <= 0 ? (
+              ) : mounted && secondsUntil !== null && isLive ? (
                 <p className="text-sm font-semibold leading-snug mb-1" style={{ color: '#FF8303' }}>
                   In class: {formatRemainingCountdown(remainingSeconds)} remaining
                 </p>
