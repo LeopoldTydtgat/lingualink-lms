@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
+  Calendar,
   CalendarDays,
   GraduationCap,
   Clock,
@@ -241,13 +242,13 @@ function SecondaryButton({
   )
 }
 
-// ── Shared lesson row — used by upcoming day groups and the cancelled section ──
+// ── Shared lesson row — used by the upcoming day groups ──
 function LessonRow({
   lesson,
   studentTimezone,
   mounted,
   now,
-  isLast,
+  isFirst,
   showDate,
   cancellingId,
   showCancelWarning,
@@ -259,7 +260,7 @@ function LessonRow({
   studentTimezone: string
   mounted: boolean
   now: number
-  isLast: boolean
+  isFirst: boolean
   showDate: boolean
   cancellingId: string | null
   showCancelWarning: string | null
@@ -267,6 +268,7 @@ function LessonRow({
   onCancel: (id: string, within24: boolean) => void
   onDismissWarning: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
   const isCancelled = isCancelledStatus(lesson.status)
   const cancelLabel = getCancellationLabel(lesson, 'student')
   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
@@ -280,11 +282,11 @@ function LessonRow({
   return (
     <div>
       <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
-          backgroundColor: '#ffffff',
-          border: '1px solid #E0DFDC',
-          borderTop: 'none',
-          borderRadius: isLast ? '0 0 8px 8px' : '0',
+          backgroundColor: hovered ? '#f9fafb' : '#ffffff',
+          borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
           padding: '14px 16px',
         }}
       >
@@ -410,8 +412,6 @@ export default function MyClassesClient({
   const [isDismissingBanner, setIsDismissingBanner] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
-  const [hideCancelled, setHideCancelled] = useState(false)
-  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(true)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
@@ -423,21 +423,6 @@ export default function MyClassesClient({
     const currentNow = Date.now()
     setNow(currentNow)
     setMounted(true)
-
-    try {
-      const stored = localStorage.getItem('lingualink_student_hide_cancelled')
-      if (stored === 'true') setHideCancelled(true)
-    } catch {}
-
-    try {
-      const stored = localStorage.getItem('lingualink_student_cancelled_section_expanded')
-      if (stored === 'false') setCancelledSectionExpanded(false)
-    } catch {}
-
-    // Expand all day groups by default
-    const keys = new Set<string>()
-    lessons.forEach((l) => keys.add(getLocalDateKey(l.scheduled_at, studentTimezone)))
-    setExpandedDays(keys)
 
     // Tick every second for countdowns
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -455,15 +440,6 @@ export default function MyClassesClient({
   // All scheduled lessons (for counts) and the grouped list (which excludes the hero)
   const scheduledLessons = lessons.filter((l) => l.status === 'scheduled')
   const listLessons = scheduledLessons.filter((l) => l.id !== nextLesson?.id)
-
-  // Cancelled lessons for the separate collapsed section
-  const cancelledLessons = lessons
-    .filter((l) => isCancelledStatus(l.status))
-    .sort((a, b) => {
-      const ta = a.cancelled_at ?? a.scheduled_at
-      const tb = b.cancelled_at ?? b.scheduled_at
-      return new Date(tb).getTime() - new Date(ta).getTime()
-    })
 
   // Group upcoming (non-hero) lessons by local date
   const groupedByDate: Record<string, Lesson[]> = {}
@@ -509,12 +485,6 @@ export default function MyClassesClient({
 
   function handleReschedule(lessonId: string) {
     router.push(`/student/book?reschedule=${lessonId}`)
-  }
-
-  function handleCancelledSectionToggle() {
-    const next = !cancelledSectionExpanded
-    setCancelledSectionExpanded(next)
-    try { localStorage.setItem('lingualink_student_cancelled_section_expanded', String(next)) } catch {}
   }
 
   const scheduledCount = scheduledLessons.length
@@ -882,8 +852,8 @@ export default function MyClassesClient({
         </div>
       ))}
 
-      {/* ── Upcoming and cancelled classes list ── */}
-      {(listLessons.length > 0 || cancelledLessons.length > 0) && (
+      {/* ── Upcoming classes list ── */}
+      {listLessons.length > 0 && (
         <div>
           <div style={{
             display: 'flex',
@@ -894,28 +864,6 @@ export default function MyClassesClient({
             <h2 style={{ fontSize: '16px', fontWeight: '700', color: '#111827' }}>
               Upcoming Classes
             </h2>
-            <label style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '13px',
-              color: '#6b7280',
-              cursor: 'pointer',
-            }}>
-              <input
-                type="checkbox"
-                checked={hideCancelled}
-                onChange={(e) => {
-                  const checked = e.target.checked
-                  setHideCancelled(checked)
-                  try {
-                    localStorage.setItem('lingualink_student_hide_cancelled', String(checked))
-                  } catch {}
-                }}
-                style={{ accentColor: '#FF8303' }}
-              />
-              Hide cancelled
-            </label>
           </div>
 
           {sortedDays.map((dayKey) => {
@@ -932,7 +880,7 @@ export default function MyClassesClient({
               : dayKey
 
             return (
-              <div key={dayKey} style={{ marginBottom: '8px' }}>
+              <div key={dayKey} className="card-elevated" style={{ overflow: 'hidden', marginBottom: '12px' }}>
 
                 {/* Day group header — click to expand/collapse */}
                 <button
@@ -944,8 +892,7 @@ export default function MyClassesClient({
                     alignItems: 'center',
                     padding: '10px 16px',
                     backgroundColor: '#f9fafb',
-                    border: '1px solid #E0DFDC',
-                    borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                    borderBottom: isExpanded ? '1px solid #E0DFDC' : 'none',
                     fontSize: '13px',
                     fontWeight: '600',
                     color: '#374151',
@@ -954,7 +901,8 @@ export default function MyClassesClient({
                   }}
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {dayLabel}
+                    <Calendar size={15} color="#9ca3af" />
+                    <span style={{ display: 'inline-block', minWidth: '100px' }}>{dayLabel}</span>
                     <span style={{
                       fontSize: '12px',
                       fontWeight: '600',
@@ -980,7 +928,7 @@ export default function MyClassesClient({
                     studentTimezone={studentTimezone}
                     mounted={mounted}
                     now={now}
-                    isLast={i === dayLessons.length - 1}
+                    isFirst={i === 0}
                     showDate={false}
                     cancellingId={cancellingId}
                     showCancelWarning={showCancelWarning}
@@ -992,65 +940,6 @@ export default function MyClassesClient({
               </div>
             )
           })}
-
-          {/* ── Cancelled section ── */}
-          {!hideCancelled && cancelledLessons.length > 0 && (
-            <div style={{ marginBottom: '8px' }}>
-              <button
-                onClick={handleCancelledSectionToggle}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '10px 16px',
-                  backgroundColor: '#f9fafb',
-                  border: '1px solid #E0DFDC',
-                  borderRadius: cancelledSectionExpanded ? '8px 8px 0 0' : '8px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: '#374151',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  Cancelled
-                  <span style={{
-                    fontSize: '12px',
-                    fontWeight: '600',
-                    padding: '1px 8px',
-                    backgroundColor: '#f3f4f6',
-                    color: '#4b5563',
-                    borderRadius: '10px',
-                  }}>
-                    {cancelledLessons.length}
-                  </span>
-                </span>
-                {cancelledSectionExpanded
-                  ? <ChevronUp size={16} color="#9ca3af" />
-                  : <ChevronDown size={16} color="#9ca3af" />
-                }
-              </button>
-
-              {cancelledSectionExpanded && cancelledLessons.map((lesson, i) => (
-                <LessonRow
-                  key={lesson.id}
-                  lesson={lesson}
-                  studentTimezone={studentTimezone}
-                  mounted={mounted}
-                  now={now}
-                  isLast={i === cancelledLessons.length - 1}
-                  showDate={true}
-                  cancellingId={cancellingId}
-                  showCancelWarning={showCancelWarning}
-                  onReschedule={handleReschedule}
-                  onCancel={handleCancel}
-                  onDismissWarning={() => setShowCancelWarning(null)}
-                />
-              ))}
-            </div>
-          )}
         </div>
       )}
     </div>

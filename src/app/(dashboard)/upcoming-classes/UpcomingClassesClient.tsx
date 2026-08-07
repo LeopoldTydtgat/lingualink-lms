@@ -230,7 +230,7 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
   )
 }
 
-function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
+function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero = false, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; hero?: boolean; isFirst?: boolean }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
@@ -268,33 +268,38 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
   return (
     <div
-      className="rounded-xl bg-white shadow-sm overflow-hidden"
-      style={{
-        border: '1px solid #f3f4f6',
-        borderLeft: isNext ? '3px solid #FF8303'
-          : '1px solid #f3f4f6',
-        opacity: isCancelled ? 0.75 : undefined,
-      }}
+      className={hero ? 'card-elevated overflow-hidden' : 'bg-white overflow-hidden'}
+      style={
+        hero
+          ? {
+              borderLeft: '3px solid #FF8303',
+              opacity: isCancelled ? 0.75 : undefined,
+            }
+          : {
+              borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
+              opacity: isCancelled ? 0.75 : undefined,
+            }
+      }
     >
       <div
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-4 p-4 text-left hover:bg-gray-50 transition-colors cursor-pointer"
+        className={`w-full flex items-center gap-4 ${hero ? 'p-5' : 'p-4'} text-left hover:bg-gray-50 transition-colors cursor-pointer`}
       >
         <Link
           href={`/students/${cls.training_id}`}
           prefetch={false}
           onClick={e => e.stopPropagation()}
-          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
+          className={`${hero ? 'w-14 h-14' : 'w-10 h-10'} rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden`}
           style={{ backgroundColor: '#FFE8C2' }}
         >
           {cls.student.photo_url ? (
             <img
               src={cls.student.photo_url}
               alt={cls.student.full_name}
-              className="w-10 h-10 rounded-full object-cover"
+              className={`${hero ? 'w-14 h-14' : 'w-10 h-10'} rounded-full object-cover`}
             />
           ) : (
-            <span className="font-semibold text-sm" style={{ color: '#FF8303' }}>
+            <span className={`font-semibold ${hero ? 'text-lg' : 'text-sm'}`} style={{ color: '#FF8303' }}>
               {cls.student.full_name.charAt(0)}
             </span>
           )}
@@ -302,7 +307,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 
         <div className="flex-1 min-w-0">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <p className="font-semibold">{cls.student.full_name}</p>
+            <p className={hero ? 'font-semibold text-lg' : 'font-semibold'}>{cls.student.full_name}</p>
             {isNext && (
               <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
                 NEXT
@@ -326,7 +331,16 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
             ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>{cancelLabel ?? 'Cancelled'}</span>
-            : <Countdown startsAt={cls.starts_at} />}
+            : hero
+              ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9ca3af' }}>
+                    Starts in
+                  </span>
+                  <Countdown startsAt={cls.starts_at} />
+                </div>
+              )
+              : <Countdown startsAt={cls.starts_at} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </div>
@@ -367,16 +381,24 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 }
 
 function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
-  const [open, setOpen] = useState(true)
+  // The next class is now the hero above the list, so every day group starts collapsed.
+  const [open, setOpen] = useState(false)
   const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
 
   return (
-    <div className="space-y-3">
+    <div className="card-elevated overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-left w-full"
+        className="flex items-center gap-2 text-left"
+        style={{
+          width: '100%',
+          padding: '12px 16px',
+          backgroundColor: '#f9fafb',
+          borderBottom: open ? '1px solid #E0DFDC' : 'none',
+        }}
       >
-        <span className="font-semibold text-gray-800">{heading}</span>
+        <CalendarDays size={15} color="#9ca3af" />
+        <span className="font-semibold text-gray-800" style={{ display: 'inline-block', minWidth: '120px' }}>{heading}</span>
         <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
           {classes.length} {classes.length === 1 ? 'lesson' : 'lessons'}
         </span>
@@ -386,9 +408,9 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, ne
       </button>
 
       {open && (
-        <div className="space-y-2">
-          {classes.map(cls => (
-            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
+        <div>
+          {classes.map((cls, i) => (
+            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} isFirst={i === 0} />
           ))}
         </div>
       )}
@@ -402,14 +424,9 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    try {
-      const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
-      if (stored === 'true') setCancelledSectionExpanded(true)
-    } catch {}
   }, [])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
@@ -421,9 +438,13 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       const tb = b.cancelled_at ?? b.starts_at
       return new Date(tb).getTime() - new Date(ta).getTime()
     })
-  const grouped = groupByDay(upcomingClasses, teacherTimezone)
-  const days = Object.keys(grouped).sort()
   const nextId = upcomingClasses.length > 0 ? upcomingClasses[0].id : null
+  // The next class is pulled out as a hero above the list; the day groups are built
+  // from the remainder, so a day that held only the next class disappears entirely.
+  const heroClass = upcomingClasses.find(c => c.id === nextId) ?? null
+  const listClasses = upcomingClasses.filter(c => c.id !== nextId)
+  const grouped = groupByDay(listClasses, teacherTimezone)
+  const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
   const [rescheduleMessage, setRescheduleMessage] = useState('')
@@ -467,23 +488,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     } finally {
       setRescheduleLoading(false)
     }
-  }
-
-  function handleCancelledSectionToggle() {
-    const next = !cancelledSectionExpanded
-    setCancelledSectionExpanded(next)
-    try { localStorage.setItem('lingualink_teacher_cancelled_section_expanded', String(next)) } catch {}
-  }
-
-  function handleJumpToCancelled() {
-    if (!cancelledSectionExpanded) handleCancelledSectionToggle()
-    requestAnimationFrame(() => {
-      const el = document.getElementById('cancelled-section')
-      const main = document.querySelector('main')
-      if (!el || !main) return
-      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 16
-      main.scrollTo({ top, behavior: 'smooth' })
-    })
   }
 
   // Hide only after the dismissal is persisted - hiding on failure silently resurrects the
@@ -548,21 +552,29 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             {cancelledClasses.length > 0 && (
               <>
                 {' '}&middot;{' '}
-                <button
-                  type="button"
-                  onClick={handleJumpToCancelled}
-                  className="font-medium hover:underline"
-                  style={{ color: '#FF8303', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+                <span
+                  className="font-medium"
+                  style={{ color: '#FF8303' }}
                 >
                   {cancelledClasses.length} cancelled
-                </button>
+                </span>
               </>
             )}
           </p>
         </div>
       </div>
 
-      {days.length === 0 ? (
+      {/* Next class hero: mounted-gated, matching the isNext gating inside ClassCard. */}
+      {mounted && heroClass && (
+        <div>
+          <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#9ca3af', marginBottom: '8px' }}>
+            NEXT CLASS
+          </p>
+          <ClassCard cls={heroClass} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} hero />
+        </div>
+      )}
+
+      {!heroClass && days.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
@@ -587,37 +599,10 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           </div>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-3">
           {days.map(day => (
             <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
           ))}
-        </div>
-      )}
-
-      {cancelledClasses.length > 0 && (
-        <div id="cancelled-section" className="space-y-3 scroll-mt-6">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleCancelledSectionToggle}
-              className="flex items-center gap-2 text-left flex-1"
-            >
-              <span className="font-semibold text-gray-800">Cancelled</span>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
-                {cancelledClasses.length}
-              </span>
-              <div className="ml-auto">
-                <ChevronIcon rotated={cancelledSectionExpanded} />
-              </div>
-            </button>
-          </div>
-
-          {cancelledSectionExpanded && (
-            <div className="space-y-2">
-              {cancelledClasses.map(cls => (
-                <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />
-              ))}
-            </div>
-          )}
         </div>
       )}
 

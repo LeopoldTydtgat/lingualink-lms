@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
 import { computeStreakWeeks } from '@/lib/lessons/streak'
@@ -28,7 +27,9 @@ export default async function MyClassesPage() {
 
   const tz = requireTz(student.timezone, 'my-classes:student')
 
-  // Fetch upcoming lessons (scheduled + cancelled) with teacher info
+  // Fetch upcoming scheduled lessons with teacher info. Cancelled lessons are
+  // deliberately NOT fetched: the student list no longer renders them, and the rows
+  // carry cancellation_reason / cancelled_by that must not ship to the client unused.
   const { data: rawLessons } = await supabase
     .from('lessons')
     .select(`
@@ -51,7 +52,7 @@ export default async function MyClassesPage() {
     `)
     .eq('student_id', student.id)
     .gte('scheduled_at', new Date().toISOString())
-    .in('status', ACTIVE_AND_CANCELLED_STATUSES)
+    .eq('status', 'scheduled')
     .order('scheduled_at', { ascending: true })
 
   // Supabase returns joins as arrays — flatten to single objects
