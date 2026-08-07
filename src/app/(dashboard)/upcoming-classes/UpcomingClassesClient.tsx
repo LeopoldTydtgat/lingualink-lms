@@ -367,7 +367,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId }: { cl
 }
 
 function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(() => classes.some(c => c.id === nextId))
   const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
 
   return (
@@ -402,14 +402,9 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [cancelledSectionExpanded, setCancelledSectionExpanded] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    try {
-      const stored = localStorage.getItem('lingualink_teacher_cancelled_section_expanded')
-      if (stored === 'true') setCancelledSectionExpanded(true)
-    } catch {}
   }, [])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
@@ -467,23 +462,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
     } finally {
       setRescheduleLoading(false)
     }
-  }
-
-  function handleCancelledSectionToggle() {
-    const next = !cancelledSectionExpanded
-    setCancelledSectionExpanded(next)
-    try { localStorage.setItem('lingualink_teacher_cancelled_section_expanded', String(next)) } catch {}
-  }
-
-  function handleJumpToCancelled() {
-    if (!cancelledSectionExpanded) handleCancelledSectionToggle()
-    requestAnimationFrame(() => {
-      const el = document.getElementById('cancelled-section')
-      const main = document.querySelector('main')
-      if (!el || !main) return
-      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop - 16
-      main.scrollTo({ top, behavior: 'smooth' })
-    })
   }
 
   // Hide only after the dismissal is persisted - hiding on failure silently resurrects the
@@ -548,14 +526,12 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             {cancelledClasses.length > 0 && (
               <>
                 {' '}&middot;{' '}
-                <button
-                  type="button"
-                  onClick={handleJumpToCancelled}
-                  className="font-medium hover:underline"
-                  style={{ color: '#FF8303', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+                <span
+                  className="font-medium"
+                  style={{ color: '#FF8303' }}
                 >
                   {cancelledClasses.length} cancelled
-                </button>
+                </span>
               </>
             )}
           </p>
@@ -591,33 +567,6 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
           {days.map(day => (
             <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
           ))}
-        </div>
-      )}
-
-      {cancelledClasses.length > 0 && (
-        <div id="cancelled-section" className="space-y-3 scroll-mt-6">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleCancelledSectionToggle}
-              className="flex items-center gap-2 text-left flex-1"
-            >
-              <span className="font-semibold text-gray-800">Cancelled</span>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
-                {cancelledClasses.length}
-              </span>
-              <div className="ml-auto">
-                <ChevronIcon rotated={cancelledSectionExpanded} />
-              </div>
-            </button>
-          </div>
-
-          {cancelledSectionExpanded && (
-            <div className="space-y-2">
-              {cancelledClasses.map(cls => (
-                <ClassCard key={cls.id} cls={cls} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={null} />
-              ))}
-            </div>
-          )}
         </div>
       )}
 
