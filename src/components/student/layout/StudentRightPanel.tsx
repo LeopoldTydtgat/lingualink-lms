@@ -8,6 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
+import { formatRemainingCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
 interface NextLesson {
@@ -160,7 +161,7 @@ export default function StudentRightPanel({
               </p>
             ) : mounted && secondsUntilNext !== null && secondsUntilNext <= 0 ? (
               <p style={{ fontSize: '14px', fontWeight: '600', lineHeight: '1.3', marginBottom: '4px', color: '#FF8303' }}>
-                In class — {formatCountdown(remainingSeconds)} remaining
+                In class: {formatRemainingCountdown(remainingSeconds)} remaining
               </p>
             ) : (
               <p style={{

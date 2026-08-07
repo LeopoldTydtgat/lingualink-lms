@@ -1,16 +1,15 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import {
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts'
 import { Activity, History, Pencil, type LucideIcon } from 'lucide-react'
 import { requireTz } from '@/lib/time/requireTz'
+import {
+  hasUsableLevelData,
+  listUnassessedSkillLabels,
+  toRadarData,
+  type LevelData,
+} from '@/lib/levels/levelData'
+import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
 
 // ----- Types -----
 
@@ -31,16 +30,6 @@ interface Training {
   status: string
 }
 
-interface LevelData {
-  grammar?: string
-  expression?: string
-  comprehension?: string
-  vocabulary?: string
-  accent?: string
-  overall_spoken?: string
-  overall_written?: string
-}
-
 interface Props {
   student: { id: string; full_name: string; timezone: string }
   training: Training | null
@@ -49,27 +38,6 @@ interface Props {
   latestLevelDate: string | null
   totalAssigned: number
   totalCompleted: number
-}
-
-// ----- CEFR conversion -----
-
-const CEFR_TO_NUM: Record<string, number> = {
-  A1: 1,
-  A2: 2,
-  B1: 3,
-  B2: 4,
-  C1: 5,
-  C2: 6,
-}
-
-const SKILL_LABELS: Record<keyof LevelData, string> = {
-  grammar: 'Grammar',
-  expression: 'Expression',
-  comprehension: 'Comprehension',
-  vocabulary: 'Vocabulary',
-  accent: 'Accent',
-  overall_spoken: 'Spoken',
-  overall_written: 'Written',
 }
 
 // ----- Helpers -----
@@ -164,17 +132,6 @@ function StatBlock({
   )
 }
 
-function Pill({ children }: { children: ReactNode }) {
-  return (
-    <span
-      className="rounded-full text-xs font-medium px-2 py-0.5"
-      style={{ background: '#f3f4f6', color: '#4b5563' }}
-    >
-      {children}
-    </span>
-  )
-}
-
 function ProgressBar({ value, max, colour = '#FF8303' }: { value: number; max: number; colour?: string }) {
   const pct = max === 0 ? 0 : Math.min(100, Math.round((value / max) * 100))
   return (
@@ -245,15 +202,13 @@ export default function ProgressClient({
   const avgPerWeek = avgClassesPerWeek(completedLessons)
 
   // ----- Radar chart data -----
-  const radarData = latestLevelData
-    ? (Object.keys(SKILL_LABELS) as (keyof LevelData)[])
-        .filter(key => latestLevelData[key])
-        .map(key => ({
-          skill: SKILL_LABELS[key],
-          value: CEFR_TO_NUM[latestLevelData[key] as string] ?? 0,
-          label: latestLevelData[key],
-        }))
-    : []
+  // All three chart surfaces share these helpers: same presence predicate, same
+  // canonical skill order, same 1..CEFR_MAX_VALUE scale, and unassessed skills
+  // dropped from the chart rather than plotted at zero. They are named
+  // underneath instead.
+  const hasLevels = hasUsableLevelData(latestLevelData)
+  const radarData = toRadarData(latestLevelData)
+  const unassessedSkills = listUnassessedSkillLabels(latestLevelData)
 
   // ----- Exercises -----
   const pending = Math.max(0, totalAssigned - totalCompleted)
@@ -322,53 +277,23 @@ export default function ProgressClient({
             </p>
           )}
 
-          {radarData.length > 0 ? (
-            <div className="grid lg:grid-cols-2 gap-4 items-center">
-              <ResponsiveContainer width="100%" height={360}>
-                <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
-                  <PolarGrid stroke="#e5e7eb" />
-                  <PolarAngleAxis
-                    dataKey="skill"
-                    tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
-                  />
-                  <Radar
-                    name="Level"
-                    dataKey="value"
-                    stroke="#FF8303"
-                    fill="#FF8303"
-                    fillOpacity={0.25}
-                    strokeWidth={2}
-                  />
-                  {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
-                  <Tooltip
-                    formatter={(value: unknown, _name: unknown, item: { payload?: { label?: string } }) => [
-                      item.payload?.label ?? String((value as number) ?? 0),
-                      'Level',
-                    ]}
-                    contentStyle={{
-                      fontSize: 12,
-                      fontFamily: 'Inter, sans-serif',
-                      borderRadius: 8,
-                      border: '1px solid #e5e7eb',
-                    }}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
+          {hasLevels ? (
+            <>
+            {/* Chart and the "not yet assessed" line are one shared component,
+                rendered in a single full-width column. The chart is a
+                fixed-size hand-rolled SVG ported from the admin report detail:
+                each skill's CEFR level prints on the chart under its axis
+                label, so the per-skill scorecard that used to sit below is
+                gone. This used to be a `grid lg:grid-cols-2` with the chart
+                inline, which handed the chart only half the card width from lg
+                up, and kept a second, drifting copy of the chart config. */}
+            <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
 
-              <div className="flex flex-col items-center justify-center" style={{ gap: '16px' }}>
-                {/* Skill/level pairs as neutral pills */}
-                <div className="flex flex-wrap gap-2 justify-center">
-                  {radarData.map(d => (
-                    <Pill key={d.skill}>{d.skill}: {d.label}</Pill>
-                  ))}
-                </div>
-
-                {/* CEFR scale hint */}
-                <p className="text-xs text-center" style={{ color: '#9ca3af' }}>
-                  Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
-                </p>
-              </div>
-            </div>
+            {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
+            <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
+              Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
+            </p>
+            </>
           ) : (
             <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
               Your level chart will appear here after your teacher submits your first assessment.

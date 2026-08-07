@@ -4,12 +4,10 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  ResponsiveContainer,
-} from 'recharts';
+  hasUsableLevelData,
+  listUnassessedSkillLabels,
+  toRadarData,
+} from '@/lib/levels/levelData';
 import {
   MessageSquareText,
   BookOpen,
@@ -20,6 +18,7 @@ import {
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
 import PastClassStatusTag from '@/components/student/PastClassStatusTag';
 import StarRating from '@/components/student/StarRating';
+import LevelAssessmentChart from '@/components/student/LevelAssessmentChart';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,27 +78,15 @@ interface Props {
 
 // ─── CEFR level → numeric for radar chart ─────────────────────────────────────
 
-const LEVEL_ORDER = [
-  'A1', 'A2',
-  'B1', 'B2',
-  'C1', 'C2',
-];
-
-function levelToNumber(level: string | undefined): number {
-  if (!level) return 0;
-  const idx = LEVEL_ORDER.indexOf(level);
-  return idx === -1 ? 0 : idx + 1;
-}
-
-const SKILLS = [
-  { key: 'grammar', label: 'Grammar' },
-  { key: 'expression', label: 'Expression' },
-  { key: 'comprehension', label: 'Comprehension' },
-  { key: 'vocabulary', label: 'Vocabulary' },
-  { key: 'accent', label: 'Accent' },
-  { key: 'overall_spoken', label: 'Spoken' },
-  { key: 'overall_written', label: 'Written' },
-];
+// The skill keys, their short labels and the CEFR-to-number scale now live in
+// one module that the report form (the only writer) and all three chart
+// surfaces import, so they cannot drift apart again.
+// See src/lib/levels/levelData.ts.
+//
+// The chart itself and the "not yet assessed" line are shared with the Progress
+// page as <LevelAssessmentChart />; only the card shell, header and empty
+// states below are page-specific. The chart prints each skill's CEFR level on
+// the chart itself, so there is no scorecard listed beneath it.
 
 // ─── Design system ────────────────────────────────────────────────────────────
 
@@ -174,19 +161,19 @@ export default function PastClassDetailClient({
   // deadlines or teacher pay is surfaced to the student.
   const awaitingReport = lesson.status === 'scheduled';
 
-  // Build radar chart data from report level_data
-  const radarData = SKILLS.map((skill) => ({
-    skill: skill.label,
-    value: levelToNumber(lesson.report?.level_data?.[skill.key]),
-    fullMark: 6,
-  }));
+  // Build radar chart data from report level_data. Shared with the Progress and
+  // admin surfaces: same presence predicate, same canonical order, same
+  // 1..CEFR_MAX_VALUE scale. Skills the teacher left blank are DROPPED from the
+  // chart - they used to be plotted at zero, which drew a spike to the centre
+  // that read as a failing grade rather than as "not graded". They are named
+  // underneath instead.
+  const levelData = lesson.report?.level_data ?? null;
+  const radarData = toRadarData(levelData);
+  const unassessedSkills = listUnassessedSkillLabels(levelData);
 
-  // Optional-chained throughout: a null report yields undefined -> false here,
-  // so the radar is never rendered from absent level_data.
-  const hasLevelData = Boolean(
-    lesson.report?.level_data &&
-      Object.values(lesson.report.level_data).some((v) => v)
-  );
+  // A null report, jsonb null, {} and empty-string values all yield false here,
+  // so the radar is never rendered from unusable level_data.
+  const hasLevelData = hasUsableLevelData(levelData);
 
   const hasSheets = assignments.some((a) => a.study_sheet);
 
@@ -282,16 +269,13 @@ export default function PastClassDetailClient({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* ── LEFT COLUMN ── */}
-      <div className="lg:col-span-2">
       {/* ── Teacher feedback ── */}
       <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
         <div className="mb-3">
           <CardHeader icon={MessageSquareText} label="TEACHER FEEDBACK" />
         </div>
         {lesson.report?.feedback_text ? (
-          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">
+          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed" style={{ maxWidth: '70ch' }}>
             {lesson.report.feedback_text}
           </p>
         ) : awaitingReport ? (
@@ -300,107 +284,18 @@ export default function PastClassDetailClient({
           </p>
         ) : (
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-            Your teacher didn&apos;t leave written feedback for this class.
+            No written feedback was recorded for this class.
           </p>
         )}
       </div>
 
-      {/* ── Assigned study sheets ── */}
-      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
-        <div className="mb-3">
-          <CardHeader icon={BookOpen} label="STUDY SHEETS ASSIGNED" />
-        </div>
-        {hasSheets ? (
-          <div className="space-y-2">
-            {assignments.map((a) =>
-              a.study_sheet ? (
-                <div
-                  key={a.id}
-                  className="flex items-center justify-between text-sm rounded-lg px-3 py-2"
-                  style={{ border: '1px solid #f3f4f6' }}
-                >
-                  <span className="text-gray-800">{a.study_sheet.title}</span>
-                  <div className="flex items-center gap-2 text-xs" style={{ color: '#9ca3af' }}>
-                    {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
-                    {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
-                    {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
-                  </div>
-                </div>
-              ) : null
-            )}
-          </div>
-        ) : (
-          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-            No study sheets were assigned after this class.
-          </p>
-        )}
-      </div>
-
-      {/* ── Teacher's marked-up material ── */}
-      {annotatedPdfs.length > 0 && (
-        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
-          <div className="mb-1">
-            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
-          </div>
-          <p className="text-xs text-gray-500 mb-3">
-            The notes your teacher made on screen during this class. View only.
-          </p>
-          <div className="space-y-4">
-            {annotatedPdfs.map((pdf) => (
-              <div
-                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
-                className="overflow-hidden bg-white"
-                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
-              >
-                <PdfViewer
-                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
-                  initialAnnotations={pdf.annotations}
-                  readOnly
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      </div>
-      {/* ── RIGHT COLUMN ── */}
-      <div className="lg:col-span-1">
       {/* ── Level radar chart ── */}
       {hasLevelData ? (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
           </div>
-          <div className="w-full" style={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#e5e7eb" />
-                <PolarAngleAxis
-                  dataKey="skill"
-                  tick={{ fontSize: 12, fill: '#6b7280' }}
-                />
-                <Radar
-                  name="Level"
-                  dataKey="value"
-                  stroke="#FF8303"
-                  fill="#FF8303"
-                  fillOpacity={0.25}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
-          {/* Level labels reference */}
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 justify-center">
-            {SKILLS.map((skill) => {
-              const level = lesson.report?.level_data?.[skill.key];
-              return level ? (
-                <span key={skill.key} className="text-xs text-gray-500">
-                  <span className="font-medium text-gray-700">{skill.label}:</span> {level}
-                </span>
-              ) : null;
-            })}
-          </div>
+          <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
         </div>
       ) : awaitingReport ? (
         /* Ended class, report not filed yet: keep the section visible with an
@@ -411,6 +306,26 @@ export default function PastClassDetailClient({
           </div>
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
             Your teacher&apos;s assessment of your level will appear here soon.
+          </p>
+        </div>
+      ) : lesson.report ? (
+        /* The report is filed but carries no usable level assessment - a no-show,
+           or a class where no skill was graded. This section used to disappear
+           entirely, which read as though the card did not exist; it now states
+           the outcome, matching the teacher-feedback card above, which always
+           renders an empty state of its own. Split on did_class_happen: when the
+           class never took place (a student/teacher no-show), the "didn't record"
+           copy would wrongly imply the teacher skipped paperwork - so that case
+           gets its own copy. null/absent (a reopened report) keeps the original
+           copy; it is not a third outcome. */
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-3">
+            <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
+          </div>
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            {lesson.report.did_class_happen === false
+              ? 'This class did not take place, so there is no level assessment.'
+              : 'No level assessment was recorded for this class.'}
           </p>
         </div>
       ) : null}
@@ -484,8 +399,64 @@ export default function PastClassDetailClient({
           )}
         </div>
       )}
+
+      {/* ── Assigned study sheets ── */}
+      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+        <div className="mb-3">
+          <CardHeader icon={BookOpen} label="STUDY SHEETS ASSIGNED" />
+        </div>
+        {hasSheets ? (
+          <div className="space-y-2">
+            {assignments.map((a) =>
+              a.study_sheet ? (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between text-sm rounded-lg px-3 py-2"
+                  style={{ border: '1px solid #f3f4f6' }}
+                >
+                  <span className="text-gray-800">{a.study_sheet.title}</span>
+                  <div className="flex items-center gap-2 text-xs" style={{ color: '#9ca3af' }}>
+                    {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
+                    {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
+                    {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
+                  </div>
+                </div>
+              ) : null
+            )}
+          </div>
+        ) : (
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            No study sheets were assigned after this class.
+          </p>
+        )}
       </div>
-      </div>
+
+      {/* ── Teacher's marked-up material ── */}
+      {annotatedPdfs.length > 0 && (
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            The notes your teacher made on screen during this class. View only.
+          </p>
+          <div className="space-y-4">
+            {annotatedPdfs.map((pdf) => (
+              <div
+                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
+                className="overflow-hidden bg-white"
+                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
+              >
+                <PdfViewer
+                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
+                  initialAnnotations={pdf.annotations}
+                  readOnly
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

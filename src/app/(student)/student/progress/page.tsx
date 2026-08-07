@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildAssignmentCompletion } from '@/lib/study/assignmentCompletion'
+import { hasUsableLevelData } from '@/lib/levels/levelData'
 import ProgressClient from './ProgressClient'
 
 export default async function ProgressPage() {
@@ -61,7 +62,8 @@ export default async function ProgressPage() {
 
   const studentLessonIds = (studentLessonIdRows ?? []).map((l) => l.id as string)
 
-  // Get the most recent report that has level_data (for the radar chart).
+  // Pick the level assessment that drives the radar chart.
+  //
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose
   // the whole row including student_confirmed and impersonation_note (a fraud flag
@@ -76,6 +78,16 @@ export default async function ProgressPage() {
   // a report reopened by admin for correction is excluded until re-filed, and
   // this also prevents Postgres NULLS-FIRST DESC ordering from promoting a
   // reopened report to the top.
+  //
+  // There is deliberately NO .not('level_data','is',null) filter any more. It
+  // excluded SQL NULL only, while complete_report_atomic writes
+  // `level_data = p_report_payload->'level_data'` - which stores jsonb null for
+  // a no-show and {} for a class where the teacher graded no skill. Neither is
+  // SQL NULL, so both passed the filter, and .limit(1) then made one of them
+  // "the latest assessment": the chart fell back to its empty state while that
+  // row's completed_at still printed the date line above it. Confirmed against
+  // live data. So fetch a bounded newest-first window instead and let
+  // hasUsableLevelData - the same predicate the charts gate on - choose the row.
   let latestLevelReport: {
     level_data: Record<string, string> | null
     completed_at: string | null
@@ -83,24 +95,30 @@ export default async function ProgressPage() {
 
   if (studentLessonIds.length > 0) {
     const admin = createAdminClient()
-    const { data: reportsWithLevel, error: reportsError } = await admin
+    const { data: recentReports, error: reportsError } = await admin
       .from('reports')
       .select('level_data, completed_at')
       .in('lesson_id', studentLessonIds)
-      .not('level_data', 'is', null)
       .not('completed_at', 'is', null)
       .order('completed_at', { ascending: false })
-      .limit(1)
+      .limit(20)
 
     if (reportsError) {
       // Fail soft: the page still renders, the radar chart just shows its
       // "no assessment yet" state instead of 500-ing the whole progress view.
       console.error('[student/progress] reports fetch failed:', reportsError)
-    } else if (reportsWithLevel && reportsWithLevel.length > 0) {
-      const row = reportsWithLevel[0]
-      latestLevelReport = {
-        level_data: (row.level_data ?? null) as Record<string, string> | null,
-        completed_at: (row.completed_at ?? null) as string | null,
+    } else {
+      // Newest-first, so the first qualifying row IS the latest real assessment.
+      // Both values below come from that ONE row, so the date line can never
+      // describe a different report than the chart. Nothing qualifying in the
+      // window leaves this null, and the client then renders its empty state
+      // with no date line above it.
+      const chosen = (recentReports ?? []).find((row) => hasUsableLevelData(row.level_data))
+      if (chosen) {
+        latestLevelReport = {
+          level_data: (chosen.level_data ?? null) as Record<string, string> | null,
+          completed_at: (chosen.completed_at ?? null) as string | null,
+        }
       }
     }
   }
