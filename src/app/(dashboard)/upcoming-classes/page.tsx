@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { ACTIVE_AND_CANCELLED_STATUSES } from '@/lib/billing/billability'
+import { MAX_LESSON_MS } from '@/app/api/student/availability/slotEngine'
 import { redirect } from 'next/navigation'
 import UpcomingClassesClient from './UpcomingClassesClient'
 
@@ -10,6 +11,12 @@ export default async function UpcomingClassesPage() {
   if (!user) redirect('/login')
 
   const adminClient = createAdminClient()
+
+  // One request-time instant shared by the query bound and the end-based filter below,
+  // so the two can never disagree about "now". new Date().getTime() rather than
+  // Date.now(): the react-hooks/purity rule mis-fires on Date.now() in async Server
+  // Components, and the repo's only other remedy is a file-wide rule disable.
+  const listNowMs = new Date().getTime()
 
   const [{ data: profile }, { data: rawLessons, error }] = await Promise.all([
     supabase
@@ -38,7 +45,12 @@ export default async function UpcomingClassesPage() {
       `)
       .eq('teacher_id', user.id)
       .in('status', ACTIVE_AND_CANCELLED_STATUSES)
-      .gte('scheduled_at', new Date().toISOString())
+      // COARSE prefilter only, widened by the longest bookable lesson so a class that
+      // has already started is still fetched. Instant-vs-instant (UTC): scheduled_at is
+      // a timestamptz and this bound is an instant, NOT a local calendar date — the
+      // toISOString() ban covers local date CONSTRUCTION, which this is not.
+      // The exact "has it ended" test is the end-based filter below.
+      .gte('scheduled_at', new Date(listNowMs - MAX_LESSON_MS).toISOString())
       .order('scheduled_at', { ascending: true }),
   ])
 
@@ -46,12 +58,25 @@ export default async function UpcomingClassesPage() {
     console.error('Error fetching lessons:', error)
   }
 
+  // A class leaves this list when it ENDS, not when it starts: an in-progress class must
+  // stay visible, matching the right panel's "In class" state on the same screen
+  // ((dashboard)/layout.tsx picks its lesson with the same now < start + duration rule).
+  // Cancelled rows — the only non-'scheduled' statuses this query returns — keep the
+  // original start-based cutoff: a cancelled class has nothing left to run, so nothing
+  // to keep on screen past its start.
+  const visibleLessons = (rawLessons ?? []).filter((l) => {
+    const startMs = new Date(l.scheduled_at).getTime()
+    return l.status === 'scheduled'
+      ? listNowMs < startMs + l.duration_minutes * 60 * 1000
+      : listNowMs < startMs
+  })
+
   // Build a "last time's recap" per student: the most recent PAST lesson that has a
   // written report, plus the study sheets assigned in that lesson. No teacher_id filter —
   // cross-teacher recap is intended so a substitute sees the prior teacher's notes.
   const studentIds = Array.from(
     new Set(
-      (rawLessons ?? [])
+      visibleLessons
         .map((l: any) => (Array.isArray(l.students) ? l.students[0] : l.students)?.id)
         .filter((id: string | undefined): id is string => Boolean(id))
     )
@@ -103,7 +128,7 @@ export default async function UpcomingClassesPage() {
     }
   }
 
-  const classes = (rawLessons ?? []).map((l: any) => {
+  const classes = visibleLessons.map((l: any) => {
     const student = Array.isArray(l.students) ? l.students[0] : l.students
     const scheduledAt = new Date(l.scheduled_at)
     const endsAt = new Date(scheduledAt.getTime() + l.duration_minutes * 60 * 1000)

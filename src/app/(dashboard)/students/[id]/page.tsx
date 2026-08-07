@@ -309,9 +309,27 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     }
   })
 
-  const now = new Date()
-  const upcomingLessons = lessons?.filter(l => new Date(l.scheduled_at) >= now) ?? []
-  const pastLessons = lessons?.filter(l => new Date(l.scheduled_at) < now) ?? []
+  // A lesson belongs in Next Classes until it ENDS, not until it starts: a class that is
+  // in progress must not drop into Past Classes, where a not-yet-written report would
+  // mislabel it 'No report'. Same end-based rule as the right panel's "In class" pick
+  // ((dashboard)/layout.tsx) and the admin dashboard's 'In Progress' status. Settled
+  // statuses (cancelled / completed / no-show) keep the original start-based cutoff —
+  // nothing is left to run, so nothing should linger in Next Classes.
+  // Instant-vs-instant in UTC ms; no local calendar date is involved. This set is not
+  // date-scoped in SQL at all (the query above fetches every lesson on the training),
+  // so no query bound is needed here.
+  // new Date().getTime() rather than Date.now(): the react-hooks/purity rule mis-fires
+  // on Date.now() in async Server Components, and the repo's only other remedy is a
+  // file-wide rule disable in eslint.config.mjs.
+  const nowMs = new Date().getTime()
+  const isUpcoming = (l: { scheduled_at: string; duration_minutes: number; status: string }) => {
+    const startMs = new Date(l.scheduled_at).getTime()
+    return l.status === 'scheduled'
+      ? nowMs < startMs + l.duration_minutes * 60 * 1000
+      : nowMs < startMs
+  }
+  const upcomingLessons = lessons?.filter(isUpcoming) ?? []
+  const pastLessons = lessons?.filter(l => !isUpcoming(l)) ?? []
 
   return (
     <StudentDetailClient
