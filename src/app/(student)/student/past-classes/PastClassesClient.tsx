@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Star, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Star, X, ChevronDown, ChevronRight, Calendar } from 'lucide-react';
 import { EmptyPastClasses } from '@/components/EmptyPastClasses';
 import PastClassStatusTag from '@/components/student/PastClassStatusTag';
 import StarRating from '@/components/student/StarRating';
@@ -104,8 +104,8 @@ function formatMonthLabel(isoString: string, timezone: string) {
   }).format(date);
 }
 
-// "Thu, 16 Jul 2026 · 08:00 – 08:30 · 30 min" — end time is start + duration,
-// computed manually from local hour/minute parts (no toISOString).
+// dateStr: "Thu, 16 Jul 2026". timeStr: "08:00 – 08:30 · 30 min" — end time is
+// start + duration, computed manually from local hour/minute parts (no toISOString).
 function formatClassRowLabel(isoString: string, durationMinutes: number, timezone: string) {
   const { dateStr } = formatDateTime(isoString, timezone);
   const { hour, minute } = getLocalParts(isoString, timezone);
@@ -114,7 +114,8 @@ function formatClassRowLabel(isoString: string, durationMinutes: number, timezon
   const endHour = Math.floor(totalEndMinutes / 60) % 24;
   const endMinute = totalEndMinutes % 60;
   const endStr = `${pad2(endHour)}:${pad2(endMinute)}`;
-  return `${dateStr} · ${startStr} – ${endStr} · ${durationMinutes} min`;
+  const timeStr = `${startStr} – ${endStr} · ${durationMinutes} min`;
+  return { dateStr, timeStr };
 }
 
 function TeacherAvatar({
@@ -289,7 +290,7 @@ function ClassRow({
   hasReview: boolean;
   needsReview: boolean;
 }) {
-  const rowLabel = formatClassRowLabel(lesson.scheduled_at, lesson.duration_minutes, studentTimezone);
+  const { dateStr, timeStr } = formatClassRowLabel(lesson.scheduled_at, lesson.duration_minutes, studentTimezone);
 
   return (
     <Link
@@ -301,13 +302,18 @@ function ClassRow({
       <TeacherAvatar teacher={lesson.teacher} size={32} />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm truncate">
-          <span style={{ fontWeight: 600, color: '#111827' }}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm truncate" style={{ fontWeight: 600, color: '#111827' }}>
             {lesson.teacher?.full_name ?? 'Unknown Teacher'}
           </span>
-          <span style={{ color: '#9ca3af' }}> · </span>
-          <span style={{ color: '#4b5563' }}>{rowLabel}</span>
-        </p>
+          <span
+            className="text-xs font-medium px-2.5 py-0.5 rounded-full flex-shrink-0"
+            style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+          >
+            {dateStr}
+          </span>
+          <span className="text-sm" style={{ color: '#4b5563' }}>{timeStr}</span>
+        </div>
       </div>
 
       <div className="flex flex-col items-end gap-1 flex-shrink-0">
@@ -520,9 +526,15 @@ export default function PastClassesClient({
                   <button
                     type="button"
                     onClick={() => toggleMonth(group.key)}
-                    className="w-full flex items-center justify-between px-1 py-2"
-                    style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb', zIndex: 10 }}
+                    className="w-full flex items-center gap-3 px-4 py-3 shadow-sm hover:shadow-md transition-all"
+                    style={{
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #E0DFDC',
+                      borderRadius: '12px',
+                      marginBottom: isExpanded ? '8px' : '0',
+                    }}
                   >
+                    <Calendar size={16} color="#9ca3af" />
                     <span
                       style={{
                         backgroundColor: '#FFF3E0',
@@ -534,13 +546,15 @@ export default function PastClassesClient({
                         display: 'inline-block',
                       }}
                     >
-                      {group.label} — {group.items.length} class{group.items.length !== 1 ? 'es' : ''}
+                      {group.label} {'\u2014'} {group.items.length} class{group.items.length !== 1 ? 'es' : ''}
                     </span>
-                    {isExpanded ? (
-                      <ChevronDown size={16} color="#9ca3af" />
-                    ) : (
-                      <ChevronRight size={16} color="#9ca3af" />
-                    )}
+                    <span className="ml-auto flex items-center">
+                      {isExpanded ? (
+                        <ChevronDown size={16} color="#9ca3af" />
+                      ) : (
+                        <ChevronRight size={16} color="#9ca3af" />
+                      )}
+                    </span>
                   </button>
 
                   {isExpanded && (
