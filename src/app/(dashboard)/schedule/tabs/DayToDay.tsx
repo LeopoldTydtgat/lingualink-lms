@@ -1040,7 +1040,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
         <button
           onClick={exportClassesToCalendar}
           disabled={isExporting}
-          title={`Exports all your upcoming classes as a calendar file. All times shown in ${displayTz}.`}
+          title="Downloads a one-time snapshot file of your current schedule. It does not update."
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -1057,7 +1057,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           }}
         >
           <Download size={14} />
-          {isExporting ? 'Exporting...' : 'Export'}
+          {isExporting ? 'Exporting...' : 'Download snapshot'}
         </button>
         </div>
       </div>
