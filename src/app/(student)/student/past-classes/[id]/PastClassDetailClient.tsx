@@ -272,16 +272,13 @@ export default function PastClassDetailClient({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* ── LEFT COLUMN ── */}
-      <div className="lg:col-span-2">
       {/* ── Teacher feedback ── */}
       <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
         <div className="mb-3">
           <CardHeader icon={MessageSquareText} label="TEACHER FEEDBACK" />
         </div>
         {lesson.report?.feedback_text ? (
-          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed">
+          <p className="text-sm text-gray-700 whitespace-pre-line leading-relaxed" style={{ maxWidth: '70ch' }}>
             {lesson.report.feedback_text}
           </p>
         ) : awaitingReport ? (
@@ -295,105 +292,56 @@ export default function PastClassDetailClient({
         )}
       </div>
 
-      {/* ── Assigned study sheets ── */}
-      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
-        <div className="mb-3">
-          <CardHeader icon={BookOpen} label="STUDY SHEETS ASSIGNED" />
-        </div>
-        {hasSheets ? (
-          <div className="space-y-2">
-            {assignments.map((a) =>
-              a.study_sheet ? (
-                <div
-                  key={a.id}
-                  className="flex items-center justify-between text-sm rounded-lg px-3 py-2"
-                  style={{ border: '1px solid #f3f4f6' }}
-                >
-                  <span className="text-gray-800">{a.study_sheet.title}</span>
-                  <div className="flex items-center gap-2 text-xs" style={{ color: '#9ca3af' }}>
-                    {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
-                    {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
-                    {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
-                  </div>
-                </div>
-              ) : null
-            )}
-          </div>
-        ) : (
-          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-            No study sheets were assigned after this class.
-          </p>
-        )}
-      </div>
-
-      {/* ── Teacher's marked-up material ── */}
-      {annotatedPdfs.length > 0 && (
-        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
-          <div className="mb-1">
-            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
-          </div>
-          <p className="text-xs text-gray-500 mb-3">
-            The notes your teacher made on screen during this class. View only.
-          </p>
-          <div className="space-y-4">
-            {annotatedPdfs.map((pdf) => (
-              <div
-                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
-                className="overflow-hidden bg-white"
-                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
-              >
-                <PdfViewer
-                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
-                  initialAnnotations={pdf.annotations}
-                  readOnly
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      </div>
-      {/* ── RIGHT COLUMN ── */}
-      <div className="lg:col-span-1">
       {/* ── Level radar chart ── */}
       {hasLevelData ? (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
           </div>
-          <div className="w-full" style={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#e5e7eb" />
-                <PolarAngleAxis
-                  dataKey="skill"
-                  tick={{ fontSize: 12, fill: '#6b7280' }}
-                />
-                {/* Fixed A1..C2 domain so a B1 sits at the same radius here, on
-                    Progress and on the admin report. Without it recharts derives
-                    the radius from this one report's values. */}
-                <PolarRadiusAxis
-                  domain={[0, CEFR_MAX_VALUE]}
-                  tick={false}
-                  axisLine={false}
-                />
-                <Radar
-                  name="Level"
-                  dataKey="value"
-                  stroke="#FF8303"
-                  fill="#FF8303"
-                  fillOpacity={0.25}
-                />
-              </RadarChart>
-            </ResponsiveContainer>
+          <div style={{ maxWidth: '460px', margin: '0 auto' }}>
+            <div className="w-full" style={{ height: 320 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }} outerRadius="72%">
+                  <PolarGrid stroke="#e5e7eb" />
+                  <PolarAngleAxis
+                    dataKey="skill"
+                    tick={{ fontSize: 12, fill: '#6b7280' }}
+                  />
+                  {/* Fixed A1..C2 domain so a B1 sits at the same radius here, on
+                      Progress and on the admin report. Without it recharts derives
+                      the radius from this one report's values. */}
+                  <PolarRadiusAxis
+                    domain={[0, CEFR_MAX_VALUE]}
+                    tick={false}
+                    axisLine={false}
+                  />
+                  <Radar
+                    name="Level"
+                    dataKey="value"
+                    stroke="#FF8303"
+                    fill="#FF8303"
+                    fillOpacity={0.25}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
           {/* Level labels reference */}
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 justify-center">
-            {radarData.map((d) => (
-              <span key={d.key} className="text-xs text-gray-500">
-                <span className="font-medium text-gray-700">{d.skill}:</span> {d.level}
-              </span>
+          <div style={{ maxWidth: '460px', margin: '16px auto 0' }}>
+            {radarData.map((d, i) => (
+              <div
+                key={d.key}
+                className="flex items-center justify-between py-2"
+                style={i === 0 ? undefined : { borderTop: '1px solid #f3f4f6' }}
+              >
+                <span className="text-sm" style={{ color: '#4b5563' }}>{d.skill}</span>
+                <span
+                  className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                >
+                  {d.level}
+                </span>
+              </div>
             ))}
           </div>
           {unassessedSkills.length > 0 && (
@@ -504,8 +452,64 @@ export default function PastClassDetailClient({
           )}
         </div>
       )}
+
+      {/* ── Assigned study sheets ── */}
+      <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+        <div className="mb-3">
+          <CardHeader icon={BookOpen} label="STUDY SHEETS ASSIGNED" />
+        </div>
+        {hasSheets ? (
+          <div className="space-y-2">
+            {assignments.map((a) =>
+              a.study_sheet ? (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between text-sm rounded-lg px-3 py-2"
+                  style={{ border: '1px solid #f3f4f6' }}
+                >
+                  <span className="text-gray-800">{a.study_sheet.title}</span>
+                  <div className="flex items-center gap-2 text-xs" style={{ color: '#9ca3af' }}>
+                    {a.study_sheet.category && <span>{a.study_sheet.category}</span>}
+                    {a.study_sheet.category && a.study_sheet.level && <span>{String.fromCharCode(183)}</span>}
+                    {a.study_sheet.level && <span>{a.study_sheet.level}</span>}
+                  </div>
+                </div>
+              ) : null
+            )}
+          </div>
+        ) : (
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            No study sheets were assigned after this class.
+          </p>
+        )}
       </div>
-      </div>
+
+      {/* ── Teacher's marked-up material ── */}
+      {annotatedPdfs.length > 0 && (
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            The notes your teacher made on screen during this class. View only.
+          </p>
+          <div className="space-y-4">
+            {annotatedPdfs.map((pdf) => (
+              <div
+                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
+                className="overflow-hidden bg-white"
+                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
+              >
+                <PdfViewer
+                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
+                  initialAnnotations={pdf.annotations}
+                  readOnly
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
