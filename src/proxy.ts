@@ -136,6 +136,7 @@ export async function proxy(request: NextRequest) {
     '/api/cron/invoice-reminder',
     '/api/cron/report-overdue',
     '/api/cron/training-ending-soon',
+    '/api/cron/google-busy-sync',
     '/api/keep-alive',
     '/api/webhooks/resend',
   ])
