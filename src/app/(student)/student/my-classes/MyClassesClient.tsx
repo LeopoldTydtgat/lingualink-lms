@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronUp,
   Plus,
+  Calendar,
   CalendarDays,
   GraduationCap,
   Clock,
@@ -247,7 +248,7 @@ function LessonRow({
   studentTimezone,
   mounted,
   now,
-  isLast,
+  isFirst,
   showDate,
   cancellingId,
   showCancelWarning,
@@ -259,7 +260,7 @@ function LessonRow({
   studentTimezone: string
   mounted: boolean
   now: number
-  isLast: boolean
+  isFirst: boolean
   showDate: boolean
   cancellingId: string | null
   showCancelWarning: string | null
@@ -267,6 +268,7 @@ function LessonRow({
   onCancel: (id: string, within24: boolean) => void
   onDismissWarning: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
   const isCancelled = isCancelledStatus(lesson.status)
   const cancelLabel = getCancellationLabel(lesson, 'student')
   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
@@ -280,11 +282,11 @@ function LessonRow({
   return (
     <div>
       <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
-          backgroundColor: '#ffffff',
-          border: '1px solid #E0DFDC',
-          borderTop: 'none',
-          borderRadius: isLast ? '0 0 8px 8px' : '0',
+          backgroundColor: hovered ? '#f9fafb' : '#ffffff',
+          borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
           padding: '14px 16px',
         }}
       >
@@ -878,7 +880,7 @@ export default function MyClassesClient({
               : dayKey
 
             return (
-              <div key={dayKey} style={{ marginBottom: '8px' }}>
+              <div key={dayKey} className="card-elevated" style={{ overflow: 'hidden', marginBottom: '12px' }}>
 
                 {/* Day group header — click to expand/collapse */}
                 <button
@@ -890,8 +892,7 @@ export default function MyClassesClient({
                     alignItems: 'center',
                     padding: '10px 16px',
                     backgroundColor: '#f9fafb',
-                    border: '1px solid #E0DFDC',
-                    borderRadius: isExpanded ? '8px 8px 0 0' : '8px',
+                    borderBottom: isExpanded ? '1px solid #E0DFDC' : 'none',
                     fontSize: '13px',
                     fontWeight: '600',
                     color: '#374151',
@@ -900,7 +901,8 @@ export default function MyClassesClient({
                   }}
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {dayLabel}
+                    <Calendar size={15} color="#9ca3af" />
+                    <span style={{ display: 'inline-block', minWidth: '100px' }}>{dayLabel}</span>
                     <span style={{
                       fontSize: '12px',
                       fontWeight: '600',
@@ -926,7 +928,7 @@ export default function MyClassesClient({
                     studentTimezone={studentTimezone}
                     mounted={mounted}
                     now={now}
-                    isLast={i === dayLessons.length - 1}
+                    isFirst={i === 0}
                     showDate={false}
                     cancellingId={cancellingId}
                     showCancelWarning={showCancelWarning}
