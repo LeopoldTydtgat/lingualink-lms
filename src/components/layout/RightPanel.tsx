@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
+import { formatRemainingCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
@@ -443,7 +444,7 @@ export default function RightPanel({
                 <p className="text-sm font-semibold text-gray-900 leading-snug mb-1">Class has ended</p>
               ) : mounted && secondsUntil !== null && secondsUntil <= 0 ? (
                 <p className="text-sm font-semibold leading-snug mb-1" style={{ color: '#FF8303' }}>
-                  In class — {formatCountdown(remainingSeconds)} remaining
+                  In class: {formatRemainingCountdown(remainingSeconds)} remaining
                 </p>
               ) : (
                 <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums', lineHeight: '1.2', marginBottom: '4px' }}>
