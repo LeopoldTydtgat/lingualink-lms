@@ -484,47 +484,57 @@ export default function RightPanel({
 
               {/* Join Class — always visible; greyed until 10 min before start, gone at end */}
               {nextLesson.teams_join_url ? (
-                <a
-                  href={isJoinable ? nextLesson.teams_join_url : undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onMouseEnter={() => setJoinHovered(true)}
-                  onMouseLeave={() => setJoinHovered(false)}
-                  onClick={() => {
-                    // Fire-and-forget teacher join-click logging. Guarded to the joinable
-                    // state only, and never awaited / never throws — logging must not block
-                    // or break opening Teams.
-                    if (!isJoinable || !nextLesson?.teams_join_url) return
-                    fetch('/api/join-click', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ lesson_id: nextLesson.id }),
-                      keepalive: true,
-                    }).catch(() => {})
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    width: '100%',
-                    padding: '8px 12px',
-                    backgroundColor: isJoinable ? (joinHovered ? '#FF8303' : '#ffffff') : '#E0DFDC',
-                    color: isJoinable ? (joinHovered ? '#ffffff' : '#FF8303') : '#9ca3af',
-                    border: isJoinable ? '1.5px solid #FF8303' : 'none',
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    textAlign: 'center',
-                    textDecoration: 'none',
-                    cursor: isJoinable ? 'pointer' : 'default',
-                    pointerEvents: isJoinable ? 'auto' : 'none',
-                    transition: 'background-color 0.18s ease, color 0.18s ease',
-                  }}
-                >
-                  <Video size={14} />
-                  Join Class
-                </a>
+                <>
+                  <a
+                    href={isJoinable ? nextLesson.teams_join_url : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onMouseEnter={() => setJoinHovered(true)}
+                    onMouseLeave={() => setJoinHovered(false)}
+                    onClick={() => {
+                      // Fire-and-forget teacher join-click logging. Guarded to the joinable
+                      // state only, and never awaited / never throws — logging must not block
+                      // or break opening Teams.
+                      if (!isJoinable || !nextLesson?.teams_join_url) return
+                      fetch('/api/join-click', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lesson_id: nextLesson.id }),
+                        keepalive: true,
+                      }).catch(() => {})
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      width: '100%',
+                      padding: '8px 12px',
+                      backgroundColor: isJoinable ? (joinHovered ? '#FF8303' : '#ffffff') : '#E0DFDC',
+                      color: isJoinable ? (joinHovered ? '#ffffff' : '#FF8303') : '#9ca3af',
+                      border: isJoinable ? '1.5px solid #FF8303' : 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      textAlign: 'center',
+                      textDecoration: 'none',
+                      cursor: isJoinable ? 'pointer' : 'default',
+                      pointerEvents: isJoinable ? 'auto' : 'none',
+                      transition: 'background-color 0.18s ease, color 0.18s ease',
+                    }}
+                  >
+                    <Video size={14} />
+                    Join Class
+                  </a>
+                  {/* Mirrors the student panel: a greyed button with no explanation
+                      reads as broken. Suppressed once the class has ended, when the
+                      button is gone for good rather than not open yet. */}
+                  {!isJoinable && !classEnded && (
+                    <p style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center', marginTop: '6px' }}>
+                      Opens 10 min before class
+                    </p>
+                  )}
+                </>
               ) : (
                 <span style={{ fontSize: '12px', color: '#9ca3af' }}>
                   Link not yet available
