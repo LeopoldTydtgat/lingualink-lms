@@ -1,24 +1,15 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import {
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts'
 import { Activity, History, Pencil, type LucideIcon } from 'lucide-react'
 import { requireTz } from '@/lib/time/requireTz'
 import {
-  CEFR_MAX_VALUE,
   hasUsableLevelData,
   listUnassessedSkillLabels,
   toRadarData,
   type LevelData,
 } from '@/lib/levels/levelData'
+import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
 
 // ----- Types -----
 
@@ -138,17 +129,6 @@ function StatBlock({
       <div style={{ fontSize: '24px', fontWeight: 700, color: '#111827' }}>{value}</div>
       <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>{label}</div>
     </div>
-  )
-}
-
-function Pill({ children }: { children: ReactNode }) {
-  return (
-    <span
-      className="rounded-full text-xs font-medium px-2 py-0.5"
-      style={{ background: '#f3f4f6', color: '#4b5563' }}
-    >
-      {children}
-    </span>
   )
 }
 
@@ -299,83 +279,19 @@ export default function ProgressClient({
 
           {hasLevels ? (
             <>
-            {/* Single full-width column, matching the past-class detail card.
-                This used to be a `grid lg:grid-cols-2`, which handed the chart
-                only half the card width from lg up - narrow enough that the
-                longest angle-axis label, "Comprehension", was clipped mid-word.
-                The 460px cap, the wide left/right margins and the 72%
-                outerRadius are the exact containment that card uses, where all
-                seven labels render whole. */}
-            <div style={{ maxWidth: '460px', margin: '0 auto' }}>
-              <div className="w-full" style={{ height: 320 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={radarData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }} outerRadius="72%">
-                    <PolarGrid stroke="#e5e7eb" />
-                    <PolarAngleAxis
-                      dataKey="skill"
-                      tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
-                    />
-                    {/* Fixed A1..C2 domain, matching the past-class and admin charts:
-                        without it recharts derives the radius from this one report,
-                        so an all-B1 assessment filled the grid exactly like an
-                        all-C2 one. Ticks and axis line stay hidden - the scale is
-                        spelled out in the hint below instead. */}
-                    <PolarRadiusAxis
-                      domain={[0, CEFR_MAX_VALUE]}
-                      tick={false}
-                      axisLine={false}
-                    />
-                    <Radar
-                      name="Level"
-                      dataKey="value"
-                      stroke="#FF8303"
-                      fill="#FF8303"
-                      fillOpacity={0.25}
-                      strokeWidth={2}
-                    />
-                    {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
-                    <Tooltip
-                      formatter={(value: unknown, _name: unknown, item: { payload?: { level?: string } }) => [
-                        item.payload?.level ?? String((value as number) ?? 0),
-                        'Level',
-                      ]}
-                      contentStyle={{
-                        fontSize: 12,
-                        fontFamily: 'Inter, sans-serif',
-                        borderRadius: 8,
-                        border: '1px solid #e5e7eb',
-                      }}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
+            {/* Chart, per-skill scorecard and the "not yet assessed" line are one
+                shared component, rendered in a single full-width column so the
+                angle-axis labels have room. This used to be a `grid
+                lg:grid-cols-2` with the chart inline, which handed the chart
+                only half the card width from lg up - narrow enough that
+                "Comprehension" clipped mid-word - and kept a second, drifting
+                copy of the chart config. */}
+            <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
 
-            {/* Skill readout, unchanged, now stacked under the chart rather than
-                sitting in the second grid column. mt-4 replaces the 16px the
-                removed grid's gap-4 used to provide. */}
-            <div className="flex flex-col items-center justify-center mt-4" style={{ gap: '16px' }}>
-              {/* Skill/level pairs as neutral pills */}
-              <div className="flex flex-wrap gap-2 justify-center">
-                {radarData.map(d => (
-                  <Pill key={d.key}>{d.skill}: {d.level}</Pill>
-                ))}
-              </div>
-
-              {/* CEFR scale hint */}
-              <p className="text-xs text-center" style={{ color: '#9ca3af' }}>
-                Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
-              </p>
-            </div>
-
-            {/* Skills this assessment left blank. Named rather than drawn, so a
-                partial assessment reads as partial instead of as a differently
-                shaped chart. */}
-            {unassessedSkills.length > 0 && (
-              <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
-                Not yet assessed: {unassessedSkills.join(', ')}
-              </p>
-            )}
+            {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
+            <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
+              Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
+            </p>
             </>
           ) : (
             <p className="text-center text-sm" style={{ color: '#9ca3af' }}>

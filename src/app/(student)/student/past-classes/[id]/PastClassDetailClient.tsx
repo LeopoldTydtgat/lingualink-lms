@@ -4,15 +4,6 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  ResponsiveContainer,
-} from 'recharts';
-import {
-  CEFR_MAX_VALUE,
   hasUsableLevelData,
   listUnassessedSkillLabels,
   toRadarData,
@@ -27,6 +18,7 @@ import {
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
 import PastClassStatusTag from '@/components/student/PastClassStatusTag';
 import StarRating from '@/components/student/StarRating';
+import LevelAssessmentChart from '@/components/student/LevelAssessmentChart';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +82,10 @@ interface Props {
 // one module that the report form (the only writer) and all three chart
 // surfaces import, so they cannot drift apart again.
 // See src/lib/levels/levelData.ts.
+//
+// The chart itself, its scorecard and the "not yet assessed" line are shared
+// with the Progress page as <LevelAssessmentChart />; only the card shell,
+// header and empty states below are page-specific.
 
 // ─── Design system ────────────────────────────────────────────────────────────
 
@@ -298,57 +294,7 @@ export default function PastClassDetailClient({
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
           </div>
-          <div style={{ maxWidth: '460px', margin: '0 auto' }}>
-            <div className="w-full" style={{ height: 320 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={radarData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }} outerRadius="72%">
-                  <PolarGrid stroke="#e5e7eb" />
-                  <PolarAngleAxis
-                    dataKey="skill"
-                    tick={{ fontSize: 12, fill: '#6b7280' }}
-                  />
-                  {/* Fixed A1..C2 domain so a B1 sits at the same radius here, on
-                      Progress and on the admin report. Without it recharts derives
-                      the radius from this one report's values. */}
-                  <PolarRadiusAxis
-                    domain={[0, CEFR_MAX_VALUE]}
-                    tick={false}
-                    axisLine={false}
-                  />
-                  <Radar
-                    name="Level"
-                    dataKey="value"
-                    stroke="#FF8303"
-                    fill="#FF8303"
-                    fillOpacity={0.25}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          {/* Level labels reference */}
-          <div style={{ maxWidth: '460px', margin: '16px auto 0' }}>
-            {radarData.map((d, i) => (
-              <div
-                key={d.key}
-                className="flex items-center justify-between py-2"
-                style={i === 0 ? undefined : { borderTop: '1px solid #f3f4f6' }}
-              >
-                <span className="text-sm" style={{ color: '#4b5563' }}>{d.skill}</span>
-                <span
-                  className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-                >
-                  {d.level}
-                </span>
-              </div>
-            ))}
-          </div>
-          {unassessedSkills.length > 0 && (
-            <p className="text-xs text-center mt-2" style={{ color: '#9ca3af' }}>
-              Not yet assessed: {unassessedSkills.join(', ')}
-            </p>
-          )}
+          <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
         </div>
       ) : awaitingReport ? (
         /* Ended class, report not filed yet: keep the section visible with an
