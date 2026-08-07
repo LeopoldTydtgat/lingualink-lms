@@ -299,61 +299,73 @@ export default function ProgressClient({
 
           {hasLevels ? (
             <>
-            <div className="grid lg:grid-cols-2 gap-4 items-center">
-              <ResponsiveContainer width="100%" height={360}>
-                <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
-                  <PolarGrid stroke="#e5e7eb" />
-                  <PolarAngleAxis
-                    dataKey="skill"
-                    tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
-                  />
-                  {/* Fixed A1..C2 domain, matching the past-class and admin charts:
-                      without it recharts derives the radius from this one report,
-                      so an all-B1 assessment filled the grid exactly like an
-                      all-C2 one. Ticks and axis line stay hidden - the scale is
-                      spelled out in the hint below instead. */}
-                  <PolarRadiusAxis
-                    domain={[0, CEFR_MAX_VALUE]}
-                    tick={false}
-                    axisLine={false}
-                  />
-                  <Radar
-                    name="Level"
-                    dataKey="value"
-                    stroke="#FF8303"
-                    fill="#FF8303"
-                    fillOpacity={0.25}
-                    strokeWidth={2}
-                  />
-                  {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
-                  <Tooltip
-                    formatter={(value: unknown, _name: unknown, item: { payload?: { level?: string } }) => [
-                      item.payload?.level ?? String((value as number) ?? 0),
-                      'Level',
-                    ]}
-                    contentStyle={{
-                      fontSize: 12,
-                      fontFamily: 'Inter, sans-serif',
-                      borderRadius: 8,
-                      border: '1px solid #e5e7eb',
-                    }}
-                  />
-                </RadarChart>
-              </ResponsiveContainer>
-
-              <div className="flex flex-col items-center justify-center" style={{ gap: '16px' }}>
-                {/* Skill/level pairs as neutral pills */}
-                <div className="flex flex-wrap gap-2 justify-center">
-                  {radarData.map(d => (
-                    <Pill key={d.key}>{d.skill}: {d.level}</Pill>
-                  ))}
-                </div>
-
-                {/* CEFR scale hint */}
-                <p className="text-xs text-center" style={{ color: '#9ca3af' }}>
-                  Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
-                </p>
+            {/* Single full-width column, matching the past-class detail card.
+                This used to be a `grid lg:grid-cols-2`, which handed the chart
+                only half the card width from lg up - narrow enough that the
+                longest angle-axis label, "Comprehension", was clipped mid-word.
+                The 460px cap, the wide left/right margins and the 72%
+                outerRadius are the exact containment that card uses, where all
+                seven labels render whole. */}
+            <div style={{ maxWidth: '460px', margin: '0 auto' }}>
+              <div className="w-full" style={{ height: 320 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={radarData} margin={{ top: 20, right: 60, bottom: 20, left: 60 }} outerRadius="72%">
+                    <PolarGrid stroke="#e5e7eb" />
+                    <PolarAngleAxis
+                      dataKey="skill"
+                      tick={{ fontSize: 12, fill: '#6b7280', fontFamily: 'Inter, sans-serif' }}
+                    />
+                    {/* Fixed A1..C2 domain, matching the past-class and admin charts:
+                        without it recharts derives the radius from this one report,
+                        so an all-B1 assessment filled the grid exactly like an
+                        all-C2 one. Ticks and axis line stay hidden - the scale is
+                        spelled out in the hint below instead. */}
+                    <PolarRadiusAxis
+                      domain={[0, CEFR_MAX_VALUE]}
+                      tick={false}
+                      axisLine={false}
+                    />
+                    <Radar
+                      name="Level"
+                      dataKey="value"
+                      stroke="#FF8303"
+                      fill="#FF8303"
+                      fillOpacity={0.25}
+                      strokeWidth={2}
+                    />
+                    {/* value typed as number | undefined - recharts passes ValueType which includes undefined */}
+                    <Tooltip
+                      formatter={(value: unknown, _name: unknown, item: { payload?: { level?: string } }) => [
+                        item.payload?.level ?? String((value as number) ?? 0),
+                        'Level',
+                      ]}
+                      contentStyle={{
+                        fontSize: 12,
+                        fontFamily: 'Inter, sans-serif',
+                        borderRadius: 8,
+                        border: '1px solid #e5e7eb',
+                      }}
+                    />
+                  </RadarChart>
+                </ResponsiveContainer>
               </div>
+            </div>
+
+            {/* Skill readout, unchanged, now stacked under the chart rather than
+                sitting in the second grid column. mt-4 replaces the 16px the
+                removed grid's gap-4 used to provide. */}
+            <div className="flex flex-col items-center justify-center mt-4" style={{ gap: '16px' }}>
+              {/* Skill/level pairs as neutral pills */}
+              <div className="flex flex-wrap gap-2 justify-center">
+                {radarData.map(d => (
+                  <Pill key={d.key}>{d.skill}: {d.level}</Pill>
+                ))}
+              </div>
+
+              {/* CEFR scale hint */}
+              <p className="text-xs text-center" style={{ color: '#9ca3af' }}>
+                Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
+              </p>
             </div>
 
             {/* Skills this assessment left blank. Named rather than drawn, so a
