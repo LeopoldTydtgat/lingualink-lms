@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, CheckCircle, Clock, Search } from 'lucide-react'
+import { CalendarDays, CheckCircle, Clock, FileText, Search } from 'lucide-react'
 import { EmptyStudy } from '@/components/EmptyStudy'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 import DifficultyBars from '@/components/study/DifficultyBars'
@@ -25,12 +25,23 @@ interface Assignment {
   study_sheet: StudySheet | null
 }
 
+/** One live teaching-material homework grant (material_assignments row). */
+interface MaterialAssignment {
+  id: string
+  title: string
+  attachment_name: string
+  page_start: number | null
+  page_end: number | null
+  assigned_at: string
+}
+
 interface Props {
   studentId: string
   assignments: Assignment[]
   completedAssignmentIds: string[]
   practicedSheetIds: string[]
   library: StudySheet[]
+  materialAssignments: MaterialAssignment[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -52,6 +63,18 @@ function formatDate(iso: string) {
     month: 'short',
     year: 'numeric',
   }).format(new Date(iso))
+}
+
+// Page-range label for a material grant. page_start / page_end are 1-based and
+// inclusive; both null means the whole document. A half-null range is forbidden
+// by the table's CHECK constraint but is labelled defensively rather than
+// rendering an empty badge.
+function pageRangeLabel(pageStart: number | null, pageEnd: number | null): string {
+  if (pageStart === null && pageEnd === null) return 'Whole document'
+  if (pageStart !== null && pageEnd !== null) {
+    return pageStart === pageEnd ? `Page ${pageStart}` : `Pages ${pageStart}-${pageEnd}`
+  }
+  return `Page ${pageStart ?? pageEnd}`
 }
 
 // ── Reusable buttons (hover via handlers — Tailwind v4 dynamic-class rule) ─────
@@ -128,7 +151,7 @@ function StatCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library, materialAssignments }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
@@ -171,6 +194,12 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
       ? `/student/study/${sheetId}?assignment=${assignmentId}`
       : `/student/study/${sheetId}`
     router.push(url)
+  }
+
+  // Teaching-material homework opens its own page, keyed by the GRANT id (not a
+  // study_sheet id): the sheet itself is audience='staff' and unreadable here.
+  function openMaterial(assignmentId: string) {
+    router.push(`/student/study/material/${assignmentId}`)
   }
 
   return (
@@ -246,6 +275,23 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
       {/* ── ASSIGNED SECTION ──────────────────────────────────────────────── */}
       {activeSection === 'assigned' && (
         <div>
+          {/* Teaching-material grants. Flat list, no pending/completed state:
+              these carry no completion signal, so they are never counted in the
+              tab badge, the stat cards, or "This Week". Nothing renders at all
+              (not even the heading) when there are no live grants. */}
+          {materialAssignments.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+                Homework Tasks
+              </h2>
+              <div className="flex flex-col gap-3">
+                {materialAssignments.map((m) => (
+                  <MaterialCard key={m.id} material={m} onOpen={() => openMaterial(m.id)} />
+                ))}
+              </div>
+            </div>
+          )}
+
           {pendingAssignments.length === 0 && completedAssignments.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <EmptyStudy />
@@ -478,6 +524,70 @@ function AssignmentCard({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// --- Material Card sub-component -------------------------------------------
+//
+// Deliberately NOT AssignmentCard: a material grant has no completion state, no
+// sheet metadata (the sheet is audience='staff' and unreadable by this student),
+// and no status to colour a spine by. Keeping it separate is what stops the two
+// cards from growing shared status logic that only one of them actually has.
+function MaterialCard({
+  material,
+  onOpen,
+}: {
+  material: MaterialAssignment
+  onOpen: () => void
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className="flex items-center justify-between px-4 py-4 rounded-xl bg-white shadow-sm cursor-pointer text-left"
+      style={{
+        border: '1px solid #f3f4f6',
+        borderLeft: '3px solid #FF8303',
+      }}
+    >
+      <div className="flex items-start gap-3 min-w-0">
+        <div
+          className="mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ backgroundColor: '#fff7ed' }}
+        >
+          <FileText size={15} style={{ color: '#FF8303' }} />
+        </div>
+
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-900 text-sm">{material.title}</p>
+          <p className="text-xs text-gray-500 mt-0.5 truncate">{material.attachment_name}</p>
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            <span
+              className="px-2 py-0.5 rounded-full text-xs font-medium"
+              style={{ backgroundColor: '#FFF0E0', color: '#FF8303' }}
+            >
+              {pageRangeLabel(material.page_start, material.page_end)}
+            </span>
+            <span className="text-xs text-gray-400">
+              Assigned {formatDate(material.assigned_at)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* The whole card is clickable, so the button's click must not bubble back
+          into the card handler and fire a second navigation. */}
+      <div className="ml-4 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+        <StartButton label="Open" onClick={onOpen} />
+      </div>
     </div>
   )
 }

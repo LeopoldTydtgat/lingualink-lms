@@ -4,7 +4,9 @@ import React, { useState } from 'react'
 import Link from 'next/link'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
+import { X } from 'lucide-react'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
+import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
 
 // --- Types ---
@@ -39,12 +41,19 @@ type Report = {
   lesson: Lesson
 }
 
+type MaterialSheet = {
+  id: string
+  title: string
+  attachments: { name: string; type: string }[]
+}
+
 type Props = {
   report: Report
   profile: { id: string; full_name: string; role: string }
   isAdmin: boolean
   assignedSheetIds: string[]
   assignedSheets: { id: string; title: string }[]
+  materialSheets: MaterialSheet[]
 }
 
 const CEFR_LEVELS = [
@@ -80,6 +89,13 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; fg: string }> =
   pending: { label: 'Pending', bg: '#FFF8E8', fg: '#B45309' },
   flagged: { label: 'Flagged — overdue', bg: '#FFEEE6', fg: '#FD5602' },
   reopened: { label: 'Reopened by admin', bg: '#FFF0E0', fg: '#C2410C' },
+}
+
+// A grant can only ever be issued over a PDF: the file route rebuilds the
+// document page by page and refuses anything else. A sheet whose attachments
+// hold no PDF is therefore unpickable here, not merely unhelpful.
+function hasPdf(sheet: MaterialSheet): boolean {
+  return sheet.attachments.some(att => att.type === 'application/pdf')
 }
 
 // Whether this class lands on the teacher's invoice, derived only from report
@@ -185,7 +201,7 @@ function LevelTrack({
   )
 }
 
-export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets }: Props) {
   const router = useRouter()
 
   const lesson = report.lesson
@@ -210,12 +226,27 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   const [currentAssignedIds, setCurrentAssignedIds] = useState<string[]>(assignedSheetIds)
   const [currentAssignedSheets, setCurrentAssignedSheets] = useState<{ id: string; title: string }[]>(assignedSheets)
   const [showGuide, setShowGuide] = useState(false)
+  // Teaching-material entry point: the picker chooses WHICH sheet, then hands
+  // over to AssignMaterialModal, which owns the whole grant flow.
+  const [showMaterialPicker, setShowMaterialPicker] = useState(false)
+  const [selectedMaterialSheetId, setSelectedMaterialSheetId] = useState('')
 
   const isEditable = report.status === 'pending' || report.status === 'reopened'
   const statusInfo = STATUS_CONFIG[report.status] ?? STATUS_CONFIG.pending
   // Settled facts from the saved row, not the live form state: the panel must
   // report what the invoice will actually carry, not an unsaved selection.
   const invoiceInfo = invoiceNotice(report.status, report.did_class_happen)
+
+  const selectedMaterialSheet =
+    materialSheets.find(sheet => sheet.id === selectedMaterialSheetId) ?? null
+
+  // Dismissing the picker must clear the chosen sheet as well as the flag: the
+  // assign modal mounts on "picker closed AND a sheet chosen", so an id left
+  // behind would open it on a picker the teacher just backed out of.
+  function closeMaterialPicker() {
+    setShowMaterialPicker(false)
+    setSelectedMaterialSheetId('')
+  }
 
   function setSkillLevel(skillKey: string, level: string) {
     setLevelData(prev => ({ ...prev, [skillKey]: level }))
@@ -473,13 +504,22 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               </div>
             )}
             {isEditable && (
-              <button
-                onClick={() => setShowAssignModal(true)}
-                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-colors"
-                style={{ color: '#FF8303', borderColor: '#FFD9A8', backgroundColor: '#FFF3E0' }}
-              >
-                + Assign Study Sheets
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setShowAssignModal(true)}
+                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-colors"
+                  style={{ color: '#FF8303', borderColor: '#FFD9A8', backgroundColor: '#FFF3E0' }}
+                >
+                  + Assign Study Sheets
+                </button>
+                <button
+                  onClick={() => setShowMaterialPicker(true)}
+                  className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border transition-colors"
+                  style={{ color: '#FF8303', borderColor: '#FFD9A8', backgroundColor: '#FFF3E0' }}
+                >
+                  + Assign from Teaching Material
+                </button>
+              </div>
             )}
           </section>
 
@@ -627,6 +667,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           <SectionHeader>
             Additional Details{didClassHappen === false && <span className="text-red-500 ml-1">*</span>}
           </SectionHeader>
+          <p className="text-xs text-gray-500 mb-3">Your student never sees this. It is visible to admin and to the teacher assigned to this class.</p>
           {didClassHappen === false && (
             <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}
@@ -680,6 +721,93 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             setCurrentAssignedIds(sheets.map(s => s.id))
             setCurrentAssignedSheets(sheets)
           }}
+        />
+      )}
+
+      {/* Teaching-material chooser — picks the sheet, then hands over below */}
+      {showMaterialPicker && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+        >
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col">
+
+            <div
+              className="flex items-center justify-between px-6 py-4"
+              style={{ borderBottom: '1px solid #E0DFDC' }}
+            >
+              <h2 className="font-semibold" style={{ color: '#111827' }}>Assign Teaching Material</h2>
+              <button
+                type="button"
+                onClick={closeMaterialPicker}
+                className="p-2 flex-shrink-0 transition-opacity hover:opacity-80"
+                style={{ color: '#9ca3af' }}
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-4">
+              {materialSheets.length === 0 ? (
+                <p className="text-sm" style={{ color: '#9ca3af' }}>
+                  No teaching materials available.
+                </p>
+              ) : (
+                <select
+                  value={selectedMaterialSheetId}
+                  onChange={e => setSelectedMaterialSheetId(e.target.value)}
+                  className="w-full rounded-md text-sm px-3 py-2 border"
+                  style={{ borderColor: '#E0DFDC', color: '#111827', backgroundColor: '#ffffff' }}
+                >
+                  <option value="" disabled>Choose teaching material...</option>
+                  {materialSheets.map(sheet => {
+                    const pdf = hasPdf(sheet)
+                    return (
+                      <option key={sheet.id} value={sheet.id} disabled={!pdf}>
+                        {pdf ? sheet.title : `${sheet.title} (no PDF)`}
+                      </option>
+                    )
+                  })}
+                </select>
+              )}
+            </div>
+
+            <div
+              className="px-6 py-4 flex items-center justify-end gap-3"
+              style={{ borderTop: '1px solid #E0DFDC' }}
+            >
+              <button
+                type="button"
+                onClick={closeMaterialPicker}
+                className="px-4 py-2 text-sm rounded-md border transition-opacity hover:opacity-80 disabled:opacity-50"
+                style={{ borderColor: '#E0DFDC', color: '#4b5563', backgroundColor: 'white' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowMaterialPicker(false)}
+                disabled={!selectedMaterialSheet || !hasPdf(selectedMaterialSheet)}
+                className="px-5 py-2 text-sm rounded-md text-white font-medium transition-opacity hover:opacity-80 disabled:opacity-40"
+                style={{ backgroundColor: '#FF8303' }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Teaching-material grant flow — mounts only once a sheet is chosen and
+          the picker is closed, so its GET never fires on a normal report load */}
+      {!showMaterialPicker && selectedMaterialSheet && student && (
+        <AssignMaterialModal
+          sheetId={selectedMaterialSheet.id}
+          sheetTitle={selectedMaterialSheet.title}
+          attachments={selectedMaterialSheet.attachments}
+          initialStudentId={student.id}
+          onClose={() => setSelectedMaterialSheetId('')}
         />
       )}
 

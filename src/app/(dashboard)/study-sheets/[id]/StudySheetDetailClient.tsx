@@ -2,12 +2,13 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, ExternalLink, Upload, CheckCircle } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Upload, CheckCircle, UserPlus } from 'lucide-react'
 import type { Annotation } from '@/components/pdf/PdfViewer'
 import MaterialFileViewer from '@/components/study/MaterialFileViewer'
 import DifficultyBars from '@/components/study/DifficultyBars'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 import type { PreppedActivity } from '@/lib/study/prepActivities'
+import AssignMaterialModal from './AssignMaterialModal'
 
 type Word = {
   word: string
@@ -136,6 +137,8 @@ export default function StudySheetDetailClient({
   // screen-visible surface read-only).
   const canManageFiles = isOwned && !live
 
+  const [assignOpen, setAssignOpen] = useState(false)
+
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [removingName, setRemovingName] = useState<string | null>(null)
@@ -235,16 +238,34 @@ export default function StudySheetDetailClient({
               (live) page in a named popup so the teacher can window-share just the
               PDF in Teams. Hidden in the live window itself via the same {!live} gate. */}
           {!live && (
-            <button
-              type="button"
-              onClick={() => window.open(`/live-annotate/${sheet.id}`, 'live-annotate', 'popup')}
-              className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
-              style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
-              title="Open this sheet in a separate window to screen-share in Teams"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Open Live Window
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Assign teaching material as homework. Gated on audience='staff'
+                  only, deliberately NOT on isOwned: the material_assignments
+                  INSERT policy decides who may assign, and admin-library
+                  materials (owner_id null) are assignable by design. */}
+              {isTeachingMaterial && (
+                <button
+                  type="button"
+                  onClick={() => setAssignOpen(true)}
+                  className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+                  style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+                  title="Assign a PDF from this sheet to one of your students"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Assign to student
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => window.open(`/live-annotate/${sheet.id}`, 'live-annotate', 'popup')}
+                className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 transition-opacity hover:opacity-80"
+                style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+                title="Open this sheet in a separate window to screen-share in Teams"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open Live Window
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -351,6 +372,18 @@ export default function StudySheetDetailClient({
             </div>
           )}
         </div>
+      )}
+
+      {/* Mounted only while open, so its GET never fires on a normal prep-page
+          load - and never at all in the live window, where the button is gated
+          out entirely. */}
+      {assignOpen && (
+        <AssignMaterialModal
+          sheetId={sheet.id}
+          sheetTitle={sheet.title}
+          attachments={attachments}
+          onClose={() => setAssignOpen(false)}
+        />
       )}
     </div>
   )

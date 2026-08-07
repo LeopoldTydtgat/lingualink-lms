@@ -14,6 +14,20 @@ type RawAssignmentRow = {
   study_sheets: RawSheetJoin | RawSheetJoin[]
 }
 
+// One live teaching-material homework grant (material_assignments row), as read
+// for the read-only Homework section. `annotations` is jsonb, so nothing about
+// its shape is guaranteed at runtime: it is narrowed to a boolean server-side and
+// the array itself never reaches the client.
+type RawMaterialAssignmentRow = {
+  id: string
+  study_sheet_id: string
+  attachment_name: string
+  page_start: number | null
+  page_end: number | null
+  annotations: unknown
+  assigned_at: string
+}
+
 export default async function StudentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
@@ -169,6 +183,74 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     : training.students
   const studentId = (studentRecord as { id: string } | null)?.id
 
+  // --- Teaching-material homework grants (read-only Homework section) -------
+  // USER-SCOPED read, deliberately NOT adminClient: the material_assignments
+  // SELECT policy ("Teachers read material assignments for own students", via
+  // trainings / get_teacher_training_ids()) IS the gate on this list. Service role
+  // bypasses RLS and would leave this list with no relationship check at all.
+  //
+  // Explicit column list, never select('*'): material_assignments carries a
+  // column-level UPDATE grant (annotations, updated_at only). Revoked grants stay
+  // in the table as history and are filtered out here - the teacher view shows
+  // live grants only, and the viewer sub-route re-applies the same filter so a
+  // direct URL cannot reach a revoked one either.
+  //
+  // The error is BOUND and surfaced to the client as its own state: a failed
+  // lookup must never render as "this student has no homework".
+  const { data: materialRaw, error: materialError } = studentId
+    ? await supabase
+        .from('material_assignments')
+        .select('id, study_sheet_id, attachment_name, page_start, page_end, annotations, assigned_at')
+        .eq('student_id', studentId)
+        .is('revoked_at', null)
+        .order('assigned_at', { ascending: false })
+    : { data: [], error: null }
+
+  if (materialError) {
+    console.error(`[dashboard/students/[id]] material_assignments lookup failed (training ${id}):`, materialError)
+  }
+
+  const materialRows = (materialError ? [] : (materialRaw ?? [])) as RawMaterialAssignmentRow[]
+
+  // Display titles, USER-SCOPED on purpose. The student-portal pages read these on
+  // the service-role client because the student RLS tier cannot see staff-audience
+  // sheets at all; a teacher's tier CAN see them, minus another teacher's private
+  // (owner_id-scoped) material. Reading titles service-role here would therefore
+  // hand this teacher the titles of sheets their own tier denies them. Where RLS
+  // denies the sheet the row falls back to the granted filename instead.
+  const materialSheetIds = [...new Set(materialRows.map(m => m.study_sheet_id))]
+  const materialTitles = new Map<string, string>()
+
+  if (materialSheetIds.length > 0) {
+    const { data: materialSheetRows, error: materialSheetError } = await supabase
+      .from('study_sheets')
+      .select('id, title')
+      .in('id', materialSheetIds)
+
+    if (materialSheetError) {
+      console.error(`[dashboard/students/[id]] study_sheets title lookup failed (training ${id}):`, materialSheetError)
+    }
+
+    for (const row of ((materialSheetRows ?? []) as { id: string; title: string | null }[])) {
+      if (typeof row.title === 'string' && row.title.length > 0) {
+        materialTitles.set(row.id, row.title)
+      }
+    }
+  }
+
+  // hasWork is derived HERE, server-side: the annotations array is the student's
+  // actual work and can be large, so only the boolean crosses into the client
+  // bundle. The full layer is read once, by the viewer sub-route, for the single
+  // grant being opened.
+  const materialAssignments = materialRows.map(m => ({
+    id: m.id,
+    title: materialTitles.get(m.study_sheet_id) ?? m.attachment_name,
+    page_start: m.page_start,
+    page_end: m.page_end,
+    assigned_at: m.assigned_at,
+    hasWork: Array.isArray(m.annotations) && m.annotations.length > 0,
+  }))
+
   const { data: rawAssignments } = studentId
     ? await adminClient
         .from('assignments')
@@ -242,6 +324,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       currentUserId={user.id}
       assignments={assignments}
       assignedTeacherNames={assignedTeacherNames}
+      materialAssignments={materialAssignments}
+      materialLoadFailed={Boolean(materialError)}
     />
   )
 }

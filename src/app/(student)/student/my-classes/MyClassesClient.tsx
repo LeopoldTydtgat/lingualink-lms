@@ -22,6 +22,7 @@ import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
 import { EmptyStateCalendar } from '@/components/EmptyStateCalendar'
+import CalendarSubscriptionCard from '@/components/shared/CalendarSubscriptionCard'
 
 interface Teacher {
   id: string
@@ -602,23 +603,29 @@ export default function MyClassesClient({
             {scheduledCount} upcoming {scheduledCount === 1 ? 'class' : 'classes'}
           </p>
         </div>
-        <button
-          onClick={() => router.push('/student/book')}
-          onMouseEnter={() => setBookHovered(true)}
-          onMouseLeave={() => setBookHovered(false)}
-          className="flex items-center gap-1.5 rounded-md text-sm font-medium"
-          style={{
-            padding: '8px 16px',
-            backgroundColor: bookHovered ? '#e67300' : '#FF8303',
-            color: '#ffffff',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'background-color 0.18s ease',
-          }}
-        >
-          <Plus size={16} />
-          Book a Class
-        </button>
+        {/* Calendar subscription sits in the page header, not in the lessons
+            list, so it renders on every page state - including the empty
+            schedule, where a student can subscribe before booking anything. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <CalendarSubscriptionCard buttonRadius="6px" />
+          <button
+            onClick={() => router.push('/student/book')}
+            onMouseEnter={() => setBookHovered(true)}
+            onMouseLeave={() => setBookHovered(false)}
+            className="flex items-center gap-1.5 rounded-md text-sm font-medium"
+            style={{
+              padding: '8px 16px',
+              backgroundColor: bookHovered ? '#e67300' : '#FF8303',
+              color: '#ffffff',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'background-color 0.18s ease',
+            }}
+          >
+            <Plus size={16} />
+            Book a Class
+          </button>
+        </div>
       </div>
 
       {/* Cancel error banner */}

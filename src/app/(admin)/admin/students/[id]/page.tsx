@@ -4,7 +4,12 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { requireStaff } from '@/lib/auth/requireStaff'
 import StudentDetailClient from './StudentDetailClient'
-import type { AdminConversation, Assignment } from './StudentDetailClient'
+import type {
+  AdminConversation,
+  Assignment,
+  MaterialHomework,
+  MaterialSheetOption,
+} from './StudentDetailClient'
 
 export default async function StudentDetailPage({
   params,
@@ -343,6 +348,123 @@ export default async function StudentDetailPage({
     }
   })
 
+  // ── Teaching-material homework grants (material_assignments) ────────────────
+  // Admin only, like the study-sheet assignments above: staff never see the
+  // Assignments tab, so both reads below are skipped entirely for them.
+  //
+  // Service role, matching every other read on this page. Explicit column list,
+  // never select('*'): material_assignments carries a column-level UPDATE grant
+  // (annotations, updated_at only). Revoked rows are deliberately KEPT and shown
+  // with a Revoked badge — revoke is semantic (revoked_at stamped, never
+  // deleted) and the row is the audit trail of what was handed out.
+  //
+  // The error is BOUND and surfaced to the client as its own flag: a failed
+  // lookup must never render as "this student has no homework".
+  type RawMaterialRow = {
+    id: string
+    study_sheet_id: string
+    attachment_name: string
+    page_start: number | null
+    page_end: number | null
+    assigned_at: string
+    revoked_at: string | null
+  }
+
+  const { data: rawMaterialHomework, error: materialHomeworkError } = isStaffView
+    ? { data: null, error: null }
+    : await supabase
+        .from('material_assignments')
+        .select('id, study_sheet_id, attachment_name, page_start, page_end, assigned_at, revoked_at')
+        .eq('student_id', id)
+        .order('assigned_at', { ascending: false })
+
+  if (materialHomeworkError) {
+    console.error(
+      `[admin student detail] material_assignments lookup failed (student ${id}):`,
+      materialHomeworkError
+    )
+  }
+
+  const materialHomeworkLoadFailed = Boolean(materialHomeworkError)
+  const materialRows = (
+    materialHomeworkError ? [] : rawMaterialHomework ?? []
+  ) as RawMaterialRow[]
+
+  // Sheet titles for those grants. A failed lookup here is a soft degradation,
+  // not an error state: every row falls back to the granted filename, which is
+  // stored on the row itself and is always present.
+  const materialSheetIds = [...new Set(materialRows.map((m) => m.study_sheet_id))]
+  const materialTitles = new Map<string, string>()
+
+  if (materialSheetIds.length > 0) {
+    const { data: materialTitleRows, error: materialTitleError } = await supabase
+      .from('study_sheets')
+      .select('id, title')
+      .in('id', materialSheetIds)
+
+    if (materialTitleError) {
+      console.error(
+        `[admin student detail] material sheet titles lookup failed (student ${id}):`,
+        materialTitleError
+      )
+    }
+
+    for (const row of (materialTitleRows ?? []) as { id: string; title: string | null }[]) {
+      if (typeof row.title === 'string' && row.title.length > 0) {
+        materialTitles.set(row.id, row.title)
+      }
+    }
+  }
+
+  const materialHomework: MaterialHomework[] = materialRows.map((row) => ({
+    id: row.id,
+    sheet_title: materialTitles.get(row.study_sheet_id) ?? null,
+    attachment_name: row.attachment_name,
+    page_start: row.page_start,
+    page_end: row.page_end,
+    assigned_at: row.assigned_at,
+    revoked_at: row.revoked_at,
+  }))
+
+  // Assignable teaching material for the assign modal: active, audience='staff'.
+  // Those are exactly the two conditions POST /api/admin/material-assignments
+  // re-applies before it will issue a grant, so the picker cannot offer
+  // something the route would refuse. PDF filtering is left to the modal, which
+  // needs the non-PDF rows in order to disable them with a reason.
+  type RawMaterialSheetRow = { id: string; title: string | null; attachments: unknown }
+
+  const { data: rawMaterialSheets, error: materialSheetsError } = isStaffView
+    ? { data: null, error: null }
+    : await supabase
+        .from('study_sheets')
+        .select('id, title, attachments')
+        .eq('is_active', true)
+        .eq('audience', 'staff')
+        .order('title')
+
+  if (materialSheetsError) {
+    console.error('[admin student detail] teaching material list failed:', materialSheetsError)
+  }
+
+  // An empty picker reads as "there is no teaching material", which is exactly
+  // what a failed read also produces. The flag carries that distinction to the
+  // client so the Assign button can be disabled with the real reason.
+  const materialSheetsLoadFailed = Boolean(materialSheetsError)
+
+  const materialSheetRows = (
+    materialSheetsError ? [] : rawMaterialSheets ?? []
+  ) as RawMaterialSheetRow[]
+
+  const materialSheets: MaterialSheetOption[] = materialSheetRows.map((row) => ({
+    id: row.id,
+    title: row.title ?? 'Untitled material',
+    attachments: Array.isArray(row.attachments)
+      ? (row.attachments as { name: string; type: string }[]).filter(
+          (att) => att && typeof att.name === 'string' && typeof att.type === 'string'
+        )
+      : [],
+  }))
+
   // ── Purge eligibility: check all linked teachers are 'former' ───────────────
   // (admin only — staff view skips it, purge controls are hidden)
   //
@@ -477,6 +599,10 @@ export default async function StudentDetailPage({
       purgeBlockedBy={purgeBlockedBy}
       purgePreflightFailed={purgePreflightFailed}
       assignments={assignments}
+      materialHomework={materialHomework}
+      materialHomeworkLoadFailed={materialHomeworkLoadFailed}
+      materialSheets={materialSheets}
+      materialSheetsLoadFailed={materialSheetsLoadFailed}
       isStaffView={isStaffView}
       adminTz={adminTz}
     />

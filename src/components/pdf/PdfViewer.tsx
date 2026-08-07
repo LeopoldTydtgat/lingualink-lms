@@ -71,7 +71,13 @@ const UNDERLINE_WIDTH = 3
 const ARROW_WIDTH = 3
 const TEXT_SIZE = 16
 // Editing/wrapping width for a text box, in scale-1 px (multiplied by scale).
+// This is the width of a NEW box and the fallback for any box saved before the
+// right-edge resize handle existed (TextAnnotation.width absent).
 const TEXT_BOX_WIDTH = 180
+// Clamp range for a text box's stored (scale-1) width when it is dragged by its
+// right-edge handle. Mirrors FONT_MIN / FONT_MAX for the font size.
+const TEXT_BOX_MIN_WIDTH = 60
+const TEXT_BOX_MAX_WIDTH = 600
 // Text-box font sizing (scale-1 units): the A- / A+ step and the clamp range.
 const FONT_STEP = 4
 const FONT_MIN = 8
@@ -216,6 +222,13 @@ interface TextAnnotation {
   y: number // 0..1 fraction (top-left corner)
   text: string
   fontSize: number // scale-1 px; rendered size = fontSize * scale
+  // Wrapping / editing width in scale-1 px, same convention as fontSize
+  // (rendered width = width * scale). Set by dragging the box's right-edge
+  // handle; height stays content-driven. ABSENT = a box saved before the handle
+  // existed: it renders EXACTLY as it always has, through the TEXT_BOX_WIDTH
+  // fallback at both read sites. Optional and numeric, so the annotations array
+  // stays JSON-serializable (it is persisted as-is to lesson_annotations).
+  width?: number
 }
 // A straight arrow with an arrowhead at `end`. A separate union member, NOT an
 // overloaded StrokeAnnotation: it stores only its two endpoints (0..1 fractions),
@@ -279,6 +292,19 @@ interface DragState {
   originY: number
   width: number
   height: number
+  moved: boolean
+}
+// In-progress WIDTH resize of a text box (refs only; never rendered).
+// Deliberately NOT DragState: a resize needs the box's start WIDTH, not its
+// origin x/y and page size, and widening DragState would change the shape every
+// existing move-drag caller (text + stamp) reads. Only one of the two can run at
+// a time -- the handle is a sibling of the box and stops propagation, so a grab
+// never starts a move -- but they stay in separate refs so neither can see the
+// other's state.
+interface ResizeState {
+  id: string
+  startX: number
+  startWidth: number // scale-1 px at pointer-down (t.width ?? TEXT_BOX_WIDTH)
   moved: boolean
 }
 // A baked-in PDF link surfaced from the uploaded file's own annotations,
@@ -841,6 +867,9 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   const latestDraftRef = useRef<Draft | null>(null)
   // In-progress text-box drag.
   const dragRef = useRef<DragState | null>(null)
+  // In-progress text-box WIDTH resize (its own ref, see ResizeState: the move
+  // drag's semantics and dragRef are untouched by it).
+  const resizeRef = useRef<ResizeState | null>(null)
   // In-progress marquee drag (cursor tool). A ref as well as state because the
   // move / up handlers must read it synchronously, and because the click-vs-drag
   // threshold flips `moved` without a re-render.
@@ -2436,6 +2465,123 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     selectBox(dr.id)
   }
 
+  // --- Width resize of a text box (its right-edge handle) -------------------
+  // Mirrors the onTextPointerDown/Move/Up flow above: best-effort pointer
+  // capture, a pre-gesture snapshot in pendingPastRef pushed onto the undo stack
+  // ONLY if the width actually changed (so one drag is exactly one undo step and
+  // a no-move grab records nothing), and the same 3px click-vs-drag threshold.
+  // WIDTH ONLY -- height stays content-driven, so nothing here touches the
+  // wrapping styles.
+  function onResizePointerDown(
+    e: ReactPointerEvent<HTMLDivElement>,
+    t: TextAnnotation,
+    startWidth: number,
+  ) {
+    // Primary button only -- the same guard the cursor branch of
+    // onOverlayPointerDown carries, for the same reason: a right-press gets no
+    // matching pointer-up (the context menu swallows it), so arming a resize on
+    // one would leave the gesture armed. Returned BEFORE stopPropagation on
+    // purpose: the overlay ignores a non-primary press too, so letting this one
+    // bubble changes nothing, while preventDefault here would kill the menu.
+    if (e.button !== 0) return
+    // stopPropagation: the grab must never reach the page overlay, where it
+    // would deselect the box, arm a marquee or create a new box.
+    // preventDefault: it must never blur the textarea while the box is being
+    // edited (the same guard the control-bar buttons use).
+    e.stopPropagation()
+    e.preventDefault()
+    const el = e.currentTarget
+    if (typeof el.setPointerCapture === 'function') {
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    pendingPastRef.current = annotationsRef.current
+    resizeRef.current = {
+      id: t.id,
+      startX: e.clientX,
+      // The width the box is CURRENTLY rendering at, resolved by the caller from
+      // the exact value the render uses (t.width when it is a usable number,
+      // else the TEXT_BOX_WIDTH fallback). Single source of truth, so a legacy
+      // box -- or one whose persisted width came back unusable -- always starts
+      // its resize from what is on screen instead of from NaN.
+      startWidth,
+      moved: false,
+    }
+  }
+
+  function onResizePointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const rz = resizeRef.current
+    if (!rz) return
+    e.stopPropagation()
+    // Self-heal a pointer-up we never saw (released outside the window, or
+    // capture refused): end the gesture where it stands -- exactly as updateMove
+    // does -- rather than leave it armed, which would let a later plain hover
+    // over the handle keep resizing the box.
+    if (e.buttons === 0) {
+      onResizePointerUp(e)
+      return
+    }
+    const dx = e.clientX - rz.startX
+    // Same 3px click-vs-drag threshold as the text / shape move drags, measured
+    // on RAW pointer travel so it is independent of zoom.
+    if (!rz.moved && Math.abs(dx) <= 3) return
+    // The stored width is scale-1, so the client-px delta is divided by the
+    // current scale: the edge tracks the pointer exactly at any zoom.
+    const next = clampRange(rz.startWidth + dx / scale, TEXT_BOX_MIN_WIDTH, TEXT_BOX_MAX_WIDTH)
+    // The clamp can swallow the WHOLE delta (the box is already at the min / max
+    // and is being dragged further that way). Nothing would change, so the
+    // gesture stays a grab: flipping `moved` here would push a phantom undo step
+    // and wipe the redo stack for a resize that changed nothing. This is exactly
+    // the guard updateMove carries, for exactly the same reason.
+    if (!rz.moved && next === rz.startWidth) return
+    rz.moved = true
+    setAnnotations((anns) =>
+      anns.map((a) => (a.id === rz.id && a.type === 'text' ? { ...a, width: next } : a)),
+    )
+  }
+
+  function onResizePointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    const rz = resizeRef.current
+    if (!rz) return
+    e.stopPropagation()
+    resizeRef.current = null
+    const el = e.currentTarget
+    if (typeof el.releasePointerCapture === 'function') {
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        // Ignore.
+      }
+    }
+    // Is the box still there? It can be removed MID-gesture (Delete while it is
+    // merely selected, or Escape on an empty box being edited), which unmounts
+    // its handle -- so no real pointer-up can follow and this release can only be
+    // the stale-gesture self-heal above. That snapshot predates the removal, so
+    // pushing it would put an OUT-OF-ORDER restore point on the stack (one undo
+    // would silently resurrect the deleted box), and re-selecting a dead id below
+    // would arm the Delete key on a phantom. Drop the gesture instead.
+    const alive = annotationsRef.current.some((a) => a.id === rz.id)
+    // A real resize pushes the pre-drag snapshot as ONE undo step; a no-move
+    // grab pushes nothing. Either way the pending snapshot is cleared.
+    if (rz.moved && alive) {
+      const snap = pendingPastRef.current
+      if (snap) {
+        setPast((p) => (p.length >= HISTORY_LIMIT ? [...p.slice(1), snap] : [...p, snap]))
+        setFuture([])
+      }
+    }
+    pendingPastRef.current = null
+    // The gesture ends SELECTED, like a move drag -- EXCEPT when this box is the
+    // one being edited: selection and editing are mutually exclusive, so
+    // selectBox would kick the teacher out of the textarea mid-sentence. Editing
+    // is the stronger state and survives the resize (which is exactly what the
+    // preventDefault on pointer-down protects).
+    if (alive && editingId !== rz.id) selectBox(rz.id)
+  }
+
   // --- Pointer handling on a committed shape stamp --------------------------
   // Modelled on the text-box pointer flow (select + drag), kept as separate
   // handlers so the text path is unchanged. Differences: the target is a
@@ -2636,6 +2782,57 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     )
   }
 
+  // Width handle on a text box's RIGHT edge, vertically centred. Drag it to set
+  // the box's stored (scale-1) width; the height stays content-driven. It lives
+  // inside the box wrapper's pointerEvents:none layer with its own
+  // pointerEvents:'auto' -- the same model as the control bar -- and carries the
+  // same two guards: stopPropagation so a grab never reaches the overlay (never
+  // deselects, never starts a marquee or a box MOVE drag) and preventDefault on
+  // mouse/pointer down so it never blurs the textarea during editing. Absolutely
+  // positioned, so it stays out of flow and the wrapper's measured box (what the
+  // cursor tool hit-tests) is still exactly the text box.
+  function renderResizeHandle(t: TextAnnotation, startWidth: number) {
+    return (
+      <div
+        onPointerDown={(e) => onResizePointerDown(e, t, startWidth)}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
+        onMouseDown={(e) => e.preventDefault()}
+        title="Drag to set the text box width"
+        aria-hidden
+        style={{
+          position: 'absolute',
+          // Just outside the box's right edge, so the hit target never covers
+          // the text (or steals the box's own double-click-to-edit).
+          left: '100%',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          marginLeft: 2,
+          // Hit target >= 12px wide; the visible grip inside it is thinner.
+          width: 14,
+          height: 30,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'ew-resize',
+          pointerEvents: 'auto',
+          touchAction: 'none',
+        }}
+      >
+        <span
+          style={{
+            display: 'block',
+            width: 4,
+            height: 22,
+            borderRadius: 2,
+            backgroundColor: ORANGE,
+            boxShadow: '0 0 0 1px rgba(255,255,255,0.9)',
+          }}
+        />
+      </div>
+    )
+  }
+
   function renderTextBox(t: TextAnnotation, rect: PageRect) {
     const isEditing = t.id === editingId
     const isSelected = selectedIds.includes(t.id)
@@ -2656,6 +2853,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // sits too near the page top for the bar to fit above it.
     const below = t.y * rect.height < 40
     const bar = isEditing || isSoleSelection ? renderControlBar(t, below) : null
+    // This box's stored width, or null for a box saved before the handle
+    // existed. Checked as a FINITE NUMBER rather than merely `!== undefined`:
+    // the value comes back from a jsonb column, and a null / NaN there would
+    // otherwise render a zero-width box. Resolved ONCE here and used by all
+    // three consumers below (the editor width, the static width, and the
+    // handle's start width), so the gesture can never disagree with the render.
+    const fixedWidth = typeof t.width === 'number' && Number.isFinite(t.width) ? t.width : null
+    // Width handle, shown under EXACTLY the same condition as the control bar.
+    // In read-only nothing is selectable and nothing can be edited, so it never
+    // renders there (no new readOnly logic needed).
+    const handle =
+      isEditing || isSoleSelection ? renderResizeHandle(t, fixedWidth ?? TEXT_BOX_WIDTH) : null
 
     // Wrapper pinned at the box's 0..1 top-left. It hugs the box (lineHeight 0
     // kills the inline-block descender gap) so the control bar, anchored to the
@@ -2683,7 +2892,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         <div key={t.id} ref={registerBox} style={wrapperStyle}>
           <EditableTextBox
             value={t.text}
-            widthPx={TEXT_BOX_WIDTH * scale}
+            widthPx={(fixedWidth ?? TEXT_BOX_WIDTH) * scale}
             fontSizePx={t.fontSize * scale}
             onChangeText={(v) => updateText(t.id, v)}
             onCommit={() => finishEditing(t.id)}
@@ -2705,6 +2914,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             }}
           />
           {bar}
+          {handle}
         </div>
       )
     }
@@ -2720,7 +2930,13 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             ...baseStyle,
             display: 'inline-block',
             verticalAlign: 'top',
-            maxWidth: TEXT_BOX_WIDTH * scale,
+            // A box that has been shaped by its handle HOLDS that shape: a fixed
+            // width, so short text keeps the box the teacher drew. A box with no
+            // stored width keeps the exact maxWidth it has always had, so every
+            // already-saved annotation renders pixel-identical.
+            ...(fixedWidth !== null
+              ? { width: fixedWidth * scale }
+              : { maxWidth: TEXT_BOX_WIDTH * scale }),
             padding: `${2 * scale}px ${4 * scale}px`,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
@@ -2737,6 +2953,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           {t.text === '' ? ' ' : t.text}
         </div>
         {bar}
+        {handle}
       </div>
     )
   }

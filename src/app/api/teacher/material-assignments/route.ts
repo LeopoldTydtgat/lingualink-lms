@@ -1,0 +1,351 @@
+import { NextResponse } from 'next/server'
+import { z } from 'zod'
+import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { checkEmailDispatchLimit } from '@/lib/rateLimit'
+import resend from '@/lib/email/client'
+import { buildEmailTemplate, studentMaterialHomeworkAssignedEmailContent } from '@/lib/email/templates'
+import { MaterialAssignmentCreateSchema } from '@/lib/validation/schemas'
+import { runMaterialAssignPreflight } from '@/lib/materials/materialAssignPreflight'
+
+type StudentOption = { id: string; full_name: string }
+
+const SheetIdSchema = z.string().uuid()
+
+// ---------------------------------------------------------------------------
+// Teacher-facing teaching-material homework grants (material_assignments).
+//
+//   GET  - the data behind the assign modal: assignable students + the live
+//          grants already issued for one sheet.
+//   POST - issue a grant.
+//
+// AUTHORISATION MODEL. Every gate on this route is RLS, evaluated on the
+// USER-SCOPED client (createClient):
+//   - the student picker is whatever the caller's own RLS lets them read;
+//   - the assignment list is the material_assignments SELECT policies;
+//   - the INSERT is the "Teachers assign material to own students" WITH CHECK
+//     policy - teacher-of-student via trainings (legacy teacher_id OR the
+//     training_teachers junction) AND an active, role-permitted sheet.
+// The service-role client appears ONLY for read-only pre-flight validation
+// (sheet metadata, the stored PDF's real page count). It NEVER performs the
+// insert: moving the insert onto it would bypass the only authorisation gate
+// this feature has.
+// ---------------------------------------------------------------------------
+
+// GET /api/teacher/material-assignments?sheet_id=<uuid>
+export async function GET(request: Request) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
+    const parsedSheetId = SheetIdSchema.safeParse(
+      new URL(request.url).searchParams.get('sheet_id')
+    )
+    if (!parsedSheetId.success) {
+      // A non-uuid would otherwise reach Postgres as a 22P02 cast error and
+      // surface as a 500.
+      return NextResponse.json({ error: 'A valid sheet_id is required.' }, { status: 400 })
+    }
+    const sheetId = parsedSheetId.data
+
+    // --- Assignable students -------------------------------------------------
+    // TWO user-scoped reads, unioned, because the INSERT policy accepts TWO
+    // teacher-of-student paths and no single RLS-scoped table exposes both:
+    //
+    //   (a) trainings, scoped by "Teachers can view own trainings"
+    //       (trainings.teacher_id = auth.uid()) - the LEGACY link. Modern
+    //       trainings are created without teacher_id
+    //       (src/app/api/admin/students/route.ts:275-284), so this path alone
+    //       returns an EMPTY picker for a normally-assigned teacher.
+    //   (b) students, scoped by "Teachers read own students", which is the
+    //       trainings x training_teachers JUNCTION - the same relationship
+    //       get_teacher_training_ids() encodes in the INSERT policy.
+    //
+    // Both are user-scoped, so RLS remains the sole scoping mechanism and this
+    // route never widens it; the union simply stops the picker being narrower
+    // than what the INSERT policy would actually accept. An admin reads every
+    // student under either path (they hold is_admin() SELECT policies on both
+    // tables) - the INSERT policy still denies them any student they do not
+    // teach, so the extra names are fail-closed noise, not a grant.
+    //
+    // Explicit column lists on both: students carries column-level REVOKEs
+    // (admin_notes, cancellation_policy), so select('*') is banned there.
+    const { data: trainingRows, error: trainingsError } = await supabase
+      .from('trainings')
+      .select('student_id, students ( id, full_name )')
+
+    if (trainingsError) {
+      console.error('[teacher/material-assignments] trainings lookup failed:', trainingsError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    const { data: studentRows, error: studentsError } = await supabase
+      .from('students')
+      .select('id, full_name')
+
+    if (studentsError) {
+      console.error('[teacher/material-assignments] students lookup failed:', studentsError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    type JoinedStudent = { id: string; full_name: string | null }
+    type TrainingRow = {
+      student_id: string | null
+      students: JoinedStudent | JoinedStudent[] | null
+    }
+
+    // De-duplicated by student id: a student can hold several trainings, and the
+    // two reads above overlap.
+    const studentsById = new Map<string, StudentOption>()
+
+    for (const row of ((trainingRows ?? []) as TrainingRow[])) {
+      // Supabase returns nested joins as arrays - always flatten with an
+      // Array.isArray() check. A null join means the student row itself is not
+      // readable by this caller, so there is no name to offer: skip it.
+      const joined = Array.isArray(row.students) ? row.students[0] : row.students
+      if (!joined || typeof joined.id !== 'string') continue
+      studentsById.set(joined.id, {
+        id: joined.id,
+        full_name: joined.full_name ?? 'Unnamed student',
+      })
+    }
+
+    for (const row of ((studentRows ?? []) as JoinedStudent[])) {
+      if (typeof row.id !== 'string') continue
+      studentsById.set(row.id, {
+        id: row.id,
+        full_name: row.full_name ?? 'Unnamed student',
+      })
+    }
+
+    const students = [...studentsById.values()].sort((a, b) =>
+      a.full_name.localeCompare(b.full_name)
+    )
+
+    // --- Live grants for this sheet ------------------------------------------
+    // User-scoped: the material_assignments SELECT policies decide which rows a
+    // caller sees (teacher -> their own students, admin -> all). Explicit column
+    // list, never select('*') - the table carries a column-level UPDATE grant.
+    // Revoked rows stay in the table as history and are filtered out here.
+    const { data: assignmentRows, error: assignmentsError } = await supabase
+      .from('material_assignments')
+      .select('id, student_id, attachment_index, attachment_name, page_start, page_end, assigned_at')
+      .eq('study_sheet_id', sheetId)
+      .is('revoked_at', null)
+      .order('assigned_at', { ascending: false })
+
+    if (assignmentsError) {
+      console.error('[teacher/material-assignments] material_assignments lookup failed:', assignmentsError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    type AssignmentRow = {
+      id: string
+      student_id: string
+      attachment_index: number
+      attachment_name: string
+      page_start: number | null
+      page_end: number | null
+      assigned_at: string
+    }
+
+    // Student name joined HERE, from the list built above, rather than as a
+    // nested select: a nested students(...) embed would be re-filtered by the
+    // students RLS policy and could silently return null for a row the caller
+    // can legitimately see. null name -> the client renders its own fallback.
+    const assignments = ((assignmentRows ?? []) as AssignmentRow[]).map((row) => ({
+      id: row.id,
+      student_id: row.student_id,
+      student_name: studentsById.get(row.student_id)?.full_name ?? null,
+      attachment_index: row.attachment_index,
+      attachment_name: row.attachment_name,
+      page_start: row.page_start,
+      page_end: row.page_end,
+      assigned_at: row.assigned_at,
+    }))
+
+    return NextResponse.json({ students, assignments })
+  } catch (err) {
+    console.error('[teacher/material-assignments] unhandled GET failure:', err)
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+  }
+}
+
+// POST /api/teacher/material-assignments
+export async function POST(request: Request) {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    }
+
+    const body = await request.json().catch(() => null)
+    const parsed = MaterialAssignmentCreateSchema.safeParse(body)
+    if (!parsed.success) {
+      // Page-range rules are a semantic conflict (422); a malformed id or index
+      // is a malformed request (400). Both carry the schema's own message, which
+      // the modal renders verbatim.
+      const issue = parsed.error.issues[0]
+      const isPageRangeIssue = issue.path[0] === 'page_start' || issue.path[0] === 'page_end'
+      return NextResponse.json(
+        { error: issue.message },
+        { status: isPageRangeIssue ? 422 : 400 }
+      )
+    }
+
+    const { student_id, study_sheet_id, attachment_index } = parsed.data
+    const pageStart = parsed.data.page_start ?? null
+    const pageEnd = parsed.data.page_end ?? null
+
+    // --- Read-only pre-flight validation (service role) ----------------------
+    // None of this is authorisation - the INSERT's RLS policy is. This only
+    // stops a grant being written that the file route could never satisfy:
+    // sheet active + audience='staff', the attachment at this index exists and
+    // its name passes the file route's charset gate, it is a PDF, and (when both
+    // bounds are set) the page range fits the REAL document.
+    //
+    // Shared verbatim with POST /api/admin/material-assignments so the two
+    // assign paths cannot drift. The helper returns this route's exact statuses,
+    // bodies and error codes, and logs under this route's own prefix.
+    const adminClient = createAdminClient()
+
+    const preflight = await runMaterialAssignPreflight(
+      adminClient,
+      {
+        studySheetId: study_sheet_id,
+        attachmentIndex: attachment_index,
+        pageStart,
+        pageEnd,
+      },
+      '[teacher/material-assignments]'
+    )
+
+    if (!preflight.ok) {
+      return NextResponse.json(preflight.body, { status: preflight.status })
+    }
+
+    // --- THE GATE: the insert itself, on the USER-SCOPED client ---------------
+    // "Teachers assign material to own students" (WITH CHECK) is the sole
+    // authorisation check: assigned_by = auth.uid(), a teacher-of-student
+    // relationship via trainings, and an active sheet this account type may
+    // assign. Nothing above re-derives any of that, so this route can never
+    // disagree with the live policy.
+    const { data: inserted, error: insertError } = await supabase
+      .from('material_assignments')
+      .insert({
+        student_id,
+        study_sheet_id,
+        attachment_index,
+        // Resolved server-side from the index by the preflight, never taken from
+        // the request body.
+        attachment_name: preflight.attachmentName,
+        page_start: pageStart,
+        page_end: pageEnd,
+        assigned_by: user.id,
+      })
+      .select('id')
+      .maybeSingle()
+
+    if (insertError) {
+      // 23505 = material_assignments_live_unique, the partial unique index over
+      // (student_id, study_sheet_id, attachment_index) WHERE revoked_at is null.
+      if (insertError.code === '23505') {
+        return NextResponse.json(
+          { error: 'This student already has a live assignment for this file. Revoke it first.' },
+          { status: 409 }
+        )
+      }
+
+      const denied =
+        insertError.code === '42501' || /row-level security/i.test(insertError.message)
+      if (denied) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
+      console.error('[teacher/material-assignments] insert failed:', insertError)
+      return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+    }
+
+    // No error and no row back: the RETURNING row was filtered out by RLS. Treat
+    // it as a denial - never report success for a write we cannot confirm.
+    if (!inserted) {
+      console.error('[teacher/material-assignments] insert returned no row')
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // --- Notification email (best-effort, never affects the response) ---------
+    // The grant row already exists by this point, so NO outcome below may change
+    // what this route returns: a rate-limit block, a failed lookup, a missing
+    // address and a Resend failure all still yield the 201. Own try/catch so a
+    // throw cannot fall into the outer handler and turn a written grant into a
+    // 500. Revoke stays silent - only an insert notifies.
+    try {
+      // 20 dispatches per user per hour. A block SKIPS the send; it is never a
+      // 429, because the assignment itself succeeded.
+      const limit = await checkEmailDispatchLimit(user.id)
+      if (limit.blocked) {
+        console.error(
+          `[teacher/material-assignments] email dispatch rate-limited, skipping send (assignment ${inserted.id})`
+        )
+      } else {
+        // Teacher display name from the SESSION profile on the user-scoped
+        // client - never from the request body. A lookup failure is not worth
+        // losing the email over: continue with null, and the template renders
+        // the nameless variant rather than an empty name slot.
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', user.id)
+          .maybeSingle()
+
+        if (profileError) {
+          console.error('[teacher/material-assignments] profiles lookup failed:', profileError)
+        }
+        const teacherName = profile?.full_name ?? null
+
+        // Service role, reusing the instance built for the pre-flight checks:
+        // students.email is not readable under the teacher's own RLS. The error
+        // is BOUND and checked - discarding it would make a transient DB failure
+        // indistinguishable from a student who has no address on file.
+        const { data: student, error: studentError } = await adminClient
+          .from('students')
+          .select('email, full_name')
+          .eq('id', student_id)
+          .maybeSingle()
+
+        if (studentError) {
+          console.error('[teacher/material-assignments] student lookup failed:', studentError)
+        } else if (!student || !student.email) {
+          console.error(
+            `[teacher/material-assignments] no email address for student ${student_id}, skipping send`
+          )
+        } else {
+          const subject = 'Lingualink Online - Your teacher has assigned you a homework task'
+          await resend.emails.send({
+            from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+            to: student.email,
+            subject,
+            html: buildEmailTemplate({
+              recipientName: student.full_name,
+              recipientFallback: 'Student',
+              subject,
+              bodyHtml: studentMaterialHomeworkAssignedEmailContent(teacherName),
+              contactEmail: 'support@lingualinkonline.com',
+            }),
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[teacher/material-assignments] email dispatch failed:', err)
+    }
+
+    return NextResponse.json({ id: inserted.id }, { status: 201 })
+  } catch (err) {
+    console.error('[teacher/material-assignments] unhandled POST failure:', err)
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+  }
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
 import {
   buildWeekSlots,
   getWeekWindow,
@@ -107,6 +108,37 @@ export async function GET(req: NextRequest) {
       { error: 'Could not load availability. Please try again.' },
       { status: 500 }
     )
+  }
+
+  // Assignment gate: a student may only read the availability of a teacher
+  // assigned to one of their trainings. Previously any authenticated caller
+  // could pass an arbitrary teacherId and read that teacher's whole working
+  // week. Booking was never possible (api/student/book enforces the same
+  // training_teachers rule on the write path) but the schedule itself is
+  // staff information and must not be readable by unassigned students.
+  //
+  // Fail closed in both directions:
+  //  - a non-admin caller with no students row has no assignments to check
+  //    against, so it is denied rather than falling through;
+  //  - getAssignedTeacherIds THROWS on query error (documented contract), so
+  //    a verification failure is a 500, never a silent allow.
+  if (!isAdmin) {
+    if (!callerStudent) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    let assignedTeacherIds: Set<string>
+    try {
+      assignedTeacherIds = await getAssignedTeacherIds(admin, callerStudent.id)
+    } catch (err) {
+      console.error('[student availability] assignment check failed:', err)
+      return NextResponse.json(
+        { error: 'Could not load availability. Please try again.' },
+        { status: 500 }
+      )
+    }
+    if (!assignedTeacherIds.has(teacherId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
   }
 
   const { data: teacherProfile, error: tzError } = await admin
