@@ -29,3 +29,43 @@ export function formatRemainingCountdown(secondsRemaining: number): string {
   const ss = String(seconds).padStart(2, '0')
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`
 }
+
+// What a lesson card should say about a lesson RIGHT NOW - the single source of truth for
+// the countdown label, its value, and whether the class is live, shared by the teacher
+// upcoming-classes list and the student my-classes list + hero. Both portals keep an
+// in-progress class in their list until it ENDS, so "time until start" alone is wrong the
+// moment a class begins: a class 40 minutes underway must read "In class 47:37", never
+// "Starting now" under a NEXT pill.
+export type LessonCountdown = {
+  live: boolean
+  label: string
+  value: string
+}
+
+// PURE EPOCH-MS ARITHMETIC. Every argument is an absolute instant in milliseconds and the
+// only operation performed on them is subtraction. No Date is constructed from local
+// parts, no timezone is read, no toISOString(): the result is byte-identical in every
+// timezone, and the caller owns resolving its own instants.
+export function describeLessonCountdown(
+  startMs: number,
+  endMs: number,
+  nowMs: number
+): LessonCountdown {
+  // Teaching window is half-open [start, end): the start instant is already live and the
+  // end instant is not, matching pickLiveLesson's teaching-time test in liveLesson.ts.
+  if (nowMs >= startMs && nowMs < endMs) {
+    return {
+      live: true,
+      label: 'In class',
+      value: formatRemainingCountdown(Math.floor((endMs - nowMs) / 1000)),
+    }
+  }
+  // Not live: before the class it counts down to the start; at or past the end it
+  // collapses to zero rather than counting up, so a row that outlives its class by a
+  // render tick degrades to "Starting now" instead of a negative timer.
+  return {
+    live: false,
+    label: 'Starts in',
+    value: formatCompoundCountdown(nowMs >= endMs ? 0 : Math.floor((startMs - nowMs) / 1000)),
+  }
+}

@@ -17,7 +17,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
-import { formatCompoundCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -272,7 +272,13 @@ function LessonRow({
   const isCancelled = isCancelledStatus(lesson.status)
   const cancelLabel = getCancellationLabel(lesson, 'student')
   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
-  const secondsUntil = mounted ? getSecondsUntil(lesson.scheduled_at, now) : 0
+  // Defensive: a live class is normally the hero, not a list row, but should one ever
+  // land here the shared helper keeps it reading "47:37" instead of "Starting now".
+  // Pure epoch ms - scheduled_at is an instant and duration_minutes is a plain offset.
+  const startMs = new Date(lesson.scheduled_at).getTime()
+  const countdown = mounted
+    ? describeLessonCountdown(startMs, startMs + lesson.duration_minutes * 60000, now)
+    : null
   const isCancelling = cancellingId === lesson.id
 
   const timeText = showDate
@@ -348,7 +354,7 @@ function LessonRow({
           {/* Countdown */}
           {!isCancelled && mounted && (
             <span className="font-mono text-sm" style={{ color: '#FF8303', flexShrink: 0 }}>
-              {formatCompoundCountdown(secondsUntil)}
+              {countdown?.value ?? ''}
             </span>
           )}
 
@@ -510,7 +516,15 @@ export default function MyClassesClient({
 
   // Next class hero derivations
   const nextWithin24 = !!nextLesson && mounted && isWithin24Hours(nextLesson.scheduled_at, now)
-  const nextSeconds = nextLesson && mounted ? getSecondsUntil(nextLesson.scheduled_at, now) : 0
+  // Hero countdown and its NEXT / IN CLASS pill come from one describeLessonCountdown
+  // result, ticked by the same `now` as the rest of the card, so the hero flips to the
+  // in-class state on its own at the start instant with no reload. Pure epoch ms: no
+  // timezone and no local date construction anywhere in this derivation.
+  const nextStartMs = nextLesson ? new Date(nextLesson.scheduled_at).getTime() : 0
+  const nextCountdown =
+    nextLesson && mounted
+      ? describeLessonCountdown(nextStartMs, nextStartMs + nextLesson.duration_minutes * 60000, now)
+      : null
   const nextCancelling = !!nextLesson && cancellingId === nextLesson.id
   const canJoinNext =
     !!nextLesson &&
@@ -686,7 +700,7 @@ export default function MyClassesClient({
                   color: '#ffffff',
                   borderRadius: '4px',
                 }}>
-                  NEXT
+                  {nextCountdown?.live ? 'IN CLASS' : 'NEXT'}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -708,7 +722,7 @@ export default function MyClassesClient({
 
             {/* Countdown */}
             <div className="font-mono text-base" style={{ textAlign: 'right', flexShrink: 0, color: '#FF8303', lineHeight: 1 }}>
-              {mounted ? formatCompoundCountdown(nextSeconds) : '—'}
+              {nextCountdown?.value ?? '—'}
             </div>
           </div>
 

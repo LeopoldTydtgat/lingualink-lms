@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
-import { formatCompoundCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown, type LessonCountdown } from '@/lib/lessons/countdown'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -104,20 +104,67 @@ function formatDayHeading(isoString: string, timezone: string): string {
   return formatDate(isoString, timezone)
 }
 
-function Countdown({ startsAt }: { startsAt: string }) {
-  const [timeLeft, setTimeLeft] = useState('')
+// One 1s ticker feeding the countdown value, its label and the NEXT / IN CLASS pill from
+// a single describeLessonCountdown result, so the three can never disagree on screen.
+// Liveness is recomputed on every tick, not once at mount: a card that is already open
+// when its class starts flips to the in-class state by itself, with no reload.
+//
+// Returns null until the first effect run. The value must not be computed during render:
+// Date.now() in a render body is impure (react-hooks/purity) and would make the SSR pass
+// disagree with hydration.
+//
+// Call this once per rendered card and pass the result down. Two calls with the same
+// arguments are not free: each one owns its own setInterval.
+function useLessonCountdown(startsAt: string, endsAt: string): LessonCountdown | null {
+  const [countdown, setCountdown] = useState<LessonCountdown | null>(null)
 
   useEffect(() => {
+    const startMs = new Date(startsAt).getTime()
+    const endMs = new Date(endsAt).getTime()
     function update() {
-      const totalSeconds = Math.floor((new Date(startsAt).getTime() - Date.now()) / 1000)
-      setTimeLeft(formatCompoundCountdown(totalSeconds))
+      setCountdown(describeLessonCountdown(startMs, endMs, Date.now()))
     }
     update()
     const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
-  }, [startsAt])
+  }, [startsAt, endsAt])
 
-  return <span className="font-mono text-sm" style={{ color: '#FF8303' }}>{timeLeft}</span>
+  return countdown
+}
+
+// Presentational only: the tick arrives as a prop from the card's single
+// useLessonCountdown call, so a card runs one interval rather than one per consumer.
+// withLabel is the hero variant: the label sits above the value and comes off that same
+// tick, so it reads "In class" the instant the value becomes a remaining-time timer. The
+// list variant renders the value alone, unchanged in shape.
+function Countdown({ countdown, withLabel = false }: { countdown: LessonCountdown | null; withLabel?: boolean }) {
+  const value = <span className="font-mono text-sm" style={{ color: '#FF8303' }}>{countdown?.value ?? ''}</span>
+
+  if (!withLabel) return value
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+      <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9ca3af' }}>
+        {countdown?.label ?? 'Starts in'}
+      </span>
+      {value}
+    </div>
+  )
+}
+
+// The section heading above the hero card must agree with the pill inside it, so it is
+// driven by the same liveness rather than hardcoded. It is its own component so the hook
+// stays unconditional: heroClass can be null, and this only renders when it is not. The
+// alternative - calling the hook in the parent with placeholder dates - would run a real
+// interval over NaN timestamps for every teacher with no upcoming class.
+function HeroHeading({ startsAt, endsAt }: { startsAt: string; endsAt: string }) {
+  const countdown = useLessonCountdown(startsAt, endsAt)
+
+  return (
+    <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#9ca3af', marginBottom: '8px' }}>
+      {countdown?.live === true ? 'IN CLASS' : 'NEXT CLASS'}
+    </p>
+  )
 }
 
 function ChevronIcon({ rotated }: { rotated: boolean }) {
@@ -233,11 +280,15 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero = false, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; hero?: boolean; isFirst?: boolean }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
+  const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
   const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
   const cancelLabel = getCancellationLabel(cls, 'teacher')
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
   const isNext = mounted && cls.id === nextId && !isCancelled
+  // A cancelled class has nothing left running, so it is never live whatever the clock
+  // says. isNext already excludes cancelled rows; this keeps that true at the pill too.
+  const isLive = !isCancelled && countdown?.live === true
   const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
 
   const hoursBeforeStart = cls.cancelled_at
@@ -310,7 +361,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
             <p className={hero ? 'font-semibold text-lg' : 'font-semibold'}>{cls.student.full_name}</p>
             {isNext && (
               <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
-                NEXT
+                {isLive ? 'IN CLASS' : 'NEXT'}
               </span>
             )}
           </div>
@@ -331,16 +382,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
             ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>{cancelLabel ?? 'Cancelled'}</span>
-            : hero
-              ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9ca3af' }}>
-                    Starts in
-                  </span>
-                  <Countdown startsAt={cls.starts_at} />
-                </div>
-              )
-              : <Countdown startsAt={cls.starts_at} />}
+            : <Countdown countdown={countdown} withLabel={hero} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </div>
@@ -567,9 +609,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       {/* Next class hero: mounted-gated, matching the isNext gating inside ClassCard. */}
       {mounted && heroClass && (
         <div>
-          <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#9ca3af', marginBottom: '8px' }}>
-            NEXT CLASS
-          </p>
+          <HeroHeading startsAt={heroClass.starts_at} endsAt={heroClass.ends_at} />
           <ClassCard cls={heroClass} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} hero />
         </div>
       )}
