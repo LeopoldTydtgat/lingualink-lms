@@ -83,9 +83,10 @@ interface Props {
 // surfaces import, so they cannot drift apart again.
 // See src/lib/levels/levelData.ts.
 //
-// The chart itself, its scorecard and the "not yet assessed" line are shared
-// with the Progress page as <LevelAssessmentChart />; only the card shell,
-// header and empty states below are page-specific.
+// The chart itself and the "not yet assessed" line are shared with the Progress
+// page as <LevelAssessmentChart />; only the card shell, header and empty
+// states below are page-specific. The chart prints each skill's CEFR level on
+// the chart itself, so there is no scorecard listed beneath it.
 
 // ─── Design system ────────────────────────────────────────────────────────────
 

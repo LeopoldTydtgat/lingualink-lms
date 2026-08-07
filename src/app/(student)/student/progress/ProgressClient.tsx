@@ -279,13 +279,14 @@ export default function ProgressClient({
 
           {hasLevels ? (
             <>
-            {/* Chart, per-skill scorecard and the "not yet assessed" line are one
-                shared component, rendered in a single full-width column so the
-                angle-axis labels have room. This used to be a `grid
-                lg:grid-cols-2` with the chart inline, which handed the chart
-                only half the card width from lg up - narrow enough that
-                "Comprehension" clipped mid-word - and kept a second, drifting
-                copy of the chart config. */}
+            {/* Chart and the "not yet assessed" line are one shared component,
+                rendered in a single full-width column. The chart is a
+                fixed-size hand-rolled SVG ported from the admin report detail:
+                each skill's CEFR level prints on the chart under its axis
+                label, so the per-skill scorecard that used to sit below is
+                gone. This used to be a `grid lg:grid-cols-2` with the chart
+                inline, which handed the chart only half the card width from lg
+                up, and kept a second, drifting copy of the chart config. */}
             <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
 
             {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
