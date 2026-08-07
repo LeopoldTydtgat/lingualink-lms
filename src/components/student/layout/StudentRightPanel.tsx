@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
-import { formatRemainingCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown, formatRemainingCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
 interface NextLesson {
@@ -112,10 +112,22 @@ export default function StudentRightPanel({
     ? Math.max(0, Math.floor((new Date(nextLesson.scheduled_at).getTime() - now) / 1000))
     : null
 
-  const classEndMs = nextLesson
-    ? new Date(nextLesson.scheduled_at).getTime() + nextLesson.duration_minutes * 60 * 1000
+  const lessonStartMs = nextLesson ? new Date(nextLesson.scheduled_at).getTime() : null
+  const classEndMs = lessonStartMs !== null && nextLesson
+    ? lessonStartMs + nextLesson.duration_minutes * 60 * 1000
     : null
+  // Liveness comes from the shared half-open [start, end) window in
+  // describeLessonCountdown, the same definition the my-classes cards use, so this
+  // panel's heading can never disagree with the card beside it. Only `live` is taken:
+  // this panel keeps its own hero formatter (formatCountdown, zero-padded HH:MM:SS).
+  const isLive = mounted && lessonStartMs !== null && classEndMs !== null
+    ? describeLessonCountdown(lessonStartMs, classEndMs, now).live
+    : false
   const classEnded = mounted && classEndMs !== null && now >= classEndMs
+  // One joinability read per render instead of eight inline recomputations, all of
+  // which used identical arguments.
+  const isJoinable = mounted && nextLesson !== null
+    && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
   const remainingSeconds = classEndMs !== null
     ? Math.max(0, Math.floor((classEndMs - now) / 1000))
     : 0
@@ -150,7 +162,7 @@ export default function StudentRightPanel({
       <div className="shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', borderRadius: '12px', padding: '14px 16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '10px' }}>
           <Clock size={14} color="#FF8303" style={{ flexShrink: 0 }} />
-          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Next Class</p>
+          <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>{isLive ? 'In Class' : 'Next Class'}</p>
         </div>
 
         {nextLesson ? (
@@ -159,7 +171,7 @@ export default function StudentRightPanel({
               <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827', lineHeight: '1.3', marginBottom: '4px' }}>
                 Class has ended
               </p>
-            ) : mounted && secondsUntilNext !== null && secondsUntilNext <= 0 ? (
+            ) : mounted && secondsUntilNext !== null && isLive ? (
               <p style={{ fontSize: '14px', fontWeight: '600', lineHeight: '1.3', marginBottom: '4px', color: '#FF8303' }}>
                 In class: {formatRemainingCountdown(remainingSeconds)} remaining
               </p>
@@ -193,9 +205,7 @@ export default function StudentRightPanel({
               {nextLesson.teams_join_url ? (
                 <>
                   <a
-                    href={mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
-                      ? nextLesson.teams_join_url
-                      : undefined}
+                    href={isJoinable ? nextLesson.teams_join_url : undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     onMouseEnter={() => setJoinHovered(true)}
@@ -204,7 +214,7 @@ export default function StudentRightPanel({
                       // Fire-and-forget student join-click logging. Guarded to the
                       // joinable state only, and never awaited / never throws —
                       // logging must not block or break opening Teams.
-                      if (!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) || !nextLesson.teams_join_url) return
+                      if (!isJoinable || !nextLesson.teams_join_url) return
                       fetch('/api/join-click', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -218,13 +228,13 @@ export default function StudentRightPanel({
                       width: '100%',
                       gap: '8px',
                       padding: '7px 12px',
-                      backgroundColor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      backgroundColor: isJoinable
                         ? (joinHovered ? '#FF8303' : '#ffffff')
                         : '#E0DFDC',
-                      color: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      color: isJoinable
                         ? (joinHovered ? '#ffffff' : '#FF8303')
                         : '#9ca3af',
-                      border: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      border: isJoinable
                         ? '1.5px solid #FF8303'
                         : 'none',
                       borderRadius: '8px',
@@ -232,10 +242,10 @@ export default function StudentRightPanel({
                       fontWeight: '600',
                       textAlign: 'center',
                       textDecoration: 'none',
-                      cursor: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      cursor: isJoinable
                         ? 'pointer'
                         : 'default',
-                      pointerEvents: mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
+                      pointerEvents: isJoinable
                         ? 'auto'
                         : 'none',
                       transition: 'background-color 0.18s ease, color 0.18s ease',
@@ -244,7 +254,7 @@ export default function StudentRightPanel({
                     <Video size={14} />
                     Join Class
                   </a>
-                  {!(mounted && isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)) && !classEnded && (
+                  {!isJoinable && !classEnded && (
                     <p style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'center', marginTop: '6px' }}>
                       Opens 10 min before class
                     </p>

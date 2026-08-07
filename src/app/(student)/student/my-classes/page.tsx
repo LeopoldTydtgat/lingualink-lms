@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import MyClassesClient from './MyClassesClient'
 import { requireTz } from '@/lib/time/requireTz'
 import { computeStreakWeeks } from '@/lib/lessons/streak'
+import { MAX_LESSON_MS } from '@/app/api/student/availability/slotEngine'
 
 export default async function MyClassesPage() {
   const supabase = await createClient()
@@ -26,6 +27,12 @@ export default async function MyClassesPage() {
   }
 
   const tz = requireTz(student.timezone, 'my-classes:student')
+
+  // One request-time instant shared by the query bound and the end-based filter below,
+  // so the two can never disagree about "now". new Date().getTime() rather than
+  // Date.now(): the react-hooks/purity rule mis-fires on Date.now() in async Server
+  // Components, and the repo's only other remedy is a file-wide rule disable.
+  const nowMs = new Date().getTime()
 
   // Fetch upcoming scheduled lessons with teacher info. Cancelled lessons are
   // deliberately NOT fetched: the student list no longer renders them, and the rows
@@ -51,12 +58,27 @@ export default async function MyClassesPage() {
       )
     `)
     .eq('student_id', student.id)
-    .gte('scheduled_at', new Date().toISOString())
+    // COARSE prefilter only, widened by the longest bookable lesson so a class that has
+    // already started is still fetched. Instant-vs-instant (UTC): scheduled_at is a
+    // timestamptz and this bound is an instant, NOT a local calendar date — the
+    // toISOString() ban covers local date CONSTRUCTION, which this is not. The exact
+    // "has it ended" test is the end-based filter below. The bound also keeps an old
+    // ended-but-never-reported 'scheduled' row from resurfacing as an upcoming class.
+    .gte('scheduled_at', new Date(nowMs - MAX_LESSON_MS).toISOString())
     .eq('status', 'scheduled')
     .order('scheduled_at', { ascending: true })
 
+  // A class leaves this list when it ENDS, not when it starts, so an in-progress class
+  // stays here and stays the NEXT hero — matching the student right panel's "In class"
+  // state, which picks its lesson with the same now < start + duration rule
+  // ((student)/student/layout.tsx). Every row here is status 'scheduled' (filtered
+  // above), so no status branch is needed.
+  const liveOrUpcoming = (rawLessons ?? []).filter(
+    (l) => nowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+  )
+
   // Supabase returns joins as arrays — flatten to single objects
-  const lessons = (rawLessons ?? []).map((lesson) => ({
+  const lessons = liveOrUpcoming.map((lesson) => ({
     ...lesson,
     teacher: Array.isArray(lesson.teacher)
       ? lesson.teacher[0] ?? null
