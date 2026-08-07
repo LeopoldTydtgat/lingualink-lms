@@ -29,6 +29,10 @@ interface Props {
   profile: Profile
   initialAvailability: AvailabilityRecord[]
   minAvailableHours: number | null
+  // Finished banner text, or null when there is nothing to warn about. The
+  // admin-only gate, the failure threshold and the fail-safe default all live
+  // server-side in page.tsx — this component only renders what it is handed.
+  googleSyncWarning: string | null
 }
 
 type TabId = 'general' | 'daytodday' | 'holidays'
@@ -39,7 +43,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'holidays',   label: 'Holidays' },
 ]
 
-export default function ScheduleClient({ profile, initialAvailability, minAvailableHours }: Props) {
+export default function ScheduleClient({ profile, initialAvailability, minAvailableHours, googleSyncWarning }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
   // The FULL availability list lives here.
@@ -58,6 +62,26 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
           Manage your weekly availability, specific day adjustments, and holiday periods.
         </p>
       </div>
+
+      {/* Google busy-sync health. Deliberately not dismissable: it stays until
+          the sync recovers, because a hidden banner means silently taking
+          bookings over her real commitments. */}
+      {googleSyncWarning && (
+        <div
+          role="alert"
+          style={{
+            backgroundColor: '#FD5602',
+            color: '#FFFFFF',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '20px',
+            fontSize: '14px',
+            lineHeight: 1.5,
+          }}
+        >
+          {googleSyncWarning}
+        </div>
+      )}
 
       {/* Tab buttons — the calendar subscription trigger rides the same row,
           pushed right, so it is reachable from any tab without scrolling. */}
