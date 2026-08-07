@@ -287,7 +287,7 @@ export default function PastClassDetailClient({
           </p>
         ) : (
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-            Your teacher didn&apos;t leave written feedback for this class.
+            No written feedback was recorded for this class.
           </p>
         )}
       </div>
@@ -378,7 +378,7 @@ export default function PastClassDetailClient({
           <p style={{ fontSize: '13px', color: '#9ca3af' }}>
             {lesson.report.did_class_happen === false
               ? 'This class did not take place, so there is no level assessment.'
-              : "Your teacher didn't record a level assessment for this class."}
+              : 'No level assessment was recorded for this class.'}
           </p>
         </div>
       ) : null}
