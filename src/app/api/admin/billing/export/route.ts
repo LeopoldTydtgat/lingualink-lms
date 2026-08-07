@@ -67,11 +67,15 @@ export async function GET(req: NextRequest) {
   const exportTzLabel = tzLabel(exportTz)
 
   const { searchParams } = new URL(req.url)
-  const type = searchParams.get('type') // 'teacher_invoices' | 'student_hours' | 'company_billing' | 'student_progress' | 'pending_reports'
+  // Two types, and only two. The student-progress and pending-reports exports are
+  // served by /api/admin/exports/[type] as 'student-progress' and
+  // 'pending-reports'; do not re-add them here. The copies that used to live in
+  // this file were reachable by no caller, and the student-progress one queried a
+  // students embed and a student_id filter that public.reports does not have.
+  const type = searchParams.get('type') // 'teacher_invoices' | 'company_billing'
   const dateFrom = searchParams.get('dateFrom')
   const dateTo = searchParams.get('dateTo')
   const teacherId = searchParams.get('teacherId')
-  const studentId = searchParams.get('studentId')
   const companyId = searchParams.get('companyId')
   const month = searchParams.get('month') // YYYY-MM-01 for teacher_invoices
   const status = searchParams.get('status') // optional invoice status for teacher_invoices
@@ -249,112 +253,6 @@ export async function GET(req: NextRequest) {
 
     csv = toCSV(headers, rows)
     filename = 'company-billing.csv'
-  }
-
-  // ── 5. Student Progress Report ────────────────────────────────────────────────────────
-  else if (type === 'student_progress') {
-    let reportsQuery = supabase
-      .from('reports')
-      .select('id, lesson_id, level_data, created_at, lessons(scheduled_at, teacher_id, student_id, profiles!lessons_teacher_id_fkey(full_name)), students(full_name)')
-      .order('created_at', { ascending: false })
-
-    if (studentId) reportsQuery = reportsQuery.eq('student_id', studentId)
-    if (dateGteIso) reportsQuery = reportsQuery.gte('created_at', dateGteIso)
-    if (dateLtIso) reportsQuery = reportsQuery.lt('created_at', dateLtIso)
-
-    const { data: reports, error: reportsErr } = await reportsQuery
-    if (reportsErr) throw reportsErr
-
-    const headers = ['Student', `Class Date (${exportTzLabel})`, 'Teacher', 'Grammar', 'Expression', 'Comprehension', 'Vocabulary', 'Accent', 'Spoken Level', 'Written Level']
-    const rows = (reports || []).map(r => {
-      const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
-      // Use unknown as intermediate to safely bridge the array→object cast for nested profiles
-      const lessonWithProfiles = lesson as unknown as { scheduled_at: string; profiles: { full_name: string }[] } | null
-      const teacher = lessonWithProfiles
-        ? (Array.isArray(lessonWithProfiles.profiles) ? lessonWithProfiles.profiles[0] : null)
-        : null
-      const student = Array.isArray(r.students) ? r.students[0] : r.students
-      const ld = (r.level_data as Record<string, string>) || {}
-      return [
-        (student as { full_name: string } | null)?.full_name || '',
-        lessonWithProfiles?.scheduled_at ? formatInstantInTz(lessonWithProfiles.scheduled_at, exportTz) : '',
-        teacher?.full_name || '',
-        ld.grammar || '',
-        ld.expression || '',
-        ld.comprehension || '',
-        ld.vocabulary || '',
-        ld.accent || '',
-        ld.spoken_level || '',
-        ld.written_level || '',
-      ]
-    })
-
-    csv = toCSV(headers, rows)
-    filename = 'student-progress.csv'
-  }
-
-  // ── 6. Pending Reports Log ────────────────────────────────────────────────────────────
-  else if (type === 'pending_reports') {
-    // Pending reports live in the `reports` table — `lessons` has no
-    // 'pending_report' status. Query reports, then join lessons + names by id
-    // (mirrors /api/admin/exports/[type] pending-reports).
-    let query = supabase
-      .from('reports')
-      .select('id, lesson_id, teacher_id, status, created_at')
-      .in('status', ['pending', 'flagged', 'reopened'])
-      .order('created_at', { ascending: false })
-
-    if (teacherId) query = query.eq('teacher_id', teacherId)
-    if (dateGteIso) query = query.gte('created_at', dateGteIso)
-    if (dateLtIso) query = query.lt('created_at', dateLtIso)
-
-    const { data: reports, error: reportsErr } = await query
-    if (reportsErr) throw reportsErr
-
-    const lessonIds = (reports || []).map((r: any) => r.lesson_id).filter(Boolean)
-    const tIds = [...new Set((reports || []).map((r: any) => r.teacher_id).filter(Boolean))]
-
-    const [lessonRes, teacherRes] = await Promise.all([
-      lessonIds.length > 0
-        ? supabase.from('lessons').select('id, student_id, scheduled_at, duration_minutes').in('id', lessonIds)
-        : { data: [] },
-      tIds.length > 0
-        ? supabase.from('profiles').select('id, full_name').in('id', tIds)
-        : { data: [] },
-    ])
-    if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
-    if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
-
-    const lessonMap: Record<string, { studentId: string; scheduledAt: string; durationMinutes: number }> = {}
-    lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at, durationMinutes: l.duration_minutes } })
-
-    const teacherMap: Record<string, string> = {}
-    teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
-
-    const studentIds = [...new Set(Object.values(lessonMap).map(l => l.studentId).filter(Boolean))] as string[]
-    const studentRes = studentIds.length > 0
-      ? await supabase.from('students').select('id, full_name').in('id', studentIds)
-      : { data: [] }
-    if ('error' in studentRes && studentRes.error) throw studentRes.error
-    const studentMap: Record<string, string> = {}
-    studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
-
-    const now = Date.now()
-    const headers = ['Teacher', 'Student', `Class Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Hours Since Class']
-    const rows = (reports || []).map((r: any) => {
-      const lesson = lessonMap[r.lesson_id]
-      return [
-        teacherMap[r.teacher_id] ?? '',
-        lesson ? (studentMap[lesson.studentId] ?? '') : '',
-        lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
-        lesson ? lesson.durationMinutes : '',
-        r.status,
-        lesson ? Math.max(0, Math.floor((now - (new Date(lesson.scheduledAt).getTime() + lesson.durationMinutes * 60 * 1000)) / (1000 * 60 * 60))) : '',
-      ]
-    })
-
-    csv = toCSV(headers, rows)
-    filename = 'pending-reports.csv'
   }
 
   else {
