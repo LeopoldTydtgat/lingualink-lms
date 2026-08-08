@@ -282,7 +282,6 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
-  const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
   const cancelLabel = getCancellationLabel(cls, 'teacher')
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
@@ -290,7 +289,13 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   // A cancelled class has nothing left running, so it is never live whatever the clock
   // says. isNext already excludes cancelled rows; this keeps that true at the pill too.
   const isLive = !isCancelled && countdown?.live === true
-  const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
+  // Gated off the card's existing countdown tick rather than a fresh Date.now() in the
+  // render body: that read was impure (react-hooks/purity) and only re-evaluated when the
+  // card happened to re-render, so an open card kept offering Cancel Class after crossing
+  // the 24h boundary. Null until the countdown's first effect run, which fails safe - the
+  // button is withheld, never wrongly offered. This is only ever evaluated inside the
+  // expanded block, which cannot be open before hydration, so nothing changes on screen.
+  const showReschedule = countdown !== null && countdown.msUntilStart > 24 * 60 * 60_000 && !isCancelled
 
   const hoursBeforeStart = cls.cancelled_at
     ? Math.floor((new Date(cls.starts_at).getTime() - new Date(cls.cancelled_at).getTime()) / 3600000)

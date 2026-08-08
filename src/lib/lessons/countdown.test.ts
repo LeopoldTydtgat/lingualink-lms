@@ -100,6 +100,42 @@ describe('describeLessonCountdown - format shape', () => {
   })
 })
 
+describe('describeLessonCountdown - msUntilStart', () => {
+  it('is the exact millisecond lead time before the class', () => {
+    const res = describeLessonCountdown(START, END, START - 90 * MIN)
+    expect(res.msUntilStart).toBe(90 * MIN)
+  })
+
+  it('is zero at the exact start instant', () => {
+    const res = describeLessonCountdown(START, END, START)
+    expect(res.msUntilStart).toBe(0)
+  })
+
+  it('goes negative once the class is underway rather than clamping', () => {
+    const res = describeLessonCountdown(START, END, START + 12 * MIN)
+    expect(res.msUntilStart).toBe(-12 * MIN)
+  })
+
+  it('stays negative after the end, where value collapses to "Starting now"', () => {
+    const res = describeLessonCountdown(START, END, END + 5 * MIN)
+    expect(res.msUntilStart).toBe(-65 * MIN)
+    expect(res.value).toBe('Starting now')
+  })
+
+  it('keeps the sub-second precision that value floors away', () => {
+    const res = describeLessonCountdown(START, END, START - 1)
+    expect(res.msUntilStart).toBe(1)
+    expect(res.value).toBe('Starting now')
+  })
+
+  it('lands on the correct side of the 24h reschedule gate', () => {
+    // The teacher Cancel Class button gates on > 24h, so exactly 24h must NOT qualify.
+    const DAY = 24 * 60 * MIN
+    expect(describeLessonCountdown(START, END, START - DAY).msUntilStart).toBe(DAY)
+    expect(describeLessonCountdown(START, END, START - DAY - 1).msUntilStart).toBeGreaterThan(DAY)
+  })
+})
+
 describe('formatHeroCountdown', () => {
   it('floors at "Now" on zero', () => {
     expect(formatHeroCountdown(0)).toBe('Now')

@@ -62,6 +62,16 @@ export type LessonCountdown = {
   live: boolean
   label: string
   value: string
+  // Raw signed lead time to the start instant, in milliseconds: positive before the
+  // class, zero at the start instant, negative once underway or over. Unfloored, so it
+  // keeps the sub-second precision `value` discards, and uncapped, so it keeps counting
+  // negative after the end where `value` collapses to "Starting now".
+  //
+  // Exists so a caller gating on time-to-start (the teacher Cancel Class button's 24h
+  // window) can read it off the same tick that drives the countdown, instead of calling
+  // Date.now() in a render body - which is both impure under react-hooks/purity and a
+  // stale read that never updates until something else re-renders the card.
+  msUntilStart: number
 }
 
 // PURE EPOCH-MS ARITHMETIC. Every argument is an absolute instant in milliseconds and the
@@ -73,6 +83,10 @@ export function describeLessonCountdown(
   endMs: number,
   nowMs: number
 ): LessonCountdown {
+  // Computed once and returned on both branches: it is the same quantity either side of
+  // the start instant, only its sign differs.
+  const msUntilStart = startMs - nowMs
+
   // Teaching window is half-open [start, end): the start instant is already live and the
   // end instant is not, matching pickLiveLesson's teaching-time test in liveLesson.ts.
   if (nowMs >= startMs && nowMs < endMs) {
@@ -80,14 +94,17 @@ export function describeLessonCountdown(
       live: true,
       label: 'In class',
       value: formatRemainingCountdown(Math.floor((endMs - nowMs) / 1000)),
+      msUntilStart,
     }
   }
   // Not live: before the class it counts down to the start; at or past the end it
   // collapses to zero rather than counting up, so a row that outlives its class by a
-  // render tick degrades to "Starting now" instead of a negative timer.
+  // render tick degrades to "Starting now" instead of a negative timer. msUntilStart is
+  // deliberately NOT collapsed the same way - it stays signed and exact.
   return {
     live: false,
     label: 'Starts in',
     value: formatCompoundCountdown(nowMs >= endMs ? 0 : Math.floor((startMs - nowMs) / 1000)),
+    msUntilStart,
   }
 }
