@@ -3,10 +3,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { describeLessonCountdown, type LessonCountdown } from '@/lib/lessons/countdown'
+import { getLocalDateKey as getTzDateKey, addDaysToDateKey } from '@/lib/utils/timezone'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -79,28 +79,29 @@ function formatDate(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
-function getLocalDateKey(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
-
 function groupByDay(classes: Class[], timezone: string): Record<string, Class[]> {
   return classes.reduce((groups, cls) => {
-    const day = getLocalDateKey(cls.starts_at, timezone)
+    const day = getTzDateKey(new Date(cls.starts_at), timezone)
     if (!groups[day]) groups[day] = []
     groups[day].push(cls)
     return groups
   }, {} as Record<string, Class[]>)
 }
 
-function formatDayHeading(isoString: string, timezone: string): string {
-  const date = new Date(isoString)
-  if (isToday(date)) return 'Today'
-  if (isTomorrow(date)) return 'Tomorrow'
+// Today/Tomorrow must be decided on the SAME day boundary that built the group this
+// heading labels - the teacher's account timezone, not the browser's. date-fns
+// isToday/isTomorrow compare Date objects on the browser's boundary, so a teacher
+// whose device zone differs from their account zone read a heading one day off near
+// midnight while the group beneath it was correct.
+//
+// dateKey is the group's own key, already produced by getLocalDateKey in the teacher's
+// timezone; todayKey is supplied by the caller from a clock read in an effect, never
+// during render (react-hooks/purity is ON in this file).
+function formatDayHeading(isoString: string, timezone: string, dateKey: string, todayKey: string | null): string {
+  if (todayKey !== null) {
+    if (dateKey === todayKey) return 'Today'
+    if (dateKey === addDaysToDateKey(todayKey, 1)) return 'Tomorrow'
+  }
   return formatDate(isoString, timezone)
 }
 
@@ -422,10 +423,10 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   )
 }
 
-function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
+function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId, todayKey }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; todayKey: string | null }) {
   // The next class is now the hero above the list, so every day group starts collapsed.
   const [open, setOpen] = useState(false)
-  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
+  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone, dateStr, todayKey) : dateStr
 
   return (
     <div className="card-elevated overflow-hidden">
@@ -466,10 +467,16 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
+  // Today's date key in the TEACHER's timezone. Set in the effect, never during render:
+  // react-hooks/purity is ON in this file and a clock read in a render body would also
+  // make the SSR pass disagree with hydration. Null until mounted, which formatDayHeading
+  // treats as "no relative label" and falls back to the absolute date.
+  const [todayKey, setTodayKey] = useState<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    setTodayKey(getTzDateKey(new Date(), teacherTimezone))
+  }, [teacherTimezone])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
   const upcomingClasses = classes.filter(c => !isCancelledStatus(c.status))
@@ -641,7 +648,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       ) : (
         <div className="space-y-3">
           {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
+            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} todayKey={todayKey} />
           ))}
         </div>
       )}
