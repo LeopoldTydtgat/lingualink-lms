@@ -97,6 +97,40 @@ export function pickLiveLesson(
   return teaching ?? grace
 }
 
+// Lesson statuses that mean "this class HAPPENED in its slot": exactly the three
+// outcomes complete_report_atomic is allowed to write. Cancelled lessons are
+// deliberately excluded — nobody taught them, so marks drawn inside a cancelled slot
+// belong to whatever class comes next, and attributing them backwards would refuse
+// that next class's perfectly good saves.
+export const ATTRIBUTION_STATUSES = ['completed', 'student_no_show', 'teacher_no_show'] as const
+
+// A lesson row as read for attribution. No student_id: nothing here is displayed.
+type AttributionRow = {
+  id: string
+  scheduled_at: string
+  duration_minutes: number
+}
+
+// Which lesson was BEING TAUGHT at nowMs. Pure, for the same reason pickLiveLesson
+// is: the risky part is the window arithmetic, so it lives somewhere a test can
+// reach it without a database.
+//
+// This is NOT a "may I write here" answer and must never be used as one — see
+// getAttributionLessonIdForTeacher below. Teaching time only ([start, end)), with NO
+// grace: grace exists so a just-ended class's marks can still land, which is a WRITE
+// concern, whereas attribution only has to name the class a teacher was sitting in.
+export function pickAttributionLesson(
+  lessons: AttributionRow[],
+  nowMs: number
+): string | null {
+  for (const l of lessons) {
+    const startMs = new Date(l.scheduled_at).getTime()
+    const endMs = startMs + l.duration_minutes * 60_000
+    if (nowMs >= startMs && nowMs < endMs) return l.id
+  }
+  return null
+}
+
 // Resolve the live lesson for the CURRENTLY LOGGED-IN teacher.
 // Read-only. Uses the user-scoped client so it sees only this teacher's rows.
 // Returns null when no class is live (the normal "prep time" / "between
@@ -161,4 +195,58 @@ export async function getLiveLessonForTeacher(): Promise<LiveLesson | null> {
     ...picked,
     studentName: student?.full_name ?? 'your student',
   }
+}
+
+// Name the class the teacher is sitting in RIGHT NOW even though it is no longer
+// writable. Used ONLY to arm the annotation guard — never to write.
+//
+// Why it exists: getLiveLessonForTeacher requires status 'scheduled', so filing a
+// report mid-class (allowed from the class start) makes it return null for the rest
+// of the hour. Every save after that point is refused without naming a lesson, so a
+// tab that marks up the remainder of the class never learns which class it was in;
+// its guard stays null and the next class accepts that whole array. Returning the id
+// here arms the guard, so the next class refuses it instead.
+//
+// SAFETY (W2): the id returned here is only ever compared for equality by the
+// annotation guard. It never becomes a write target — saveLessonAnnotations writes
+// getLiveLessonForTeacher's lesson and nothing else — so this can only REFUSE a
+// write, never redirect one. The set of writable lessons is completely unchanged.
+//
+// Read-only, user-scoped client (W1), so it sees only this teacher's rows.
+export async function getAttributionLessonIdForTeacher(): Promise<string | null> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const nowMs = Date.now()
+
+  const { data: lessons, error } = await supabase
+    .from('lessons')
+    .select('id, scheduled_at, duration_minutes')
+    .eq('teacher_id', user.id)
+    .in('status', [...ATTRIBUTION_STATUSES])
+    .lte('scheduled_at', new Date(nowMs).toISOString())
+    // Same fetch-narrowing bound as getLiveLessonForTeacher, same reasoning: a lesson
+    // runs at most a few hours, so 24h cannot drop one whose slot contains now.
+    .gte('scheduled_at', new Date(nowMs - 24 * 60 * 60_000).toISOString())
+    .order('scheduled_at', { ascending: false })
+
+  if (error) {
+    // Log and fall back to null, matching getLiveLessonForTeacher above. Null here
+    // means "guard not armed", i.e. permissive — the one place this mechanism fails
+    // open. Deliberate: arming a never-matching sentinel on a transient fault would
+    // kill autosave for the rest of that tab's life, including for the prep-then-class
+    // flow, and this query only runs in a window where nothing is writable anyway.
+    console.error('[getAttributionLessonIdForTeacher] lessons query failed', {
+      teacherId: user.id,
+      error,
+    })
+    return null
+  }
+  if (!lessons || lessons.length === 0) return null
+
+  return pickAttributionLesson(lessons as AttributionRow[], nowMs)
 }

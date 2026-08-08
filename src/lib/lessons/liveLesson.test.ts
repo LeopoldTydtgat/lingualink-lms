@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pickLiveLesson, GRACE_MINUTES } from './liveLesson'
+import { pickLiveLesson, pickAttributionLesson, GRACE_MINUTES } from './liveLesson'
 
 // Fixed clock for the general cases.
 const NOW = new Date('2026-07-01T10:05:00.000Z').getTime()
@@ -106,5 +106,73 @@ describe('pickLiveLesson — two lessons both on grace', () => {
     const res = pickLiveLesson([a, b], now)
     expect(res).not.toBeNull()
     expect(['a', 'b']).toContain(res!.lessonId)
+  })
+})
+
+describe('pickAttributionLesson — naming the class a teacher is sitting in', () => {
+  // Attribution answers "which class was being taught at nowMs", for lessons the
+  // caller has already filtered to the happened-in-their-slot statuses. It arms the
+  // annotation guard when nothing is writable; it never selects a write target.
+  const start = new Date('2026-07-01T10:00:00.000Z').getTime()
+  const end = start + 60 * 60_000 // 11:00:00.000
+  const l = { id: 'a', scheduled_at: '2026-07-01T10:00:00.000Z', duration_minutes: 60 }
+
+  it('returns null when there are no lessons', () => {
+    expect(pickAttributionLesson([], NOW)).toBeNull()
+  })
+
+  it('names the lesson whose slot contains now', () => {
+    expect(pickAttributionLesson([l], NOW)).toBe('a')
+  })
+
+  it('includes the exact start instant and excludes the exact end instant', () => {
+    // Half-open [start, end), mirroring pickLiveLesson's teaching window so the two
+    // can never disagree about which class an instant belongs to.
+    expect(pickAttributionLesson([l], start)).toBe('a')
+    expect(pickAttributionLesson([l], end - 1)).toBe('a')
+    expect(pickAttributionLesson([l], end)).toBeNull()
+  })
+
+  it('grants NO grace — a just-ended lesson is not attributed', () => {
+    // Grace exists so a finished class's marks can still be WRITTEN. Attribution is
+    // not a write, and extending grace here would let a tab that merely sat through
+    // the changeover claim the previous class.
+    expect(pickAttributionLesson([l], end + 60_000)).toBeNull()
+  })
+
+  it('returns the same lesson pickLiveLesson calls live, across the handover', () => {
+    // The invariant both functions' comments claim, asserted JOINTLY rather than as
+    // two parallel literals: for any instant inside a teaching window the two must
+    // name the same class, or a save could be refused as belonging to one lesson
+    // while the write targets another. Probed across the A->B changeover.
+    const rows = [
+      { id: 'a', scheduled_at: '2026-07-01T09:00:00.000Z', duration_minutes: 60, student_id: 's1' },
+      { id: 'b', scheduled_at: '2026-07-01T10:00:00.000Z', duration_minutes: 60, student_id: 's2' },
+    ]
+    const base = new Date('2026-07-01T09:00:00.000Z').getTime()
+    for (const offsetMin of [0, 30, 59, 60, 61, 90, 119]) {
+      const t = base + offsetMin * 60_000
+      expect(pickAttributionLesson(rows, t)).toBe(pickLiveLesson(rows, t)?.lessonId)
+    }
+  })
+
+  it('does not depend on input order when only one lesson can match', () => {
+    // no_teacher_overlap forbids two lessons overlapping in real teaching time, so at
+    // most one row can contain a given instant. Pin that the result is order-free
+    // rather than an artefact of the query's scheduled_at DESC sort.
+    const early = { id: 'early', scheduled_at: '2026-07-01T08:00:00.000Z', duration_minutes: 60 }
+    const later = { id: 'later', scheduled_at: '2026-07-01T10:00:00.000Z', duration_minutes: 60 }
+    expect(pickAttributionLesson([early, later], NOW)).toBe('later')
+    expect(pickAttributionLesson([later, early], NOW)).toBe('later')
+  })
+
+  it('at a back-to-back handover, names the class now being taught', () => {
+    // Same wrong-class instant pickLiveLesson guards: A 09:00-10:00, B 10:00-11:00,
+    // probed at 10:00:00.000 exactly. A has ended; B owns the instant.
+    const a2 = { id: 'a', scheduled_at: '2026-07-01T09:00:00.000Z', duration_minutes: 60 }
+    const b2 = { id: 'b', scheduled_at: '2026-07-01T10:00:00.000Z', duration_minutes: 60 }
+    const handover = new Date('2026-07-01T10:00:00.000Z').getTime()
+    expect(pickAttributionLesson([a2, b2], handover)).toBe('b')
+    expect(pickAttributionLesson([b2, a2], handover)).toBe('b')
   })
 })

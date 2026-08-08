@@ -40,6 +40,11 @@ type Props = {
   isAdmin: boolean
   isOwned: boolean
   annotationsByName: Record<string, Annotation[]>
+  // The lesson the seeded marks above belong to (null: no class was live when
+  // this page loaded). Forwarded to the annotatable viewer only, so an autosave
+  // fired from a tab left open across a lesson change is refused server-side
+  // instead of writing the previous class's marks onto the new one.
+  liveLessonId: string | null
   live?: boolean
 }
 
@@ -125,6 +130,7 @@ export default function StudySheetDetailClient({
   activities,
   isOwned,
   annotationsByName,
+  liveLessonId,
   live = false,
 }: Props) {
   const router = useRouter()
@@ -307,6 +313,7 @@ export default function StudySheetDetailClient({
               sheetId={sheet.id}
               mode="annotatable"
               annotationsByName={annotationsByName}
+              liveLessonId={liveLessonId}
               cardClassName="rounded-lg overflow-hidden bg-white"
               cardStyle={{ border: '1px solid #E0DFDC' }}
               onRemove={canManageFiles ? handleRemove : undefined}

@@ -94,6 +94,13 @@ export async function loadStudySheetDetail(id: string) {
     // like-for-like. Non-owned (admin-library) sheets get no file-management UI.
     isOwned: sheet.owner_id === user.id,
     annotationsByName,
+    // The lesson those seed marks came from — null when no class was live at
+    // load. Threaded to the client so the autosave can be REFUSED when a tab
+    // left open across a lesson change tries to flush the previous class's
+    // marks into the new one. The client sends this value back untouched and the
+    // action compares it to the lesson IT resolves; it can only ever BLOCK a
+    // write, never name the lesson written to, so W2 above still holds.
+    liveLessonId: live ? live.lessonId : null,
   }
 }
 

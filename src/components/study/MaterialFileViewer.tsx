@@ -24,6 +24,11 @@ type Props = {
   mode: 'plain' | 'annotatable'
   // Only consumed in 'annotatable' mode — seed marks keyed by attachment name.
   annotationsByName?: Record<string, Annotation[]>
+  // Only consumed in 'annotatable' mode — the lesson those seed marks came from,
+  // handed to AnnotatablePdf as its stale-tab guard. Optional so the student
+  // 'plain' call is unchanged; absent -> null, which the save action reads as
+  // "nothing was seeded" and lets through.
+  liveLessonId?: string | null
   wrapperClassName?: string
   cardClassName?: string
   cardStyle?: React.CSSProperties
@@ -38,6 +43,7 @@ export default function MaterialFileViewer({
   sheetId,
   mode,
   annotationsByName,
+  liveLessonId,
   wrapperClassName = 'space-y-4',
   cardClassName = 'rounded-xl overflow-hidden bg-white shadow-sm',
   cardStyle = { border: '1px solid #f3f4f6' },
@@ -135,6 +141,7 @@ export default function MaterialFileViewer({
                   attachmentIndex={idx}
                   attachmentName={att.name}
                   initialAnnotations={annotationsByName?.[att.name]}
+                  seedLessonId={liveLessonId ?? null}
                 />
               ) : (
                 // PdfViewer replaces the native <iframe>: it renders the PDF through
