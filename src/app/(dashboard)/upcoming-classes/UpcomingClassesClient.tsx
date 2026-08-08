@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { describeLessonCountdown, type LessonCountdown } from '@/lib/lessons/countdown'
-import { getLocalDateKey as getTzDateKey, addDaysToDateKey } from '@/lib/utils/timezone'
+import { getLocalDateKey as getTzDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -471,11 +471,37 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   // react-hooks/purity is ON in this file and a clock read in a render body would also
   // make the SSR pass disagree with hydration. Null until mounted, which formatDayHeading
   // treats as "no relative label" and falls back to the absolute date.
+  //
+  // Refreshed at each local midnight by the self-rescheduling timer below, so a tab left
+  // open across the boundary does not keep labelling yesterday's group "Today".
   const [todayKey, setTodayKey] = useState<string | null>(null)
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Reads the key from the clock on every hop rather than incrementing the previous
+    // key. That is what makes an imprecise fire harmless: early (clock skew) leaves the
+    // old key and reschedules a second later; late (throttled background tab, or a zone
+    // whose DST transition lands ON midnight so 00:00 does not exist that day and
+    // wallTimeToUtcMs resolves past the gap) still reads the correct current day.
+    function schedule() {
+      const key = getTzDateKey(new Date(), teacherTimezone)
+      setTodayKey(key)
+
+      const [y, m, d] = addDaysToDateKey(key, 1).split('-').map(Number)
+      const nextMidnightMs = wallTimeToUtcMs(y, m, d, 0, 0, teacherTimezone)
+      // Floor the delay: an early fire must never schedule a zero-delay loop. One extra
+      // hop a second later lands past the boundary and settles.
+      const delay = Math.max(nextMidnightMs - Date.now(), 1000)
+      timer = setTimeout(schedule, delay)
+    }
+
     setMounted(true)
-    setTodayKey(getTzDateKey(new Date(), teacherTimezone))
+    schedule()
+
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }, [teacherTimezone])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
