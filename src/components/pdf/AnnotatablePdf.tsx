@@ -101,10 +101,11 @@ export default function AnnotatablePdf({
   // 'stale' is the cross-lesson guard's state: the live class changed under a tab
   // left open, so this tab's marks belong to the previous class and the action
   // refused the write. Treat it as terminal — the badge says to reload, and (like
-  // 'not-saving') it never auto-clears. It is not quite unrecoverable: if the newer
-  // class leaves 'scheduled' (cancelled or reported) while the guard's own lesson is
-  // still inside its 15-minute grace, the resolver names that lesson again and saves
-  // resume correctly. Rare, and it lands on the right class when it happens.
+  // 'not-saving') it never auto-clears. It is not quite unrecoverable: recovery
+  // happens only if the newer class is CANCELLED while the guard's own lesson is
+  // still inside its 15-minute grace, since a reported newer class now suppresses
+  // the grace candidate instead, so reporting does not reopen the previous lesson.
+  // Rare, and it lands on the right class when it happens.
   //
   // NOTE: the status values the action returns use underscores ('no_live_class',
   // 'not_saving', 'stale_lesson'), but saveState uses a hyphen ('not-saving').
