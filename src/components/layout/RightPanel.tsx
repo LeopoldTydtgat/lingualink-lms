@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { Video, ArrowRight, BookOpen, Clock, Receipt, Sparkles, CalendarClock, CheckCircle2, Wrench, ChevronDown, ChevronUp } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
-import { describeLessonCountdown, formatRemainingCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown, formatRemainingCountdown, formatHeroCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import type { WhatsNewItem } from '@/lib/whatsNew'
 import { WhatsNewRow } from '@/components/layout/whatsNewUi'
@@ -37,18 +37,6 @@ type RightPanelProps = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatCountdown(totalSeconds: number): string {
-  if (totalSeconds <= 0) return 'Now'
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  if (days > 0) {
-    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
-  }
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
 
 // Format: "Thu 09 Apr, 10:00 – 11:00" in the teacher's account timezone.
 // Built from utcInstantToTzParts (same helper as StudentRightPanel and the
@@ -319,8 +307,8 @@ export default function RightPanel({
   // Liveness comes from the shared half-open [start, end) window in
   // describeLessonCountdown, the same definition the upcoming-classes cards use, so a
   // panel heading can never disagree with the card beside it. Only `live` is taken:
-  // this panel keeps its own hero formatter (formatCountdown, zero-padded HH:MM:SS),
-  // which countdown.ts deliberately does NOT share with the cards.
+  // the hero below uses formatHeroCountdown (zero-padded HH:MM:SS), which the
+  // cards deliberately do NOT use.
   //
   // Both of these read the component's own 1s tick (`now`, set at mount and by the
   // countdown interval above) rather than Date.now(): the render path stays pure, and
@@ -458,7 +446,7 @@ export default function RightPanel({
                 </p>
               ) : (
                 <p style={{ fontSize: '22px', fontWeight: 700, color: '#111827', fontVariantNumeric: 'tabular-nums', lineHeight: '1.2', marginBottom: '4px' }}>
-                  {mounted && secondsUntil !== null ? formatCountdown(secondsUntil) : '--:--:--'}
+                  {mounted && secondsUntil !== null ? formatHeroCountdown(secondsUntil) : '--:--:--'}
                 </p>
               )}
 

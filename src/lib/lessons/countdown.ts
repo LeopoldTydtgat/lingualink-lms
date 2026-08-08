@@ -12,10 +12,32 @@ export function formatCompoundCountdown(secondsUntil: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
 }
 
+// Pre-class hero countdown for the teacher RightPanel and the student
+// StudentRightPanel - the 22px zero-padded HH:MM:SS block above the class time.
+// It was duplicated verbatim in both panels. The two panels remain separate
+// components by design; this is only the formatter they share.
+//
+// Deliberately a different shape from the other two formatters here: it always
+// emits an hour block under a day and zero-pads it ("00:47:37"), where
+// formatRemainingCountdown drops the hour block entirely under an hour and never
+// pads it, and formatCompoundCountdown uses the "10h 18m 36s" compound form.
+// It also floors at 'Now', not 'Starting now'.
+export function formatHeroCountdown(secondsUntil: number): string {
+  if (secondsUntil <= 0) return 'Now'
+  const days = Math.floor(secondsUntil / 86400)
+  const hours = Math.floor((secondsUntil % 86400) / 3600)
+  const minutes = Math.floor((secondsUntil % 3600) / 60)
+  const seconds = secondsUntil % 60
+  if (days > 0) {
+    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 // Live in-class "time remaining" timer shared by the teacher RightPanel and the
 // student StudentRightPanel ("In class: 47:37 remaining").
 //
-// Deliberately NOT formatCountdown (each panel's local pre-class hero formatter):
+// Deliberately NOT formatHeroCountdown (the panels' pre-class hero formatter above):
 // that one always emits a zero-padded HH:MM:SS block and is still the hero's
 // format. This one drops the hour block entirely under an hour and does not
 // zero-pad the hour above it, so a mid-class timer reads 47:37 rather than

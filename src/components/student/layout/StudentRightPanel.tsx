@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
-import { describeLessonCountdown, formatRemainingCountdown } from '@/lib/lessons/countdown'
+import { describeLessonCountdown, formatRemainingCountdown, formatHeroCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts } from '@/lib/utils/timezone'
 
 interface NextLesson {
@@ -30,19 +30,6 @@ interface StudentRightPanelProps {
   assignedExercises: number
   completedExercises: number
   streakWeeks: number
-}
-
-function formatCountdown(secondsUntil: number): string {
-  if (secondsUntil <= 0) return 'Now'
-  const days = Math.floor(secondsUntil / 86400)
-  const hours = Math.floor((secondsUntil % 86400) / 3600)
-  const minutes = Math.floor((secondsUntil % 3600) / 60)
-  const seconds = secondsUntil % 60
-
-  if (days > 0) {
-    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
-  }
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
 function formatHours(hours: number): string {
@@ -119,7 +106,7 @@ export default function StudentRightPanel({
   // Liveness comes from the shared half-open [start, end) window in
   // describeLessonCountdown, the same definition the my-classes cards use, so this
   // panel's heading can never disagree with the card beside it. Only `live` is taken:
-  // this panel keeps its own hero formatter (formatCountdown, zero-padded HH:MM:SS).
+  // the hero below uses formatHeroCountdown (zero-padded HH:MM:SS).
   const isLive = mounted && lessonStartMs !== null && classEndMs !== null
     ? describeLessonCountdown(lessonStartMs, classEndMs, now).live
     : false
@@ -185,7 +172,7 @@ export default function StudentRightPanel({
                 marginBottom: '4px',
               }}>
                 {mounted && secondsUntilNext !== null
-                  ? formatCountdown(secondsUntilNext)
+                  ? formatHeroCountdown(secondsUntilNext)
                   : '--:--:--'}
               </p>
             )}
