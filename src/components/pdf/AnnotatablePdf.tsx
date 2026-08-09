@@ -145,6 +145,17 @@ export default function AnnotatablePdf({
         // class. The warn-by-default branch means any unknown/absent status is
         // treated as not-saved (fail-safe), never silently ignored. NOTE: the
         // status values use underscores, but saveState uses a hyphen.
+        //
+        // The failing arms below also put `annotations` BACK on latestRef. flush
+        // nulls it before issuing the save, so a save that then fails leaves those
+        // strokes queued nowhere: if the teacher never draws again, the unmount
+        // flush finds null and sends nothing. Restoring only makes the unmount
+        // flush — and any later flush — carry these marks; it schedules no timer
+        // and no retry of its own, and every later stroke resends the full array
+        // anyway. It is conditional on latestRef.current still being null so an
+        // array committed while the save was in flight is never clobbered. The
+        // 'saved' and 'no_live_class' arms deliberately do NOT restore: one already
+        // persisted, and prep marks are meant not to persist.
         switch (r?.status) {
           case 'saved':
             // Bind this tab's marks to the class they just landed in, but only if the
@@ -176,7 +187,9 @@ export default function AnnotatablePdf({
             if (guardLessonId === null && r.attributionLessonId !== null) {
               savedLessonRef.current = r.attributionLessonId
             }
-            setSaveState('idle')
+            // 'stale' is terminal (reload required); a later no-live-class result (the
+            // stale class ending) must not clear it and imply things recovered.
+            setSaveState((s) => (s === 'stale' ? s : 'idle'))
             break
           case 'not_saving':
             // The write was refused, but the guard PASSED to get this far, so the live
@@ -185,17 +198,24 @@ export default function AnnotatablePdf({
             // the next one once the fault clears. Same guardLessonId test as the other
             // two arms, for the same reason.
             if (guardLessonId === null) savedLessonRef.current = r.lessonId
+            if (latestRef.current === null) latestRef.current = annotations
             setSaveState('not-saving')
             break
           case 'stale_lesson':
+            if (latestRef.current === null) latestRef.current = annotations
             setSaveState('stale')
             break
           default:
+            if (latestRef.current === null) latestRef.current = annotations
             setSaveState('not-saving')
         }
       } catch {
         // A transport error is a harmless no-op for persistence, but for the
-        // indicator it counts as not-saved (fail-safe): show the warning.
+        // indicator it counts as not-saved (fail-safe): show the warning. Same
+        // restore as the failing arms above — these strokes were unqueued when the
+        // save was issued, so put them back for the unmount/next flush unless
+        // something newer has already been committed.
+        if (latestRef.current === null) latestRef.current = annotations
         setSaveState('not-saving')
       }
     })

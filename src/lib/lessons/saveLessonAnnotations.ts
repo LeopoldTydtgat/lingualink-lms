@@ -79,7 +79,15 @@ export async function saveLessonAnnotations(
     // unmistakably that class's. Without this the client's guard would stay null for
     // the rest of the hour and hand the whole array to the NEXT class. Attribution
     // only — the resolver's note explains why this can never widen what is writable.
-    return { status: 'no_live_class', attributionLessonId: await getAttributionLessonIdForTeacher() }
+    //
+    // Only ASK when the caller's guard is null. The client arms on attributionLessonId
+    // solely under `guardLessonId === null`, so a tab that already sent a non-null
+    // guard discards this value unconditionally — running the query for it is a DB
+    // round-trip per debounce (prep time, between classes) whose result is thrown
+    // away. Skipping it is behaviour-identical: returning null here can only leave a
+    // guard UNARMED, never clear an armed one, so nothing about the write path
+    // widens — the write target is still resolved from `live` alone.
+    return { status: 'no_live_class', attributionLessonId: input.seedLessonId === null ? await getAttributionLessonIdForTeacher() : null }
   }
 
   // Cross-lesson bleed guard. A tab left open across a lesson change still holds
