@@ -116,7 +116,27 @@ export async function saveLessonAnnotations(
 
   const supabase = await createClient()
 
-  // Upsert on the unique key (lesson_id, study_sheet_id, attachment_index).
+  // Upsert on the unique key (lesson_id, study_sheet_id, attachment_name) —
+  // the constraint lesson_annotations_unique_pdf_name. NAME, not
+  // attachment_index: every read path (the serving route, the student past-class
+  // page, the teacher seed in loadStudySheetDetail) already resolves a row by
+  // attachment_name, while this write keyed on the file's POSITION. Remove a file
+  // mid-lesson, or re-upload one under the same name, and every later attachment
+  // shifts a slot — so a save for the shifted file collided with the row
+  // belonging to a DIFFERENT file and silently overwrote its marks.
+  // attachment_index is still written, but it is now informational only: it
+  // selects nothing.
+  //
+  // The OLD constraint lesson_annotations_unique_pdf on (lesson_id,
+  // study_sheet_id, attachment_index) STILL EXISTS — do not assume it is gone. It
+  // is dropped in its own DDL session only AFTER this fix is promoted to main and
+  // deployed, because main's running code still upserts on it. While both uniques
+  // are live, the shifted-file case that used to overwrite instead violates the
+  // index unique and errors, so the write fails LOUDLY into the not_saving branch
+  // below (amber badge, marks kept in memory and re-queued) rather than
+  // destroying another file's marks. Fail-safe, and it stops happening once the
+  // old constraint is dropped.
+  //
   // W1: user-scoped client, so RLS re-checks teacher ownership AND the deadline
   // on this exact write — if the teacher is not the class's teacher, or the
   // grace window has closed, the DB rejects it (no row returned).
@@ -132,7 +152,7 @@ export async function saveLessonAnnotations(
         annotations: input.annotations,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'lesson_id,study_sheet_id,attachment_index' }
+      { onConflict: 'lesson_id,study_sheet_id,attachment_name' }
     )
     .select('id')
     .maybeSingle()
