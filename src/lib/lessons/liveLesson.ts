@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { REPORT_OUTCOME_STATUSES } from '@/lib/billing/billability'
 
 // ---------------------------------------------------------------------------
 // Live-lesson resolver (Milestone 4, Piece B).
@@ -135,7 +136,9 @@ export function pickLiveLesson(
 // deliberately excluded — nobody taught them, so marks drawn inside a cancelled slot
 // belong to whatever class comes next, and attributing them backwards would refuse
 // that next class's perfectly good saves.
-export const ATTRIBUTION_STATUSES = ['completed', 'student_no_show', 'teacher_no_show'] as const
+// The set now lives in billability.ts as REPORT_OUTCOME_STATUSES (the status-vocabulary
+// source of truth); this export is kept so existing consumers and tests keep their name.
+export const ATTRIBUTION_STATUSES: readonly string[] = REPORT_OUTCOME_STATUSES
 
 // A lesson row as read for attribution. No student_id: nothing here is displayed.
 type AttributionRow = {
