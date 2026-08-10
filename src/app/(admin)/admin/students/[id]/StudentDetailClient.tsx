@@ -109,6 +109,7 @@ type Report = {
   id: string
   happened: boolean | null
   feedback: string | null
+  status: string
   created_at: string
   class_id: string
   lesson_scheduled_at: string | null
@@ -1584,15 +1585,28 @@ export default function StudentDetailClient({
                     </td>
                     <td className="px-4 py-3 text-gray-700">{report.teacher_name || '—'}</td>
                     <td className="px-4 py-3">
+                      {/* Three states, not two: happened stays null until the
+                          report is filed. Falling through to the red 'No' read
+                          as "the class did not take place" when it only meant
+                          nothing had been reported yet — hence the explicit
+                          === true / === false comparisons. */}
                       <span
                         className="px-2 py-0.5 rounded-full text-xs font-medium"
                         style={
-                          report.happened
+                          report.happened === true
                             ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-                            : { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                            : report.happened === false
+                            ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                            : { backgroundColor: '#E0DFDC', color: '#000000' }
                         }
                       >
-                        {report.happened ? 'Yes' : 'No'}
+                        {report.happened === true
+                          ? 'Yes'
+                          : report.happened === false
+                          ? 'No'
+                          : report.status === 'flagged'
+                          ? 'Missed'
+                          : 'Awaiting report'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-500 max-w-xs truncate">

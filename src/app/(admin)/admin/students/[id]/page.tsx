@@ -247,6 +247,7 @@ export default async function StudentDetailPage({
     id: string
     happened: boolean | null
     feedback: string | null
+    status: string
     created_at: string
     class_id: string
     lesson_scheduled_at: string | null
@@ -254,12 +255,13 @@ export default async function StudentDetailPage({
   }[] = []
 
   if (lessonIds.length > 0) {
-    const { data: rawReports } = await supabase
+    const { data: rawReports, error: reportsError } = await supabase
       .from('reports')
       .select(`
         id,
-        happened,
-        feedback,
+        did_class_happen,
+        feedback_text,
+        status,
         created_at,
         lesson_id,
         lessons!inner (
@@ -274,6 +276,13 @@ export default async function StudentDetailPage({
       .order('created_at', { ascending: false })
       .limit(50)
 
+    // Bound and logged, never thrown: a failed reports read leaves the Reports
+    // tab empty but must not take down the whole student record — every other
+    // tab on this page stays useful.
+    if (reportsError) {
+      console.error('[admin/students/[id]] reports query failed:', reportsError)
+    }
+
     reports = (rawReports || []).map((r) => {
       const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
       const teacherProfile = lesson
@@ -281,8 +290,9 @@ export default async function StudentDetailPage({
         : null
       return {
         id: r.id,
-        happened: r.happened,
-        feedback: r.feedback,
+        happened: r.did_class_happen,
+        feedback: r.feedback_text,
+        status: r.status,
         created_at: r.created_at,
         class_id: r.lesson_id,
         lesson_scheduled_at: lesson?.scheduled_at ?? null,
