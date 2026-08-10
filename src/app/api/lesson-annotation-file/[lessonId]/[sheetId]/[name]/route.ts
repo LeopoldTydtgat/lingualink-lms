@@ -13,11 +13,12 @@ type Attachment = {
 // GET /api/lesson-annotation-file/[lessonId]/[sheetId]/[name]
 //
 // Serves the bytes of a library PDF that a teacher marked up during a live
-// lesson, so the student can review it read-only under Past Classes. This is the
-// ONE deliberate, narrow exception to the rule enforced by /api/library-file that
-// students never receive staff-audience Teaching Material: here a student may see
-// a staff PDF, but ONLY the specific attachment their own teacher annotated in
-// their own past class.
+// lesson, so those marks can be reviewed read-only afterwards: by the student
+// under Past Classes, and by the teacher (or an admin) on the class report.
+// This is the ONE deliberate, narrow exception to the rule enforced by
+// /api/library-file that students never receive staff-audience Teaching
+// Material: here a student may see a staff PDF, but ONLY the specific
+// attachment their own teacher annotated in their own past class.
 //
 // The third segment is the attachment's FILENAME, not its position in the
 // sheet's attachments array. Annotation identity is the name end to end — the
@@ -26,21 +27,25 @@ type Attachment = {
 // attachment's index while the filename stays put.
 //
 // AUTHORISATION MODEL — the whole gate is a single user-scoped, RLS-governed
-// SELECT on lesson_annotations:
-//   - The check runs on the USER-SCOPED client (createClient), so the policy
-//     "Students read final lesson annotations after cutoff" governs it. That
-//     policy returns a row ONLY when (lessonId, sheetId, name) is an annotation
-//     on a lesson whose student_id is THIS caller AND the 15-minute post-class
-//     cutoff has passed. The row's existence IS the grant.
+// SELECT on lesson_annotations. This route holds NO role check of its own:
+// every caller is governed by their own SELECT policy on that table, and the
+// row's existence IS the grant.
+//   - "Students read final lesson annotations after cutoff" returns a row ONLY
+//     when the lesson's student_id is THIS caller AND the 15-minute post-class
+//     cutoff has passed. That policy is untouched by this route also serving
+//     teachers and admins: it remains the only thing deciding what a student
+//     may read here, cutoff included.
+//   - "Teachers read own lesson annotations" returns a row when the lesson's
+//     teacher_id is THIS caller. No cutoff — a teacher reviews the marks from
+//     their own class at any time.
+//   - "Admins read all lesson annotations" returns a row when is_admin().
+//   - No row from any of them means no access, for any caller: same generic 403.
 //   - No ownership/cutoff/audience logic is re-derived in code, so this route can
-//     never disagree with the live RLS policy. NEVER move this check onto the
+//     never disagree with the live RLS policies. NEVER move this check onto the
 //     admin/service-role client: that bypasses RLS and the entire gate.
 //   - The service-role admin client is used ONLY after access is granted, purely
 //     to read the attachment metadata and download the bytes from the private
 //     bucket (the general audience gate in /api/library-file is left untouched).
-//
-// This route is scoped to STUDENTS (see the guard below). Teachers/admins are
-// refused here and use their existing paths (dashboard seed + /api/library-file).
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ lessonId: string; sheetId: string; name: string }> }
@@ -61,25 +66,6 @@ export async function GET(
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
-    }
-
-    // Scope this route to STUDENTS. lesson_annotations also has teacher/admin
-    // SELECT policies with NO cutoff, so a teacher/admin hitting this route would
-    // be gated by THOSE instead of the student read-after-cutoff policy this
-    // route exists to serve. (The INSERT/UPDATE policies DO verify study-sheet
-    // access — visibility since 20260703120000, plus the owner_id clause since
-    // 20260715150000 — so the historical self-mint bypass is closed at the
-    // policy level; the guard is kept because teachers/admins already have their
-    // own read paths and this route's contract is student-only.) Students have
-    // NO write policy and cannot mint rows, so restricting to students makes the
-    // student read-after-cutoff policy the only path through.
-    const { data: student } = await supabase
-      .from('students')
-      .select('id')
-      .eq('auth_user_id', user.id)
-      .maybeSingle()
-    if (!student) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // --- THE GATE (sole authorization) ---
