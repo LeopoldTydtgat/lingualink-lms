@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import Link from 'next/link'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
@@ -231,6 +231,12 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A submit blocked by the 150-character minimum is otherwise silent: the inline
+  // message under the textarea only appears once something has been typed, so an
+  // EMPTY feedback box with "Yes" selected showed nothing anywhere. This flag lets
+  // that same inline message speak for a never-touched field.
+  const [submitAttempted, setSubmitAttempted] = useState(false)
+  const feedbackSectionRef = useRef<HTMLElement>(null)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [currentAssignedIds, setCurrentAssignedIds] = useState<string[]>(assignedSheetIds)
   const [currentAssignedSheets, setCurrentAssignedSheets] = useState<{ id: string; title: string }[]>(assignedSheets)
@@ -283,6 +289,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       // No setError here: the inline counter beneath the recap field already shows this
       // message in the right place. The shared banner sits at the bottom (under Additional
       // Details) and would misleadingly read as if Additional Details were at fault.
+      // Arm that inline message (it is otherwise hidden while the box is empty) and bring
+      // the field on screen, so the blocked submit is never silent.
+      setSubmitAttempted(true)
+      feedbackSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
 
@@ -462,7 +472,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       {didClassHappen === true && (
         <>
           {/* Feedback box */}
-          <section className={cardClass} style={cardStyle}>
+          <section ref={feedbackSectionRef} className={cardClass} style={cardStyle}>
             <SectionHeader>Class Recap, Feedback &amp; Next Steps</SectionHeader>
             <p className="text-xs text-gray-500 mb-3">
               This will appear as the recap on the next class card.
@@ -483,7 +493,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             ) : (
               <p className="whitespace-pre-wrap text-sm text-gray-700">{feedbackText}</p>
             )}
-            {isEditable && feedbackText.length > 0 && feedbackText.trim().length < 150 && (
+            {isEditable && (feedbackText.length > 0 || submitAttempted) && feedbackText.trim().length < 150 && (
               <p className="text-xs text-red-500 mt-1">
                 Minimum 150 characters required ({150 - feedbackText.trim().length} remaining)
               </p>
