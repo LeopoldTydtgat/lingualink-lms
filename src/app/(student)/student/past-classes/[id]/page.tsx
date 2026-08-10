@@ -117,6 +117,14 @@ export default async function PastClassDetailPage({
 
   if (!isStudentVisiblePast) notFound();
 
+  // Mirrors the lesson_annotations student RLS cutoff: rows unlock at
+  // lesson_end_time(scheduled_at, duration_minutes) + 15 min, i.e.
+  // end instant + 15 min. Inside that window the RLS-bound annotation
+  // query below returns zero rows even when marks exist, so the client
+  // cannot distinguish "no marks" from "marks still hidden" - it renders
+  // a hedged pending note instead of nothing. Display only, not a gate.
+  const annotationsMayBePending = nowMs < lessonEndMs + 15 * 60000;
+
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose
   // the whole row including student_confirmed and impersonation_note (a fraud flag
@@ -283,6 +291,7 @@ export default async function PastClassDetailPage({
       lesson={flatLesson}
       assignments={flatAssignments}
       annotatedPdfs={annotatedPdfs}
+      annotationsMayBePending={annotationsMayBePending}
       existingReview={existingReview ?? null}
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'past-class-detail:student')}

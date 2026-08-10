@@ -73,6 +73,7 @@ interface Props {
   lesson: Lesson;
   assignments: Assignment[];
   annotatedPdfs: AnnotatedPdf[];
+  annotationsMayBePending: boolean;
   existingReview: ExistingReview | null;
   studentId: string;
   studentTimezone: string;
@@ -141,6 +142,7 @@ export default function PastClassDetailClient({
   lesson,
   assignments,
   annotatedPdfs,
+  annotationsMayBePending,
   existingReview,
   studentId,
   studentTimezone,
@@ -466,6 +468,17 @@ export default function PastClassDetailClient({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {annotatedPdfs.length === 0 && annotationsMayBePending && (
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
+          </div>
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            If your teacher marked up any documents during this class, they&apos;ll appear here within 15 minutes of the class ending.
+          </p>
         </div>
       )}
     </div>
