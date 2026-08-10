@@ -55,9 +55,19 @@ export type SaveAnnotationsInput = {
   seedLessonId: string | null
 }
 
-// What the client gets back, to drive the four-state banner.
+// What the client gets back, to drive the badge. Four statuses, five client states: the
+// client splits 'no_live_class' on attributionLessonId (silent vs. terminal warning).
 //  - 'saved'        : marks persisted; banner shows "Saving to your <time> class with <name>". Carries the lessonId written to, which the client keeps as the guard value for its next save (see seedLessonId above) — that is what stops a long-open tab from drifting onto the next class.
-//  - 'no_live_class': nothing saved (prep time / between classes / class ended or already reported); the client renders NOTHING for this — it is the common case and a badge here was a permanent false alarm (NEW253)
+//  - 'no_live_class': nothing saved. TWO different situations, told apart by attributionLessonId,
+//                     which is why that field is now computed on EVERY no-live-class result:
+//                       null     -> genuine prep time / between classes. Nothing was meant to
+//                                   persist and the client renders NOTHING. A badge here was a
+//                                   permanent false alarm on every page where no class is live,
+//                                   which is why NEW253 removed it - do not re-introduce one.
+//                       non-null -> the teacher IS sitting in a class, but it is not writable
+//                                   (its report is already filed, or it is a grace predecessor
+//                                   suppressed by the class being taught). Marks drawn now are
+//                                   being discarded, so the client shows a terminal warning.
 //  - 'not_saving'   : a live class existed but the write was refused (e.g. raced past the RLS cutoff); client shows the amber warning. Carries lessonId for the same reason 'saved' does — a refused write still identifies the class
 //  - 'stale_lesson' : nothing saved; the live class has changed since this page seeded its marks (see the guard below); banner tells the teacher to reload
 export type SaveAnnotationsResult =
@@ -80,14 +90,20 @@ export async function saveLessonAnnotations(
     // the rest of the hour and hand the whole array to the NEXT class. Attribution
     // only — the resolver's note explains why this can never widen what is writable.
     //
-    // Only ASK when the caller's guard is null. The client arms on attributionLessonId
-    // solely under `guardLessonId === null`, so a tab that already sent a non-null
-    // guard discards this value unconditionally — running the query for it is a DB
-    // round-trip per debounce (prep time, between classes) whose result is thrown
-    // away. Skipping it is behaviour-identical: returning null here can only leave a
-    // guard UNARMED, never clear an armed one, so nothing about the write path
-    // widens — the write target is still resolved from `live` alone.
-    return { status: 'no_live_class', attributionLessonId: input.seedLessonId === null ? await getAttributionLessonIdForTeacher() : null }
+    // ALWAYS ASK, even when the caller already sent a non-null guard. This value has a
+    // SECOND consumer now: the client's badge. Non-null means the teacher is sitting in a
+    // class that cannot be written to, so the marks being drawn are discarded and the
+    // client shows a terminal warning; null is real prep time / between classes and stays
+    // silent. A tab whose guard is already armed still discards the value for GUARD
+    // purposes (it arms only from null), but it is exactly that tab - armed at the start
+    // of the class it is sitting in - that needs the badge for the rest of the hour, so
+    // the old "skip the query when the guard is non-null" shortcut would blind it.
+    // Cost: one extra read-only, user-scoped SELECT per debounce while nothing is live.
+    //
+    // Attribution ONLY, unchanged: the id returned here is never a write target (the
+    // upsert below runs off `live`, which is null in this branch), so nothing about the
+    // set of writable lessons widens.
+    return { status: 'no_live_class', attributionLessonId: await getAttributionLessonIdForTeacher() }
   }
 
   // Cross-lesson bleed guard. A tab left open across a lesson change still holds

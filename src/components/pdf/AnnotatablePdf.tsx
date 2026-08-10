@@ -85,13 +85,36 @@ export default function AnnotatablePdf({
   // that through so the prep-then-class flow keeps saving.
   const savedLessonRef = useRef<string | null>(null)
   const mountSeedLessonRef = useRef<string | null>(seedLessonId)
-  // Minimal fail-safe cue. Only 'not_saving' (a write refused during a live
-  // class), an unexpected/absent status, or a transport error shows the warning,
-  // so marks are never silently discarded on a real failure. 'no_live_class' (the
-  // common prep-time / between-classes case) maps to 'idle' and is SILENT, and
-  // must stay that way: a badge there was a permanent false alarm on every page
-  // where no class is live, which is why NEW253 removed it. Do not re-introduce
-  // one. 'idle' renders nothing.
+  // Minimal fail-safe cue. A write refused during a live class ('not_saving'), an
+  // unexpected/absent status, or a transport error shows the amber warning - and so does
+  // a save made inside a class that is no longer writable ('reported'), so marks are
+  // never silently discarded on a real failure. 'idle' renders nothing.
+  //
+  // 'no_live_class' is SILENT ONLY when its attributionLessonId is null: no lesson slot
+  // contains this instant at all, so nothing was ever meant to persist. A badge for THAT
+  // was a permanent false alarm on every page where no class is live, which is why
+  // NEW253 removed it; do not re-introduce one. When attributionLessonId NAMES a class
+  // the situation is the opposite: the teacher is inside the slot of a class whose report
+  // is already filed (or a grace predecessor suppressed by the class being taught), the
+  // marks being drawn are discarded, and that gets the 'reported' warning.
+  //
+  // PRECISE FIRING CONDITION, because "it only fires mid-class" is NOT true: the server
+  // names a class whenever now falls inside the slot of one of the teacher's
+  // happened-status lessons (liveLesson.ts pickAttributionLesson - teaching time only,
+  // no grace). Two consequences, both known and accepted, neither introduced here:
+  //  - a class reported EARLY (teacher finishes at 09:42, files the report, then preps
+  //    the 10:00 sheet at 09:50) still has now inside its slot, so a prep page for the
+  //    NEXT class carries this warning until 10:00. Nothing IS being saved there, so the
+  //    badge is true, but its wording points at the class the teacher has left.
+  //  - once now is PAST the slot (report filed at 10:01, teacher marks up at 10:05,
+  //    inside the 15-minute save grace) attribution is null again and this goes silent -
+  //    the same silent discard the 'reported' state exists to expose. Closing that means
+  //    giving attribution a grace window, which changes guard semantics; not done here.
+  //
+  // 'reported' is terminal, like 'stale': a reported class never returns to 'scheduled',
+  // so nothing arriving later can mean recovery. It never auto-clears (the auto-clear
+  // effect only touches 'saved') and a later attribution-null result must not downgrade
+  // it to 'idle' - see the no_live_class arm.
   //
   // 'saved' is the only state that changed meaning: a successful write now renders
   // a transient confirmation, which clears itself after 2 seconds via the
@@ -109,7 +132,7 @@ export default function AnnotatablePdf({
   //
   // NOTE: the status values the action returns use underscores ('no_live_class',
   // 'not_saving', 'stale_lesson'), but saveState uses a hyphen ('not-saving').
-  const [saveState, setSaveState] = useState<'idle' | 'saved' | 'not-saving' | 'stale'>('idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saved' | 'not-saving' | 'stale' | 'reported'>('idle')
   // Bumped on every successful save, and read ONLY by the auto-clear effect's
   // dependency array - never rendered. A second consecutive 'saved' result would
   // otherwise call setSaveState with the value it already holds; React bails out,
@@ -140,11 +163,12 @@ export default function AnnotatablePdf({
         const guardLessonId = savedLessonRef.current ?? mountSeedLessonRef.current
         const r = await saveLessonAnnotations({ studySheetId, attachmentIndex, attachmentName, annotations, seedLessonId: guardLessonId })
         // Map each declared status explicitly. Only an exact 'saved' clears the
-        // warning; 'no_live_class' is the benign common case (prep time / between
-        // classes) and stays silent; 'not_saving' is a real refusal during a live
-        // class. The warn-by-default branch means any unknown/absent status is
-        // treated as not-saved (fail-safe), never silently ignored. NOTE: the
-        // status values use underscores, but saveState uses a hyphen.
+        // warning; 'no_live_class' SPLITS on attributionLessonId - silent when it is null
+        // (the benign prep-time / between-classes case), amber 'reported' when it names
+        // the unwritable class the teacher is sitting in; 'not_saving' is a real refusal
+        // during a live class. The warn-by-default branch means any unknown/absent status
+        // is treated as not-saved (fail-safe), never silently ignored. NOTE: the status
+        // values use underscores, but saveState uses a hyphen.
         //
         // The failing arms below also put `annotations` BACK on latestRef. flush
         // nulls it before issuing the save, so a save that then fails leaves those
@@ -155,7 +179,10 @@ export default function AnnotatablePdf({
         // anyway. It is conditional on latestRef.current still being null so an
         // array committed while the save was in flight is never clobbered. The
         // 'saved' and 'no_live_class' arms deliberately do NOT restore: one already
-        // persisted, and prep marks are meant not to persist.
+        // persisted, and nothing the other arm holds can ever be written - prep marks are
+        // meant not to persist, and marks drawn inside a class whose report is filed have
+        // no writable target now or later (that class never returns to 'scheduled'), so
+        // re-queueing either would only resend an array to be refused again.
         switch (r?.status) {
           case 'saved':
             // Bind this tab's marks to the class they just landed in, but only if the
@@ -187,9 +214,23 @@ export default function AnnotatablePdf({
             if (guardLessonId === null && r.attributionLessonId !== null) {
               savedLessonRef.current = r.attributionLessonId
             }
+            // Badge, driven by the same discriminator the arming above uses, and read
+            // independently of it: attributionLessonId NAMES the class the teacher is
+            // sitting in whenever that class is no longer writable, and is null for real
+            // prep time / between classes. So a named class warns (terminal), and null
+            // stays silent (NEW253). Note this is deliberately NOT conditioned on
+            // guardLessonId: an already-armed tab arms nothing here but is exactly the
+            // tab that must keep warning for the rest of the class.
+            //
             // 'stale' is terminal (reload required); a later no-live-class result (the
-            // stale class ending) must not clear it and imply things recovered.
-            setSaveState((s) => (s === 'stale' ? s : 'idle'))
+            // stale class ending) must not clear it and imply things recovered. 'reported'
+            // is terminal for the same reason, so an attribution-null result arriving
+            // after it (the reported class's slot simply ending) must not clear it either.
+            if (r.attributionLessonId !== null) {
+              setSaveState((s) => (s === 'stale' ? s : 'reported'))
+            } else {
+              setSaveState((s) => (s === 'stale' || s === 'reported' ? s : 'idle'))
+            }
             break
           case 'not_saving':
             // The write was refused, but the guard PASSED to get this far, so the live
@@ -329,6 +370,18 @@ export default function AnnotatablePdf({
           }}
         >
           Not saving - class changed, reload this page
+        </div>
+      )}
+      {saveState === 'reported' && (
+        <div
+          style={{
+            ...badgeBaseStyle,
+            backgroundColor: '#FFFBEB',
+            color: '#92400E',
+            border: '1px solid #FDE68A',
+          }}
+        >
+          Not saving - report already filed for this class
         </div>
       )}
     </div>
