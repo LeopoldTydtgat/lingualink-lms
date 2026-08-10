@@ -655,7 +655,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
           {/* Rows */}
           <div>
-            {filtered.map(sheet => {
+            {filtered.map((sheet, idx) => {
               const empty = isSheetEmpty(sheet, actCounts)
               return (
                 <div
@@ -763,7 +763,19 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       {openMenuId === sheet.id && (
                         <div
                           className="absolute right-0 z-20 bg-white rounded-lg shadow-lg"
-                          style={{ top: 'calc(100% + 4px)', border: '1px solid #e5e7eb', minWidth: '150px' }}
+                          style={{
+                            // The card container is overflow-hidden (load-bearing for its
+                            // rounded corners), so a menu opening downward on the LAST row is
+                            // clipped and Edit/Delete become unreachable. Flip it upward there.
+                            // Only above 2 rows: at 2 or fewer the container is too short for
+                            // the flipped menu to fit either, and clipping at the top is no
+                            // better than clipping at the bottom — so leave those opening down.
+                            ...(filtered.length > 2 && idx === filtered.length - 1
+                              ? { bottom: 'calc(100% + 4px)' }
+                              : { top: 'calc(100% + 4px)' }),
+                            border: '1px solid #e5e7eb',
+                            minWidth: '150px',
+                          }}
                         >
                           <button
                             onClick={() => { setActivitiesSheet(sheet); setOpenMenuId(null) }}
