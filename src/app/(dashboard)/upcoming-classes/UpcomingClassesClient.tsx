@@ -3,10 +3,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { isToday, isTomorrow } from 'date-fns'
 import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { describeLessonCountdown, type LessonCountdown } from '@/lib/lessons/countdown'
+import { getLocalDateKey as getTzDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { Button } from '@/components/ui/button'
@@ -79,28 +79,29 @@ function formatDate(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
-function getLocalDateKey(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
-
 function groupByDay(classes: Class[], timezone: string): Record<string, Class[]> {
   return classes.reduce((groups, cls) => {
-    const day = getLocalDateKey(cls.starts_at, timezone)
+    const day = getTzDateKey(new Date(cls.starts_at), timezone)
     if (!groups[day]) groups[day] = []
     groups[day].push(cls)
     return groups
   }, {} as Record<string, Class[]>)
 }
 
-function formatDayHeading(isoString: string, timezone: string): string {
-  const date = new Date(isoString)
-  if (isToday(date)) return 'Today'
-  if (isTomorrow(date)) return 'Tomorrow'
+// Today/Tomorrow must be decided on the SAME day boundary that built the group this
+// heading labels - the teacher's account timezone, not the browser's. date-fns
+// isToday/isTomorrow compare Date objects on the browser's boundary, so a teacher
+// whose device zone differs from their account zone read a heading one day off near
+// midnight while the group beneath it was correct.
+//
+// dateKey is the group's own key, already produced by getLocalDateKey in the teacher's
+// timezone; todayKey is supplied by the caller from a clock read in an effect, never
+// during render (react-hooks/purity is ON in this file).
+function formatDayHeading(isoString: string, timezone: string, dateKey: string, todayKey: string | null): string {
+  if (todayKey !== null) {
+    if (dateKey === todayKey) return 'Today'
+    if (dateKey === addDaysToDateKey(todayKey, 1)) return 'Tomorrow'
+  }
   return formatDate(isoString, timezone)
 }
 
@@ -281,7 +282,6 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
-  const minutesUntilStart = (new Date(cls.starts_at).getTime() - Date.now()) / 1000 / 60
   const isCancelled = isCancelledStatus(cls.status)
   const cancelLabel = getCancellationLabel(cls, 'teacher')
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
@@ -289,7 +289,13 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   // A cancelled class has nothing left running, so it is never live whatever the clock
   // says. isNext already excludes cancelled rows; this keeps that true at the pill too.
   const isLive = !isCancelled && countdown?.live === true
-  const showReschedule = minutesUntilStart > 24 * 60 && !isCancelled
+  // Gated off the card's existing countdown tick rather than a fresh Date.now() in the
+  // render body: that read was impure (react-hooks/purity) and only re-evaluated when the
+  // card happened to re-render, so an open card kept offering Cancel Class after crossing
+  // the 24h boundary. Null until the countdown's first effect run, which fails safe - the
+  // button is withheld, never wrongly offered. This is only ever evaluated inside the
+  // expanded block, which cannot be open before hydration, so nothing changes on screen.
+  const showReschedule = countdown !== null && countdown.msUntilStart > 24 * 60 * 60_000 && !isCancelled
 
   const hoursBeforeStart = cls.cancelled_at
     ? Math.floor((new Date(cls.starts_at).getTime() - new Date(cls.cancelled_at).getTime()) / 3600000)
@@ -422,10 +428,10 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   )
 }
 
-function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null }) {
+function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId, todayKey }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; todayKey: string | null }) {
   // The next class is now the hero above the list, so every day group starts collapsed.
   const [open, setOpen] = useState(false)
-  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone) : dateStr
+  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone, dateStr, todayKey) : dateStr
 
   return (
     <div className="card-elevated overflow-hidden">
@@ -466,10 +472,42 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   const [showProfileBanner, setShowProfileBanner] = useState(!profileCompleted && !bannerDismissed)
   const [isDismissing, setIsDismissing] = useState(false)
   const [mounted, setMounted] = useState(false)
+  // Today's date key in the TEACHER's timezone. Set in the effect, never during render:
+  // react-hooks/purity is ON in this file and a clock read in a render body would also
+  // make the SSR pass disagree with hydration. Null until mounted, which formatDayHeading
+  // treats as "no relative label" and falls back to the absolute date.
+  //
+  // Refreshed at each local midnight by the self-rescheduling timer below, so a tab left
+  // open across the boundary does not keep labelling yesterday's group "Today".
+  const [todayKey, setTodayKey] = useState<string | null>(null)
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Reads the key from the clock on every hop rather than incrementing the previous
+    // key. That is what makes an imprecise fire harmless: early (clock skew) leaves the
+    // old key and reschedules a second later; late (throttled background tab, or a zone
+    // whose DST transition lands ON midnight so 00:00 does not exist that day and
+    // wallTimeToUtcMs resolves past the gap) still reads the correct current day.
+    function schedule() {
+      const key = getTzDateKey(new Date(), teacherTimezone)
+      setTodayKey(key)
+
+      const [y, m, d] = addDaysToDateKey(key, 1).split('-').map(Number)
+      const nextMidnightMs = wallTimeToUtcMs(y, m, d, 0, 0, teacherTimezone)
+      // Floor the delay: an early fire must never schedule a zero-delay loop. One extra
+      // hop a second later lands past the boundary and settles.
+      const delay = Math.max(nextMidnightMs - Date.now(), 1000)
+      timer = setTimeout(schedule, delay)
+    }
+
     setMounted(true)
-  }, [])
+    schedule()
+
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [teacherTimezone])
 
   const scheduledCount = classes.filter(c => c.status === 'scheduled').length
   const upcomingClasses = classes.filter(c => !isCancelledStatus(c.status))
@@ -641,7 +679,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       ) : (
         <div className="space-y-3">
           {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} />
+            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} todayKey={todayKey} />
           ))}
         </div>
       )}

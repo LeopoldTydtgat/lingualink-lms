@@ -107,7 +107,7 @@ export default function MaterialHomeworkViewer({
         </p>
         {hiddenCount > 0 && (
           <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>
-            Some marks fall outside the assigned page range and are not shown.
+            Some of this student&apos;s marks could not be shown on these pages.
           </p>
         )}
       </div>

@@ -24,23 +24,24 @@ type StudentVisibleReport = {
 type SheetAttachment = { name: string };
 
 // Mirrors the attachment-resolution block in
-// /api/lesson-annotation-file/[lessonId]/[sheetId]/[index]/route.ts EXACTLY:
-//   - a non-empty attachment_name resolves by NAME against the sheet's current
-//     attachments and never falls back to position;
-//   - a null/empty attachment_name (legacy rows) falls back to
-//     attachments[attachment_index];
-//   - either way the resolved entry must exist and its filename must pass the
-//     route's charset check.
+// /api/lesson-annotation-file/[lessonId]/[sheetId]/[name]/route.ts EXACTLY:
+//   - attachment_name resolves by NAME against the sheet's current attachments;
+//   - there is NO positional fallback on either side. attachment_name is NOT NULL
+//     on lesson_annotations, and the route now takes the name as its own path
+//     param, so a row whose name does not match a current attachment is simply
+//     unservable — resolving it by index here would mount a viewer whose every
+//     byte request 404s;
+//   - the resolved entry must exist and its filename must pass the route's
+//     charset check, which the name is also screened against as a path param.
 // Anything this returns false for is a guaranteed 404 from that route.
 function attachmentResolves(
   attachments: SheetAttachment[],
-  attachmentName: unknown,
-  attachmentIndex: number
+  attachmentName: unknown
 ): boolean {
   const attachment =
     typeof attachmentName === 'string' && attachmentName.length > 0
       ? attachments.find((a) => a && a.name === attachmentName)
-      : attachments[attachmentIndex];
+      : undefined;
 
   return (
     !!attachment &&
@@ -116,6 +117,14 @@ export default async function PastClassDetailPage({
 
   if (!isStudentVisiblePast) notFound();
 
+  // Mirrors the lesson_annotations student RLS cutoff: rows unlock at
+  // lesson_end_time(scheduled_at, duration_minutes) + 15 min, i.e.
+  // end instant + 15 min. Inside that window the RLS-bound annotation
+  // query below returns zero rows even when marks exist, so the client
+  // cannot distinguish "no marks" from "marks still hidden" - it renders
+  // a hedged pending note instead of nothing. Display only, not a gate.
+  const annotationsMayBePending = nowMs < lessonEndMs + 15 * 60000;
+
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose
   // the whole row including student_confirmed and impersonation_note (a fraud flag
@@ -178,8 +187,10 @@ export default async function PastClassDetailPage({
   // this is the student's own lesson AND the 15-minute post-class cutoff has
   // passed — so this user-scoped query IS the access gate. No ownership or cutoff
   // logic is re-derived here, and the service-role client is never used on this path.
-  // attachment_name is selected purely to mirror the serving route's attachment
-  // resolution below; it is never handed to the client.
+  // attachment_name is BOTH the resolution key mirrored from the serving route and
+  // the value handed to the client, which builds that route's URL from it — the
+  // annotation's identity is its filename end to end. attachment_index survives
+  // only as the display ordering below; nothing keys off it.
   const { data: annotatedRows } = await supabase
     .from('lesson_annotations')
     .select('study_sheet_id, attachment_index, attachment_name, annotations')
@@ -264,15 +275,14 @@ export default async function PastClassDetailPage({
     .filter((r) => {
       const attachments = activeSheetAttachments.get(r.study_sheet_id as string);
       if (!attachments) return false;
-      return attachmentResolves(
-        attachments,
-        r.attachment_name,
-        r.attachment_index as number
-      );
+      return attachmentResolves(attachments, r.attachment_name);
     })
     .map((r) => ({
       studySheetId: r.study_sheet_id as string,
-      attachmentIndex: r.attachment_index as number,
+      // The serving route's third path segment, and the React key. Every row
+      // reaching here passed attachmentResolves, so this is a non-empty string
+      // matching a current attachment and the route's charset rule.
+      attachmentName: r.attachment_name as string,
       annotations: (Array.isArray(r.annotations) ? r.annotations : []) as Annotation[],
     }));
 
@@ -281,6 +291,7 @@ export default async function PastClassDetailPage({
       lesson={flatLesson}
       assignments={flatAssignments}
       annotatedPdfs={annotatedPdfs}
+      annotationsMayBePending={annotationsMayBePending}
       existingReview={existingReview ?? null}
       studentId={student.id}
       studentTimezone={requireTz(student.timezone, 'past-class-detail:student')}

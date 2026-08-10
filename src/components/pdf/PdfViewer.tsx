@@ -78,6 +78,11 @@ const TEXT_BOX_WIDTH = 180
 // right-edge handle. Mirrors FONT_MIN / FONT_MAX for the font size.
 const TEXT_BOX_MIN_WIDTH = 60
 const TEXT_BOX_MAX_WIDTH = 600
+// Clamp range for a text box's stored (scale-1) MINIMUM height when it is
+// dragged by its bottom-edge / corner handle. Mirrors the width clamp above.
+// A floor only: text taller than the minimum still grows the box past it.
+const TEXT_BOX_MIN_HEIGHT = 24
+const TEXT_BOX_MAX_HEIGHT = 800
 // Text-box font sizing (scale-1 units): the A- / A+ step and the clamp range.
 const FONT_STEP = 4
 const FONT_MIN = 8
@@ -224,11 +229,21 @@ interface TextAnnotation {
   fontSize: number // scale-1 px; rendered size = fontSize * scale
   // Wrapping / editing width in scale-1 px, same convention as fontSize
   // (rendered width = width * scale). Set by dragging the box's right-edge
-  // handle; height stays content-driven. ABSENT = a box saved before the handle
-  // existed: it renders EXACTLY as it always has, through the TEXT_BOX_WIDTH
-  // fallback at both read sites. Optional and numeric, so the annotations array
-  // stays JSON-serializable (it is persisted as-is to lesson_annotations).
+  // handle; the vertical axis lives in the separate `height` field below.
+  // ABSENT = a box saved before the handle existed: it renders EXACTLY as it
+  // always has, through the TEXT_BOX_WIDTH fallback at both read sites. Optional
+  // and numeric, so the annotations array stays JSON-serializable (it is
+  // persisted as-is to lesson_annotations).
   width?: number
+  // MINIMUM box height in scale-1 px, same convention as width / fontSize
+  // (rendered height = height * scale). Set by dragging the box's bottom-edge or
+  // corner handle. A MINIMUM and never a fixed size: the box still grows past it
+  // to fit its text, so no character can ever be clipped or hidden. ABSENT (or a
+  // null / NaN that came back from the jsonb column) = a purely content-driven
+  // height, exactly as before these handles existed. Optional and numeric, so
+  // the annotations array stays JSON-serializable (it is persisted as-is to
+  // lesson_annotations).
+  height?: number
 }
 // A straight arrow with an arrowhead at `end`. A separate union member, NOT an
 // overloaded StrokeAnnotation: it stores only its two endpoints (0..1 fractions),
@@ -294,17 +309,23 @@ interface DragState {
   height: number
   moved: boolean
 }
-// In-progress WIDTH resize of a text box (refs only; never rendered).
-// Deliberately NOT DragState: a resize needs the box's start WIDTH, not its
-// origin x/y and page size, and widening DragState would change the shape every
-// existing move-drag caller (text + stamp) reads. Only one of the two can run at
-// a time -- the handle is a sibling of the box and stops propagation, so a grab
-// never starts a move -- but they stay in separate refs so neither can see the
-// other's state.
+// In-progress SIZE resize of a text box (refs only; never rendered).
+// Deliberately NOT DragState: a resize needs the box's start WIDTH / HEIGHT, not
+// its origin x/y and page size, and widening DragState would change the shape
+// every existing move-drag caller (text + stamp) reads. Only one of the two can
+// run at a time -- the handle is a sibling of the box and stops propagation, so
+// a grab never starts a move -- but they stay in separate refs so neither can
+// see the other's state.
 interface ResizeState {
   id: string
+  // Which axis (or axes) the grabbed handle drives. The move handler writes ONLY
+  // the field(s) this names, so an edge drag can never silently stamp the other
+  // axis onto a box that has nothing stored for it.
+  axis: 'x' | 'y' | 'both'
   startX: number
+  startY: number
   startWidth: number // scale-1 px at pointer-down (t.width ?? TEXT_BOX_WIDTH)
+  startHeight: number // scale-1 px at pointer-down (t.height, else the measured rendered height)
   moved: boolean
 }
 // A baked-in PDF link surfaced from the uploaded file's own annotations,
@@ -746,6 +767,7 @@ function cloneAnnotation(a: Annotation): Annotation {
 function EditableTextBox({
   value,
   widthPx,
+  minHeightPx,
   fontSizePx,
   onChangeText,
   onCommit,
@@ -753,6 +775,9 @@ function EditableTextBox({
 }: {
   value: string
   widthPx: number
+  // Rendered floor for the auto-grow height, never a cap. 0 for a box with no
+  // stored height, which makes the Math.max below a no-op.
+  minHeightPx: number
   fontSizePx: number
   onChangeText: (v: string) => void
   onCommit: () => void
@@ -783,14 +808,19 @@ function EditableTextBox({
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // Grow to fit content height whenever the text, width, or font size changes
-  // (font size is included so A- / A+ resize the box live while editing).
+  // Grow to fit content height whenever the text, width, font size or dragged
+  // minimum height changes (font size is included so A- / A+ resize the box live
+  // while editing; minHeightPx so dragging the height handle mid-edit grows the
+  // box live instead of waiting for the next keystroke -- leave it OUT of the
+  // dependency array and the box simply will not follow the handle). scrollHeight
+  // is the floor the CONTENT needs, so taking the max can only ever ADD space:
+  // a minimum can never clip or hide a character.
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value, widthPx, fontSizePx])
+    el.style.height = `${Math.max(el.scrollHeight, minHeightPx)}px`
+  }, [value, widthPx, fontSizePx, minHeightPx])
 
   return (
     <textarea
@@ -867,7 +897,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
   const latestDraftRef = useRef<Draft | null>(null)
   // In-progress text-box drag.
   const dragRef = useRef<DragState | null>(null)
-  // In-progress text-box WIDTH resize (its own ref, see ResizeState: the move
+  // In-progress text-box SIZE resize (its own ref, see ResizeState: the move
   // drag's semantics and dragRef are untouched by it).
   const resizeRef = useRef<ResizeState | null>(null)
   // In-progress marquee drag (cursor tool). A ref as well as state because the
@@ -2465,17 +2495,19 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     selectBox(dr.id)
   }
 
-  // --- Width resize of a text box (its right-edge handle) -------------------
+  // --- Size resize of a text box (its right / bottom / corner handles) ------
   // Mirrors the onTextPointerDown/Move/Up flow above: best-effort pointer
   // capture, a pre-gesture snapshot in pendingPastRef pushed onto the undo stack
-  // ONLY if the width actually changed (so one drag is exactly one undo step and
+  // ONLY if the size actually changed (so one drag is exactly one undo step and
   // a no-move grab records nothing), and the same 3px click-vs-drag threshold.
-  // WIDTH ONLY -- height stays content-driven, so nothing here touches the
-  // wrapping styles.
+  // The stored height is a MINIMUM, so nothing here touches the wrapping styles:
+  // a box still grows past it to fit its text and can never clip a character.
   function onResizePointerDown(
     e: ReactPointerEvent<HTMLDivElement>,
     t: TextAnnotation,
+    axis: 'x' | 'y' | 'both',
     startWidth: number,
+    fixedHeight: number | null,
   ) {
     // Primary button only -- the same guard the cursor branch of
     // onOverlayPointerDown carries, for the same reason: a right-press gets no
@@ -2499,15 +2531,28 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       }
     }
     pendingPastRef.current = annotationsRef.current
+    // The height is resolved HERE rather than by the render that built this
+    // handle, because for a box with no stored height it can only come from a DOM
+    // measurement -- and a measurement taken during render reads the layout of
+    // the PREVIOUS commit. A box whose text had just grown would then start its
+    // drag from a stale, shorter height and visibly jump on the first pointer
+    // move. At pointer-down the DOM is current. A box with a usable stored height
+    // needs no measurement at all, and the clamp minimum is the last resort when
+    // nothing is mounted to measure, so the gesture can never start from NaN.
+    const startHeight = fixedHeight ?? measuredTextBoxHeight(t.id) ?? TEXT_BOX_MIN_HEIGHT
     resizeRef.current = {
       id: t.id,
+      axis,
       startX: e.clientX,
+      startY: e.clientY,
       // The width the box is CURRENTLY rendering at, resolved by the caller from
       // the exact value the render uses (t.width when it is a usable number,
-      // else the TEXT_BOX_WIDTH fallback). Single source of truth, so a legacy
-      // box -- or one whose persisted width came back unusable -- always starts
-      // its resize from what is on screen instead of from NaN.
+      // else the TEXT_BOX_WIDTH fallback); the height comes from the resolve just
+      // above. Single source of truth on both axes, so a legacy box -- or one
+      // whose persisted size came back unusable -- always starts its resize from
+      // what is on screen instead of from NaN.
       startWidth,
+      startHeight,
       moved: false,
     }
   }
@@ -2525,21 +2570,42 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
       return
     }
     const dx = e.clientX - rz.startX
+    const dy = e.clientY - rz.startY
     // Same 3px click-vs-drag threshold as the text / shape move drags, measured
-    // on RAW pointer travel so it is independent of zoom.
-    if (!rz.moved && Math.abs(dx) <= 3) return
-    // The stored width is scale-1, so the client-px delta is divided by the
-    // current scale: the edge tracks the pointer exactly at any zoom.
-    const next = clampRange(rz.startWidth + dx / scale, TEXT_BOX_MIN_WIDTH, TEXT_BOX_MAX_WIDTH)
+    // on RAW pointer travel so it is independent of zoom -- and only on the axes
+    // this gesture actually drives, so travel along an edge handle's own edge
+    // (which changes nothing) can never arm it.
+    const travel =
+      rz.axis === 'x' ? Math.abs(dx) : rz.axis === 'y' ? Math.abs(dy) : Math.max(Math.abs(dx), Math.abs(dy))
+    if (!rz.moved && travel <= 3) return
+    // The stored width / height are scale-1, so each client-px delta is divided
+    // by the current scale: the edge tracks the pointer exactly at any zoom.
+    const nextWidth = clampRange(rz.startWidth + dx / scale, TEXT_BOX_MIN_WIDTH, TEXT_BOX_MAX_WIDTH)
+    const nextHeight = clampRange(rz.startHeight + dy / scale, TEXT_BOX_MIN_HEIGHT, TEXT_BOX_MAX_HEIGHT)
     // The clamp can swallow the WHOLE delta (the box is already at the min / max
     // and is being dragged further that way). Nothing would change, so the
     // gesture stays a grab: flipping `moved` here would push a phantom undo step
     // and wipe the redo stack for a resize that changed nothing. This is exactly
-    // the guard updateMove carries, for exactly the same reason.
-    if (!rz.moved && next === rz.startWidth) return
+    // the guard updateMove carries, for exactly the same reason. Checked PER
+    // AXIS THE GESTURE OWNS, so a corner drag pinned at max width but still
+    // growing in height HAS changed something and counts as moved, while one
+    // pinned at both limits has not.
+    const changedWidth = rz.axis !== 'y' && nextWidth !== rz.startWidth
+    const changedHeight = rz.axis !== 'x' && nextHeight !== rz.startHeight
+    if (!rz.moved && !changedWidth && !changedHeight) return
     rz.moved = true
+    // ONE setAnnotations even for a corner drag: two calls would turn one drag
+    // step into two renders and risk two undo steps for a single gesture.
     setAnnotations((anns) =>
-      anns.map((a) => (a.id === rz.id && a.type === 'text' ? { ...a, width: next } : a)),
+      anns.map((a) =>
+        a.id === rz.id && a.type === 'text'
+          ? {
+              ...a,
+              ...(rz.axis !== 'y' ? { width: nextWidth } : {}),
+              ...(rz.axis !== 'x' ? { height: nextHeight } : {}),
+            }
+          : a,
+      ),
     )
   }
 
@@ -2667,7 +2733,14 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         style={{
           position: 'absolute',
           left: 0,
-          ...(below ? { top: 'calc(100% + 4px)' } : { bottom: 'calc(100% + 4px)' }),
+          // Flipped BELOW the box, the bar clears 20px rather than the 4px it
+          // uses above: the bottom-edge and corner resize handles occupy the band
+          // 2px..16px under the box edge, and at 4px the bar would sit on top of
+          // them and make a near-the-page-top box impossible to resize
+          // vertically. The two numbers are coupled -- handle offset 2 + handle
+          // height 14 = 16 -- so this must stay clear of 16 if either changes.
+          // The above-the-box branch keeps its original 4px: nothing sits there.
+          ...(below ? { top: 'calc(100% + 20px)' } : { bottom: 'calc(100% + 4px)' }),
           display: 'flex',
           alignItems: 'center',
           gap: 4,
@@ -2782,39 +2855,89 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     )
   }
 
-  // Width handle on a text box's RIGHT edge, vertically centred. Drag it to set
-  // the box's stored (scale-1) width; the height stays content-driven. It lives
-  // inside the box wrapper's pointerEvents:none layer with its own
-  // pointerEvents:'auto' -- the same model as the control bar -- and carries the
-  // same two guards: stopPropagation so a grab never reaches the overlay (never
-  // deselects, never starts a marquee or a box MOVE drag) and preventDefault on
-  // mouse/pointer down so it never blurs the textarea during editing. Absolutely
-  // positioned, so it stays out of flow and the wrapper's measured box (what the
-  // cursor tool hit-tests) is still exactly the text box.
-  function renderResizeHandle(t: TextAnnotation, startWidth: number) {
+  // The scale-1 height a text box is CURRENTLY rendering at, measured off its
+  // mounted wrapper -- the same textBoxElsRef node the cursor tool hit-tests
+  // through, so this is the box's REAL rendered box and never an estimate.
+  // Returns null when nothing is mounted yet or the measurement is unusable, so
+  // the caller falls back to a real number rather than starting a resize from 0
+  // / NaN, which would poison every clamp that follows. The DOM measures in
+  // rendered px while the stored height is scale-1, hence the divide.
+  function measuredTextBoxHeight(id: string): number | null {
+    const el = textBoxElsRef.current.get(id)
+    if (!el) return null
+    const h = el.getBoundingClientRect().height / scale
+    return Number.isFinite(h) && h > 0 ? h : null
+  }
+
+  // One resize handle of a text box, built for the axis it drives: the RIGHT
+  // edge sets the stored (scale-1) width, the BOTTOM edge the stored MINIMUM
+  // height, and the BOTTOM-RIGHT corner both at once. Each lives inside the box
+  // wrapper's pointerEvents:none layer with its own pointerEvents:'auto' -- the
+  // same model as the control bar -- and carries the same two guards:
+  // stopPropagation so a grab never reaches the overlay (never deselects, never
+  // starts a marquee or a box MOVE drag) and preventDefault on mouse/pointer
+  // down so it never blurs the textarea during editing. Absolutely positioned,
+  // so they stay out of flow and the wrapper's measured box (what the cursor
+  // tool hit-tests) is still exactly the text box.
+  function renderResizeHandle(
+    t: TextAnnotation,
+    axis: 'x' | 'y' | 'both',
+    startWidth: number,
+    fixedHeight: number | null,
+  ) {
+    // Placement per axis, each just OUTSIDE its own edge (the 2px margin) so a
+    // hit target never covers the text or steals the box's own
+    // double-click-to-edit. Hit target >= 12px on every axis; the visible grip
+    // inside it is thinner.
+    const placement: CSSProperties =
+      axis === 'x'
+        ? {
+            left: '100%',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            marginLeft: 2,
+            width: 14,
+            height: 30,
+            cursor: 'ew-resize',
+          }
+        : axis === 'y'
+          ? {
+              left: '50%',
+              top: '100%',
+              transform: 'translateX(-50%)',
+              marginTop: 2,
+              width: 30,
+              height: 14,
+              cursor: 'ns-resize',
+            }
+          : {
+              left: '100%',
+              top: '100%',
+              marginLeft: 2,
+              marginTop: 2,
+              width: 14,
+              height: 14,
+              cursor: 'nwse-resize',
+            }
+    // The grip reads as the axis it drives: a tall bar for width, a wide bar for
+    // height, a small square for the corner.
+    const grip: CSSProperties =
+      axis === 'x' ? { width: 4, height: 22 } : axis === 'y' ? { width: 22, height: 4 } : { width: 10, height: 10 }
+    const label = axis === 'x' ? 'width' : axis === 'y' ? 'height' : 'size'
     return (
       <div
-        onPointerDown={(e) => onResizePointerDown(e, t, startWidth)}
+        onPointerDown={(e) => onResizePointerDown(e, t, axis, startWidth, fixedHeight)}
         onPointerMove={onResizePointerMove}
         onPointerUp={onResizePointerUp}
         onMouseDown={(e) => e.preventDefault()}
-        title="Drag to set the text box width"
+        title={`Drag to set the text box ${label}`}
         aria-hidden
         style={{
           position: 'absolute',
-          // Just outside the box's right edge, so the hit target never covers
-          // the text (or steals the box's own double-click-to-edit).
-          left: '100%',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          marginLeft: 2,
-          // Hit target >= 12px wide; the visible grip inside it is thinner.
-          width: 14,
-          height: 30,
+          ...placement,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          cursor: 'ew-resize',
           pointerEvents: 'auto',
           touchAction: 'none',
         }}
@@ -2822,14 +2945,35 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
         <span
           style={{
             display: 'block',
-            width: 4,
-            height: 22,
+            ...grip,
             borderRadius: 2,
             backgroundColor: ORANGE,
             boxShadow: '0 0 0 1px rgba(255,255,255,0.9)',
           }}
         />
       </div>
+    )
+  }
+
+  // All three handles of one box. The start WIDTH is resolved ONCE here and
+  // shared by every handle, so a corner drag can never disagree with an edge drag
+  // or with what the render put on screen -- it comes from stored state, never
+  // from the DOM, so there is nothing stale about it. The HEIGHT is deliberately
+  // NOT resolved here: a box with no stored height can only get one by measuring
+  // the DOM, and a measurement taken during render reflects the PREVIOUS commit's
+  // layout, which would make the first drag after a text change jump. The stored
+  // value is passed straight through and onResizePointerDown measures at grab
+  // time instead. The corner is rendered LAST so that wherever it overlaps an
+  // edge handle (a very short or very narrow box) it wins the pointer, which is
+  // what the teacher is aiming at in that spot.
+  function renderResizeHandles(t: TextAnnotation, fixedWidth: number | null, fixedHeight: number | null) {
+    const startWidth = fixedWidth ?? TEXT_BOX_WIDTH
+    return (
+      <>
+        {renderResizeHandle(t, 'x', startWidth, fixedHeight)}
+        {renderResizeHandle(t, 'y', startWidth, fixedHeight)}
+        {renderResizeHandle(t, 'both', startWidth, fixedHeight)}
+      </>
     )
   }
 
@@ -2860,11 +3004,18 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // three consumers below (the editor width, the static width, and the
     // handle's start width), so the gesture can never disagree with the render.
     const fixedWidth = typeof t.width === 'number' && Number.isFinite(t.width) ? t.width : null
-    // Width handle, shown under EXACTLY the same condition as the control bar.
-    // In read-only nothing is selectable and nothing can be edited, so it never
-    // renders there (no new readOnly logic needed).
-    const handle =
-      isEditing || isSoleSelection ? renderResizeHandle(t, fixedWidth ?? TEXT_BOX_WIDTH) : null
+    // This box's stored MINIMUM height, or null for a box saved before the
+    // height handles existed. Checked as a FINITE NUMBER for exactly the same
+    // reason as the width above: the value comes back from a jsonb column, and a
+    // null / NaN there would otherwise render a zero-height box. Resolved ONCE
+    // here and used by all three consumers below (the editor's minimum, the
+    // static box's minimum, and the handles' start height), so the gesture can
+    // never disagree with the render.
+    const fixedHeight = typeof t.height === 'number' && Number.isFinite(t.height) ? t.height : null
+    // Width / height / corner handles, shown under EXACTLY the same condition as
+    // the control bar. In read-only nothing is selectable and nothing can be
+    // edited, so they never render there (no new readOnly logic needed).
+    const handles = isEditing || isSoleSelection ? renderResizeHandles(t, fixedWidth, fixedHeight) : null
 
     // Wrapper pinned at the box's 0..1 top-left. It hugs the box (lineHeight 0
     // kills the inline-block descender gap) so the control bar, anchored to the
@@ -2893,6 +3044,10 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           <EditableTextBox
             value={t.text}
             widthPx={(fixedWidth ?? TEXT_BOX_WIDTH) * scale}
+            // 0 for a box with no stored height, so Math.max in the auto-grow
+            // effect is a true no-op and the box keeps the exact content-driven
+            // height it has always had.
+            minHeightPx={(fixedHeight ?? 0) * scale}
             fontSizePx={t.fontSize * scale}
             onChangeText={(v) => updateText(t.id, v)}
             onCommit={() => finishEditing(t.id)}
@@ -2914,7 +3069,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             }}
           />
           {bar}
-          {handle}
+          {handles}
         </div>
       )
     }
@@ -2937,6 +3092,11 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
             ...(fixedWidth !== null
               ? { width: fixedWidth * scale }
               : { maxWidth: TEXT_BOX_WIDTH * scale }),
+            // Same rule on the vertical axis, but as a MINIMUM: the box holds
+            // the height the teacher drew, and text longer than that still grows
+            // it (nothing clips). A box with no stored height adds no property at
+            // all, so every already-saved annotation renders pixel-identical.
+            ...(fixedHeight !== null ? { minHeight: fixedHeight * scale } : {}),
             padding: `${2 * scale}px ${4 * scale}px`,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
@@ -2953,7 +3113,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
           {t.text === '' ? ' ' : t.text}
         </div>
         {bar}
-        {handle}
+        {handles}
       </div>
     )
   }

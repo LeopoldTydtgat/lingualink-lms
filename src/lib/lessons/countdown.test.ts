@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { describeLessonCountdown } from './countdown'
+import { describeLessonCountdown, formatHeroCountdown } from './countdown'
 
 // A single 10:00-11:00 class, probed at fixed instants. Everything here is epoch ms:
 // describeLessonCountdown never constructs a Date from local parts and never reads a
@@ -97,5 +97,78 @@ describe('describeLessonCountdown - format shape', () => {
     const res = describeLessonCountdown(START, END_90, START + 29 * MIN)
     expect(res.value).toMatch(/^\d:\d{2}:\d{2}$/)
     expect(res.value).toBe('1:01:00')
+  })
+})
+
+describe('describeLessonCountdown - msUntilStart', () => {
+  it('is the exact millisecond lead time before the class', () => {
+    const res = describeLessonCountdown(START, END, START - 90 * MIN)
+    expect(res.msUntilStart).toBe(90 * MIN)
+  })
+
+  it('is zero at the exact start instant', () => {
+    const res = describeLessonCountdown(START, END, START)
+    expect(res.msUntilStart).toBe(0)
+  })
+
+  it('goes negative once the class is underway rather than clamping', () => {
+    const res = describeLessonCountdown(START, END, START + 12 * MIN)
+    expect(res.msUntilStart).toBe(-12 * MIN)
+  })
+
+  it('stays negative after the end, where value collapses to "Starting now"', () => {
+    const res = describeLessonCountdown(START, END, END + 5 * MIN)
+    expect(res.msUntilStart).toBe(-65 * MIN)
+    expect(res.value).toBe('Starting now')
+  })
+
+  it('keeps the sub-second precision that value floors away', () => {
+    const res = describeLessonCountdown(START, END, START - 1)
+    expect(res.msUntilStart).toBe(1)
+    expect(res.value).toBe('Starting now')
+  })
+
+  it('lands on the correct side of the 24h reschedule gate', () => {
+    // The teacher Cancel Class button gates on > 24h, so exactly 24h must NOT qualify.
+    const DAY = 24 * 60 * MIN
+    expect(describeLessonCountdown(START, END, START - DAY).msUntilStart).toBe(DAY)
+    expect(describeLessonCountdown(START, END, START - DAY - 1).msUntilStart).toBeGreaterThan(DAY)
+  })
+})
+
+describe('formatHeroCountdown', () => {
+  it('floors at "Now" on zero', () => {
+    expect(formatHeroCountdown(0)).toBe('Now')
+  })
+
+  it('floors at "Now" on a negative value rather than counting up', () => {
+    expect(formatHeroCountdown(-90)).toBe('Now')
+  })
+
+  it('uses the compound d/h/m form at a day or more out, with no seconds', () => {
+    // 3d 5h 30m 45s -> seconds are dropped above a day
+    const secs = 3 * 86400 + 5 * 3600 + 30 * 60 + 45
+    expect(formatHeroCountdown(secs)).toBe('3d 5h 30m')
+  })
+
+  it('zero-pads the minutes in the days branch', () => {
+    const secs = 1 * 86400 + 2 * 3600 + 5 * 60
+    expect(formatHeroCountdown(secs)).toBe('1d 2h 05m')
+  })
+
+  it('emits a zero-padded HH:MM:SS block under a day', () => {
+    expect(formatHeroCountdown(10 * 3600 + 18 * 60 + 36)).toBe('10:18:36')
+  })
+
+  it('keeps the padded 00 hour block under an hour - unlike formatRemainingCountdown', () => {
+    expect(formatHeroCountdown(47 * 60 + 37)).toBe('00:47:37')
+  })
+
+  it('pads single-digit hours, minutes and seconds', () => {
+    expect(formatHeroCountdown(1 * 3600 + 2 * 60 + 3)).toBe('01:02:03')
+  })
+
+  it('emits 00:00:01 one second out', () => {
+    expect(formatHeroCountdown(1)).toBe('00:00:01')
   })
 })

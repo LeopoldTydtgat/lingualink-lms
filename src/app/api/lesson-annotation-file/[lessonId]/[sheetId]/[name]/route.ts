@@ -10,41 +10,54 @@ type Attachment = {
   type: string
 }
 
-// GET /api/lesson-annotation-file/[lessonId]/[sheetId]/[index]
+// GET /api/lesson-annotation-file/[lessonId]/[sheetId]/[name]
 //
 // Serves the bytes of a library PDF that a teacher marked up during a live
-// lesson, so the student can review it read-only under Past Classes. This is the
-// ONE deliberate, narrow exception to the rule enforced by /api/library-file that
-// students never receive staff-audience Teaching Material: here a student may see
-// a staff PDF, but ONLY the specific attachment their own teacher annotated in
-// their own past class.
+// lesson, so those marks can be reviewed read-only afterwards: by the student
+// under Past Classes, and by the teacher (or an admin) on the class report.
+// This is the ONE deliberate, narrow exception to the rule enforced by
+// /api/library-file that students never receive staff-audience Teaching
+// Material: here a student may see a staff PDF, but ONLY the specific
+// attachment their own teacher annotated in their own past class.
+//
+// The third segment is the attachment's FILENAME, not its position in the
+// sheet's attachments array. Annotation identity is the name end to end — the
+// autosave upserts on (lesson_id, study_sheet_id, attachment_name) — because an
+// admin reorder, a removal or a same-name re-upload shifts every later
+// attachment's index while the filename stays put.
 //
 // AUTHORISATION MODEL — the whole gate is a single user-scoped, RLS-governed
-// SELECT on lesson_annotations:
-//   - The check runs on the USER-SCOPED client (createClient), so the policy
-//     "Students read final lesson annotations after cutoff" governs it. That
-//     policy returns a row ONLY when (lessonId, sheetId, index) is an annotation
-//     on a lesson whose student_id is THIS caller AND the 15-minute post-class
-//     cutoff has passed. The row's existence IS the grant.
+// SELECT on lesson_annotations. This route holds NO role check of its own:
+// every caller is governed by their own SELECT policy on that table, and the
+// row's existence IS the grant.
+//   - "Students read final lesson annotations after cutoff" returns a row ONLY
+//     when the lesson's student_id is THIS caller AND the 15-minute post-class
+//     cutoff has passed. That policy is untouched by this route also serving
+//     teachers and admins: it remains the only thing deciding what a student
+//     may read here, cutoff included.
+//   - "Teachers read own lesson annotations" returns a row when the lesson's
+//     teacher_id is THIS caller. No cutoff — a teacher reviews the marks from
+//     their own class at any time.
+//   - "Admins read all lesson annotations" returns a row when is_admin().
+//   - No row from any of them means no access, for any caller: same generic 403.
 //   - No ownership/cutoff/audience logic is re-derived in code, so this route can
-//     never disagree with the live RLS policy. NEVER move this check onto the
+//     never disagree with the live RLS policies. NEVER move this check onto the
 //     admin/service-role client: that bypasses RLS and the entire gate.
 //   - The service-role admin client is used ONLY after access is granted, purely
 //     to read the attachment metadata and download the bytes from the private
 //     bucket (the general audience gate in /api/library-file is left untouched).
-//
-// This route is scoped to STUDENTS (see the guard below). Teachers/admins are
-// refused here and use their existing paths (dashboard seed + /api/library-file).
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ lessonId: string; sheetId: string; index: string }> }
+  { params }: { params: Promise<{ lessonId: string; sheetId: string; name: string }> }
 ) {
   try {
-    const { lessonId, sheetId, index } = await params
+    const { lessonId, sheetId, name } = await params
 
-    // attachment_index is part of the gate key, so parse + validate it up front.
-    const idx = Number(index)
-    if (!Number.isInteger(idx) || idx < 0) {
+    // attachment_name is the gate key AND, further down, the value matched
+    // against the sheet's attachments, so validate its charset up front with the
+    // same rule applied at the storage boundary below. Anything else is refused
+    // here and never reaches a query.
+    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
@@ -55,35 +68,16 @@ export async function GET(
       return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
     }
 
-    // Scope this route to STUDENTS. lesson_annotations also has teacher/admin
-    // SELECT policies with NO cutoff, so a teacher/admin hitting this route would
-    // be gated by THOSE instead of the student read-after-cutoff policy this
-    // route exists to serve. (The INSERT/UPDATE policies DO verify study-sheet
-    // access — visibility since 20260703120000, plus the owner_id clause since
-    // 20260715150000 — so the historical self-mint bypass is closed at the
-    // policy level; the guard is kept because teachers/admins already have their
-    // own read paths and this route's contract is student-only.) Students have
-    // NO write policy and cannot mint rows, so restricting to students makes the
-    // student read-after-cutoff policy the only path through.
-    const { data: student } = await supabase
-      .from('students')
-      .select('id')
-      .eq('auth_user_id', user.id)
-      .maybeSingle()
-    if (!student) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-
     // --- THE GATE (sole authorization) ---
     // User-scoped read: RLS decides. A missing row means "not this caller's lesson
     // / before cutoff / no such annotation" — all indistinguishable and all denied
     // with the same generic 403, so nothing about the sheet leaks.
     const { data: annotationRow } = await supabase
       .from('lesson_annotations')
-      .select('id, attachment_name')
+      .select('id')
       .eq('lesson_id', lessonId)
       .eq('study_sheet_id', sheetId)
-      .eq('attachment_index', idx)
+      .eq('attachment_name', name)
       .maybeSingle()
 
     if (!annotationRow) {
@@ -106,23 +100,23 @@ export async function GET(
 
     const attachments: Attachment[] = Array.isArray(sheet.attachments) ? sheet.attachments : []
 
-    // Resolve WHICH attachment to serve. attachment_name (recorded by the teacher
-    // autosave alongside the positional index) is the stable key: match it against
-    // the sheet's CURRENT attachments so an admin reorder/removal can't shift the
-    // teacher's marks onto a different same-sheet PDF. If the annotated file was
-    // since removed or renamed, find() returns undefined and the filename validation
-    // below denies with 404 — we NEVER fall back to position when a name is present.
-    // Only a legacy row with a null name (none exist today; kept for forward-safety)
-    // falls back to attachments[idx].
-    const attachment =
-      typeof annotationRow.attachment_name === 'string' && annotationRow.attachment_name.length > 0
-        ? attachments.find((a) => a && a.name === annotationRow.attachment_name)
-        : attachments[idx]
+    // Resolve WHICH attachment to serve. The name is the stable key: match the
+    // requested filename against the sheet's CURRENT attachments so an admin
+    // reorder/removal can't shift the teacher's marks onto a different same-sheet
+    // PDF. It is the gate row's own attachment_name — the equality filter above is
+    // what returned that row — so this serves exactly the annotated file and
+    // nothing else. If the annotated file was since removed or renamed, find()
+    // returns undefined and the validation below denies with 404. There is no
+    // positional fallback: attachment_name is NOT NULL, so no row can lack one.
+    const attachment = attachments.find((a) => a && a.name === name)
     // Re-validate the filename at this boundary (mirrors /api/library-file): the
     // admin library create/PATCH routes write the attachments array verbatim, so a
     // hostile or malformed name could otherwise reach the storage path ('../'
     // traversal) or the response header (quote/CRLF injection). Every real upload
     // already matches this charset, so the check rejects nothing legitimate.
+    // This is deliberately the SECOND charset check: the first one screens the
+    // request param, this one screens the STORED attachments entry that actually
+    // builds the path and the header. Different inputs, different trust — keep both.
     if (
       !attachment ||
       typeof attachment.name !== 'string' ||

@@ -250,6 +250,20 @@ export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
     (s) => s !== 'completed' && s !== 'missed' && !NO_SHOW_STATUSES.includes(s)
   )
 
+// Report outcomes: these are exactly the three outcomes complete_report_atomic is
+// allowed to write — the settled statuses meaning "this class happened in its slot"
+// (student_no_show and teacher_no_show count: the slot was held).
+// 'missed' also means the class happened, but it is written by the overdue cron long
+// after the slot ends, never by the report RPC, and can never exist during a live
+// teaching window — so its exclusion is correct for every consumer.
+// Derived by exclusion ON PURPOSE: a fourth report outcome added to
+// ALL_LESSON_STATUSES flows in here automatically instead of drifting silently.
+// Equals ['completed','student_no_show','teacher_no_show'] today.
+// Consumed by liveLesson.ts (annotation attribution/blockers) and by
+// STUDENT_PAST_LESSON_STATUSES below.
+export const REPORT_OUTCOME_STATUSES: readonly LessonStatus[] =
+  SETTLED_LESSON_STATUSES.filter((s) => s !== 'missed' && !CANCELLED_STATUSES.includes(s))
+
 // Student-visible history statuses: settled lessons with ALL cancellations removed
 // (completed + both no-shows), and 'missed' removed too. This EXCLUDES every cancellation
 // by deliberate product decision (BUG_LOG NEW61 / S134): students do not see cancelled
@@ -266,8 +280,13 @@ export const ACTIVE_AND_CANCELLED_STATUSES: readonly LessonStatus[] =
 // (client-approved: history must not wait on the report). That widening lives in those two
 // pages ONLY; this constant deliberately stays settled-only, so no other consumer inherits
 // it. Never add 'scheduled' here.
+// This coincides with REPORT_OUTCOME_STATUSES today by construction. The coincidence is
+// semantic luck, not necessity — if the provisional decision to hide 'missed' classes from
+// students ever changes, DO NOT edit REPORT_OUTCOME_STATUSES (it is a write-safety set for
+// annotation attribution); re-derive this constant independently from
+// SETTLED_LESSON_STATUSES instead.
 export const STUDENT_PAST_LESSON_STATUSES: readonly LessonStatus[] =
-  SETTLED_LESSON_STATUSES.filter((s) => s !== 'missed' && !CANCELLED_STATUSES.includes(s))
+  REPORT_OUTCOME_STATUSES
 
 // Build a PostgREST .not('status','in', ...) / .in-string filter argument from a status set.
 // PostgREST's STRING-shorthand "in" takes a quoted, comma-joined, parenthesised list — e.g.

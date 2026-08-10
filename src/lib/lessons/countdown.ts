@@ -12,10 +12,32 @@ export function formatCompoundCountdown(secondsUntil: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`
 }
 
+// Pre-class hero countdown for the teacher RightPanel and the student
+// StudentRightPanel - the 22px zero-padded HH:MM:SS block above the class time.
+// It was duplicated verbatim in both panels. The two panels remain separate
+// components by design; this is only the formatter they share.
+//
+// Deliberately a different shape from the other two formatters here: it always
+// emits an hour block under a day and zero-pads it ("00:47:37"), where
+// formatRemainingCountdown drops the hour block entirely under an hour and never
+// pads it, and formatCompoundCountdown uses the "10h 18m 36s" compound form.
+// It also floors at 'Now', not 'Starting now'.
+export function formatHeroCountdown(secondsUntil: number): string {
+  if (secondsUntil <= 0) return 'Now'
+  const days = Math.floor(secondsUntil / 86400)
+  const hours = Math.floor((secondsUntil % 86400) / 3600)
+  const minutes = Math.floor((secondsUntil % 3600) / 60)
+  const seconds = secondsUntil % 60
+  if (days > 0) {
+    return `${days}d ${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 // Live in-class "time remaining" timer shared by the teacher RightPanel and the
 // student StudentRightPanel ("In class: 47:37 remaining").
 //
-// Deliberately NOT formatCountdown (each panel's local pre-class hero formatter):
+// Deliberately NOT formatHeroCountdown (the panels' pre-class hero formatter above):
 // that one always emits a zero-padded HH:MM:SS block and is still the hero's
 // format. This one drops the hour block entirely under an hour and does not
 // zero-pad the hour above it, so a mid-class timer reads 47:37 rather than
@@ -40,6 +62,16 @@ export type LessonCountdown = {
   live: boolean
   label: string
   value: string
+  // Raw signed lead time to the start instant, in milliseconds: positive before the
+  // class, zero at the start instant, negative once underway or over. Unfloored, so it
+  // keeps the sub-second precision `value` discards, and uncapped, so it keeps counting
+  // negative after the end where `value` collapses to "Starting now".
+  //
+  // Exists so a caller gating on time-to-start (the teacher Cancel Class button's 24h
+  // window) can read it off the same tick that drives the countdown, instead of calling
+  // Date.now() in a render body - which is both impure under react-hooks/purity and a
+  // stale read that never updates until something else re-renders the card.
+  msUntilStart: number
 }
 
 // PURE EPOCH-MS ARITHMETIC. Every argument is an absolute instant in milliseconds and the
@@ -51,6 +83,10 @@ export function describeLessonCountdown(
   endMs: number,
   nowMs: number
 ): LessonCountdown {
+  // Computed once and returned on both branches: it is the same quantity either side of
+  // the start instant, only its sign differs.
+  const msUntilStart = startMs - nowMs
+
   // Teaching window is half-open [start, end): the start instant is already live and the
   // end instant is not, matching pickLiveLesson's teaching-time test in liveLesson.ts.
   if (nowMs >= startMs && nowMs < endMs) {
@@ -58,14 +94,17 @@ export function describeLessonCountdown(
       live: true,
       label: 'In class',
       value: formatRemainingCountdown(Math.floor((endMs - nowMs) / 1000)),
+      msUntilStart,
     }
   }
   // Not live: before the class it counts down to the start; at or past the end it
   // collapses to zero rather than counting up, so a row that outlives its class by a
-  // render tick degrades to "Starting now" instead of a negative timer.
+  // render tick degrades to "Starting now" instead of a negative timer. msUntilStart is
+  // deliberately NOT collapsed the same way - it stays signed and exact.
   return {
     live: false,
     label: 'Starts in',
     value: formatCompoundCountdown(nowMs >= endMs ? 0 : Math.floor((startMs - nowMs) / 1000)),
+    msUntilStart,
   }
 }

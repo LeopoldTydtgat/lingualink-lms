@@ -16,7 +16,7 @@ export default async function LiveAnnotatePage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { sheet, activities, isAdmin, isOwned, annotationsByName } = await loadStudySheetDetail(id)
+  const { sheet, activities, isAdmin, isOwned, annotationsByName, liveLessonId } = await loadStudySheetDetail(id)
 
   // rawAnswerKey = null: activities render as question lists with NO correct
   // answer / explanation. The screen-shareable live window must not leak the key.
@@ -29,6 +29,7 @@ export default async function LiveAnnotatePage({
       isAdmin={isAdmin}
       isOwned={isOwned}
       annotationsByName={annotationsByName}
+      liveLessonId={liveLessonId}
       live
     />
   )

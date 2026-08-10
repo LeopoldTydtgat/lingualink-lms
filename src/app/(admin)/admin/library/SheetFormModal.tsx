@@ -328,7 +328,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         }
 
         const data: Attachment = await res.json()
-        setAttachments(prev => [...prev, data])
+        // The server sanitizes the filename and upsert-overwrites the bytes, so a
+        // same-name re-upload must REPLACE the entry, never double it - duplicate
+        // names would collapse two annotation viewers onto one name-keyed row.
+        setAttachments(prev => [...prev.filter(a => a?.name !== data.name), data])
       }
     } catch {
       // Without this the button sits at "Uploading…", disabled, with no reason.
@@ -532,6 +535,10 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         }
 
         const data: Attachment = await upRes.json()
+        // A same-name later file's upsert owns the bytes in storage, so it must
+        // replace the earlier entry here too, never sit alongside it.
+        const dupIdx = uploaded.findIndex(a => a.name === data.name)
+        if (dupIdx !== -1) uploaded.splice(dupIdx, 1)
         uploaded.push(data)
       }
 

@@ -12,7 +12,8 @@ import AnnotatablePdf from '@/components/pdf/AnnotatablePdf'
 // The two copies differed only in the PDF component (AnnotatablePdf vs
 // PdfViewer) and per-card chrome; those differences are parameterised via props
 // rather than forked. With no `onRemove`/annotation props supplied the student
-// call renders byte-for-byte what its inline copy did.
+// call renders what its inline copy did, with one deliberate difference: the
+// proxy URL now carries a `?f=` cache-buster (see the fileUrl line below).
 
 type MaterialAttachment = { name: string; type: string }
 
@@ -24,6 +25,11 @@ type Props = {
   mode: 'plain' | 'annotatable'
   // Only consumed in 'annotatable' mode — seed marks keyed by attachment name.
   annotationsByName?: Record<string, Annotation[]>
+  // Only consumed in 'annotatable' mode — the lesson those seed marks came from,
+  // handed to AnnotatablePdf as its stale-tab guard. Optional so the student
+  // 'plain' call is unchanged; absent -> null, which the save action reads as
+  // "nothing was seeded" and lets through.
+  liveLessonId?: string | null
   wrapperClassName?: string
   cardClassName?: string
   cardStyle?: React.CSSProperties
@@ -38,6 +44,7 @@ export default function MaterialFileViewer({
   sheetId,
   mode,
   annotationsByName,
+  liveLessonId,
   wrapperClassName = 'space-y-4',
   cardClassName = 'rounded-xl overflow-hidden bg-white shadow-sm',
   cardStyle = { border: '1px solid #f3f4f6' },
@@ -79,7 +86,11 @@ export default function MaterialFileViewer({
         const isPdf = att.type === 'application/pdf'
         const isImage = att.type.startsWith('image/')
         // Same-origin proxy URL, served by the auth-gated /api/library-file route.
-        const fileUrl = `/api/library-file/${sheetId}/${idx}`
+        // The ?f param is a cache-buster for occupant identity, ignored by the
+        // route (it reads path params only): when a removal shifts the array, the
+        // URL string changes so PdfViewer reloads the correct document and reseeds
+        // marks from the correct name key.
+        const fileUrl = `/api/library-file/${sheetId}/${idx}?f=${encodeURIComponent(att.name)}`
         const isThisFullscreen = fullscreenIdx === idx
         const isRemoving = removingName === att.name
 
@@ -98,7 +109,7 @@ export default function MaterialFileViewer({
 
         return (
           <div
-            key={idx}
+            key={att.name}
             ref={el => { containerRefs.current[idx] = el }}
             className={cardClassName}
             style={cardStyle}
@@ -135,6 +146,7 @@ export default function MaterialFileViewer({
                   attachmentIndex={idx}
                   attachmentName={att.name}
                   initialAnnotations={annotationsByName?.[att.name]}
+                  seedLessonId={liveLessonId ?? null}
                 />
               ) : (
                 // PdfViewer replaces the native <iframe>: it renders the PDF through

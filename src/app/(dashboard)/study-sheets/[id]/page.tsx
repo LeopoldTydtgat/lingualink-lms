@@ -9,7 +9,7 @@ export default async function StudySheetDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const { sheet, activities, isAdmin, isOwned, annotationsByName } = await loadStudySheetDetail(id)
+  const { sheet, activities, isAdmin, isOwned, annotationsByName, liveLessonId } = await loadStudySheetDetail(id)
 
   // Prep view: correct answers ARE shown (teacher-facing). answer_key is
   // service-role only (column-grant-excluded), so it is read here with the
@@ -35,6 +35,7 @@ export default async function StudySheetDetailPage({
       isAdmin={isAdmin}
       isOwned={isOwned}
       annotationsByName={annotationsByName}
+      liveLessonId={liveLessonId}
     />
   )
 }

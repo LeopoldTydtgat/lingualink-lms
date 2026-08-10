@@ -1,10 +1,11 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import Link from 'next/link'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
+import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
@@ -48,6 +49,14 @@ type MaterialSheet = {
   attachments: { name: string; type: string }[]
 }
 
+type AnnotatedPdf = {
+  studySheetId: string
+  // The attachment's FILENAME, not its position: annotation identity is the name
+  // end to end, and it is the serving route's third path segment.
+  attachmentName: string
+  annotations: Annotation[]
+}
+
 type Props = {
   report: Report
   profile: { id: string; full_name: string; role: string }
@@ -55,6 +64,7 @@ type Props = {
   assignedSheetIds: string[]
   assignedSheets: { id: string; title: string }[]
   materialSheets: MaterialSheet[]
+  annotatedPdfs: AnnotatedPdf[]
 }
 
 // This form is the ONLY writer of reports.level_data, so its keys and its level
@@ -192,11 +202,19 @@ function LevelTrack({
   )
 }
 
-export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets, annotatedPdfs }: Props) {
   const router = useRouter()
 
   const lesson = report.lesson
   const student = lesson?.student
+
+  // The recap's file route takes the lesson id as its first path segment. The
+  // Report type declares lesson non-null, but the server flattens a nullable
+  // join and passes null through an `as any` cast, so the id is read
+  // defensively and the card below is gated on it — never on annotatedPdfs
+  // alone. Without this a lesson-less report would build
+  // /api/lesson-annotation-file/undefined/... and 404 every byte request.
+  const recapLessonId = lesson?.id ?? ''
 
   const [didClassHappen, setDidClassHappen] = useState<boolean | null>(report.did_class_happen)
   const [noShowType, setNoShowType] = useState<string>(report.no_show_type ?? '')
@@ -213,6 +231,12 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A submit blocked by the 150-character minimum is otherwise silent: the inline
+  // message under the textarea only appears once something has been typed, so an
+  // EMPTY feedback box with "Yes" selected showed nothing anywhere. This flag lets
+  // that same inline message speak for a never-touched field.
+  const [submitAttempted, setSubmitAttempted] = useState(false)
+  const feedbackSectionRef = useRef<HTMLElement>(null)
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [currentAssignedIds, setCurrentAssignedIds] = useState<string[]>(assignedSheetIds)
   const [currentAssignedSheets, setCurrentAssignedSheets] = useState<{ id: string; title: string }[]>(assignedSheets)
@@ -265,6 +289,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       // No setError here: the inline counter beneath the recap field already shows this
       // message in the right place. The shared banner sits at the bottom (under Additional
       // Details) and would misleadingly read as if Additional Details were at fault.
+      // Arm that inline message (it is otherwise hidden while the box is empty) and bring
+      // the field on screen, so the blocked submit is never silent.
+      setSubmitAttempted(true)
+      feedbackSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
     }
 
@@ -444,7 +472,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       {didClassHappen === true && (
         <>
           {/* Feedback box */}
-          <section className={cardClass} style={cardStyle}>
+          <section ref={feedbackSectionRef} className={cardClass} style={cardStyle}>
             <SectionHeader>Class Recap, Feedback &amp; Next Steps</SectionHeader>
             <p className="text-xs text-gray-500 mb-3">
               This will appear as the recap on the next class card.
@@ -465,7 +493,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             ) : (
               <p className="whitespace-pre-wrap text-sm text-gray-700">{feedbackText}</p>
             )}
-            {isEditable && feedbackText.length > 0 && feedbackText.trim().length < 150 && (
+            {isEditable && (feedbackText.length > 0 || submitAttempted) && feedbackText.trim().length < 150 && (
               <p className="text-xs text-red-500 mt-1">
                 Minimum 150 characters required ({150 - feedbackText.trim().length} remaining)
               </p>
@@ -698,6 +726,52 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             {saving ? 'Saving...' : 'Submit Report'}
           </button>
         </div>
+      )}
+
+      {/* Marked-up material from the live class — read-only recap.
+          Gated on marks being present and on a lesson id existing to address
+          them by, and on nothing else — no report status is consulted, so it
+          renders in every state (pending, completed, flagged, reopened) and the
+          teacher can review their own marks whether or not the report is in.
+          Deliberately the LAST section, below the submit button: it is reference
+          material, not part of the form, and stacking full PDF viewers above the
+          button would push the only action on this page off screen. Nothing
+          here writes: the viewers
+          are readOnly and no onAnnotationsChange handler is passed, so the live
+          autosave remains the sole writer of these marks. */}
+      {recapLessonId.length > 0 && annotatedPdfs.length > 0 && (
+        <section className={cardClass} style={{ ...cardStyle, marginTop: '24px' }}>
+          <SectionHeader>CLASS RECAP - MARKED-UP MATERIAL</SectionHeader>
+          <p className="text-xs text-gray-500 mb-3">
+            {isAdmin
+              ? 'The notes made on screen during this class. View only.'
+              : 'The notes you made on screen during this class. View only.'}
+          </p>
+          <div className="space-y-4">
+            {annotatedPdfs.map(pdf => (
+              <div
+                key={`${pdf.studySheetId}:${pdf.attachmentName}`}
+                className="overflow-hidden bg-white"
+                style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
+                /* Keyed on the NAME, not the position: a sheet's attachments can
+                   be reordered between renders, and an index key would remount
+                   the wrong viewer onto another file's marks. */
+              >
+                <PdfViewer
+                  /* encodeURIComponent because the name is user-supplied data
+                     going into a path segment. The server screens it against
+                     ^[a-zA-Z0-9._-]+$ on arrival, and the page only ever emits
+                     names that already passed that same check, so today this
+                     escapes nothing — it is here so a future widening of the
+                     allowed charset cannot turn a filename into path syntax. */
+                  fileUrl={`/api/lesson-annotation-file/${recapLessonId}/${pdf.studySheetId}/${encodeURIComponent(pdf.attachmentName)}`}
+                  initialAnnotations={pdf.annotations}
+                  readOnly
+                />
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Assignment modal */}

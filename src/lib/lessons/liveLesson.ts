@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { REPORT_OUTCOME_STATUSES } from '@/lib/billing/billability'
 
 // ---------------------------------------------------------------------------
 // Live-lesson resolver (Milestone 4, Piece B).
@@ -19,13 +20,23 @@ import { createClient } from '@/lib/supabase/server'
 //   - it requires the lesson to have STARTED (now >= scheduled_at), so prep-time
 //     and future-lesson writes never get a live banner, and
 //   - it requires status = 'scheduled', which silences autosave once a class is
-//     completed/reported (teacher has moved on) and excludes cancelled lessons.
+//     completed/reported (teacher has moved on) and excludes cancelled lessons, and
+//   - it SUPPRESSES a GRACE-ONLY result while another lesson that HAPPENED in its
+//     slot (one of ATTRIBUTION_STATUSES) is being taught at this instant, so the
+//     class a teacher is actually sitting in can no longer be shadowed by the
+//     previous class's grace window once its report has been filed mid-lesson.
+//     See the blockers parameter on pickLiveLesson.
 // The direction is safe: the resolver can only ever be STRICTER than RLS, never
 // looser. So it can only name a lesson RLS would also accept — the banner can
 // never name a class the write would then reject onto a different one. That is
 // what W2 needs. (It does mean autosave goes quiet for the rest of the grace
 // window if a teacher submits the report mid-class — that is intended: reported
 // class = done.)
+//
+// The third stricture keeps that direction too: the blocker rows are only ever read
+// to ask "is some happened-status class being taught right now", and a blocker can
+// only REMOVE a lesson from the result. No blocker id is ever returned or written,
+// so the set of lessons this resolver can name only ever shrinks.
 // ---------------------------------------------------------------------------
 
 // 15-minute save-grace after a class ends. Matches the RLS cutoff verbatim.
@@ -63,9 +74,24 @@ type LessonRow = {
 // just-ended class's marks, never for starting the next class's.
 // Breaking this rule silently misattributes marks — the highest-stakes failure
 // in this feature. The Vitest test locks it; do not weaken it.
+//
+// BLOCKERS - the same failure, entered through the report path:
+// `lessons` only ever carries status 'scheduled' rows, so a class whose report is
+// filed mid-lesson drops straight out of the candidate list. The PREVIOUS class is
+// then the only candidate left, and if it ended under GRACE_MINUTES ago it wins on
+// grace - marks drawn during the class being taught upsert onto the one before it,
+// under a Saved badge. Pass the teacher's happened-status rows as `blockers` and a
+// grace-only result is suppressed whenever one of them owns this instant.
+// Only GRACE is suppressed: a lesson in real teaching time IS the class being
+// taught, so it is never blocked (no_teacher_overlap forbids a second lesson
+// overlapping it in teaching time anyway).
+// Blocker ids are compared, never returned - this can only narrow the answer.
 export function pickLiveLesson(
   lessons: LessonRow[],
-  nowMs: number
+  nowMs: number,
+  // Defaults to [] so every caller with no blockers to offer keeps today's exact
+  // behaviour: no blockers, no suppression.
+  blockers: AttributionRow[] = []
 ): LiveLesson | null {
   const graceMs = GRACE_MINUTES * 60_000
 
@@ -94,7 +120,51 @@ export function pickLiveLesson(
     }
   }
 
-  return teaching ?? grace
+  // Teaching wins outright and is never suppressed. A grace-only survivor is dropped
+  // when a happened-status lesson owns this instant, because THAT is the class the
+  // teacher is sitting in. pickAttributionLesson is reused for the check so the
+  // window arithmetic lives in exactly one place; suppression returns null rather
+  // than falling through to some other grace lesson, which would only pick a
+  // different wrong class.
+  if (teaching) return teaching
+  if (!grace) return null
+  return pickAttributionLesson(blockers, nowMs) === null ? grace : null
+}
+
+// Lesson statuses that mean "this class HAPPENED in its slot": exactly the three
+// outcomes complete_report_atomic is allowed to write. Cancelled lessons are
+// deliberately excluded — nobody taught them, so marks drawn inside a cancelled slot
+// belong to whatever class comes next, and attributing them backwards would refuse
+// that next class's perfectly good saves.
+// The set now lives in billability.ts as REPORT_OUTCOME_STATUSES (the status-vocabulary
+// source of truth); this export is kept so existing consumers and tests keep their name.
+export const ATTRIBUTION_STATUSES: readonly string[] = REPORT_OUTCOME_STATUSES
+
+// A lesson row as read for attribution. No student_id: nothing here is displayed.
+type AttributionRow = {
+  id: string
+  scheduled_at: string
+  duration_minutes: number
+}
+
+// Which lesson was BEING TAUGHT at nowMs. Pure, for the same reason pickLiveLesson
+// is: the risky part is the window arithmetic, so it lives somewhere a test can
+// reach it without a database.
+//
+// This is NOT a "may I write here" answer and must never be used as one — see
+// getAttributionLessonIdForTeacher below. Teaching time only ([start, end)), with NO
+// grace: grace exists so a just-ended class's marks can still land, which is a WRITE
+// concern, whereas attribution only has to name the class a teacher was sitting in.
+export function pickAttributionLesson(
+  lessons: AttributionRow[],
+  nowMs: number
+): string | null {
+  for (const l of lessons) {
+    const startMs = new Date(l.scheduled_at).getTime()
+    const endMs = startMs + l.duration_minutes * 60_000
+    if (nowMs >= startMs && nowMs < endMs) return l.id
+  }
+  return null
 }
 
 // Resolve the live lesson for the CURRENTLY LOGGED-IN teacher.
@@ -149,16 +219,113 @@ export async function getLiveLessonForTeacher(): Promise<LiveLesson | null> {
   const picked = pickLiveLesson(lessons as LessonRow[], nowMs)
   if (!picked) return null
 
+  // A pick in REAL TEACHING TIME is the class being taught: nothing can outrank it,
+  // so it is returned exactly as before and costs no extra query. Only a GRACE-ONLY
+  // survivor can be the wrong class - the query above sees 'scheduled' rows only, so
+  // the class actually in progress is invisible to it the moment its report is filed,
+  // leaving the previous class alone on grace. So only that case pays for the second
+  // read, which is also the case that produces no query at all on a normal day.
+  let live = picked
+  const pickedStartMs = new Date(picked.scheduledAt).getTime()
+  const pickedEndMs = new Date(picked.endAt).getTime()
+  if (!(nowMs >= pickedStartMs && nowMs < pickedEndMs)) {
+    // Which class is this teacher actually sitting in? Deliberately the same query
+    // shape as getAttributionLessonIdForTeacher below - same select, same statuses,
+    // same bounds, same order - on the same user-scoped client (W1), so it can only
+    // ever see this teacher's own rows. earliestStart is the same now-instant bound.
+    const { data: blockerLessons, error: blockerError } = await supabase
+      .from('lessons')
+      .select('id, scheduled_at, duration_minutes')
+      .eq('teacher_id', user.id)
+      .in('status', [...ATTRIBUTION_STATUSES])
+      .lte('scheduled_at', earliestStart)
+      .gte('scheduled_at', new Date(nowMs - 24 * 60 * 60_000).toISOString())
+      .order('scheduled_at', { ascending: false })
+
+    if (blockerError) {
+      // Fail OPEN, on purpose: a transient fault in this read must never kill a
+      // legitimate grace save (the ordinary "finish the marks of the class that just
+      // ended" flow). Empty blockers reproduce the pre-existing behaviour exactly.
+      // Context only - never any annotation content.
+      console.error('[getLiveLessonForTeacher] blocker lessons query failed', {
+        teacherId: user.id,
+        error: blockerError,
+      })
+    }
+
+    const rechecked = pickLiveLesson(
+      lessons as LessonRow[],
+      nowMs,
+      blockerError ? [] : ((blockerLessons ?? []) as AttributionRow[])
+    )
+    if (!rechecked) return null
+    live = rechecked
+  }
+
   // Look up the student's display name for the banner. Separate read so the
   // pure picker stays database-free and testable.
   const { data: student } = await supabase
     .from('students')
     .select('full_name')
-    .eq('id', (lessons as LessonRow[]).find((l) => l.id === picked.lessonId)!.student_id)
+    .eq('id', (lessons as LessonRow[]).find((l) => l.id === live.lessonId)!.student_id)
     .maybeSingle()
 
   return {
-    ...picked,
+    ...live,
     studentName: student?.full_name ?? 'your student',
   }
+}
+
+// Name the class the teacher is sitting in RIGHT NOW even though it is no longer
+// writable. Used ONLY to arm the annotation guard — never to write.
+//
+// Why it exists: getLiveLessonForTeacher requires status 'scheduled', so filing a
+// report mid-class (allowed from the class start) makes it return null for the rest
+// of the hour. Every save after that point is refused without naming a lesson, so a
+// tab that marks up the remainder of the class never learns which class it was in;
+// its guard stays null and the next class accepts that whole array. Returning the id
+// here arms the guard, so the next class refuses it instead.
+//
+// SAFETY (W2): the id returned here is only ever compared for equality by the
+// annotation guard. It never becomes a write target — saveLessonAnnotations writes
+// getLiveLessonForTeacher's lesson and nothing else — so this can only REFUSE a
+// write, never redirect one. The set of writable lessons is completely unchanged.
+//
+// Read-only, user-scoped client (W1), so it sees only this teacher's rows.
+export async function getAttributionLessonIdForTeacher(): Promise<string | null> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const nowMs = Date.now()
+
+  const { data: lessons, error } = await supabase
+    .from('lessons')
+    .select('id, scheduled_at, duration_minutes')
+    .eq('teacher_id', user.id)
+    .in('status', [...ATTRIBUTION_STATUSES])
+    .lte('scheduled_at', new Date(nowMs).toISOString())
+    // Same fetch-narrowing bound as getLiveLessonForTeacher, same reasoning: a lesson
+    // runs at most a few hours, so 24h cannot drop one whose slot contains now.
+    .gte('scheduled_at', new Date(nowMs - 24 * 60 * 60_000).toISOString())
+    .order('scheduled_at', { ascending: false })
+
+  if (error) {
+    // Log and fall back to null, matching getLiveLessonForTeacher above. Null here
+    // means "guard not armed", i.e. permissive — the one place this mechanism fails
+    // open. Deliberate: arming a never-matching sentinel on a transient fault would
+    // kill autosave for the rest of that tab's life, including for the prep-then-class
+    // flow, and this query only runs in a window where nothing is writable anyway.
+    console.error('[getAttributionLessonIdForTeacher] lessons query failed', {
+      teacherId: user.id,
+      error,
+    })
+    return null
+  }
+  if (!lessons || lessons.length === 0) return null
+
+  return pickAttributionLesson(lessons as AttributionRow[], nowMs)
 }

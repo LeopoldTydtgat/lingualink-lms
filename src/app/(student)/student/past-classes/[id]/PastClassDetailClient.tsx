@@ -63,7 +63,9 @@ interface ExistingReview {
 
 interface AnnotatedPdf {
   studySheetId: string;
-  attachmentIndex: number;
+  // The attachment's FILENAME, not its position: annotation identity is the name
+  // end to end, and it is the serving route's third path segment.
+  attachmentName: string;
   annotations: Annotation[];
 }
 
@@ -71,6 +73,7 @@ interface Props {
   lesson: Lesson;
   assignments: Assignment[];
   annotatedPdfs: AnnotatedPdf[];
+  annotationsMayBePending: boolean;
   existingReview: ExistingReview | null;
   studentId: string;
   studentTimezone: string;
@@ -139,6 +142,7 @@ export default function PastClassDetailClient({
   lesson,
   assignments,
   annotatedPdfs,
+  annotationsMayBePending,
   existingReview,
   studentId,
   studentTimezone,
@@ -443,18 +447,38 @@ export default function PastClassDetailClient({
           <div className="space-y-4">
             {annotatedPdfs.map((pdf) => (
               <div
-                key={`${pdf.studySheetId}:${pdf.attachmentIndex}`}
+                key={`${pdf.studySheetId}:${pdf.attachmentName}`}
                 className="overflow-hidden bg-white"
                 style={{ border: '1px solid #f3f4f6', borderRadius: '12px' }}
+                /* Keyed on the NAME, not the position: a sheet's attachments can
+                   be reordered between renders, and an index key would remount
+                   the wrong viewer onto another file's marks. */
               >
                 <PdfViewer
-                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${pdf.attachmentIndex}`}
+                  /* encodeURIComponent because the name is user-supplied data
+                     going into a path segment. The server screens it against
+                     ^[a-zA-Z0-9._-]+$ on arrival, and the page only ever emits
+                     names that already passed that same check, so today this
+                     escapes nothing — it is here so a future widening of the
+                     allowed charset cannot turn a filename into path syntax. */
+                  fileUrl={`/api/lesson-annotation-file/${lesson.id}/${pdf.studySheetId}/${encodeURIComponent(pdf.attachmentName)}`}
                   initialAnnotations={pdf.annotations}
                   readOnly
                 />
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {annotatedPdfs.length === 0 && annotationsMayBePending && (
+        <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
+          <div className="mb-1">
+            <CardHeader icon={PenLine} label="MATERIAL YOUR TEACHER MARKED UP" />
+          </div>
+          <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+            If your teacher marked up any documents during this class, they&apos;ll appear here within 15 minutes of the class ending.
+          </p>
         </div>
       )}
     </div>
