@@ -12,7 +12,7 @@ const AUTOSAVE_DEBOUNCE_MS = 800
 // ---------------------------------------------------------------------------
 // Student homework layer over a page-scoped teaching-material grant.
 //
-// Mirrors src/components/pdf/AnnotatablePdf.tsx (the teacher's live-lesson
+// Follows the same autosave shape as src/components/pdf/AnnotatablePdf.tsx (the teacher's live-lesson
 // wrapper) for everything about autosave, and adds the ONE thing the teacher
 // path never needs: page-index translation.
 //
