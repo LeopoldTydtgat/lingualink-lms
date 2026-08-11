@@ -254,79 +254,69 @@ export default function AssignStudySheetsModal({
     // Clear any previous error so a retry never shows a stale message.
     setError(null)
 
-    // try/finally guarantees the saving state is reset on EVERY exit path —
-    // the early `!user` return, a thrown Supabase/network error, or success —
-    // so the button can never get stuck disabled reading "Saving...".
+    // ONE server call carrying the FULL desired set; the route derives the
+    // add/remove diff from a fresh read. The browser cannot write this table
+    // itself: `authenticated` holds SELECT + INSERT on assignments only, with no
+    // DELETE grant and no DELETE policy, so the un-assign half of the old
+    // in-component save failed permanently while still reporting success. The
+    // homework-assigned email moved into that route too, so nothing is dispatched
+    // from here any more.
+    //
+    // try/catch/finally guarantees the saving state is reset on EVERY exit path —
+    // a rejected response, a thrown network error, or success — so the button can
+    // never get stuck disabled reading "Saving...". onSaved/onClose sit after the
+    // block: every failure path returns before reaching them.
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
+      const res = await fetch('/api/teacher/assignments/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lesson_id: lessonId,
+          sheet_ids: Array.from(selected),
+        }),
+      })
+
+      if (!res.ok) {
+        // Read defensively: a failure from the platform rather than the route
+        // need not carry a JSON body at all.
+        const payload = (await res.json().catch(() => null)) as
+          | { error?: string; blocked_study_sheet_ids?: string[] }
+          | null
+
+        // An expired session cannot be fixed by retrying, so it must not say so.
+        if (res.status === 401 || payload?.error === 'AUTH') {
+          setError('Your session has expired. Please sign in again, then re-open this window to save your changes.')
+          return
+        }
+
+        // Nothing was written: the route refuses the whole save rather than
+        // deleting an assignment the student has already completed. The current
+        // selection is untouched, so re-selecting the named sheets and saving
+        // again keeps the rest of the edit.
+        if (res.status === 409) {
+          const blockedTitles = (payload?.blocked_study_sheet_ids ?? [])
+            .map(id => sheets.find(s => s.id === id)?.title)
+            .filter((title): title is string => !!title)
+          setError(
+            blockedTitles.length > 0
+              ? `${blockedTitles.join(', ')} already completed by this student and cannot be removed. Re-select and save again.`
+              : 'A study sheet this student has already completed cannot be removed. Re-select it and save again.'
+          )
+          return
+        }
+
         setError('Could not save your assignments. Please try again.')
         return
       }
-
-      const toRemove = alreadyAssigned.filter(id => !selected.has(id))
-      if (toRemove.length > 0) {
-        // supabase-js returns { error } rather than throwing — a discarded
-        // error would wrongly report success, so capture it and bail out
-        // without calling onSaved/onClose.
-        const { error: removeError } = await supabase
-          .from('assignments')
-          .delete()
-          .eq('lesson_id', lessonId)
-          .in('study_sheet_id', toRemove)
-        if (removeError) {
-          setError('Could not save your assignments. Please try again.')
-          return
-        }
-      }
-
-      const toAdd = Array.from(selected).filter(id => !alreadyAssigned.includes(id))
-      if (toAdd.length > 0) {
-        const { error: addError } = await supabase
-          .from('assignments')
-          .insert(
-            toAdd.map(sheetId => ({
-              lesson_id: lessonId,
-              student_id: studentId,
-              study_sheet_id: sheetId,
-              assigned_by: user.id,
-            }))
-          )
-        if (addError) {
-          setError('Could not save your assignments. Please try again.')
-          return
-        }
-
-        try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name')
-            .eq('id', user.id)
-            .single()
-
-          const addedTitles = sheets
-            .filter(s => toAdd.includes(s.id))
-            .map(s => s.title)
-
-          await fetch('/api/teacher/notify-homework-assigned', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              studentId,
-              teacherName: profile?.full_name ?? 'Your teacher',
-              sheetTitles: addedTitles,
-            }),
-          })
-        } catch {
-          // email failure is non-blocking
-        }
-      }
-
-      onSaved(sheets.filter(s => selected.has(s.id)))
-      onClose()
+    } catch {
+      setError('Could not save your assignments. Please try again.')
+      return
     } finally {
       setSaving(false)
     }
+
+    onSaved(sheets.filter(s => selected.has(s.id)))
+    onClose()
   }
 
   const LEVELS = ['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
