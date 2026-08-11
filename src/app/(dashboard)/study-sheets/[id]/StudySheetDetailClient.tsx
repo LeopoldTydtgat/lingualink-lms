@@ -32,6 +32,11 @@ type StudySheet = {
   content: { words?: Word[] } | null
   attachments: Attachment[] | null
   audience: 'staff' | 'student'
+  // Bodies of the listening / reading categories - same shapes the student
+  // sheet view renders. Optional: a sheet in any other category carries
+  // neither, and older rows may have them null.
+  links?: { title: string; url: string }[] | null
+  reading_text?: string | null
 }
 
 type Props = {
@@ -137,6 +142,20 @@ export default function StudySheetDetailClient({
   const words: Word[] = sheet.content?.words ?? []
   const attachments = sheet.attachments ?? []
   const isTeachingMaterial = sheet.audience === 'staff'
+
+  // Listening / reading bodies, derived defensively: the columns are free-form
+  // (jsonb / text) and this file must not depend on the admin route's
+  // normaliser, so entries without a usable title AND url are dropped rather
+  // than rendered as blank rows, and the passage is only treated as present
+  // when it is a non-empty string.
+  const links = (Array.isArray(sheet.links) ? sheet.links : []).filter(
+    (l) =>
+      typeof l?.title === 'string' &&
+      l.title.trim().length > 0 &&
+      typeof l?.url === 'string' &&
+      l.url.trim().length > 0
+  )
+  const readingText = typeof sheet.reading_text === 'string' ? sheet.reading_text.trim() : ''
 
   // File management is owner-only and hidden inside the chrome-free live window
   // (a mid-class upload/delete makes no sense there and keeps the shared,
@@ -327,6 +346,54 @@ export default function StudySheetDetailClient({
           )}
         </div>
       </div>
+
+      {/* Links - the listening category's body, mirroring the student sheet view
+          in this page's card shell. Same !isTeachingMaterial gate as the
+          vocabulary/activities sections: staff sheets are lesson PDFs. */}
+      {!isTeachingMaterial && sheet.category === 'listening' && links.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Links</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {links.length} {links.length === 1 ? 'link' : 'links'}
+            </p>
+          </div>
+          <div className="p-6 space-y-3">
+            {links.map((l, i) => (
+              <a
+                key={i}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between gap-3 rounded-lg p-4 transition-shadow hover:shadow"
+                style={{ border: '1px solid #E0DFDC' }}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900">{l.title}</p>
+                  <p className="text-xs text-gray-500 truncate mt-0.5">{l.url}</p>
+                </div>
+                <ExternalLink className="w-4 h-4 flex-shrink-0 text-gray-400" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Reading passage - the reading category's body. whitespace-pre-wrap so the
+          paragraph breaks the author typed survive the render. */}
+      {!isTeachingMaterial && sheet.category === 'reading' && readingText.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm" style={{ border: '1px solid #f3f4f6' }}>
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Reading passage</h2>
+            <p className="text-sm text-gray-500 mt-0.5">Text for this sheet</p>
+          </div>
+          <div className="p-6">
+            <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+              {readingText}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Vocabulary table - teaching-material sheets (audience='staff') are lesson
           PDFs; vocabulary/activities do not apply and are hidden entirely. */}

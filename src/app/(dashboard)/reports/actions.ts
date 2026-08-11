@@ -156,7 +156,36 @@ export async function submitReport(reportId: string, payload: SubmitReportInput)
     },
   })
 
-  if (rpcErr) return { error: rpcErr.message }
+  // complete_report_atomic raises five exceptions. Three are unreachable from
+  // here (the lesson-status allowlist, 'Not authenticated' and 'Not authorised'
+  // are all settled by the gates above before the RPC is called). The two that
+  // do reach a teacher are handled explicitly; anything else is an unexpected DB
+  // failure whose raw Postgres text must not be shown.
+  //
+  // Matched on message text, not ERRCODE: the start-time guard and the state
+  // guard both raise P0001, so the code cannot tell them apart. Giving them
+  // distinct ERRCODEs would mean rewriting the RPC (DDL), which is not worth it
+  // for message wording. If the RPC text ever drifts, the match falls through to
+  // the generic branch - the teacher still gets a sane message, never a blob.
+  if (rpcErr) {
+    const raw = rpcErr.message ?? ''
+
+    // Client rule 8 Aug, written for the teacher. Passed through verbatim.
+    if (raw.startsWith('This class has not started yet')) {
+      return { error: raw }
+    }
+
+    // Report already filed, or an admin changed its state underneath this form.
+    // The raw text carries the report UUID and reads like a debug string.
+    if (raw.includes('is not in pending or reopened state')) {
+      return { error: 'This report has already been submitted, or its status changed while you were writing. Refresh the page to see the current version.' }
+    }
+
+    // Includes the RPC's own 'Report <uuid> not found' (raised when the report
+    // has no matching lesson row) and every unexpected Postgres failure.
+    console.error('[reports/actions] complete_report_atomic failed:', rpcErr)
+    return { error: 'Something went wrong saving this report. Please try again.' }
+  }
 
   revalidatePath('/reports')
   revalidatePath(`/reports/${reportId}`)

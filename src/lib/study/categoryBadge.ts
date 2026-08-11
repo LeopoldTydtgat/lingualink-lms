@@ -12,9 +12,13 @@ import type { CSSProperties } from 'react'
 //
 // Palette note: 'grammar' and the default are the neutral grey pill rather than
 // a blue tint. The teacher detail page palette forbids blue, and this module
-// renders there; vocabulary keeps its warm (intended) colour.
+// renders there; vocabulary keeps its warm (intended) colour. 'listening' uses
+// the soft yellow tint pair and 'reading' the approved green pair, both already
+// used elsewhere in the repo.
 export function categoryBadgeStyle(category: string | null): CSSProperties {
   if (category === 'vocabulary') return { backgroundColor: '#fff7ed', color: '#c2410c' }
   if (category === 'grammar') return { backgroundColor: '#f3f4f6', color: '#4b5563' }
+  if (category === 'listening') return { backgroundColor: '#FFF8E8', color: '#B45309' }
+  if (category === 'reading') return { backgroundColor: '#DCFCE7', color: '#15803D' }
   return { backgroundColor: '#f3f4f6', color: '#4b5563' }
 }

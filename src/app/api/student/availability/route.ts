@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
+import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import {
   buildWeekSlots,
   getWeekWindow,
@@ -171,11 +172,15 @@ export async function GET(req: NextRequest) {
   // the window still blocks the slots it overlaps inside it, and a lesson
   // starting at/after windowEndMs still blocks the NEW324 extended slots
   // (up to 60 min past the window end) it overlaps.
+  // The status filter mirrors the lessons exclusion-constraint predicate
+  // (no_teacher_overlap / no_student_overlap): it excludes exactly
+  // CANCELLED_STATUSES, so a completed / no-show / missed lesson still occupies
+  // its slot here and query and constraint cannot drift.
   let bookedQuery = admin
     .from('lessons')
     .select('scheduled_at, duration_minutes')
     .eq('teacher_id', teacherId)
-    .eq('status', 'scheduled')
+    .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
     .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
     .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())
   if (excludeLessonId) bookedQuery = bookedQuery.neq('id', excludeLessonId)
@@ -192,8 +197,9 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  // CAL8: the student's own scheduled lessons with OTHER teachers, same
-  // widened instant window. Same-teacher lessons are already in the teacher
+  // CAL8: the student's own non-cancelled lessons with OTHER teachers, same
+  // widened instant window and the same exclusion-constraint status filter as
+  // the teacher query above. Same-teacher lessons are already in the teacher
   // query above; .neq avoids double-listing them. Merged into `booked`
   // below — the engine blocks by instant overlap regardless of which side
   // of the clash the lesson sits on. Fail closed like the teacher query:
@@ -208,7 +214,7 @@ export async function GET(req: NextRequest) {
       .from('lessons')
       .select('scheduled_at, duration_minutes')
       .eq('student_id', callerStudent.id)
-      .eq('status', 'scheduled')
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
       .neq('teacher_id', teacherId)
       .gte('scheduled_at', new Date(windowStartMs - MAX_LESSON_MS).toISOString())
       .lt('scheduled_at', new Date(windowEndMs + MAX_LESSON_MS).toISOString())

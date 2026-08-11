@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Volume2, CheckCircle, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Volume2, CheckCircle, ChevronRight, ExternalLink } from 'lucide-react'
 import MaterialFileViewer from '@/components/study/MaterialFileViewer'
 import DifficultyBars from '@/components/study/DifficultyBars'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
@@ -39,6 +39,10 @@ interface Sheet {
   difficulty: number
   content: { words?: VocabWord[] } | null
   attachments: Attachment[] | null
+  // Bodies of the listening / reading categories. Shape is guaranteed by the
+  // admin route's normaliseLinks: non-empty title, non-empty http(s) url.
+  links?: { title: string; url: string }[] | null
+  reading_text?: string | null
 }
 
 interface Props {
@@ -65,11 +69,41 @@ export default function StudySheetClient({
   const router = useRouter()
 
   const words: VocabWord[] = sheet.content?.words ?? []
+  const links = sheet.links ?? []
+  const readingText = sheet.reading_text?.trim() ?? ''
 
-  // Which view is active - vocabulary list or activities. Default to the vocab
-  // tab only when the sheet has words; otherwise open straight to activities.
+  // The first tab's identity follows the sheet's category: listening sheets show
+  // their links, reading sheets their passage, everything else (vocabulary,
+  // grammar, or no category at all) the vocabulary table exactly as before.
+  const bodyKind: 'links' | 'reading' | 'vocab' =
+    sheet.category === 'listening' ? 'links' : sheet.category === 'reading' ? 'reading' : 'vocab'
+
+  const bodyLabel =
+    bodyKind === 'links' ? 'Links' : bodyKind === 'reading' ? 'Reading' : 'Vocabulary List'
+
+  // Count bubble next to the label - words for vocab, links for listening, none
+  // for reading (a passage has no meaningful count).
+  const bodyCount =
+    bodyKind === 'links' ? links.length : bodyKind === 'reading' ? null : words.length
+
+  // Does the body tab actually have anything to show? Drives both the default
+  // tab and the Activities-tab empty-state wording.
+  const hasBodyContent =
+    bodyKind === 'links'
+      ? links.length > 0
+      : bodyKind === 'reading'
+      ? readingText.length > 0
+      : words.length > 0
+
+  // Activities-tab wording. "Vocabulary List" is the tab's proper name and keeps
+  // its original phrasing; the two new bodies read as sections.
+  const bodyStudyPhrase =
+    bodyKind === 'vocab' ? 'the Vocabulary List' : `the ${bodyLabel} section`
+
+  // Which view is active - the sheet body or activities. Default to the body
+  // tab only when that body has content; otherwise open straight to activities.
   const [activeTab, setActiveTab] = useState<'vocab' | 'activities'>(
-    words.length > 0 ? 'vocab' : 'activities'
+    hasBodyContent ? 'vocab' : 'activities'
   )
 
   const [markingDone, setMarkingDone] = useState(false)
@@ -169,9 +203,9 @@ export default function StudySheetClient({
               : { color: '#6b7280', borderBottom: '2px solid transparent', minWidth: '190px' }
           }
         >
-          Vocabulary List
-          {words.length > 0 && (
-            <span className="ml-1.5 text-xs text-gray-400">({words.length})</span>
+          {bodyLabel}
+          {bodyCount !== null && bodyCount > 0 && (
+            <span className="ml-1.5 text-xs text-gray-400">({bodyCount})</span>
           )}
         </button>
 
@@ -191,10 +225,47 @@ export default function StudySheetClient({
         </button>
       </div>
 
-      {/* -- VOCABULARY TAB ------------------------------------------------- */}
+      {/* -- BODY TAB (vocabulary / links / reading) ------------------------- */}
       {activeTab === 'vocab' && (
         <div>
-          {words.length === 0 ? (
+          {bodyKind === 'links' ? (
+            links.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-10">
+                No links added to this sheet yet.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {links.map((l, idx) => (
+                  <a
+                    key={idx}
+                    href={l.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between gap-3 bg-white rounded-xl p-4 shadow-sm transition-shadow hover:shadow"
+                    style={{ border: '1px solid #f3f4f6' }}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{l.title}</p>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{l.url}</p>
+                    </div>
+                    <ExternalLink size={14} className="text-gray-400 flex-shrink-0" />
+                  </a>
+                ))}
+              </div>
+            )
+          ) : bodyKind === 'reading' ? (
+            readingText.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-10">
+                No reading text added to this sheet yet.
+              </p>
+            ) : (
+              <div className="bg-white rounded-xl shadow-sm p-5" style={{ border: '1px solid #f3f4f6' }}>
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                  {readingText}
+                </p>
+              </div>
+            )
+          ) : words.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">
               No vocabulary words added to this sheet yet.
             </p>
@@ -288,10 +359,10 @@ export default function StudySheetClient({
         <div>
           {totalActivities === 0 ? (
             <p className="text-sm text-gray-400 text-center py-10">
-              {words.length > 0 && assignmentId !== null
-                ? 'This sheet has no separate activities - study the Vocabulary List, then mark it as done below.'
-                : words.length > 0
-                ? 'This sheet has no separate activities - study the Vocabulary List.'
+              {hasBodyContent && assignmentId !== null
+                ? `This sheet has no separate activities - study ${bodyStudyPhrase}, then mark it as done below.`
+                : hasBodyContent
+                ? `This sheet has no separate activities - study ${bodyStudyPhrase}.`
                 : 'No activities for this sheet yet.'}
             </p>
           ) : (

@@ -11,8 +11,14 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const page        = parseInt(searchParams.get('page')  ?? '1');
-  const limit       = parseInt(searchParams.get('limit') ?? '50');
+
+  // Absent, non-numeric ('abc'), zero and negative values all fall back to the defaults
+  // rather than producing a NaN / inverted PostgREST range. limit is capped at 100 so a
+  // hand-crafted ?limit= cannot pull the whole table in one request.
+  const rawPage  = parseInt(searchParams.get('page')  ?? '', 10);
+  const rawLimit = parseInt(searchParams.get('limit') ?? '', 10);
+  const page        = Number.isInteger(rawPage)  && rawPage  >= 1 ? rawPage : 1;
+  const limit       = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 100) : 50;
   const status      = searchParams.get('status');
   const teacherId   = searchParams.get('teacher_id');
   const dateFrom    = searchParams.get('date_from');
@@ -126,5 +132,27 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ reports, total: count ?? 0, page, limit });
+  // Header badge counts. DELIBERATELY global - never scoped by status/teacher_id/date_from/
+  // date_to/class_status, so the header keeps showing the real outstanding workload while the
+  // list below is filtered. Do not "fix" this by applying the filters above.
+  const [pendingCountRes, flaggedCountRes] = await Promise.all([
+    supabase.from('reports').select('id', { count: 'exact', head: true }).in('status', ['pending', 'reopened']),
+    supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'flagged'),
+  ]);
+
+  // A failed badge count must never take down the reports list - it degrades to null.
+  if (pendingCountRes.error) console.error('Reports pending count error:', pendingCountRes.error);
+  if (flaggedCountRes.error) console.error('Reports flagged count error:', flaggedCountRes.error);
+
+  const pendingTotal = pendingCountRes.error ? null : pendingCountRes.count;
+  const flaggedTotal = flaggedCountRes.error ? null : flaggedCountRes.count;
+
+  return NextResponse.json({
+    reports,
+    total: count ?? 0,
+    page,
+    limit,
+    pendingTotal: pendingTotal ?? null,
+    flaggedTotal: flaggedTotal ?? null,
+  });
 }

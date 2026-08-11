@@ -13,6 +13,48 @@ const BUCKET = 'library-files'
 const LIST_PAGE_SIZE = 100
 const MAX_LIST_PAGES = 50
 
+// Study-sheet categories the DB CHECK accepts. Validated in this route so a bad
+// value returns a readable 400 instead of reaching Postgres and coming back as a
+// raw study_sheets_category_check violation inside the 500 below — which the
+// admin modal prints verbatim in its footer.
+const CATEGORIES = ['vocabulary', 'grammar', 'listening', 'reading']
+
+// Listening sheets carry study_sheets.links (jsonb, shape [{ title, url }]);
+// reading sheets carry study_sheets.reading_text. Both arrive from the browser,
+// so both are bounded and re-validated here — the modal's own filtering is
+// convenience, never the gate.
+const MAX_LINKS = 50
+const MAX_READING_TEXT = 20000
+
+type SheetLink = { title: string; url: string }
+
+// Keeps only entries carrying a non-empty title AND a non-empty http(s) URL,
+// capped at MAX_LINKS. Anything else is DROPPED rather than stored: a
+// half-filled row renders as a broken link, and a javascript:/data: URL would be
+// handed to a student as a clickable resource.
+function normaliseLinks(value: unknown[]): SheetLink[] {
+  const out: SheetLink[] = []
+  for (const entry of value) {
+    if (out.length >= MAX_LINKS) break
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const row = entry as Record<string, unknown>
+    const title = typeof row.title === 'string' ? row.title.trim() : ''
+    const url = typeof row.url === 'string' ? row.url.trim() : ''
+    if (title.length === 0 || url.length === 0) continue
+    if (!url.startsWith('http://') && !url.startsWith('https://')) continue
+    out.push({ title, url })
+  }
+  return out
+}
+
+// '' (or whitespace only) is a legitimate "clear it" instruction and is stored
+// as NULL, matching the nullable column.
+function normaliseReadingText(value: string): string | null {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return null
+  return trimmed.slice(0, MAX_READING_TEXT)
+}
+
 // PATCH /api/admin/library/[id] — update a study sheet
 export async function PATCH(
   request: Request,
@@ -27,7 +69,7 @@ export async function PATCH(
   const body = await request.json()
 
   // Only allow fields that are safe to update — strip anything unexpected
-  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments', 'audience']
+  const allowed = ['title', 'category', 'level', 'difficulty', 'intro_text', 'content', 'allowed_roles', 'is_active', 'attachments', 'audience', 'links', 'reading_text']
   const update: Record<string, unknown> = {}
   for (const key of allowed) {
     if (key in body) update[key] = body[key]
@@ -36,6 +78,18 @@ export async function PATCH(
   // value (or a malformed one) coerces to the fail-safe 'staff'. Absent = unchanged.
   if ('audience' in update) {
     update.audience = update.audience === 'student' ? 'student' : 'staff'
+  }
+
+  // Category whitelist. A NULL category is legitimate (teacher private resources
+  // carry none), so only a present, non-null value is checked. Absent = unchanged.
+  // This runs BEFORE the student-worksheet guard below, which then trusts the value.
+  if ('category' in update && update.category !== null) {
+    if (typeof update.category !== 'string' || !CATEGORIES.includes(update.category)) {
+      return NextResponse.json(
+        { error: `category must be one of: ${CATEGORIES.join(', ')}` },
+        { status: 400 }
+      )
+    }
   }
 
   // Student worksheets must always carry a category and a level. study_sheets now
@@ -84,6 +138,20 @@ export async function PATCH(
         )
       }
     }
+  }
+
+  // links / reading_text are normalised in place, and DROPPED from the patch when
+  // the value is the wrong type. Dropping is the fail-safe: this is a PARTIAL
+  // update, so a malformed body must leave the stored value alone rather than
+  // overwrite a sheet's links with an empty list or its passage with NULL. An
+  // explicit [] or '' is still honoured — those are real "clear it" instructions.
+  if ('links' in update) {
+    if (Array.isArray(update.links)) update.links = normaliseLinks(update.links)
+    else delete update.links
+  }
+  if ('reading_text' in update) {
+    if (typeof update.reading_text === 'string') update.reading_text = normaliseReadingText(update.reading_text)
+    else delete update.reading_text
   }
 
   // Exercises/MCQs now live in the activities table, never in study_sheets.content.

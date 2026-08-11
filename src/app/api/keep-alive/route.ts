@@ -7,6 +7,10 @@ export async function GET(request: Request) {
   if (authFail) return authFail
 
   const supabase = await createClient()
-  await supabase.from('profiles').select('id').limit(1)
+  const { error } = await supabase.from('profiles').select('id').limit(1)
+  if (error) {
+    console.error('[keep-alive] profiles select failed:', error)
+    return NextResponse.json({ ok: false }, { status: 500 })
+  }
   return NextResponse.json({ ok: true }, { status: 200 })
 }

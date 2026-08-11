@@ -686,6 +686,8 @@ export default function StudySheetsClient({
             <option value="All">All categories</option>
             <option value="vocabulary">Vocabulary</option>
             <option value="grammar">Grammar</option>
+            <option value="listening">Listening</option>
+            <option value="reading">Reading</option>
           </select>
 
           <select

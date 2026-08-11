@@ -111,6 +111,28 @@ export default async function AdminReportsPage({
     .select('id, full_name')
     .order('full_name');
 
+  // Header badge counts. DELIBERATELY global - never scoped by status/teacher_id/date_from/
+  // date_to/class_status, so the header shows the real outstanding workload no matter what
+  // the client filters the list below down to.
+  const [pendingCountRes, flaggedCountRes] = await Promise.all([
+    supabase.from('reports').select('id', { count: 'exact', head: true }).in('status', ['pending', 'reopened']),
+    supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'flagged'),
+  ]);
+
+  if (pendingCountRes.error) console.error('Reports pending count error:', pendingCountRes.error);
+  if (flaggedCountRes.error) console.error('Reports flagged count error:', flaggedCountRes.error);
+
+  // Fail-safe: a failed count must never render as 0 and hide work that needs doing, so it
+  // falls back to the same predicate over the rows already fetched above - an undercount is
+  // recoverable, a silent zero is not.
+  const pendingTotal = pendingCountRes.error ? null : pendingCountRes.count;
+  const flaggedTotal = flaggedCountRes.error ? null : flaggedCountRes.count;
+
+  const initialPendingCount = pendingTotal
+    ?? (reportsData ?? []).filter((r) => r.status === 'pending' || r.status === 'reopened').length;
+  const initialFlaggedCount = flaggedTotal
+    ?? (reportsData ?? []).filter((r) => r.status === 'flagged').length;
+
   const initialReports = (reportsData ?? []).map((r) => {
     const lesson  = Array.isArray(r.lessons)  ? r.lessons[0]  : r.lessons;
     const teacher = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
@@ -154,6 +176,8 @@ export default async function AdminReportsPage({
       initialStatusFilter={initialStatusFilter}
       initialReopenId={reopen}
       adminTimezone={adminTimezone}
+      initialPendingCount={initialPendingCount}
+      initialFlaggedCount={initialFlaggedCount}
     />
   );
 }

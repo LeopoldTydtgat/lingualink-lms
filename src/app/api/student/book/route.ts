@@ -16,6 +16,7 @@ import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
 // ── POST /api/student/book ────────────────────────────────────────────────────
 
@@ -163,11 +164,15 @@ export async function POST(req: NextRequest) {
     // lesson being moved counts as a clash against itself and a small shift
     // (e.g. +15 min) 409s. Applied conditionally — on a fresh book rescheduleId
     // is unset and the query is exactly as before.
+    // The status filter mirrors the lessons exclusion-constraint predicate
+    // (no_teacher_overlap / no_student_overlap): it excludes exactly
+    // CANCELLED_STATUSES, so a completed / no-show / missed lesson still counts
+    // as a clash here and query and constraint cannot drift.
     let teacherClashQuery = adminClient
       .from('lessons')
       .select('id, scheduled_at, duration_minutes')
       .eq('teacher_id', teacherId)
-      .eq('status', 'scheduled')
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
       .lt('scheduled_at', newEnd.toISOString())
       .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
     if (rescheduleId) teacherClashQuery = teacherClashQuery.neq('id', rescheduleId)
@@ -208,7 +213,7 @@ export async function POST(req: NextRequest) {
       .from('lessons')
       .select('id, scheduled_at, duration_minutes')
       .eq('student_id', studentId)
-      .eq('status', 'scheduled')
+      .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
       .lt('scheduled_at', newEnd.toISOString())
       .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
     if (rescheduleId) studentClashQuery = studentClashQuery.neq('id', rescheduleId)

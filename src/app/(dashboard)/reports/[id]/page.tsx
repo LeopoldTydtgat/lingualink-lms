@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect, notFound } from 'next/navigation'
+import { isValidTimeZone } from '@/lib/utils/timezone'
 import ReportFormClient from './ReportFormClient'
 import type { Annotation } from '@/components/pdf/PdfViewer'
 
@@ -66,9 +67,38 @@ export default async function ReportPage({ params }: Props) {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('id, full_name, role')
+    .select('id, full_name, role, timezone, profile_completed')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
+
+  // A null profile is NOT an unauthenticated user, so this never bounces to
+  // /login. Same inline fallback the schedule page renders.
+  if (!profile) return (
+    <div className="p-8 text-gray-500">Unable to load your profile. Please refresh the page.</div>
+  )
+
+  // Confirmed-timezone gate, replicated from (dashboard)/schedule/page.tsx and
+  // (dashboard)/upcoming-classes/page.tsx. The class time in the header is
+  // rendered in this viewer's own zone — an admin reading a teacher's report is
+  // bound by the gate identically, and sees the time in the ADMIN's zone. There
+  // is deliberately no 'UTC' fallback: silently formatting in UTC prints the
+  // wrong wall-clock time for every viewer outside it.
+  if (profile.profile_completed !== true) {
+    redirect('/account?confirm_tz=1')
+  }
+
+  // profile_completed is the confirmation FLAG, not the value it confirms: a row
+  // flagged complete but carrying a null timezone still leaves nothing to format
+  // in, so it goes back through the same flow rather than to a fallback zone.
+  // isValidTimeZone screens the string itself as well, since nothing on the write
+  // path checks it is a real IANA id — /api/profile stores the value verbatim.
+  // Intl.DateTimeFormat THROWS RangeError on a bad zone, and this route group has
+  // no error boundary, so an unscreened value would blank the page instead of
+  // prompting for the one thing that fixes it.
+  const viewerTimezone = profile.timezone
+  if (!viewerTimezone || !isValidTimeZone(viewerTimezone)) {
+    redirect('/account?confirm_tz=1')
+  }
 
   const isAdmin = profile?.role === 'admin'
 
@@ -281,6 +311,7 @@ export default async function ReportPage({ params }: Props) {
       assignedSheets={assignedSheets}
       materialSheets={materialSheets}
       annotatedPdfs={annotatedPdfs}
+      viewerTimezone={viewerTimezone}
     />
   )
 }
