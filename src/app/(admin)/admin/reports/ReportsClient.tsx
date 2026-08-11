@@ -137,6 +137,12 @@ function LessonStatusBadge({ status }: { status: string }) {
 function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
+  // Separate from `loading`: a Load More fetch must leave the already-rendered table on
+  // screen, so it never touches the full-list spinner.
+  const [loadingMore,   setLoadingMore]   = useState(false);
+  // Server-reported row count for the CURRENT filters, from the last successful fetch.
+  // null means "not known yet", which keeps the Load More button off screen.
+  const [total,         setTotal]         = useState<number | null>(null);
   const [listError,     setListError]     = useState('');
   // Seeded from the ?reopen= deep link so the confirmation modal is already open on
   // mount; from there it is the same state the in-row Reopen button drives.
@@ -220,13 +226,20 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   // the spinner while the newer request is still in flight.
   const reportsRequestIdRef = useRef(0);
 
+  // Highest page whose rows are actually in `reports`. Load More asks for the next one;
+  // any page-1 fetch (filter change, retry, post-reopen refresh) resets it to 1.
+  const loadedPageRef = useRef(1);
+
   // Returns true only when the list was actually refreshed from the server.
-  const fetchReports = useCallback(async () => {
+  // page 1 REPLACES the list; page > 1 APPENDS to it (the Load More button).
+  const fetchReports = useCallback(async (page = 1) => {
     // Claim the newest request; every post-await write below re-checks this id.
     const requestId = ++reportsRequestIdRef.current;
-    setLoading(true);
+    if (page === 1) setLoading(true);
+    else            setLoadingMore(true);
     setListError('');
     const params = new URLSearchParams();
+    params.set('page', String(page));
     if (statusFilter)      params.set('status',       statusFilter);
     if (teacherFilter)     params.set('teacher_id',   teacherFilter);
     if (classStatusFilter) params.set('class_status', classStatusFilter);
@@ -243,7 +256,17 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       }
       const data = await res.json();
       if (requestId !== reportsRequestIdRef.current) return false;
-      setReports(data.reports ?? []);
+      const rows: Report[] = data.reports ?? [];
+      if (page === 1) {
+        setReports(rows);
+      } else {
+        // Deduplicated by id: the list is ordered newest-first, so reports created since
+        // page 1 loaded shift the window and a later page can re-include rows already on
+        // screen. It can never skip a row, only repeat one.
+        setReports((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.id === r.id))]);
+      }
+      setTotal(typeof data.total === 'number' ? data.total : null);
+      loadedPageRef.current = page;
       // Behind the staleness guard above, so a superseded response can never overwrite
       // fresher counts. Nulls are ignored by the parent - last known good number survives.
       onTotalsChangeRef.current(data.pendingTotal ?? null, data.flaggedTotal ?? null);
@@ -255,7 +278,13 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     } finally {
       // A superseded request must never turn the spinner off - the newest request
       // owns the loading state until its own response lands.
-      if (requestId === reportsRequestIdRef.current) setLoading(false);
+      if (page === 1 && requestId === reportsRequestIdRef.current) setLoading(false);
+      // loadingMore is cleared UNCONDITIONALLY, staleness token or not: a load-more whose
+      // writes the token refused (a filter changed mid-flight) would otherwise leave the
+      // button stuck disabled forever. Safe because only one load-more can ever be in
+      // flight - the button is disabled while loadingMore - and page-1 fetches use
+      // `loading` and never touch this flag.
+      if (page > 1) setLoadingMore(false);
     }
   }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
 
@@ -275,6 +304,8 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
         setReopenError(await errorText(res, 'Reopen failed'));
         return;
       }
+      // Deliberately page 1: the reopened report moves status, so the list is reloaded
+      // from the top rather than patched, dropping any extra pages the admin had loaded.
       await fetchReports();
       closeReopen();
     } catch {
@@ -327,69 +358,83 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       ) : reports.length === 0 ? (
         <div className="text-sm text-gray-400 py-12 text-center">No reports match these filters.</div>
       ) : (
-        <div className="card-elevated overflow-hidden">
-          <div className="overflow-x-auto thin-scroll">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Date</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report Status</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Deadline / Flag</th>
-                  <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reports.map((r) => {
-                  let rowBg = '';
-                  if (r.status === 'flagged') rowBg = '#FEF2F2';
-                  if (r.status === 'pending') rowBg = '#FFFBEB';
-                  if (r.status === 'reopened') rowBg = '#FFF7ED';
-                  return (
-                    <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
-                      <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at, adminTimezone) : '—'}</td>
-                      <td className="py-3 px-3 font-medium text-gray-800">{r.teacher?.full_name ?? '—'}</td>
-                      <td className="py-3 px-3 text-gray-700">{r.student?.full_name ?? '—'}</td>
-                      <td className="py-3 px-3 text-gray-600">{r.lesson?.duration_minutes ? `${r.lesson.duration_minutes} min` : '—'}</td>
-                      <td className="py-3 px-3">
-                        <div className="flex flex-col gap-1">
-                          <ReportStatusBadge status={r.status} />
-                          {r.did_class_happen === false && r.no_show_type && (
-                            <span className="text-xs text-gray-400 capitalize">{r.no_show_type} no-show</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-gray-600 text-xs">
-                        {r.status === 'flagged' && r.flagged_at
-                          ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
-                          : r.status === 'completed' && r.completed_at
-                            ? `Submitted ${formatDateTime(r.completed_at, adminTimezone)}`
-                            : r.status === 'completed' || r.status === 'reopened'
-                              ? '—'
-                              : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
-                      </td>
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-2">
-                          {(r.status === 'completed' || r.status === 'flagged') && (
-                            <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
-                          )}
-                          {(r.status === 'flagged' || r.status === 'completed') && (
-                            <button onClick={() => openReopen(r.id)} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
-                          )}
-                          {(r.status === 'pending' || r.status === 'reopened') && (
-                            <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <>
+          <div className="card-elevated overflow-hidden">
+            <div className="overflow-x-auto thin-scroll">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Date</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Report Status</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Deadline / Flag</th>
+                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.map((r) => {
+                    let rowBg = '';
+                    if (r.status === 'flagged') rowBg = '#FEF2F2';
+                    if (r.status === 'pending') rowBg = '#FFFBEB';
+                    if (r.status === 'reopened') rowBg = '#FFF7ED';
+                    return (
+                      <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" style={rowBg ? { backgroundColor: rowBg } : {}}>
+                        <td className="py-3 px-3 text-gray-700">{r.lesson?.scheduled_at ? formatDateTime(r.lesson.scheduled_at, adminTimezone) : '—'}</td>
+                        <td className="py-3 px-3 font-medium text-gray-800">{r.teacher?.full_name ?? '—'}</td>
+                        <td className="py-3 px-3 text-gray-700">{r.student?.full_name ?? '—'}</td>
+                        <td className="py-3 px-3 text-gray-600">{r.lesson?.duration_minutes ? `${r.lesson.duration_minutes} min` : '—'}</td>
+                        <td className="py-3 px-3">
+                          <div className="flex flex-col gap-1">
+                            <ReportStatusBadge status={r.status} />
+                            {r.did_class_happen === false && r.no_show_type && (
+                              <span className="text-xs text-gray-400 capitalize">{r.no_show_type} no-show</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-gray-600 text-xs">
+                          {r.status === 'flagged' && r.flagged_at
+                            ? <span style={{ color: '#DC2626' }}>Flagged {hoursAgo(r.flagged_at)}</span>
+                            : r.status === 'completed' && r.completed_at
+                              ? `Submitted ${formatDateTime(r.completed_at, adminTimezone)}`
+                              : r.status === 'completed' || r.status === 'reopened'
+                                ? '—'
+                                : r.deadline_at ? formatDateTime(r.deadline_at, adminTimezone) : '—'}
+                        </td>
+                        <td className="py-3 px-3">
+                          <div className="flex items-center gap-2">
+                            {(r.status === 'completed' || r.status === 'flagged') && (
+                              <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
+                            )}
+                            {(r.status === 'flagged' || r.status === 'completed') && (
+                              <button onClick={() => openReopen(r.id)} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
+                            )}
+                            {(r.status === 'pending' || r.status === 'reopened') && (
+                              <span className="text-xs text-gray-400 italic">Awaiting teacher</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {typeof total === 'number' && reports.length < total && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={() => { fetchReports(loadedPageRef.current + 1); }}
+                disabled={loadingMore}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60"
+              >
+                {loadingMore ? 'Loading...' : `Load more (${total - reports.length} remaining)`}
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {reopenId && (
