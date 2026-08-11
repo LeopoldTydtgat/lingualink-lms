@@ -15,6 +15,10 @@ type StudySheet = {
   difficulty: number
   content: { words?: unknown[]; exercises?: unknown[] } | null
   attachments: unknown[] | null
+  // Bodies of the listening/reading categories (S549). Optional: not every
+  // caller-shaped row carries them, and an absent value reads as "none".
+  links?: unknown[] | null
+  reading_text?: string | null
 }
 
 type Tag = {
@@ -48,12 +52,20 @@ function DifficultyBars({ count }: { count: number }) {
   )
 }
 
-// A sheet is empty (non-assignable) when it has zero content words AND zero
-// activities. Category no longer factors in, and attachments do not count as
-// content — attachment-only sheets stay teaching material. This deliberately
-// unlocks activities-only sheets for assignment (S318).
+// A sheet is empty (non-assignable) only when it has zero content words, zero
+// activities, zero links AND no reading text. links and reading_text now count
+// as content (listening/reading categories, S549) — a listening sheet that is
+// nothing but links, or a reading sheet that is nothing but its passage, is a
+// complete sheet and must be assignable. Category still does not factor in, and
+// attachments still do not count as content — attachment-only sheets stay
+// teaching material. This also keeps activities-only sheets unlocked (S318).
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  return !(sheet.content?.words?.length) && (counts[sheet.id] ?? 0) === 0
+  return (
+    !(sheet.content?.words?.length) &&
+    (counts[sheet.id] ?? 0) === 0 &&
+    !(sheet.links?.length) &&
+    !(sheet.reading_text?.trim())
+  )
 }
 
 const EMPTY_TAG_SET: Set<string> = new Set()
@@ -91,7 +103,7 @@ export default function AssignStudySheetsModal({
     async function load() {
       const { data } = await supabase
         .from('study_sheets')
-        .select('id, title, category, level, difficulty, content, attachments')
+        .select('id, title, category, level, difficulty, content, attachments, links, reading_text')
         .eq('is_active', true)
         // Homework is student-facing only. Teaching Material (audience='staff') must
         // never be assignable to a student, so restrict this list to active,

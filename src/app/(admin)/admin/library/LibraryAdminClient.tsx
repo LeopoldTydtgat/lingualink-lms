@@ -41,6 +41,10 @@ export type StudySheet = {
   allowed_roles: string[] // ['teacher','teacher_exam'] | ['teacher_exam'] | ['admin']
   intro_text: string | null
   attachments: Attachment[] | null
+  // Bodies of the listening/reading categories (S549). Optional: not every
+  // caller-shaped row carries them, and an absent value reads as "none".
+  links?: unknown[] | null
+  reading_text?: string | null
   created_at: string
   updated_at: string
 }
@@ -76,12 +80,20 @@ function activityCount(sheet: StudySheet, counts: Record<string, number>): numbe
   return counts[sheet.id] ?? 0
 }
 
-// A sheet is empty (non-assignable) when it has zero content words AND zero
-// activities. Category no longer factors in, and attachments do not count as
-// content — attachment-only sheets stay teaching material. This deliberately
-// unlocks activities-only sheets for assignment (S318).
+// A sheet is empty (non-assignable) only when it has zero content words, zero
+// activities, zero links AND no reading text. links and reading_text now count
+// as content (listening/reading categories, S549) — a listening sheet that is
+// nothing but links, or a reading sheet that is nothing but its passage, is a
+// complete sheet and must be assignable. Category still does not factor in, and
+// attachments still do not count as content — attachment-only sheets stay
+// teaching material. This also keeps activities-only sheets unlocked (S318).
 function isSheetEmpty(sheet: StudySheet, counts: Record<string, number>): boolean {
-  return !(sheet.content?.words?.length) && (counts[sheet.id] ?? 0) === 0
+  return (
+    !(sheet.content?.words?.length) &&
+    (counts[sheet.id] ?? 0) === 0 &&
+    !(sheet.links?.length) &&
+    !(sheet.reading_text?.trim())
+  )
 }
 
 // Teacher-portal StatCard anatomy: 32px tinted icon square + label, big value,
