@@ -126,5 +126,27 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ reports, total: count ?? 0, page, limit });
+  // Header badge counts. DELIBERATELY global - never scoped by status/teacher_id/date_from/
+  // date_to/class_status, so the header keeps showing the real outstanding workload while the
+  // list below is filtered. Do not "fix" this by applying the filters above.
+  const [pendingCountRes, flaggedCountRes] = await Promise.all([
+    supabase.from('reports').select('id', { count: 'exact', head: true }).in('status', ['pending', 'reopened']),
+    supabase.from('reports').select('id', { count: 'exact', head: true }).eq('status', 'flagged'),
+  ]);
+
+  // A failed badge count must never take down the reports list - it degrades to null.
+  if (pendingCountRes.error) console.error('Reports pending count error:', pendingCountRes.error);
+  if (flaggedCountRes.error) console.error('Reports flagged count error:', flaggedCountRes.error);
+
+  const pendingTotal = pendingCountRes.error ? null : pendingCountRes.count;
+  const flaggedTotal = flaggedCountRes.error ? null : flaggedCountRes.count;
+
+  return NextResponse.json({
+    reports,
+    total: count ?? 0,
+    page,
+    limit,
+    pendingTotal: pendingTotal ?? null,
+    flaggedTotal: flaggedTotal ?? null,
+  });
 }

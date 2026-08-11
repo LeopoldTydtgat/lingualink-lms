@@ -48,6 +48,10 @@ interface Props {
   initialReopenId?: string;
   // The logged-in admin's IANA timezone (server page falls back to 'UTC').
   adminTimezone: string;
+  // Global outstanding-work counts from the server - NOT scoped by the list filters, and
+  // never a placeholder 0 (the server falls back to a derived number on a failed count).
+  initialPendingCount: number;
+  initialFlaggedCount: number;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -130,7 +134,7 @@ function LessonStatusBadge({ status }: { status: string }) {
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   const [listError,     setListError]     = useState('');
@@ -204,6 +208,12 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [dateFrom,          setDateFrom]          = useState('');
   const [dateTo,            setDateTo]            = useState('');
 
+  // The header badge counts live in the parent. Held in a ref so fetchReports can call it
+  // WITHOUT taking it as a dependency: fetchReports is keyed on the five filters and drives
+  // the mount effect below, so a callback in those deps would refetch forever.
+  const onTotalsChangeRef = useRef(onTotalsChange);
+  onTotalsChangeRef.current = onTotalsChange;
+
   // Monotonic request token. The filter controls stay enabled during a fetch, so a
   // filter change mid-flight fires a second request; without this, a slow earlier
   // response could overwrite the newer list/error, and its loading-off could clear
@@ -234,6 +244,9 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       const data = await res.json();
       if (requestId !== reportsRequestIdRef.current) return false;
       setReports(data.reports ?? []);
+      // Behind the staleness guard above, so a superseded response can never overwrite
+      // fresher counts. Nulls are ignored by the parent - last known good number survives.
+      onTotalsChangeRef.current(data.pendingTotal ?? null, data.flaggedTotal ?? null);
       return true;
     } catch {
       if (requestId !== reportsRequestIdRef.current) return false;
@@ -525,11 +538,20 @@ function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, initialPendingCount, initialFlaggedCount }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
-  const pendingCount = initialReports.filter((r) => r.status === 'pending' || r.status === 'reopened').length;
-  const flaggedCount = initialReports.filter((r) => r.status === 'flagged').length;
+  // Seeded from the server's global counts, then kept in step with each list fetch. These
+  // are the outstanding-work totals, not a count of the rows currently on screen.
+  const [pendingCount, setPendingCount] = useState(initialPendingCount);
+  const [flaggedCount, setFlaggedCount] = useState(initialFlaggedCount);
+
+  // Empty deps: state setter identities are stable. A null means "count unavailable", so it
+  // is ignored and the last known good number stays on the badge rather than dropping to 0.
+  const handleTotalsChange = useCallback((pending: number | null, flagged: number | null) => {
+    if (pending !== null) setPendingCount(pending);
+    if (flagged !== null) setFlaggedCount(flagged);
+  }, []);
 
   const tabs = [
     { id: 'list',  label: 'All Reports' },
@@ -693,7 +715,7 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} onTotalsChange={handleTotalsChange} />}
       {activeTab === 'trace' && <LiveTrace adminTimezone={adminTimezone} />}
 
       {showExport && (
