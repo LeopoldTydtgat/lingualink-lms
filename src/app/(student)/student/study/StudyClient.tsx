@@ -390,6 +390,8 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
               <option value="">All Categories</option>
               <option value="vocabulary">Vocabulary</option>
               <option value="grammar">Grammar</option>
+              <option value="listening">Listening</option>
+              <option value="reading">Reading</option>
             </select>
           </div>
 
