@@ -122,6 +122,68 @@ export default async function StudyPage() {
   const assignmentsList = assignmentsRaw ?? []
   const libraryRows = libraryRaw ?? []
 
+  // --- Topic tags for the practice library ---------------------------------
+  // Display + filter metadata only, never an access gate. Both reads are
+  // USER-SCOPED (never createAdminClient): `authenticated` may SELECT tags
+  // freely, and a sheet_tags row is visible exactly when its sheet is visible
+  // to the caller - so this can only surface links for sheets already returned
+  // by the RLS-bound library read above.
+  //
+  // Explicit column lists, never select('*').
+  //
+  // ONLY kind='topic' tags belong on this surface: skill tags duplicate the
+  // category column, so any tag_id that does not resolve to a topic tag is
+  // dropped rather than leaking through as a chip or a filter option.
+  //
+  // A query error is NOT "this sheet has no tags", but tags are metadata on a
+  // page that must still render its assignments and library, so a failure is
+  // logged and falls back to empty - same posture as the material_assignments
+  // block above.
+  const sheetTopicTags: Record<string, string[]> = {}
+  if (libraryRows.length > 0) {
+    const { data: sheetTagRaw, error: sheetTagError } = await supabase
+      .from('sheet_tags')
+      .select('sheet_id, tag_id')
+      .in('sheet_id', libraryRows.map((s) => s.id as string))
+
+    if (sheetTagError) {
+      console.error('[student/study] sheet_tags lookup failed:', sheetTagError)
+    }
+
+    const { data: topicTagRaw, error: topicTagError } = await supabase
+      .from('tags')
+      .select('id, name')
+      .eq('kind', 'topic')
+
+    if (topicTagError) {
+      console.error('[student/study] topic tags lookup failed:', topicTagError)
+    }
+
+    const sheetTagRows = sheetTagError ? [] : (sheetTagRaw ?? [])
+    const topicTagRows = topicTagError ? [] : (topicTagRaw ?? [])
+
+    // Resolving through this map is what enforces kind='topic': a skill tag has
+    // no entry here, so its link is skipped.
+    const topicTagNames = new Map<string, string>()
+    for (const t of topicTagRows) {
+      topicTagNames.set(t.id as string, t.name as string)
+    }
+
+    for (const link of sheetTagRows) {
+      const name = topicTagNames.get(link.tag_id as string)
+      if (!name) continue
+      const sheetId = link.sheet_id as string
+      const names = sheetTopicTags[sheetId] ?? []
+      names.push(name)
+      sheetTopicTags[sheetId] = names
+    }
+
+    // Alphabetical, so the chips and the dropdown render in a stable order.
+    for (const names of Object.values(sheetTopicTags)) {
+      names.sort()
+    }
+  }
+
   // NEW345 completion + practice state, single-sourced through the helper.
   // Activities must cover BOTH assigned sheets AND library sheets (practice badges).
   const allSheetIds = [
@@ -191,6 +253,7 @@ export default async function StudyPage() {
       practicedSheetIds={practicedSheetIds}
       library={library}
       materialAssignments={materialAssignments}
+      sheetTopicTags={sheetTopicTags}
     />
   )
 }

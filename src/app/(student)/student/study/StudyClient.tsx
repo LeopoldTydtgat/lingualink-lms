@@ -42,6 +42,12 @@ interface Props {
   practicedSheetIds: string[]
   library: StudySheet[]
   materialAssignments: MaterialAssignment[]
+  /**
+   * sheet id -> sorted topic-tag NAMES. Deliberately a side map rather than a
+   * field on StudySheet: tags are practice-library metadata only, and the
+   * assigned section renders the same StudySheet shape without them.
+   */
+  sheetTopicTags: Record<string, string[]>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -151,12 +157,13 @@ function StatCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library, materialAssignments }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library, materialAssignments, sheetTopicTags }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
+  const [filterTag, setFilterTag] = useState('')
 
   const completedAssignmentIdSet = new Set(completedAssignmentIds)
   const practicedSheetIdSet = new Set(practicedSheetIds)
@@ -180,12 +187,21 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
   // Badge counts only pending, active-sheet assignments
   const pendingCount = pendingAssignments.length
 
+  // Topic-tag dropdown options: only tags actually carried by a library sheet,
+  // so the filter can never offer a value that matches nothing.
+  const topicTagOptions = Array.from(
+    new Set(library.flatMap((s) => sheetTopicTags[s.id] ?? []))
+  ).sort()
+
   // Filter the library based on search and dropdowns
   const filteredLibrary = library.filter((sheet) => {
     const matchesSearch = sheet.title.toLowerCase().includes(searchQuery.toLowerCase())
     const matchesLevel = filterLevel ? sheet.level === filterLevel : true
     const matchesCategory = filterCategory ? sheet.category === filterCategory : true
-    return matchesSearch && matchesLevel && matchesCategory
+    const matchesTag = filterTag
+      ? (sheetTopicTags[sheet.id] ?? []).includes(filterTag)
+      : true
+    return matchesSearch && matchesLevel && matchesCategory && matchesTag
   })
 
   // Navigate to individual sheet — pass assignment id if it's assigned homework
@@ -393,6 +409,21 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
               <option value="listening">Listening</option>
               <option value="reading">Reading</option>
             </select>
+
+            {/* Topic filter renders only when the library actually carries topic
+                tags — an empty dropdown is noise. */}
+            {topicTagOptions.length > 0 && (
+              <select
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none"
+              >
+                <option value="">All Topics</option>
+                {topicTagOptions.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Library card grid */}
@@ -427,6 +458,23 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
                       <span className="text-xs text-gray-500">{sheet.level}</span>
                       <DifficultyBars count={sheet.difficulty ?? 1} />
                     </div>
+
+                    {/* Topic chips. Neutral grey on purpose: tags are metadata,
+                        and orange/green/yellow already mean pending/done/category
+                        on this card. */}
+                    {(sheetTopicTags[sheet.id] ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {(sheetTopicTags[sheet.id] ?? []).map((t) => (
+                          <span
+                            key={t}
+                            className="px-2 py-0.5 rounded-full text-xs font-medium"
+                            style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     <div className="mt-auto pt-3">
                       {practiced ? (
