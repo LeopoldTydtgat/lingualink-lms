@@ -13,11 +13,17 @@ type Props = {
   onSaved: () => Promise<void>
 }
 
-type FormTab = 'metadata' | 'vocabulary' | 'files' | 'tags' | 'access'
+// 'vocabulary' | 'links' | 'reading' are the three category BODY tabs. Exactly
+// one of them sits in the bar at a time — see bodyTab below.
+type FormTab = 'metadata' | 'vocabulary' | 'links' | 'reading' | 'files' | 'tags' | 'access'
 
 type SheetType = 'teaching_material' | 'study_sheet'
 
 type Audience = 'student' | 'staff'
+
+// One editable row of study_sheets.links (jsonb, shape [{ title, url }]). The
+// id is client-only — a stable React key and update target, exactly like WordRow.
+type LinkRow = { id: string; title: string; url: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -34,8 +40,17 @@ const ACCEPTED_TYPES = [
 const ACCEPTED_EXTENSIONS = '.pdf,.doc,.docx,.ppt,.pptx'
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
 
+// Mirrors the cap both library routes enforce on study_sheets.reading_text.
+// Kept identical on purpose: a longer passage typed here would be silently
+// truncated server-side, and the admin would never be told.
+const READING_TEXT_LIMIT = 20000
+
 function newWordRow(): WordRow {
   return { id: crypto.randomUUID(), word: '', pos: '', definition: '', example: '', audio_url: '' }
+}
+
+function newLinkRow(): LinkRow {
+  return { id: crypto.randomUUID(), title: '', url: '' }
 }
 
 function rolesToPreset(roles: string[]): string {
@@ -121,18 +136,35 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   )
   const selectType = (next: SheetType) => {
     setType(next)
-    // Teaching Material hides vocabulary/access — if one of those is the active tab
-    // when switching, fall back to Metadata so no orphaned tab shows.
-    if (next === 'teaching_material' && (activeTab === 'vocabulary' || activeTab === 'access')) {
+    // Teaching Material hides the body tabs and access — if one of those is the
+    // active tab when switching, fall back to Metadata so no orphaned tab shows.
+    if (
+      next === 'teaching_material' &&
+      (activeTab === 'vocabulary' || activeTab === 'links' || activeTab === 'reading' || activeTab === 'access')
+    ) {
       setActiveTab('metadata')
     }
   }
 
   // ── Metadata fields ───────────────────────────────────────────────────────
   const [title, setTitle] = useState(sheet?.title ?? '')
-  const [category, setCategory] = useState<'vocabulary' | 'grammar'>(
-    (sheet?.category as 'vocabulary' | 'grammar') ?? 'vocabulary'
-  )
+  // Plain string, NOT a two-value union. The stored vocabulary is four wide
+  // (vocabulary, grammar, listening, reading) and the DB is free to grow it
+  // again. The old `as 'vocabulary' | 'grammar'` cast made any other stored
+  // value render a <select> with no matching <option> — blank — and the first
+  // interaction with that select silently rewrote the sheet's category.
+  const [category, setCategory] = useState<string>(sheet?.category ?? 'vocabulary')
+
+  // Changing the category swaps WHICH body tab exists (Vocabulary / Links /
+  // Reading Text share one slot). Mirrors selectType above: if a body tab is
+  // open when the category changes, fall back to Metadata so activeTab can
+  // never point at a tab that is no longer in the bar.
+  const selectCategory = (next: string) => {
+    setCategory(next)
+    if (activeTab === 'vocabulary' || activeTab === 'links' || activeTab === 'reading') {
+      setActiveTab('metadata')
+    }
+  }
   const [level, setLevel] = useState(sheet?.level ?? '')
   const [difficulty, setDifficulty] = useState<1 | 2 | 3 | null>(
     sheet?.difficulty ? (sheet.difficulty as 1 | 2 | 3) : null
@@ -144,6 +176,32 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
     const existing = sheet?.content?.words
     return existing && existing.length > 0 ? existing : [newWordRow()]
   })
+
+  // ── Link rows (listening sheets) ──────────────────────────────────────────
+  // study_sheets.links is jsonb NOT NULL DEFAULT '[]', shape [{ title, url }].
+  // It is not on the StudySheet type LibraryAdminClient exports, so it is
+  // widened inline here exactly as `audience` is above. Every stored entry is
+  // re-read defensively: this row set is what the save writes back, so a
+  // malformed entry must land as blank fields the admin can see and fix, never
+  // as undefined bound into an input.
+  const existingLinks = (sheet as (StudySheet & { links?: unknown }) | null)?.links
+  const [links, setLinks] = useState<LinkRow[]>(() => {
+    const rows = Array.isArray(existingLinks) ? existingLinks : []
+    const seeded: LinkRow[] = rows
+      .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && !Array.isArray(r))
+      .map(r => ({
+        id: crypto.randomUUID(),
+        title: typeof r.title === 'string' ? r.title : '',
+        url: typeof r.url === 'string' ? r.url : '',
+      }))
+    return seeded.length > 0 ? seeded : [newLinkRow()]
+  })
+
+  // ── Reading text (reading sheets) ─────────────────────────────────────────
+  // study_sheets.reading_text is nullable; '' and null are the same "no text"
+  // state here, and the save collapses '' back to null.
+  const existingReadingText = (sheet as (StudySheet & { reading_text?: string | null }) | null)?.reading_text
+  const [readingText, setReadingText] = useState<string>(existingReadingText ?? '')
 
   // ── Tags ──────────────────────────────────────────────────────────────────
   // tags and sheet_tags are service_role writes only, and the browser client is
@@ -283,6 +341,20 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
       ;[next[index], next[target]] = [next[target], next[index]]
       return next
     })
+  }
+
+  // ── Link helpers ──────────────────────────────────────────────────────────
+  // Same shape as the word helpers above, keyed by the client-only row id, so
+  // the two row editors behave identically. No reorder controls: link order is
+  // not meaningful the way a vocabulary list's is.
+  const updateLink = (id: string, field: 'title' | 'url', value: string) => {
+    setLinks(prev => prev.map(l => l.id === id ? { ...l, [field]: value } : l))
+  }
+
+  const addLink = () => setLinks(prev => [...prev, newLinkRow()])
+
+  const removeLink = (id: string) => {
+    setLinks(prev => prev.filter(l => l.id !== id))
   }
 
   // ── File upload helpers ───────────────────────────────────────────────────
@@ -442,11 +514,37 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         payload.category = category
         payload.level = level
         payload.difficulty = difficulty ?? 1
-        payload.content = {
-          words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
-          // Exercises/MCQs now live in the activities table; content keeps an empty
-          // array purely for the backward-compatible shape the routes expect.
-          exercises: [],
+
+        // content is the VOCABULARY body and nothing else. Both routes overwrite
+        // content wholesale with { words, exercises }, so sending it on an EDIT of
+        // a grammar/listening/reading sheet wiped whatever words that row still
+        // held — an unrelated metadata change silently destroyed data. PATCH copies
+        // only the keys present in the body, so omitting it leaves the stored value
+        // untouched. Create has no stored value to protect and every reader expects
+        // the normalised shape, so POST still always sends it (words: [] for a new
+        // non-vocabulary sheet, which is correct).
+        if (!isEdit || category === 'vocabulary') {
+          payload.content = {
+            words: category === 'vocabulary' ? words.filter(w => w.word.trim()) : [],
+            // Exercises/MCQs now live in the activities table; content keeps an empty
+            // array purely for the backward-compatible shape the routes expect.
+            exercises: [],
+          }
+        }
+
+        // links and reading_text follow the same omit rule, for the same reason: a
+        // category that does not own the field never sends it, so a sheet's stored
+        // links survive a spell in the Reading editor and vice versa. Blank rows are
+        // dropped here; the route re-validates and drops anything that is not an
+        // http(s) URL.
+        if (category === 'listening') {
+          payload.links = links
+            .map(l => ({ title: l.title.trim(), url: l.url.trim() }))
+            .filter(l => l.title.length > 0 && l.url.length > 0)
+        }
+        if (category === 'reading') {
+          // '' is a legitimate "clear it" instruction; the route stores it as NULL.
+          payload.reading_text = readingText.trim()
         }
       } else if (!isEdit) {
         // Teaching Material hides Category, Level, Difficulty and the Vocabulary
@@ -639,16 +737,29 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
   )
 
   // ── Tab bar ───────────────────────────────────────────────────────────────
+  // ONE body tab occupies the slot after Metadata, chosen by category:
+  // listening -> Links, reading -> Reading Text, everything else -> Vocabulary.
+  // Grammar deliberately falls into the Vocabulary branch: that tab has always
+  // been present for it and explains itself in-panel, and that is unchanged
+  // here. The default also catches any category the DB grows later, so the bar
+  // is never left without a body tab.
+  const bodyTab: { key: FormTab; label: string; count?: number | null } =
+    category === 'listening'
+      ? { key: 'links', label: 'Links', count: links.length }
+      : category === 'reading'
+      ? { key: 'reading', label: 'Reading Text' }
+      : { key: 'vocabulary', label: 'Vocabulary', count: words.length }
+
   const allTabs: { key: FormTab; label: string; count?: number | null }[] = [
     { key: 'metadata', label: 'Metadata' },
-    { key: 'vocabulary', label: 'Vocabulary', count: words.length },
+    bodyTab,
     { key: 'files', label: 'Files', count: isEdit ? attachments.length : pendingFiles.length },
     { key: 'tags', label: 'Tags', count: tagsLoading ? null : selectedTagIds.size },
     { key: 'access', label: 'Access' },
   ]
   // Teaching Material is a staff-only resource: Title + Files only (plus Tags,
   // which classify library material of either kind).
-  // Study Sheet keeps the full editor (metadata, vocabulary, files, access).
+  // Study Sheet keeps the full editor (metadata, body tab, files, access).
   const tabs = type === 'study_sheet'
     ? allTabs
     : allTabs.filter(t => t.key === 'metadata' || t.key === 'files' || t.key === 'tags')
@@ -773,11 +884,13 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                       <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
                       <select
                         value={category}
-                        onChange={e => setCategory(e.target.value as 'vocabulary' | 'grammar')}
+                        onChange={e => selectCategory(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
                       >
                         <option value="vocabulary">Vocabulary</option>
                         <option value="grammar">Grammar</option>
+                        <option value="listening">Listening</option>
+                        <option value="reading">Reading</option>
                       </select>
                     </div>
 
@@ -920,6 +1033,91 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   </button>
                 </>
               )}
+            </div>
+          )}
+
+          {/* ── LINKS TAB (listening sheets) ── */}
+          {activeTab === 'links' && type === 'study_sheet' && category === 'listening' && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500">
+                Audio or video links for this listening sheet. Rows missing a title or a URL are
+                dropped when you save, and a URL must start with http:// or https://.
+              </p>
+
+              {/* Column headers */}
+              <div className="grid text-xs font-medium text-gray-400 uppercase gap-2"
+                style={{ gridTemplateColumns: '1.5rem 1.5fr 3fr 1.5rem' }}>
+                <span>#</span>
+                <span>Title</span>
+                <span>URL</span>
+                <span />
+              </div>
+
+              {links.map((l, i) => (
+                <div key={l.id} className="grid gap-2 items-start"
+                  style={{ gridTemplateColumns: '1.5rem 1.5fr 3fr 1.5rem' }}>
+                  <span className="text-xs text-gray-400 pt-2 text-center">{i + 1}</span>
+                  <input
+                    type="text"
+                    value={l.title}
+                    onChange={e => updateLink(l.id, 'title', e.target.value)}
+                    placeholder="Title"
+                    className="border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900"
+                  />
+                  <input
+                    type="url"
+                    value={l.url}
+                    onChange={e => updateLink(l.id, 'url', e.target.value)}
+                    placeholder="https://example.com/audio.mp3"
+                    className="border border-gray-300 rounded px-2 py-1.5 text-sm text-gray-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeLink(l.id)}
+                    disabled={links.length === 1}
+                    className="disabled:opacity-20 text-sm pt-1.5"
+                    style={{ color: '#FD5602' }}
+                    onMouseEnter={e => { e.currentTarget.style.color = '#e04e02' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = '#FD5602' }}
+                    title="Remove row"
+                  >✕</button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={addLink}
+                className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border-2 border-dashed border-gray-300 text-gray-500 w-full justify-center"
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#FFD9A8'; e.currentTarget.style.color = '#FF8303' }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.color = '#6b7280' }}
+              >
+                + Add link
+              </button>
+            </div>
+          )}
+
+          {/* ── READING TEXT TAB (reading sheets) ── */}
+          {activeTab === 'reading' && type === 'study_sheet' && category === 'reading' && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">
+                The passage students read on this sheet. Clearing it and saving removes the stored text.
+              </p>
+
+              <textarea
+                value={readingText}
+                onChange={e => setReadingText(e.target.value)}
+                placeholder="Paste or type the reading passage…"
+                rows={16}
+                maxLength={READING_TEXT_LIMIT}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
+                style={{ resize: 'vertical' }}
+              />
+
+              {/* Mirrors the route's cap, so the admin cannot silently lose the tail
+                  of a passage to server-side truncation. */}
+              <p className="text-xs text-gray-400">
+                {readingText.trim().length} / {READING_TEXT_LIMIT} characters
+              </p>
             </div>
           )}
 
