@@ -14,6 +14,8 @@ export async function POST(request: Request) {
   const user = await requireAdmin()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const adminClient = createAdminClient()
+
   const body = await request.json()
   const { study_sheet_id, student_id } = body
   // Always derive assigned_by from the verified session — never trust the body.
@@ -47,7 +49,7 @@ export async function POST(request: Request) {
   }
 
   // Check if already assigned (avoid duplicates for direct admin assignments)
-  const { data: existing } = await supabase
+  const { data: existing } = await adminClient
     .from('assignments')
     .select('id')
     .eq('study_sheet_id', study_sheet_id)
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await adminClient
     .from('assignments')
     .insert({
       study_sheet_id,
@@ -86,7 +88,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const adminClient = createAdminClient()
     const [{ data: student }, { data: sheet }, { data: assignerProfile }] = await Promise.all([
       adminClient.from('students').select('email, full_name').eq('id', student_id).single(),
       adminClient.from('study_sheets').select('title').eq('id', study_sheet_id).single(),
