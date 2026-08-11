@@ -10,6 +10,7 @@ import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
 import { DatePartInput } from '../../_components/DatePartInput'
 import AssignMaterialHomeworkModal from './AssignMaterialHomeworkModal'
+import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -265,14 +266,9 @@ function HoursTypeBadge({ type }: { type: string }) {
 
 function CategoryBadge({ category }: { category: string | null }) {
   if (!category) return null
-  const style =
-    category.toLowerCase() === 'vocabulary'
-      ? { backgroundColor: '#f3e8ff', color: '#6d28d9' }
-      : category.toLowerCase() === 'grammar'
-      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-      : { backgroundColor: '#f3f4f6', color: '#374151' }
+  const style = categoryBadgeStyle(category ? category.toLowerCase() : null)
   return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={style}>
+    <span className="px-2 py-0.5 rounded-full text-xs font-medium capitalize" style={style}>
       {category}
     </span>
   )
