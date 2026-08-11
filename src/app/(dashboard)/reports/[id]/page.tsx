@@ -69,7 +69,7 @@ export default async function ReportPage({ params }: Props) {
     .from('profiles')
     .select('id, full_name, role, timezone, profile_completed')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   // A null profile is NOT an unauthenticated user, so this never bounces to
   // /login. Same inline fallback the schedule page renders.
