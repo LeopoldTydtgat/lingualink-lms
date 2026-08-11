@@ -2,7 +2,6 @@
 
 import React, { useRef, useState } from 'react'
 import Link from 'next/link'
-import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer'
@@ -65,6 +64,47 @@ type Props = {
   assignedSheets: { id: string; title: string }[]
   materialSheets: MaterialSheet[]
   annotatedPdfs: AnnotatedPdf[]
+  // The signed-in viewer's own IANA timezone, from their profiles row. The server
+  // page gates on it, so it is never null and never a 'UTC' stand-in. An admin
+  // reading a teacher's report sees the times in the ADMIN's zone.
+  viewerTimezone: string
+}
+
+// --- Helpers: timestamps in the viewer's timezone ---
+// Times are stored in UTC. Each is formatted in the viewer's own zone via Intl with
+// an EXPLICIT timeZone, mirroring (admin)/admin/reports/ReportsClient.tsx. That is
+// deterministic — the same output on the server and in the browser — so it is safe
+// in this client component under SSR. The date-fns format(new Date(x), ...) these
+// replace carried no zone: the server rendered in the host's zone and the browser
+// re-rendered in the viewer's, which both mismatched on hydration and showed the
+// wrong wall-clock time to any viewer whose browser zone differs from their profile.
+// Two formatters joined by the same ' · ' the old pattern used: one combined
+// formatter would replace that separator with a comma of its own.
+function formatTimeOfDay(instant: Date, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(instant)
+}
+
+// Long form for the class the report covers: "Tuesday, 11 August 2026 · 16:30".
+function formatClassDateTime(iso: string, timezone: string): string {
+  const instant = new Date(iso)
+  const datePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  }).format(instant)
+  return `${datePart} · ${formatTimeOfDay(instant, timezone)}`
+}
+
+// Short form for the submission stamp: "11 Aug 2026 · 16:30".
+function formatSubmittedAt(iso: string, timezone: string): string {
+  const instant = new Date(iso)
+  const datePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    day: 'numeric', month: 'short', year: 'numeric',
+  }).format(instant)
+  return `${datePart} · ${formatTimeOfDay(instant, timezone)}`
 }
 
 // This form is the ONLY writer of reports.level_data, so its keys and its level
@@ -202,7 +242,7 @@ function LevelTrack({
   )
 }
 
-export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets, annotatedPdfs }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets, annotatedPdfs, viewerTimezone }: Props) {
   const router = useRouter()
 
   const lesson = report.lesson
@@ -353,7 +393,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               </h1>
               <p className="text-sm text-gray-500">
                 {lesson?.scheduled_at
-                  ? format(new Date(lesson.scheduled_at), 'EEEE d MMMM yyyy · HH:mm')
+                  ? formatClassDateTime(lesson.scheduled_at, viewerTimezone)
                   : 'Unknown time'}
                 {' · '}
                 {lesson?.duration_minutes ?? 60} min
@@ -369,7 +409,7 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             </span>
             {report.status === 'completed' && report.completed_at && (
               <p className="text-xs text-gray-400 mt-1">
-                Submitted on {format(new Date(report.completed_at), 'd MMM yyyy · HH:mm')}
+                Submitted on {formatSubmittedAt(report.completed_at, viewerTimezone)}
               </p>
             )}
             {isAdmin && report.status === 'flagged' && (

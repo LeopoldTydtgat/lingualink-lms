@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { format } from 'date-fns'
 import { reopenReport } from './actions'
 
 // --- Types ---
@@ -38,9 +37,35 @@ type Props = {
   reports: Report[]
   profile: { id: string; full_name: string; role: string }
   isAdmin: boolean
+  // The signed-in viewer's own IANA timezone, from their profiles row. The server
+  // page gates on it, so it is never null and never a 'UTC' stand-in.
+  viewerTimezone: string
 }
 
-export default function ReportsClient({ reports, profile, isAdmin }: Props) {
+// --- Helper: class date/time in the viewer's timezone ---
+// Times are stored in UTC. Each is formatted in the viewer's own zone via Intl with
+// an EXPLICIT timeZone, mirroring (admin)/admin/reports/ReportsClient.tsx. That is
+// deterministic — the same output on the server and in the browser — so it is safe
+// in this client component under SSR. The date-fns format(new Date(x), ...) it
+// replaces carried no zone: the server rendered in the host's zone and the browser
+// re-rendered in the viewer's, which both mismatched on hydration and showed the
+// wrong wall-clock time to any teacher whose browser zone differs from their profile.
+// Two formatters joined by the same ' · ' the old pattern used: one combined
+// formatter would replace that separator with a comma of its own.
+function formatClassDateTime(iso: string, timezone: string): string {
+  const instant = new Date(iso)
+  const datePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(instant)
+  const timePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(instant)
+  return `${datePart} · ${timePart}`
+}
+
+export default function ReportsClient({ reports, profile, isAdmin, viewerTimezone }: Props) {
   const [search, setSearch] = useState('')
   const [showAllCompleted, setShowAllCompleted] = useState(false)
 
@@ -105,7 +130,7 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
         ) : (
           <div className="flex flex-col gap-3">
             {pendingReports.map(report => (
-              <PendingReportCard key={report.id} report={report} isAdmin={isAdmin} />
+              <PendingReportCard key={report.id} report={report} isAdmin={isAdmin} viewerTimezone={viewerTimezone} />
             ))}
           </div>
         )}
@@ -126,7 +151,7 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
           <>
             <div className="flex flex-col gap-3">
               {displayCompleted.map(report => (
-                <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} />
+                <CompletedReportCard key={report.id} report={report} isAdmin={isAdmin} viewerTimezone={viewerTimezone} />
               ))}
             </div>
             {!showAllCompleted && !isSearching && filteredCompleted.length > 10 && (
@@ -152,9 +177,11 @@ export default function ReportsClient({ reports, profile, isAdmin }: Props) {
 function PendingReportCard({
   report,
   isAdmin,
+  viewerTimezone,
 }: {
   report: Report
   isAdmin: boolean
+  viewerTimezone: string
 }) {
   const lesson = report.lesson
   const student = lesson?.student
@@ -198,7 +225,7 @@ function PendingReportCard({
           </p>
           <p className="text-sm text-gray-500">
             {lesson?.scheduled_at
-              ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
+              ? formatClassDateTime(lesson.scheduled_at, viewerTimezone)
               : 'Unknown time'}
           </p>
           {report.status === 'reopened' && (
@@ -241,9 +268,11 @@ function PendingReportCard({
 function CompletedReportCard({
   report,
   isAdmin,
+  viewerTimezone,
 }: {
   report: Report
   isAdmin: boolean
+  viewerTimezone: string
 }) {
   const lesson = report.lesson
   const student = lesson?.student
@@ -303,7 +332,7 @@ function CompletedReportCard({
           </p>
           <p className="text-sm text-gray-500">
             {lesson?.scheduled_at
-              ? format(new Date(lesson.scheduled_at), 'EEE d MMM yyyy · HH:mm')
+              ? formatClassDateTime(lesson.scheduled_at, viewerTimezone)
               : 'Unknown time'}
           </p>
           {reopenError && (
