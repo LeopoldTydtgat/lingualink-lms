@@ -13,7 +13,7 @@ import {
 } from '@/lib/email/templates'
 import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
-import { CANCELLED_STATUSES, NO_SHOW_STATUSES } from '@/lib/billing/billability'
+import { CANCELLED_STATUSES, NO_SHOW_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { adminClassesPostSchema } from '@/lib/validation/schemas'
 import { localMidnightToUtc } from '@/lib/billing/monthRange'
@@ -304,7 +304,11 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Check teacher is not already booked at this time
+  // Check teacher is not already booked at this time. The status filter mirrors
+  // the lessons exclusion-constraint predicate (no_teacher_overlap /
+  // no_student_overlap): it excludes exactly CANCELLED_STATUSES, so a completed
+  // / no-show / missed lesson still counts as a clash here and query and
+  // constraint cannot drift.
   const newStart = new Date(scheduledAtUtc)
   const newEnd = new Date(newStart.getTime() + duration_minutes * 60 * 1000)
 
@@ -312,7 +316,7 @@ export async function POST(request: NextRequest) {
     .from('lessons')
     .select('id, scheduled_at, duration_minutes')
     .eq('teacher_id', teacher_id)
-    .eq('status', 'scheduled')
+    .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
     .lt('scheduled_at', newEnd.toISOString())
     .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
 
@@ -348,7 +352,7 @@ export async function POST(request: NextRequest) {
     .from('lessons')
     .select('id, scheduled_at, duration_minutes')
     .eq('student_id', student_id)
-    .eq('status', 'scheduled')
+    .not('status', 'in', toPostgrestInList(CANCELLED_STATUSES))
     .lt('scheduled_at', newEnd.toISOString())
     .gte('scheduled_at', new Date(newStart.getTime() - 90 * 60 * 1000).toISOString())
 
