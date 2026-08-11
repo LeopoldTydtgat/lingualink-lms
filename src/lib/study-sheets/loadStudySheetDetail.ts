@@ -35,9 +35,13 @@ export async function loadStudySheetDetail(id: string) {
 
   const { data: isAdminResult } = await supabase.rpc('is_admin')
 
+  // links / reading_text are the bodies of the listening and reading
+  // categories, appended so the existing column order is untouched. Both
+  // callers destructure named fields, so the extra columns only ride along on
+  // `sheet` for the detail client to render.
   const { data: sheet } = await supabase
     .from('study_sheets')
-    .select('id, title, category, level, difficulty, content, attachments, owner_id, is_active, audience')
+    .select('id, title, category, level, difficulty, content, attachments, owner_id, is_active, audience, links, reading_text')
     .eq('id', id)
     .eq('is_active', true)
     .maybeSingle()
