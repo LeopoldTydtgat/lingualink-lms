@@ -11,8 +11,14 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const page        = parseInt(searchParams.get('page')  ?? '1');
-  const limit       = parseInt(searchParams.get('limit') ?? '50');
+
+  // Absent, non-numeric ('abc'), zero and negative values all fall back to the defaults
+  // rather than producing a NaN / inverted PostgREST range. limit is capped at 100 so a
+  // hand-crafted ?limit= cannot pull the whole table in one request.
+  const rawPage  = parseInt(searchParams.get('page')  ?? '', 10);
+  const rawLimit = parseInt(searchParams.get('limit') ?? '', 10);
+  const page        = Number.isInteger(rawPage)  && rawPage  >= 1 ? rawPage : 1;
+  const limit       = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 100) : 50;
   const status      = searchParams.get('status');
   const teacherId   = searchParams.get('teacher_id');
   const dateFrom    = searchParams.get('date_from');
