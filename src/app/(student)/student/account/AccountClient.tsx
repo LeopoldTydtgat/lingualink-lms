@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
@@ -115,6 +115,7 @@ const sectionTitleStyle: React.CSSProperties = {
 export default function AccountClient({ student, activeTraining, allTrainings }: Props) {
   const supabase = createClient() // kept for password-change auth operations only
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const router = useRouter()
   const searchParams = useSearchParams()
   const mustConfirmTz = searchParams.get('confirm_tz') === '1'
 
@@ -217,6 +218,10 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       if (!res.ok) throw new Error(json.error ?? 'Failed to save')
       setGeneralSaved(true)
       setTimeout(() => setGeneralSaved(false), 3000)
+      // Timezone drives the server-rendered header, right panel and class
+      // times via the layout, so the page must re-fetch or the "Saved"
+      // message contradicts what is still on screen.
+      router.refresh()
     } catch {
       setGeneralError('Failed to save. Please try again.')
     } finally {
