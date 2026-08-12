@@ -91,12 +91,16 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
   const isCancelled = isCancelledStatus(lesson.status)
 
   // res.json() stays INSIDE the try deliberately. It is a second throw source
-  // alongside fetch(): a non-JSON body — a Vercel gateway-timeout HTML page, say —
-  // makes it reject even when res.ok is true. Both must land in the same catch,
-  // because an escaping rejection used to leave `deleting` set forever, wedging the
-  // button at "Deleting..." AND the modal's "Go Back" (disabled={deleting}) with it,
-  // leaving no way out but a page reload. Clearing in a finally makes the modal
-  // escapable again on every path.
+  // alongside fetch(): a non-JSON body, a Vercel gateway-timeout HTML page say,
+  // makes it reject even when res.ok is true. Both must land in the same catch.
+  // The reset lives in the failure branch and the catch, NOT in a finally: the
+  // success path navigates via window.location.href, which does not unmount
+  // React, so a finally would re-enable the confirm button while the old
+  // document is still interactive and admit a second request mid-navigation.
+  // Every path that leaves the modal open still clears the flag, so the modal
+  // stays escapable: the non-ok branch (including the 422 blocked case, where
+  // the confirm button is replaced by Close and Close is disabled={deleting})
+  // and the catch both reset it.
   async function handleDelete() {
     setDeleting(true)
     setDeleteError('')
@@ -109,17 +113,18 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
         setDeleteError(res.status === 422
           ? `Delete blocked: ${data.error ?? '...'}`
           : (data.error ?? 'Failed to delete. Please try again.'))
+        setDeleting(false)
         return
       }
       window.location.href = '/admin/classes'
     } catch {
       setDeleteError('Could not reach the server, or it returned an unreadable response. The class has NOT been deleted — try again.')
-    } finally {
       setDeleting(false)
     }
   }
 
-  // Same two throw sources as handleDelete above; same finally for the same reason.
+  // Same two throw sources as handleDelete above, and the same reset placement
+  // for the same reason.
   async function handleCancel() {
     setCancelling(true)
     setCancelError('')
@@ -132,12 +137,12 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
       const data = await res.json()
       if (!res.ok) {
         setCancelError(data.error ?? 'Failed to cancel. Please try again.')
+        setCancelling(false)
         return
       }
       window.location.href = '/admin/classes'
     } catch {
       setCancelError('Could not reach the server, or it returned an unreadable response. The class has NOT been cancelled — try again.')
-    } finally {
       setCancelling(false)
     }
   }
