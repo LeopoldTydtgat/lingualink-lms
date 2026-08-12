@@ -38,11 +38,20 @@ export async function reopenReport(reportId: string) {
   // Flagged (never submitted) and completed (submitted but wrong) reports may
   // both be reopened - matches the admin route's guard, and the race predicate
   // below mirrors it too, so both admin reopen paths behave identically (NEW270).
-  const { data: existing } = await supabase
+  // Error bound, and maybeSingle because zero rows is a real outcome here.
+  // .single() made an ordinary miss an error, and the discarded error meant a
+  // transient DB fault rendered to the admin as 'Report not found' - a wrong
+  // diagnosis of a recoverable problem. Mirrors the profiles lookup above.
+  const { data: existing, error: existingError } = await supabase
     .from('reports')
     .select('id, status')
     .eq('id', reportId)
-    .single()
+    .maybeSingle()
+
+  if (existingError) {
+    console.error('[reports/actions] reports lookup failed:', existingError)
+    return { error: 'Something went wrong. Please try again.' }
+  }
 
   if (!existing) return { error: 'Report not found' }
   if (existing.status !== 'flagged' && existing.status !== 'completed') {
@@ -66,7 +75,12 @@ export async function reopenReport(reportId: string) {
     .in('status', ['flagged', 'completed'])
     .select('id')
 
-  if (error) return { error: error.message }
+  if (error) {
+    // Raw Postgres text must not reach the admin: the caller renders
+    // result.error verbatim in the card's error line. Logged instead.
+    console.error('[reports/actions] reports update failed:', error)
+    return { error: 'Something went wrong. Please try again.' }
+  }
   if (!updatedRows || updatedRows.length === 0) {
     return { error: 'Report can no longer be reopened. Refresh and try again.' }
   }
