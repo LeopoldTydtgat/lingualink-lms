@@ -113,6 +113,7 @@ export default function BillingClient({
   initialLessonsByMonth,
   initialTemplateUrl,
   currentMonthDate,
+  isUploadWindow,
 }: {
   profile: Profile
   billingInfo: BillingInfoDisplay | null
@@ -120,13 +121,18 @@ export default function BillingClient({
   initialLessonsByMonth: Record<string, Lesson[]>
   initialTemplateUrl: string | null
   currentMonthDate: string
+  isUploadWindow: boolean
 }) {
   const supabase = createClient()
   const router = useRouter()
   const isAdmin = profile.role === 'admin'
 
-  const now = new Date()
-  const isUploadWindow = now.getDate() >= 1 && now.getDate() <= 10
+  // isUploadWindow arrives as a server prop, computed in the teacher's account
+  // timezone in page.tsx. Deliberately not computed here: `new Date()` at render
+  // scope reads the browser clock, so the server and client could disagree across
+  // a midnight boundary and produce different element trees at three call sites.
+  // The old test also carried a `>= 1` lower bound that no calendar day can fail
+  // and that the upload route never checked.
 
   const [activeView, setActiveView] = useState<'billing' | 'billingInfo' | 'admin'>('billing')
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null)
