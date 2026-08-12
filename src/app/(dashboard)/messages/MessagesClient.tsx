@@ -498,17 +498,27 @@ export default function MessagesClient({
     const form = new FormData()
     form.append('file', file)
 
-    const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
-    const json = await res.json()
+    // Two throw sources: fetch() rejects on a network fault, and res.json() has no
+    // .catch of its own, so an ok response carrying a non-JSON body rejects too.
+    // Either one escaping used to leave `uploading` true forever, disabling the
+    // attach button with no message. e.target.value belongs in the finally with it:
+    // without the reset, re-picking the SAME file fires no change event, so the
+    // input goes silently dead as well.
+    try {
+      const res = await fetch('/api/messages/upload', { method: 'POST', body: form })
+      const json = await res.json()
 
-    if (!res.ok) {
-      toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
-    } else {
-      setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+      if (!res.ok) {
+        toast.error(json.error ?? 'Upload failed.', { duration: 6000 })
+      } else {
+        setPendingAttachments(prev => [...prev, { url: json.url, filename: json.filename, size: json.size }])
+      }
+    } catch {
+      toast.error('Could not reach the server. Your file was not attached - please try again.', { duration: 6000 })
+    } finally {
+      setUploading(false)
+      e.target.value = ''
     }
-
-    setUploading(false)
-    e.target.value = ''
   }
 
   const filteredContacts = contacts.filter(c =>
