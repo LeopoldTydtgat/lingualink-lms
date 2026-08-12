@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type Dispatch, type SetStateAction } from 'react'
 import { AvailabilityRecord } from '../ScheduleClient'
 import { getLocalDateKey, isValidTimeZone } from '@/lib/utils/timezone'
 
@@ -9,7 +9,13 @@ interface Profile { id: string; full_name: string; role: string; timezone: strin
 interface Props {
   profile: Profile
   availability: AvailabilityRecord[]
-  onAvailabilityChange: (records: AvailabilityRecord[]) => void
+  // Dispatch<SetStateAction<...>> rather than a plain array callback: ScheduleClient
+  // owns the FULL availability list and hands every tab the raw setAvailability, so
+  // the updater form is already supported. Building the next array from the captured
+  // `availability` prop instead would let a concurrent update from another source be
+  // clobbered by whichever write landed second. GeneralAvailability.tsx types and uses
+  // this prop the same way for the same reason.
+  onAvailabilityChange: Dispatch<SetStateAction<AvailabilityRecord[]>>
 }
 
 // Format a date string for display e.g. "2026-04-10" → "10 Apr 2026"
@@ -87,7 +93,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
         setError('Failed to save. Please try again.')
       } else {
         const data = await res.json()
-        onAvailabilityChange([...availability, data as AvailabilityRecord])
+        onAvailabilityChange(prev => [...prev, data as AvailabilityRecord])
         setFromDate('')
         setToDate('')
       }
@@ -109,7 +115,7 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
     try {
       const res = await fetch(`/api/teacher/availability/${pendingDelete}`, { method: 'DELETE' })
       if (res.ok) {
-        onAvailabilityChange(availability.filter(a => a.id !== pendingDelete))
+        onAvailabilityChange(prev => prev.filter(a => a.id !== pendingDelete))
       } else {
         setDeleteError('Failed to remove this holiday period. Please try again.')
       }
