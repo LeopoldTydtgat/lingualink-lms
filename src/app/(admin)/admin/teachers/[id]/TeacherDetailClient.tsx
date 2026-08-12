@@ -421,7 +421,6 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       router.refresh()
     } catch {
       setArchiveError('Something went wrong. Please try again.')
-    } finally {
       setArchiving(false)
     }
   }
@@ -450,7 +449,6 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
       router.refresh()
     } catch (err: unknown) {
       setPurgeError(err instanceof Error ? err.message : 'Something went wrong.')
-    } finally {
       setPurging(false)
     }
   }
