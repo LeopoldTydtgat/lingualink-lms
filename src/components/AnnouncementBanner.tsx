@@ -7,7 +7,7 @@
 // Non-dismissable banners show no close button and cannot be hidden by the user.
 
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Megaphone, X } from 'lucide-react'
 
 export interface AnnouncementItem {
   id: string
@@ -18,11 +18,9 @@ export interface AnnouncementItem {
 
 interface Props {
   announcements: AnnouncementItem[]
-  userType: 'teacher' | 'student'
-  userId: string
 }
 
-export default function AnnouncementBanner({ announcements, userType, userId }: Props) {
+export default function AnnouncementBanner({ announcements }: Props) {
   // Track which banners the user has dismissed this session
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
 
@@ -33,29 +31,49 @@ export default function AnnouncementBanner({ announcements, userType, userId }: 
     // Remove from UI immediately — optimistic update
     setDismissed((prev) => new Set([...prev, id]))
 
-    // Persist dismissal so it doesn't reappear on next page load
-    await fetch('/api/announcements/dismiss', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ announcementId: id, userType, userId }),
-    })
+    // Fail-safe revert: if the write never lands, the banner must come back rather
+    // than stay hidden with nothing recorded (it would reappear on reload anyway).
+    const revert = () =>
+      setDismissed((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+
+    // Persist dismissal so it doesn't reappear on next page load.
+    // The route derives user identity and type from the session — body carries the id only.
+    try {
+      const res = await fetch('/api/announcements/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ announcementId: id }),
+      })
+      if (!res.ok) {
+        console.error('Announcement dismissal failed:', res.status)
+        revert()
+      }
+    } catch (e) {
+      console.error('Announcement dismissal error:', e)
+      revert()
+    }
   }
 
   return (
-    <div>
+    <div className="px-6 pt-4 space-y-2" role="status">
       {visible.map((a) => (
         <div
           key={a.id}
-          style={{ backgroundColor: '#1f2937', borderLeft: '4px solid #FF8303' }}
-          className="flex items-start justify-between gap-4 px-6 py-3"
+          style={{ backgroundColor: '#FF8303' }}
+          className="rounded-lg flex items-start justify-between gap-4 px-4 py-3"
         >
+          <Megaphone size={16} className="text-white flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             {a.title && (
               <span className="text-white font-semibold text-sm mr-2">
-                {a.title}
+                {a.title}:
               </span>
             )}
-            <span className="text-white text-sm leading-relaxed">{a.message}</span>
+            <span className="text-white text-sm leading-relaxed break-words whitespace-pre-line">{a.message}</span>
           </div>
 
           {a.is_dismissable && (

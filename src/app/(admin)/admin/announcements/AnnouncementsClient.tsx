@@ -70,16 +70,27 @@ export default function AnnouncementsClient({
   // Persistent banner: a toast alone disappears, and a failed write must stay
   // visible next to a list that did NOT change.
   const [actionError, setActionError] = useState<string | null>(null)
+  // Distinguishes a partial-success warning (write succeeded) from a hard
+  // failure (write did not happen) in the shared banner/toast below.
+  const [isActionWarning, setIsActionWarning] = useState(false)
 
   const reportFailure = (msg: string) => {
+    setIsActionWarning(false)
     setActionError(msg)
     toast.error(msg, { duration: 6000 })
+  }
+
+  const reportWarning = (msg: string) => {
+    setIsActionWarning(true)
+    setActionError(msg)
+    toast.warning(msg, { duration: 6000 })
   }
 
   // ── Quick activate / deactivate toggle ─────────────────────────────────────
   const handleToggle = async (id: string, current: boolean) => {
     setTogglingId(id)
     setActionError(null)
+    setIsActionWarning(false)
 
     try {
       const res = await fetch(`/api/admin/announcements/${id}`, {
@@ -93,6 +104,14 @@ export default function AnnouncementsClient({
           await readErrorMessage(res, 'Failed to update announcement.')
         )
         return
+      }
+
+      // The write succeeded even when a warning is present (e.g. dismissals
+      // could not be cleared on reactivation) — surface it without blocking
+      // the state update below.
+      const resBody = await res.json().catch(() => null)
+      if (typeof resBody?.warning === 'string' && resBody.warning) {
+        reportWarning(resBody.warning)
       }
 
       // Only reflect the new state once the server confirms it — the switch
@@ -161,12 +180,16 @@ export default function AnnouncementsClient({
         </Link>
       </div>
 
-      {/* Failed write — stays until the next action */}
+      {/* Failed write, or a partial-success warning — stays until the next action */}
       {actionError && (
         <div
           role="alert"
           className="mb-6 rounded-lg px-4 py-3 text-sm"
-          style={{ backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}
+          style={
+            isActionWarning
+              ? { backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', color: '#B45309' }
+              : { backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }
+          }
         >
           {actionError}
         </div>
