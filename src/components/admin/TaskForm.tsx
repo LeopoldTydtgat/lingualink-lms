@@ -214,7 +214,6 @@ export default function TaskForm({
       router.push('/admin/tasks')
     } catch (err: any) {
       setError(err.message)
-    } finally {
       setSaving(false)
     }
   }
