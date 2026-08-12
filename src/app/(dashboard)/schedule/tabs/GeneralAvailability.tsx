@@ -308,9 +308,27 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
             ...newRecords,
           ])
         } else {
-          setSaveError('Failed to save. Please try again.')
-          // Strip only our temps — leave everything else (including concurrent drags) intact.
-          onAvailabilityChange(prev => prev.filter(a => !tempIds.has(a.id)))
+          setSaveError('Some slots could not be saved. Please check the grid and try again.')
+          // Partial success is the normal case here, since each slot is its own
+          // request. Dropping every temp would hide slots that really were written:
+          // the teacher stops seeing availability that students can still book
+          // against, until a refresh. So strip our temps and re-add the canonical
+          // rows the API returned for the ones that succeeded. Deliberately NOT
+          // keeping the succeeded temps instead - they carry `temp-` ids, and the
+          // delete branch filters those out when resolving ids, so such a slot would
+          // render as available but could never be removed. Only our own tempIds are
+          // touched, so concurrent drags and other tabs are preserved. The delete
+          // branch's restore-everything behaviour is the opposite on purpose: showing
+          // a slot that is already gone is harmless, hiding one that still exists is
+          // not.
+          const savedRecords = results
+            .filter(r => r.ok)
+            .map(r => r.data)
+            .filter(Boolean) as AvailabilityRecord[]
+          onAvailabilityChange(prev => [
+            ...prev.filter(a => !tempIds.has(a.id)),
+            ...savedRecords,
+          ])
         }
       } else {
         const idsToDelete = slots
