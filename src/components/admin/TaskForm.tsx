@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,6 +212,7 @@ export default function TaskForm({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to save task')
 
+      toast.success(mode === 'create' ? 'Task created!' : 'Changes saved!')
       router.push('/admin/tasks')
     } catch (err: any) {
       setError(err.message)
