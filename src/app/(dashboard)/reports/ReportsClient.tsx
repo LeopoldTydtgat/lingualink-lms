@@ -301,9 +301,24 @@ function CompletedReportCard({
   async function handleReopen() {
     setReopening(true)
     setReopenError(null)
-    const result = await reopenReport(report.id)
-    if (result.error) {
-      setReopenError(result.error)
+    // reopenReport returns its errors rather than throwing, but the call can still
+    // reject: createClient() runs above every guarded branch in the action, so a
+    // cookie-store failure throws server-side, and a network fault or a stale
+    // deployment id fails the action request itself. Without this catch the
+    // rejection left `reopening` true forever, wedging the button at "Reopening..."
+    // with no message. No finally on purpose: on success the row's status becomes
+    // 'reopened', canReopen goes false and the button unmounts, so clearing the
+    // flag on the success path would only re-enable it for the frame before the
+    // revalidated props commit and admit a second click that the action then
+    // refuses.
+    try {
+      const result = await reopenReport(report.id)
+      if (result.error) {
+        setReopenError(result.error)
+        setReopening(false)
+      }
+    } catch {
+      setReopenError('Could not reach the server. The report was NOT reopened - please try again.')
       setReopening(false)
     }
     // On success, revalidatePath in the action refreshes the page automatically
