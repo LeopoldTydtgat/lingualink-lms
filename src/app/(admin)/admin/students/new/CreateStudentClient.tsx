@@ -209,7 +209,9 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
       setTimeout(() => { router.push('/admin/students'); router.refresh() }, 800)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
-    } finally {
+      // Re-enable on failure only. On success the button stays disabled through
+      // the 800ms toast delay until the redirect unmounts the form, otherwise a
+      // second click re-POSTs a record the server has already created.
       setSaving(false)
     }
   }
