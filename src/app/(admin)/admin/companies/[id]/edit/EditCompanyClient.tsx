@@ -105,7 +105,9 @@ export default function EditCompanyClient({ company }: { company: Record<string,
       setTimeout(() => { router.push(`/admin/companies/${id}`); router.refresh() }, 800)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
-    } finally {
+      // Re-enable on failure only. On success the button stays disabled through
+      // the 800ms toast delay until the redirect unmounts the form, otherwise a
+      // second click re-PATCHes a record the server has already updated.
       setSaving(false)
     }
   }

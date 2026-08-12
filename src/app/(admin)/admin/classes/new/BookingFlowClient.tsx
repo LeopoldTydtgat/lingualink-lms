@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { isBookableStart } from '@/lib/bookingGrid'
 import { getLocalDateKey, isValidTimeZone } from '@/lib/utils/timezone'
 
@@ -251,13 +252,14 @@ export default function BookingFlowClient({ teachers, students }: Props) {
 
       if (!res.ok || !data) {
         setError((data && (data.message ?? data.error)) ?? 'Something went wrong. Please try again.')
+        setSubmitting(false)
         return
       }
 
+      toast.success('Class booked!')
       router.push(`/admin/classes/${data.lesson_id}`)
     } catch {
       setError('Network error. Please check your connection and try again.')
-    } finally {
       setSubmitting(false)
     }
   }

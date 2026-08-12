@@ -66,14 +66,46 @@ export async function POST(req: NextRequest) {
 
     // ── Cross-role email guard: reject if a student already uses this email ──
     const guardClient = createAdminClient()
-    const { data: existingStudent } = await guardClient
+    const { data: existingStudent, error: existingStudentError } = await guardClient
       .from('students')
       .select('id')
       .eq('email', data.email)
       .maybeSingle()
+    // A failed read is not "no student holds this email": leaving it
+    // undestructured let a lookup error pass the guard entirely. Fail loud.
+    if (existingStudentError) {
+      console.error('Cross-role email guard error (teacher POST):', existingStudentError)
+      return NextResponse.json(
+        { error: 'Failed to verify the email address.' },
+        { status: 500 }
+      )
+    }
     if (existingStudent) {
       return NextResponse.json(
         { error: 'This email is already in use by a student account. Each email can only belong to one role.' },
+        { status: 409 }
+      )
+    }
+
+    // ── Same-role email guard: reject if a profile already uses this email ───
+    // Without it a repeat POST reached createUser and returned the raw Supabase
+    // auth message to the admin. Same reason to bind the error as above: a
+    // discarded read error leaves the row null and the guard passes.
+    const { data: existingProfile, error: existingProfileError } = await guardClient
+      .from('profiles')
+      .select('id')
+      .eq('email', data.email)
+      .maybeSingle()
+    if (existingProfileError) {
+      console.error('Profile email guard error (teacher POST):', existingProfileError)
+      return NextResponse.json(
+        { error: 'Failed to verify the email address.' },
+        { status: 500 }
+      )
+    }
+    if (existingProfile) {
+      return NextResponse.json(
+        { error: 'This email is already in use by an existing account.' },
         { status: 409 }
       )
     }

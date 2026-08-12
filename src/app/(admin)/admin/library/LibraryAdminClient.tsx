@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import DifficultyBars from '@/components/study/DifficultyBars'
 import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal } from 'lucide-react'
@@ -327,6 +328,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           `${failed} of ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} could not be updated and ${failed === 1 ? 'still has' : 'still have'} the old access. The selection is kept so you can try again.`
         )
       } else {
+        toast.success(`Access updated for ${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'}.`)
         setSelectedIds(new Set())
         setBulkRoles('')
       }
@@ -378,6 +380,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           setSelectedIds(prev => new Set(Array.from(prev).filter(id => survivingIds.has(id))))
         }
       } else {
+        toast.success(`${ids.length} ${ids.length === 1 ? 'sheet' : 'sheets'} deleted.`)
         setSelectedIds(new Set())
       }
     } finally {
@@ -397,6 +400,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         setDeleteError(body.error || 'Could not delete the sheet. Please try again.')
+      } else {
+        toast.success('Sheet deleted.')
       }
     } catch {
       // Without this the confirmation modal wedges at "Deleting..." with both of

@@ -349,9 +349,8 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
     })
 
-    setSaving(false)
-
     if (result.error) {
+      setSaving(false)
       setError(result.error)
       console.error('submitReport failed:', result.error)
       return

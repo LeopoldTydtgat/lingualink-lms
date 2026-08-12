@@ -615,7 +615,6 @@ export default function StudentDetailClient({
       router.refresh()
     } catch {
       setArchiveError('Something went wrong. Please try again.')
-    } finally {
       setArchiving(false)
     }
   }

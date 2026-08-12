@@ -230,9 +230,13 @@ export default function EditTeacherClient({ teacher, initialSection }: Props) {
       if (!res.ok) throw new Error(data.error || 'Failed to save changes.')
 
       toast.success('Changes saved!')
+      router.push(`/admin/teachers/${id}`)
+      router.refresh()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Something went wrong.', { duration: 6000 })
-    } finally {
+      // Reset lives here, not in finally: the success path navigates away, and
+      // router.push is not awaited, so a finally would re-enable the button
+      // mid-navigation and allow a second submit.
       setSaving(false)
     }
   }

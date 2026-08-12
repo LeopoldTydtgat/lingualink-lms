@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode, type MouseEvent as ReactMouseEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import {
@@ -133,6 +134,7 @@ function DuplicateMenu({ sheetId }: { sheetId: string }) {
       }
       setBusy(false)
       setOpen(false)
+      toast.success('Sheet duplicated to your library')
       router.refresh()
     } catch {
       setError('Could not duplicate this sheet.')

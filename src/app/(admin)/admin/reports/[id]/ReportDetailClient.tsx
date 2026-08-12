@@ -5,6 +5,7 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
 import {
   CEFR_MAX_VALUE,
   hasUsableLevelData,
@@ -199,7 +200,9 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
         return;
       }
       closeConfirm();
+      toast.success('Report reopened and returned to the teacher.');
       router.push('/admin/reports');
+      router.refresh();
     } catch {
       setReopenError('Network error - the report was not reopened. Please try again.');
     } finally {

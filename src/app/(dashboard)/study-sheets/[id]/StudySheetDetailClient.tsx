@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { ArrowLeft, ExternalLink, Upload, CheckCircle, UserPlus } from 'lucide-react'
 import type { Annotation } from '@/components/pdf/PdfViewer'
 import MaterialFileViewer from '@/components/study/MaterialFileViewer'
@@ -185,6 +186,7 @@ export default function StudySheetDetailClient({
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error ?? 'Upload failed')
       }
+      toast.success(`"${file.name}" uploaded`)
       router.refresh()
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Upload failed')
@@ -211,6 +213,7 @@ export default function StudySheetDetailClient({
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error ?? 'Remove failed')
       }
+      toast.success(`"${att.name}" removed`)
       router.refresh()
     } catch (err) {
       setRemoveError(err instanceof Error ? err.message : 'Remove failed')
