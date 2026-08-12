@@ -64,28 +64,38 @@ export default function Holidays({ profile, availability, onAvailabilityChange }
     const start = `${fromDate}T00:00:00`
     const end = `${toDate}T23:59:59`
 
-    const res = await fetch('/api/teacher/availability', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        teacher_id: profile.id,
-        type: 'holiday',
-        start_at: start,
-        end_at: end,
-        is_available: false,
-      }),
-    })
+    // Both fetch() and the res.json() below can reject: a network fault, or an
+    // ok response carrying a non-JSON body. Either one escaping used to strand
+    // the Add button at "Saving..." with no message and no way back except a
+    // page reload. The finally is correct here, unlike the admin class-detail
+    // handlers: nothing navigates away on success, so the button must always be
+    // re-enabled.
+    try {
+      const res = await fetch('/api/teacher/availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          teacher_id: profile.id,
+          type: 'holiday',
+          start_at: start,
+          end_at: end,
+          is_available: false,
+        }),
+      })
 
-    if (!res.ok) {
-      setError('Failed to save. Please try again.')
-    } else {
-      const data = await res.json()
-      onAvailabilityChange([...availability, data as AvailabilityRecord])
-      setFromDate('')
-      setToDate('')
+      if (!res.ok) {
+        setError('Failed to save. Please try again.')
+      } else {
+        const data = await res.json()
+        onAvailabilityChange([...availability, data as AvailabilityRecord])
+        setFromDate('')
+        setToDate('')
+      }
+    } catch {
+      setError('Could not reach the server. Your holiday period was NOT saved - please try again.')
+    } finally {
+      setIsSaving(false)
     }
-
-    setIsSaving(false)
   }
 
   function deleteHoliday(id: string) {
