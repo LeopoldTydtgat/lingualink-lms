@@ -8,12 +8,15 @@ import { createAdminClient } from '@/lib/supabase/admin'
 
 export async function POST(req: NextRequest) {
   try {
-    // Only announcementId is read from the body — userType/userId are derived from
-    // the verified session, never from the client.
-    const { announcementId } = await req.json()
+    // Authenticate before touching the request body: an anonymous caller is turned
+    // away at the door, with no parsing done on its behalf.
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    // Only announcementId is read from the body — userType/userId are derived from
+    // the verified session, never from the client.
+    const { announcementId } = await req.json()
     if (!announcementId) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
