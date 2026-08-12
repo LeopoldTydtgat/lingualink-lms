@@ -477,15 +477,33 @@ export default function MyClassesClient({
     // Server action handles cancellation + hours refund logic atomically.
     // If >24hrs before class: hours_consumed is decremented (refund).
     // If <24hrs before class: hours_consumed is unchanged (no refund).
-    const result = await cancelLessonAction(lessonId)
+    // cancelLessonAction returns its errors rather than throwing, but the call can
+    // still reject: createClient() runs above every guarded branch in it, and a
+    // network fault or a stale deployment id fails the action request outright.
+    // Without this catch the rejection left cancellingId set, wedging Cancel
+    // disabled with a spinner and no message. The wording is deliberately
+    // uncertain: a rejection means the response never arrived, not that the work
+    // did not happen, so a drop after cancel_lesson_atomic commits leaves the class
+    // cancelled and the hours refunded while the student sees a failure. Claiming
+    // it was not cancelled would be a false statement about a refund. Retrying is
+    // safe either way - a second call returns LESSON_NOT_CANCELLABLE, so no double
+    // refund is possible. The catch returns for the same reason the !result.success
+    // branch does: router.refresh() below must run only on a confirmed success.
+    try {
+      const result = await cancelLessonAction(lessonId)
 
-    if (!result.success) {
-      setCancelError(result.error)
+      if (!result.success) {
+        setCancelError(result.error)
+        setCancellingId(null)
+        return
+      }
+      setShowCancelWarning(null)
+      setCancellingId(null)
+    } catch {
+      setCancelError('Could not reach the server. Your class may or may not have been cancelled - please refresh the page to check before trying again.')
       setCancellingId(null)
       return
     }
-    setShowCancelWarning(null)
-    setCancellingId(null)
     router.refresh()
   }
 
