@@ -222,7 +222,9 @@ export default async function StudentDashboardLayout({
   }
 
   const announcements: AnnouncementItem[] = (allAnnouncements ?? []).filter((a) => {
-    if (dismissedIds.includes(a.id)) return false
+    // A non-dismissable announcement must ignore prior dismissals, so an admin flipping
+    // is_dismissable off forces the banner back for everyone, including past dismissers.
+    if (a.is_dismissable && dismissedIds.includes(a.id)) return false
     const hasStarted = a.start_date == null || Date.parse(a.start_date) <= announcementNowMs
     const hasNotEnded = a.end_date == null || Date.parse(a.end_date) >= announcementNowMs
     if (!hasStarted || !hasNotEnded) return false
