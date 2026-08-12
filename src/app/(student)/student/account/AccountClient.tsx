@@ -192,6 +192,15 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
       if (!res.ok) throw new Error(json.error ?? 'Upload failed')
 
       setPhotoUrl(json.photo_url)
+      // Local state only repaints the card on this page. The header avatar is
+      // server-rendered from students.photo_url in the student layout, so without
+      // this it keeps the old image until a hard navigation. Safe to refresh here:
+      // the route appends a ?t= timestamp to the stored URL, so the string really
+      // changes and the browser does not serve the cached image. Success path only
+      // - refreshing in the catch or a finally would re-render identical data for
+      // an upload that failed. Matches the teacher equivalent at
+      // (dashboard)/account/AccountClient.tsx.
+      router.refresh()
       setPhotoSuccess(true)
       setTimeout(() => setPhotoSuccess(false), 3000)
     } catch {
