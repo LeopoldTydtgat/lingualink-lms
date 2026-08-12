@@ -7,7 +7,7 @@
 // Non-dismissable banners show no close button and cannot be hidden by the user.
 
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Megaphone, X } from 'lucide-react'
 
 export interface AnnouncementItem {
   id: string
@@ -59,20 +59,21 @@ export default function AnnouncementBanner({ announcements }: Props) {
   }
 
   return (
-    <div>
+    <div className="px-6 pt-4 space-y-2" role="status">
       {visible.map((a) => (
         <div
           key={a.id}
-          style={{ backgroundColor: '#1f2937', borderLeft: '4px solid #FF8303' }}
-          className="flex items-start justify-between gap-4 px-6 py-3"
+          style={{ backgroundColor: '#FF8303' }}
+          className="rounded-lg flex items-start justify-between gap-4 px-4 py-3"
         >
+          <Megaphone size={16} className="text-white flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             {a.title && (
               <span className="text-white font-semibold text-sm mr-2">
                 {a.title}
               </span>
             )}
-            <span className="text-white text-sm leading-relaxed">{a.message}</span>
+            <span className="text-white text-sm leading-relaxed break-words whitespace-pre-line">{a.message}</span>
           </div>
 
           {a.is_dismissable && (
