@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -144,6 +144,9 @@ SENTRY_DSN
 - **BUG_LOG.md is retired (archive only) — never read or write it.** The live task list is `C:\Projects\lingualink-lms-meta\TODO.md`: Claude Code MAY edit it when the driving prompt instructs (add or delete single lines only). Nothing else under `lingualink-lms-meta` may be touched.
 - **`DROP FUNCTION` + `CREATE` resets Postgres EXECUTE grants** — any drafted RPC SQL must explicitly re-REVOKE from `anon`/`authenticated` where the old function had revokes.
 - **Join Class button activates 10 minutes before class start** — not 15. The briefs say 15; 10 is authoritative.
+- **Before ANY live DDL that drops a column or table, or REVOKEs: grep origin/main for the identifier, not just dev.** The database is shared between dev and main, so main's deployed code must survive the change. Rule established after a 5 Aug production outage.
+- **A form entered FROM a list or detail page returns to it on success, with a success toast plus router.refresh().** In-place panels, modals and tab-level saves stay put and show the toast only. Corollary: any handler converted from stay-put to navigate must move setSaving(false) out of finally into catch, or the submit button re-enables during the redirect and the double-submit defect comes back.
+- **Student hours and teacher pay are two separate wallets.** Student hours follow whether the class happened; teacher pay follows the report. A missed status correctly does NOT refund the student, because the class happened and only the paperwork was neglected.
 
 ## Output style
 
