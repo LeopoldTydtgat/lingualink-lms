@@ -1,0 +1,82 @@
+name: Database Backup
+
+# Nightly logical backup of the Supabase Postgres database.
+# Supabase Free has no automated backups, so this is the only copy that
+# exists outside the Supabase account itself.
+#
+# Connection note: Supabase direct connections are IPv6-only. GitHub Actions
+# runners are IPv4-only, so SUPABASE_BACKUP_DB_URL must hold the SESSION
+# POOLER string (pooler.supabase.com, port 5432), not the direct one.
+#
+# Privileges are deliberately NOT stripped from the dump. This project relies
+# on column-level GRANT/REVOKE; a dump without them would restore data that
+# looks correct and behaves incorrectly.
+
+on:
+  schedule:
+    # 01:00 UTC = 03:00 SAST
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  dump:
+    name: Dump database to artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # pg_dump major version must match the server (Postgres 17.6).
+      # The runner's default client is older, so install 17 from PGDG.
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      - name: Dump database
+        env:
+          DB_URL: ${{ secrets.SUPABASE_BACKUP_DB_URL }}
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          pg_dump "$DB_URL" \
+            --schema=public \
+            --schema=auth \
+            --schema=storage \
+            --file="lingualink-$STAMP.sql"
+          gzip "lingualink-$STAMP.sql"
+          ls -lh "lingualink-$STAMP.sql.gz"
+
+      # A job that "succeeds" while producing an empty file is how people
+      # discover they have no backup. Fail loudly instead.
+      - name: Sanity check dump size
+        run: |
+          set -euo pipefail
+          FILE="lingualink-${STAMP}.sql.gz"
+          SIZE=$(stat -c%s "$FILE")
+          echo "Compressed dump size: $SIZE bytes"
+          if [ "$SIZE" -lt 100000 ]; then
+            echo "Dump is suspiciously small - failing rather than storing a useless backup."
+            exit 1
+          fi
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ env.STAMP }}
+          path: lingualink-*.sql.gz
+          retention-days: 30
+          if-no-files-found: error
