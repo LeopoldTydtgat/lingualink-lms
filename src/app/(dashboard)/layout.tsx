@@ -58,55 +58,6 @@ export default async function DashboardLayout({
     (profile.role === 'admin' ||
       (Array.isArray(profile.account_types) && profile.account_types.includes('staff')))
 
-  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
-  // pay-withholding model, so a single-row fetch would let it shadow the real next
-  // class. Fetch a few candidates and pick the first that hasn't ended; an
-  // in-progress class (start <= now < end) must still be picked — the panel's
-  // "In class" state depends on it.
-  const { data: candidateLessons } = await supabase
-    .from('lessons')
-    .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
-    .eq('teacher_id', profile?.id)
-    .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
-    .order('scheduled_at', { ascending: true })
-    .limit(5)
-
-  const nextLessonNowMs = Date.now()
-  const lessonRow = (candidateLessons ?? []).find(
-    (l) => nextLessonNowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
-  ) ?? null
-
-  let nextLesson = null
-
-  if (lessonRow) {
-    const { data: studentRow } = await supabase
-      .from('students')
-      .select('full_name')
-      .eq('id', lessonRow.student_id)
-      .maybeSingle()
-
-    nextLesson = {
-      id: lessonRow.id,
-      scheduled_at: lessonRow.scheduled_at,
-      duration_minutes: lessonRow.duration_minutes,
-      teams_join_url: lessonRow.teams_join_url,
-      student_name: studentRow?.full_name ?? 'Student',
-      status: lessonRow.status,
-    }
-  }
-
-  // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
-  const { data: protectedLesson } = await supabase
-    .from('lessons')
-    .select('scheduled_at, duration_minutes')
-    .eq('teacher_id', profile?.id)
-    .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
-    .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
   // ── Billing summary for the current calendar month ────────────────────────
   const now = new Date()
   // Fail-SAFE (not fail-closed): this is the shell layout. A null timezone must
@@ -116,36 +67,165 @@ export default async function DashboardLayout({
   // billing page, not here. Surface the null via log.
   const tz = profile.timezone
 
-  const { data: rateRow, error: rateRowError } = await admin
-    .from('profiles')
-    .select('hourly_rate, currency')
-    .eq('id', user.id)
-    .maybeSingle()
-  if (rateRowError) {
-    console.error('[dashboard/layout] rate lookup failed:', rateRowError)
-  }
+  const [
+    nextLesson,
+    protectedLessonRes,
+    rateRes,
+    billingRes,
+    whatsNewItems,
+    availabilityRes,
+    minHoursRes,
+    unreadRes,
+    dismissalsRes,
+    announcementsRes,
+  ] = await Promise.all([
+    // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+    // pay-withholding model, so a single-row fetch would let it shadow the real next
+    // class. Fetch a few candidates and pick the first that hasn't ended; an
+    // in-progress class (start <= now < end) must still be picked — the panel's
+    // "In class" state depends on it.
+    (async () => {
+      const { data: candidateLessons } = await supabase
+        .from('lessons')
+        .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
+        .eq('teacher_id', profile?.id)
+        .eq('status', 'scheduled')
+        .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+        .order('scheduled_at', { ascending: true })
+        .limit(5)
+
+      const nextLessonNowMs = Date.now()
+      const lessonRow = (candidateLessons ?? []).find(
+        (l) => nextLessonNowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+      ) ?? null
+
+      if (!lessonRow) return null
+
+      const { data: studentRow } = await supabase
+        .from('students')
+        .select('full_name')
+        .eq('id', lessonRow.student_id)
+        .maybeSingle()
+
+      return {
+        id: lessonRow.id,
+        scheduled_at: lessonRow.scheduled_at,
+        duration_minutes: lessonRow.duration_minutes,
+        teams_join_url: lessonRow.teams_join_url,
+        student_name: studentRow?.full_name ?? 'Student',
+        status: lessonRow.status,
+      }
+    })(),
+
+    // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
+    supabase
+      .from('lessons')
+      .select('scheduled_at, duration_minutes')
+      .eq('teacher_id', profile?.id)
+      .eq('status', 'scheduled')
+      .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
+      .order('scheduled_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+
+    admin
+      .from('profiles')
+      .select('hourly_rate, currency')
+      .eq('id', user.id)
+      .maybeSingle(),
+
+    tz
+      ? (async () => {
+          const { startUtc, endUtc } = getMonthRangeInTz(now, tz)
+
+          const { data: monthLessons } = await supabase
+            .from('lessons')
+            .select('id, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, scheduled_at')
+            .eq('teacher_id', profile.id)
+            .gte('scheduled_at', startUtc)
+            .lt('scheduled_at', endUtc)
+            // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
+            .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
+
+          // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
+          // `hourlyRate` is the teacher's live rate, used only as the fallback. Applies to
+          // both settled amounts and projected amounts (scheduled lessons have snapshots too).
+          const rateMap = await fetchLessonRateMap(admin, (monthLessons ?? []).map(l => l.id))
+
+          return { monthLessons, rateMap }
+        })()
+      : Promise.resolve(null),
+
+    // What's New feed — teacher-scoped, uses the same anon server client the
+    // students/lessons lookups above use. Sole consumer is the RightPanel card.
+    fetchWhatsNew(supabase, profile.id),
+
+    // ── Availability ring: weekly offered hours vs the admin minimum target ────
+    // Weekly offered minutes from committed general-availability rows (anon client,
+    // RLS-scoped to this teacher). Mirrors the schedule page's per-row 30-min model.
+    supabase
+      .from('availability')
+      .select('id, type')
+      .eq('teacher_id', profile.id)
+      .eq('type', 'general'),
+
+    // Minimum-hours target from settings (service-role admin client). Fail SAFE:
+    // any missing/non-numeric value degrades to null so the card renders the
+    // neutral no-target state — never invent a target.
+    admin
+      .from('settings')
+      .select('value')
+      .eq('key', 'min_available_hours')
+      .maybeSingle(),
+
+    supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('receiver_id', user.id)
+      .is('read_at', null),
+
+    // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
+    // route writes and what its RLS policy checks) and is unique per user, so no
+    // user_type filter belongs here. A failed read logs and leaves dismissedIds
+    // empty — a dismissed banner reappearing beats blanking the shell.
+    supabase
+      .from('announcement_dismissals')
+      .select('announcement_id')
+      .eq('user_id', user.id),
+
+    // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+    // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+    // The active window is applied in JS below rather than as chained PostgREST
+    // .or() filters: it is a plain instant comparison on stored UTC values (no local
+    // date construction), the table is single-digit rows so fetching out-of-window
+    // rows costs nothing, and an unparseable date yields NaN, which fails both
+    // comparisons and hides the row. Fail SAFE, like the billing widget above — a
+    // failed read logs and degrades to "no banner", never blanks the portal shell.
+    supabase
+      .from('announcements')
+      .select('id, title, message, is_dismissable, target_audience, target_id, start_date, end_date')
+      .eq('is_active', true),
+  ])
+
+  if (protectedLessonRes.error) console.error('[dashboard/layout] protected-lesson lookup failed:', protectedLessonRes.error)
+  if (rateRes.error) console.error('[dashboard/layout] rate lookup failed:', rateRes.error)
+  if (availabilityRes.error) console.error('[dashboard/layout] availability lookup failed:', availabilityRes.error)
+  if (minHoursRes.error) console.error('[dashboard/layout] settings lookup failed:', minHoursRes.error)
+  if (unreadRes.error) console.error('[dashboard/layout] unread-messages lookup failed:', unreadRes.error)
+  if (dismissalsRes.error) console.error('[dashboard/layout] announcement_dismissals lookup failed:', dismissalsRes.error)
+  if (announcementsRes.error) console.error('[dashboard/layout] announcements lookup failed:', announcementsRes.error)
+
+  const protectedLesson = protectedLessonRes.data
+
+  const rateRow = rateRes.data
   const hourlyRate = rateRow?.hourly_rate ?? 0
   const currency = rateRow?.currency ?? null
 
   let currentAmount = 0
   let projectedAmount = 0
 
-  if (tz) {
-    const { startUtc, endUtc } = getMonthRangeInTz(now, tz)
-
-    const { data: monthLessons } = await supabase
-      .from('lessons')
-      .select('id, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, scheduled_at')
-      .eq('teacher_id', profile.id)
-      .gte('scheduled_at', startUtc)
-      .lt('scheduled_at', endUtc)
-      // Bespoke membership: active+cancelled PLUS completed and student_no_show, minus teacher_no_show. Intentionally inline, not ACTIVE_AND_CANCELLED_STATUSES — see billability.ts.
-      .in('status', ['completed', 'student_no_show', 'cancelled', 'cancelled_by_student', 'cancelled_by_teacher', 'scheduled'])
-
-    // Per-lesson pay rate from lesson_rate_snapshots (admin client — deny-all RLS).
-    // `hourlyRate` is the teacher's live rate, used only as the fallback. Applies to
-    // both settled amounts and projected amounts (scheduled lessons have snapshots too).
-    const rateMap = await fetchLessonRateMap(admin, (monthLessons ?? []).map(l => l.id))
+  if (billingRes) {
+    const { monthLessons, rateMap } = billingRes
 
     const nowMs = now.getTime()
 
@@ -194,51 +274,16 @@ export default async function DashboardLayout({
 
   const billingData = { currentAmount, projectedAmount }
 
-  // What's New feed — teacher-scoped, uses the same anon server client the
-  // students/lessons lookups above use. Sole consumer is the RightPanel card.
-  const whatsNewItems = await fetchWhatsNew(supabase, profile.id)
-
-  // ── Availability ring: weekly offered hours vs the admin minimum target ────
-  // Weekly offered minutes from committed general-availability rows (anon client,
-  // RLS-scoped to this teacher). Mirrors the schedule page's per-row 30-min model.
-  const { data: availabilityRows } = await supabase
-    .from('availability')
-    .select('id, type')
-    .eq('teacher_id', profile.id)
-    .eq('type', 'general')
+  const availabilityRows = availabilityRes.data
   const offeredMinutes = weeklyGeneralMinutes(availabilityRows ?? [])
 
-  // Minimum-hours target from settings (service-role admin client). Fail SAFE:
-  // any missing/non-numeric value degrades to null so the card renders the
-  // neutral no-target state — never invent a target.
-  const { data: minHoursRow, error: minHoursRowError } = await admin
-    .from('settings')
-    .select('value')
-    .eq('key', 'min_available_hours')
-    .maybeSingle()
-  if (minHoursRowError) {
-    console.error('[dashboard/layout] settings lookup failed:', minHoursRowError)
-  }
+  const minHoursRow = minHoursRes.data
   const parsedMinHours = Number(minHoursRow?.value)
   const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
 
-  const { count: unreadCount } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('receiver_id', user.id)
-    .is('read_at', null)
+  const unreadCount = unreadRes.count
 
-  // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
-  // route writes and what its RLS policy checks) and is unique per user, so no
-  // user_type filter belongs here. A failed read logs and leaves dismissedIds
-  // empty — a dismissed banner reappearing beats blanking the shell.
-  const { data: dismissals, error: dismissalsError } = await supabase
-    .from('announcement_dismissals')
-    .select('announcement_id')
-    .eq('user_id', user.id)
-  if (dismissalsError) {
-    console.error('[dashboard/layout] announcement_dismissals lookup failed:', dismissalsError)
-  }
+  const dismissals = dismissalsRes.data
 
   const dismissedIds = (dismissals ?? []).map(
     (d: { announcement_id: string }) => d.announcement_id
@@ -246,21 +291,7 @@ export default async function DashboardLayout({
 
   const announcementNowMs = Date.now()
 
-  // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
-  // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
-  // The active window is applied in JS below rather than as chained PostgREST
-  // .or() filters: it is a plain instant comparison on stored UTC values (no local
-  // date construction), the table is single-digit rows so fetching out-of-window
-  // rows costs nothing, and an unparseable date yields NaN, which fails both
-  // comparisons and hides the row. Fail SAFE, like the billing widget above — a
-  // failed read logs and degrades to "no banner", never blanks the portal shell.
-  const { data: allAnnouncements, error: announcementsError } = await supabase
-    .from('announcements')
-    .select('id, title, message, is_dismissable, target_audience, target_id, start_date, end_date')
-    .eq('is_active', true)
-  if (announcementsError) {
-    console.error('[dashboard/layout] announcements lookup failed:', announcementsError)
-  }
+  const allAnnouncements = announcementsRes.data
 
   const announcements: AnnouncementItem[] = (allAnnouncements ?? []).filter((a) => {
     // A non-dismissable announcement must ignore prior dismissals, so an admin flipping
