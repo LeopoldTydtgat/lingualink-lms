@@ -228,11 +228,13 @@ export default async function DashboardLayout({
     .eq('receiver_id', user.id)
     .is('read_at', null)
 
+  // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
+  // route writes and what its RLS policy checks) and is unique per user, so no
+  // user_type filter belongs here.
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
     .eq('user_id', user.id)
-    .eq('user_type', 'teacher')
 
   const dismissedIds = (dismissals ?? []).map(
     (d: { announcement_id: string }) => d.announcement_id
@@ -281,11 +283,7 @@ export default async function DashboardLayout({
           />
           <div className="flex flex-1 overflow-hidden">
             <main className="flex-1 overflow-y-auto bg-gray-50 thin-scroll">
-              <AnnouncementBanner
-                announcements={announcements}
-                userType="teacher"
-                userId={user.id}
-              />
+              <AnnouncementBanner announcements={announcements} />
               <div className="p-6">
                 {children}
               </div>

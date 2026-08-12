@@ -18,11 +18,9 @@ export interface AnnouncementItem {
 
 interface Props {
   announcements: AnnouncementItem[]
-  userType: 'teacher' | 'student'
-  userId: string
 }
 
-export default function AnnouncementBanner({ announcements, userType, userId }: Props) {
+export default function AnnouncementBanner({ announcements }: Props) {
   // Track which banners the user has dismissed this session
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
 
@@ -33,12 +31,31 @@ export default function AnnouncementBanner({ announcements, userType, userId }: 
     // Remove from UI immediately — optimistic update
     setDismissed((prev) => new Set([...prev, id]))
 
-    // Persist dismissal so it doesn't reappear on next page load
-    await fetch('/api/announcements/dismiss', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ announcementId: id, userType, userId }),
-    })
+    // Fail-safe revert: if the write never lands, the banner must come back rather
+    // than stay hidden with nothing recorded (it would reappear on reload anyway).
+    const revert = () =>
+      setDismissed((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+
+    // Persist dismissal so it doesn't reappear on next page load.
+    // The route derives user identity and type from the session — body carries the id only.
+    try {
+      const res = await fetch('/api/announcements/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ announcementId: id }),
+      })
+      if (!res.ok) {
+        console.error('Announcement dismissal failed:', res.status)
+        revert()
+      }
+    } catch (e) {
+      console.error('Announcement dismissal error:', e)
+      revert()
+    }
   }
 
   return (

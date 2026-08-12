@@ -186,11 +186,13 @@ export default async function StudentDashboardLayout({
   // user.id (auth uid) scopes the dismissals — see studentWhatsNew.ts.
   const whatsNewItems = await fetchStudentWhatsNew(supabase, student.id, user.id)
 
+  // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
+  // route writes and what its RLS policy checks), never the students-table PK.
+  // user_id alone is unique per user, so no user_type filter belongs here.
   const { data: dismissals } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
-    .eq('user_id', student.id)
-    .eq('user_type', 'student')
+    .eq('user_id', user.id)
 
   const dismissedIds = (dismissals ?? []).map(
     (d: { announcement_id: string }) => d.announcement_id
@@ -238,11 +240,7 @@ export default async function StudentDashboardLayout({
           />
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
             <main className="thin-scroll" style={{ flex: 1, overflowY: 'auto', backgroundColor: '#f9fafb' }}>
-              <AnnouncementBanner
-                announcements={announcements}
-                userType="student"
-                userId={student.id}
-              />
+              <AnnouncementBanner announcements={announcements} />
               <div style={{ padding: '32px' }}>
                 {children}
               </div>
