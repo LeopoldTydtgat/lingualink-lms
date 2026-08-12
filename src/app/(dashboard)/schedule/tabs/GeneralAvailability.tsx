@@ -271,6 +271,15 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           }
         })
 
+        // The .catch on each request is load-bearing, not defensive noise. fetch()
+        // rejects on a network fault and .then() does not handle a rejection, so
+        // without it the rejection escapes Promise.all and the whole handler,
+        // leaving the optimistic temp rows on screen for slots that were never
+        // written and showing no error. Routing a rejection into the same
+        // { ok: false } shape the non-ok path returns sends it through the rollback
+        // below. Per-request rather than one try/catch around the branch: a single
+        // rejection says nothing about the other requests, and a branch-level catch
+        // would roll back writes that actually succeeded.
         const results = await Promise.all(
           inserts.map(record =>
             fetch('/api/teacher/availability', {
@@ -281,6 +290,9 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
               if (r.ok) return { ok: true, data: await r.json().catch(() => null) }
               const body = await r.json().catch(() => ({}))
               console.error('[GeneralAvailability] save failed:', body)
+              return { ok: false, data: null }
+            }).catch(err => {
+              console.error('[GeneralAvailability] save request failed:', err)
               return { ok: false, data: null }
             })
           )
@@ -328,12 +340,19 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         onAvailabilityChange(prev => prev.filter(a => !idSet.has(a.id)))
         setDragPreview(new Set())
 
+        // Same reason as the insert branch, and this direction is the worse one: an
+        // escaping rejection leaves the rows removed from local state while they
+        // still exist in the database, so the teacher sees an erased slot that a
+        // student can still book. The catch sends it to the restore below.
         const results = await Promise.all(
           idsToDelete.map(id =>
             fetch(`/api/teacher/availability/${id}`, { method: 'DELETE' }).then(async r => {
               if (r.ok || r.status === 404) return true
               const body = await r.json().catch(() => ({}))
               console.error('[GeneralAvailability] delete failed:', body)
+              return false
+            }).catch(err => {
+              console.error('[GeneralAvailability] delete request failed:', err)
               return false
             })
           )
