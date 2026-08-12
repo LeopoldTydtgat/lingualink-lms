@@ -188,31 +188,44 @@ export default async function StudentDashboardLayout({
 
   // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
   // route writes and what its RLS policy checks), never the students-table PK.
-  // user_id alone is unique per user, so no user_type filter belongs here.
-  const { data: dismissals } = await supabase
+  // user_id alone is unique per user, so no user_type filter belongs here. A failed
+  // read logs and leaves dismissedIds empty — a dismissed banner reappearing beats
+  // blanking the portal shell.
+  const { data: dismissals, error: dismissalsError } = await supabase
     .from('announcement_dismissals')
     .select('announcement_id')
     .eq('user_id', user.id)
+  if (dismissalsError) {
+    console.error('[student/layout] announcement_dismissals lookup failed:', dismissalsError)
+  }
 
   const dismissedIds = (dismissals ?? []).map(
     (d: { announcement_id: string }) => d.announcement_id
   )
 
-  const announcementNowIso = new Date().toISOString()
+  const announcementNowMs = Date.now()
 
   // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
   // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
-  // The two .or() filters AND together in PostgREST, so a scheduled row stays
-  // hidden until its start and an expired row drops out after its end.
-  const { data: allAnnouncements } = await supabase
+  // The active window is applied in JS below rather than as chained PostgREST
+  // .or() filters: it is a plain instant comparison on stored UTC values (no local
+  // date construction), the table is single-digit rows so fetching out-of-window
+  // rows costs nothing, and an unparseable date yields NaN, which fails both
+  // comparisons and hides the row. Fail SAFE — a failed read logs and degrades to
+  // "no banner", never blanks the portal shell.
+  const { data: allAnnouncements, error: announcementsError } = await supabase
     .from('announcements')
-    .select('id, title, message, is_dismissable, target_audience, target_id')
+    .select('id, title, message, is_dismissable, target_audience, target_id, start_date, end_date')
     .eq('is_active', true)
-    .or(`start_date.is.null,start_date.lte.${announcementNowIso}`)
-    .or(`end_date.is.null,end_date.gte.${announcementNowIso}`)
+  if (announcementsError) {
+    console.error('[student/layout] announcements lookup failed:', announcementsError)
+  }
 
   const announcements: AnnouncementItem[] = (allAnnouncements ?? []).filter((a) => {
     if (dismissedIds.includes(a.id)) return false
+    const hasStarted = a.start_date == null || Date.parse(a.start_date) <= announcementNowMs
+    const hasNotEnded = a.end_date == null || Date.parse(a.end_date) >= announcementNowMs
+    if (!hasStarted || !hasNotEnded) return false
     if (a.target_audience === 'everyone') return true
     if (a.target_audience === 'all_students') return true
     if (a.target_audience === 'specific_student' && a.target_id === student.id) return true
