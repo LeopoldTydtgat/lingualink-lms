@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
-import { formatInstantInTz } from '@/lib/exportTime'
+import { formatInstantInTz, formatDateInTz } from '@/lib/exportTime'
 import { Receipt, CheckCircle2, Info, ChevronDown } from 'lucide-react'
 
 interface Profile {
@@ -721,7 +721,12 @@ export default function BillingClient({
                             )}
                             {invoice.paid_at && (
                               <span className="text-xs text-gray-400">
-                                Paid {new Date(invoice.paid_at).toLocaleDateString('en-GB')}
+                                {/* paid_at is an instant, so a browser-local date render drifts across the
+                                    day boundary for a viewer in a different zone. viewerTz is the LOGGED-IN user's own account
+                                    timezone, not the timezone of the teacher on this row - this block is the
+                                    admin view and lists every teacher. Viewer-clock is the right choice for a
+                                    date-of-instant, and it matches how the rest of this page renders instants. */}
+                                Paid {formatDateInTz(invoice.paid_at, viewerTz)}
                               </span>
                             )}
                           </div>
