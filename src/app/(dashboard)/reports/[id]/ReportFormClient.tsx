@@ -339,20 +339,38 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
     setSaving(true)
     setError(null)
 
-    const result = await submitReport(report.id, {
-      did_class_happen: didClassHappen,
-      no_show_type: didClassHappen ? null : (noShowType as 'student' | 'teacher'),
-      feedback_text: didClassHappen ? feedbackText : null,
-      additional_details: additionalDetails || null,
-      level_data: didClassHappen ? levelData : null,
-      student_confirmed: didClassHappen ? studentConfirmed : null,
-      impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
-    })
+    // Both the network call and the action itself can reject: submitReport returns
+    // its errors rather than throwing, but createClient() runs above every guarded
+    // branch in it, and a network fault or a stale deployment id fails the action
+    // request outright. Without this catch the rejection left `saving` true forever,
+    // wedging Submit Report at "Saving..." with no message, on a report the teacher
+    // has 12 hours to file. No finally on purpose: the success path navigates via
+    // router.push, so a finally would re-enable the button mid-navigation and admit
+    // a second submit of a report the RPC has already completed. router.push and
+    // router.refresh stay outside the try so a navigation throw cannot be reported
+    // as a failed save. The catch returns for the same reason the result.error branch
+    // does: falling through would navigate the teacher off the form via router.push
+    // and discard the recap they just typed, right after telling them it was not saved.
+    try {
+      const result = await submitReport(report.id, {
+        did_class_happen: didClassHappen,
+        no_show_type: didClassHappen ? null : (noShowType as 'student' | 'teacher'),
+        feedback_text: didClassHappen ? feedbackText : null,
+        additional_details: additionalDetails || null,
+        level_data: didClassHappen ? levelData : null,
+        student_confirmed: didClassHappen ? studentConfirmed : null,
+        impersonation_note: didClassHappen && !studentConfirmed ? impersonationNote : null,
+      })
 
-    if (result.error) {
+      if (result.error) {
+        setSaving(false)
+        setError(result.error)
+        console.error('submitReport failed:', result.error)
+        return
+      }
+    } catch {
       setSaving(false)
-      setError(result.error)
-      console.error('submitReport failed:', result.error)
+      setError('Could not reach the server. Your report was NOT saved - please try again.')
       return
     }
 
