@@ -271,6 +271,15 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
           }
         })
 
+        // The .catch on each request is load-bearing, not defensive noise. fetch()
+        // rejects on a network fault and .then() does not handle a rejection, so
+        // without it the rejection escapes Promise.all and the whole handler,
+        // leaving the optimistic temp rows on screen for slots that were never
+        // written and showing no error. Routing a rejection into the same
+        // { ok: false } shape the non-ok path returns sends it through the rollback
+        // below. Per-request rather than one try/catch around the branch: a single
+        // rejection says nothing about the other requests, and a branch-level catch
+        // would roll back writes that actually succeeded.
         const results = await Promise.all(
           inserts.map(record =>
             fetch('/api/teacher/availability', {
@@ -281,6 +290,9 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
               if (r.ok) return { ok: true, data: await r.json().catch(() => null) }
               const body = await r.json().catch(() => ({}))
               console.error('[GeneralAvailability] save failed:', body)
+              return { ok: false, data: null }
+            }).catch(err => {
+              console.error('[GeneralAvailability] save request failed:', err)
               return { ok: false, data: null }
             })
           )
@@ -296,9 +308,27 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
             ...newRecords,
           ])
         } else {
-          setSaveError('Failed to save. Please try again.')
-          // Strip only our temps — leave everything else (including concurrent drags) intact.
-          onAvailabilityChange(prev => prev.filter(a => !tempIds.has(a.id)))
+          setSaveError('Some slots could not be saved. Please check the grid and try again.')
+          // Partial success is the normal case here, since each slot is its own
+          // request. Dropping every temp would hide slots that really were written:
+          // the teacher stops seeing availability that students can still book
+          // against, until a refresh. So strip our temps and re-add the canonical
+          // rows the API returned for the ones that succeeded. Deliberately NOT
+          // keeping the succeeded temps instead - they carry `temp-` ids, and the
+          // delete branch filters those out when resolving ids, so such a slot would
+          // render as available but could never be removed. Only our own tempIds are
+          // touched, so concurrent drags and other tabs are preserved. The delete
+          // branch's restore-everything behaviour is the opposite on purpose: showing
+          // a slot that is already gone is harmless, hiding one that still exists is
+          // not.
+          const savedRecords = results
+            .filter(r => r.ok)
+            .map(r => r.data)
+            .filter(Boolean) as AvailabilityRecord[]
+          onAvailabilityChange(prev => [
+            ...prev.filter(a => !tempIds.has(a.id)),
+            ...savedRecords,
+          ])
         }
       } else {
         const idsToDelete = slots
@@ -328,12 +358,19 @@ export default function GeneralAvailability({ profile, availability, onAvailabil
         onAvailabilityChange(prev => prev.filter(a => !idSet.has(a.id)))
         setDragPreview(new Set())
 
+        // Same reason as the insert branch, and this direction is the worse one: an
+        // escaping rejection leaves the rows removed from local state while they
+        // still exist in the database, so the teacher sees an erased slot that a
+        // student can still book. The catch sends it to the restore below.
         const results = await Promise.all(
           idsToDelete.map(id =>
             fetch(`/api/teacher/availability/${id}`, { method: 'DELETE' }).then(async r => {
               if (r.ok || r.status === 404) return true
               const body = await r.json().catch(() => ({}))
               console.error('[GeneralAvailability] delete failed:', body)
+              return false
+            }).catch(err => {
+              console.error('[GeneralAvailability] delete request failed:', err)
               return false
             })
           )

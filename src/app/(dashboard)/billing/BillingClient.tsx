@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
-import { formatInstantInTz } from '@/lib/exportTime'
+import { formatInstantInTz, formatDateInTz } from '@/lib/exportTime'
 import { Receipt, CheckCircle2, Info, ChevronDown } from 'lucide-react'
 
 interface Profile {
@@ -113,6 +113,7 @@ export default function BillingClient({
   initialLessonsByMonth,
   initialTemplateUrl,
   currentMonthDate,
+  isUploadWindow,
 }: {
   profile: Profile
   billingInfo: BillingInfoDisplay | null
@@ -120,13 +121,18 @@ export default function BillingClient({
   initialLessonsByMonth: Record<string, Lesson[]>
   initialTemplateUrl: string | null
   currentMonthDate: string
+  isUploadWindow: boolean
 }) {
   const supabase = createClient()
   const router = useRouter()
   const isAdmin = profile.role === 'admin'
 
-  const now = new Date()
-  const isUploadWindow = now.getDate() >= 1 && now.getDate() <= 10
+  // isUploadWindow arrives as a server prop, computed in the teacher's account
+  // timezone in page.tsx. Deliberately not computed here: `new Date()` at render
+  // scope reads the browser clock, so the server and client could disagree across
+  // a midnight boundary and produce different element trees at three call sites.
+  // The old test also carried a `>= 1` lower bound that no calendar day can fail
+  // and that the upload route never checked.
 
   const [activeView, setActiveView] = useState<'billing' | 'billingInfo' | 'admin'>('billing')
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null)
@@ -214,20 +220,31 @@ export default function BillingClient({
     formData.append('file', file)
     formData.append('invoiceId', targetInvoice.id)
 
-    const res = await fetch('/api/teacher/invoice/upload', { method: 'POST', body: formData })
+    // fetch() rejects on a network fault and nothing used to catch it, which left
+    // `uploading` true forever: isThisUploading then wedged this invoice's
+    // Upload/Replace button at "Uploading..." with no message and no way back
+    // except a reload. res.json() below is already guarded by its own .catch, so
+    // fetch is the only throw source here. The finally is correct: router.refresh()
+    // is a soft refresh that does not unmount, and the button already re-enabled
+    // on the success path before this change.
+    try {
+      const res = await fetch('/api/teacher/invoice/upload', { method: 'POST', body: formData })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      setUploadError(body.error || 'Upload failed. Please try again.')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setUploadError(body.error || 'Upload failed. Please try again.')
+        return
+      }
+
+      setUploadSuccessId(targetInvoice.id)
+      setTimeout(() => setUploadSuccessId(null), 4000)
+
+      router.refresh()
+    } catch {
+      setUploadError('Could not reach the server. Your invoice was NOT uploaded - please try again.')
+    } finally {
       setUploading(false)
-      return
     }
-
-    setUploadSuccessId(targetInvoice.id)
-    setTimeout(() => setUploadSuccessId(null), 4000)
-
-    setUploading(false)
-    router.refresh()
   }
 
   const handleViewInvoice = async (invoiceId: string) => {
@@ -710,7 +727,12 @@ export default function BillingClient({
                             )}
                             {invoice.paid_at && (
                               <span className="text-xs text-gray-400">
-                                Paid {new Date(invoice.paid_at).toLocaleDateString('en-GB')}
+                                {/* paid_at is an instant, so a browser-local date render drifts across the
+                                    day boundary for a viewer in a different zone. viewerTz is the LOGGED-IN user's own account
+                                    timezone, not the timezone of the teacher on this row - this block is the
+                                    admin view and lists every teacher. Viewer-clock is the right choice for a
+                                    date-of-instant, and it matches how the rest of this page renders instants. */}
+                                Paid {formatDateInTz(invoice.paid_at, viewerTz)}
                               </span>
                             )}
                           </div>

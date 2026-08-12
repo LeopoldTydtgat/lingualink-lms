@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getDayKeyInTz, getMonthKeyInTz } from '@/lib/billing/monthRange'
 
 const PDF_MAGIC = '%PDF-'
 const MAX_BYTES = 5 * 1024 * 1024
@@ -53,19 +54,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  // The upload window is measured in the teacher's own account timezone, the
+  // same clock billing/page.tsx already uses for the billing month key. UTC was
+  // two hours behind every current teacher, so the window really closed at 02:00
+  // on the 11th local and the month rolled over two hours early. Fails closed
+  // when the timezone is unset, matching billing/page.tsx, which refuses to
+  // render the billing page at all in that state.
+  const { data: teacherProfile } = await admin
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .maybeSingle()
+  if (!teacherProfile?.timezone) {
+    return NextResponse.json(
+      { error: 'Your timezone is not set, so the upload window cannot be checked. Please set it in My Account.' },
+      { status: 403 }
+    )
+  }
+  const tz = teacherProfile.timezone
+
   // Upload window: 1st–10th of the month following the billing period.
   const now = new Date()
-  if (now.getUTCDate() > 10) {
+  const dayOfMonth = Number(getDayKeyInTz(now, tz).slice(8, 10))
+  if (dayOfMonth > 10) {
     return NextResponse.json(
       { error: 'Invoice upload is only allowed between the 1st and 10th of the month following the billing period.' },
       { status: 403 }
     )
   }
 
-  const [bYear, bMonth] = (invoice.billing_month as string).split('-').map(Number)
-  const billingMonthStart = Date.UTC(bYear, bMonth - 1, 1)
-  const currentMonthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
-  if (billingMonthStart >= currentMonthStart) {
+  // Both sides compared as 'YYYY-MM-01' strings. billing_month is already stored
+  // in that form, and getMonthKeyInTz returns it, so a lexicographic compare is
+  // exact - no Date.UTC round trip and no chance of the two sides being built in
+  // different zones.
+  const currentMonthKey = getMonthKeyInTz(now, tz)
+  if ((invoice.billing_month as string) >= currentMonthKey) {
     return NextResponse.json(
       { error: 'You can only upload invoices for past months.' },
       { status: 403 }
