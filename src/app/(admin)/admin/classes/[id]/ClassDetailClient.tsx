@@ -491,11 +491,23 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
               </div>
             )}
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              {/* Disabled mid-flight so the modal cannot be closed while the PATCH is in
+                  the air - closing it would unmount the cancelError banner and swallow the
+                  failure message. Safe to lock: every handleCancel path that leaves this
+                  modal open resets `cancelling` (the non-ok branch and the catch), and the
+                  only path that does not reset navigates away, so the modal always becomes
+                  escapable again. Deliberately NOT paired with a setCancelling(false) in
+                  openCancelModal: with this disabled in place the modal cannot be reopened
+                  while a request is live, so such a reset would be dead code, and in the
+                  one case it could fire (a request that never settles) it would re-enable
+                  the confirm button and admit a second cancel PATCH carrying refund_hours.
+                  Mirrors the delete modal's Go Back. */}
               <button
                 onClick={() => setShowCancelModal(false)}
+                disabled={cancelling}
                 style={{
                   padding: '9px 18px', borderRadius: '7px', border: '1px solid #D1D5DB',
-                  backgroundColor: 'white', fontSize: '13px', cursor: 'pointer', color: '#374151',
+                  backgroundColor: 'white', fontSize: '13px', cursor: cancelling ? 'not-allowed' : 'pointer', color: '#374151',
                 }}
               >
                 Go Back
