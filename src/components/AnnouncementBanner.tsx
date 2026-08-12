@@ -70,7 +70,7 @@ export default function AnnouncementBanner({ announcements }: Props) {
           <div className="flex-1 min-w-0">
             {a.title && (
               <span className="text-white font-semibold text-sm mr-2">
-                {a.title}
+                {a.title}:
               </span>
             )}
             <span className="text-white text-sm leading-relaxed break-words whitespace-pre-line">{a.message}</span>
