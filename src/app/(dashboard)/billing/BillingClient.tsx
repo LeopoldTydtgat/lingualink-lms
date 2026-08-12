@@ -214,20 +214,31 @@ export default function BillingClient({
     formData.append('file', file)
     formData.append('invoiceId', targetInvoice.id)
 
-    const res = await fetch('/api/teacher/invoice/upload', { method: 'POST', body: formData })
+    // fetch() rejects on a network fault and nothing used to catch it, which left
+    // `uploading` true forever: isThisUploading then wedged this invoice's
+    // Upload/Replace button at "Uploading..." with no message and no way back
+    // except a reload. res.json() below is already guarded by its own .catch, so
+    // fetch is the only throw source here. The finally is correct: router.refresh()
+    // is a soft refresh that does not unmount, and the button already re-enabled
+    // on the success path before this change.
+    try {
+      const res = await fetch('/api/teacher/invoice/upload', { method: 'POST', body: formData })
 
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      setUploadError(body.error || 'Upload failed. Please try again.')
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setUploadError(body.error || 'Upload failed. Please try again.')
+        return
+      }
+
+      setUploadSuccessId(targetInvoice.id)
+      setTimeout(() => setUploadSuccessId(null), 4000)
+
+      router.refresh()
+    } catch {
+      setUploadError('Could not reach the server. Your invoice was NOT uploaded - please try again.')
+    } finally {
       setUploading(false)
-      return
     }
-
-    setUploadSuccessId(targetInvoice.id)
-    setTimeout(() => setUploadSuccessId(null), 4000)
-
-    setUploading(false)
-    router.refresh()
   }
 
   const handleViewInvoice = async (invoiceId: string) => {
