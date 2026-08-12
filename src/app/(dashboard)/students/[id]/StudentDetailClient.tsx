@@ -171,6 +171,12 @@ export default function StudentDetailClient({
     if (!student) return
     setNotesError('')
     setIsSavingNotes(true)
+    // The finally already guaranteed the button recovers, but without a catch a
+    // rejection was swallowed silently: fetch() rejects on a network fault, and the
+    // res.json() below is unguarded, so an ok response with a non-JSON body rejects
+    // too. Either one left the editor open with the typed text and NO message, so a
+    // save that never happened looked the same as one that did. The text is still in
+    // the box either way, which is why this shows an error rather than restoring state.
     try {
       const res = await fetch(`/api/teacher/students/${student.id}/notes`, {
         method: 'PATCH',
@@ -184,6 +190,8 @@ export default function StudentDetailClient({
       const data = await res.json()
       setSavedNotes(data.teacher_notes ?? notes)
       setEditingNotes(false)
+    } catch {
+      setNotesError('Could not reach the server. Your notes were NOT saved - please try again.')
     } finally {
       setIsSavingNotes(false)
     }
