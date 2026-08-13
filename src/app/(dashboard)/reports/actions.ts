@@ -256,68 +256,81 @@ export async function submitReport(reportId: string, payload: SubmitReportInput)
       }[]
 
       if (pending.length > 0) {
-        const { data: sheetRows } = await adminClient
+        // The titles are the whole point of this email, so a failed read must not
+        // be papered over with an empty list. Nothing is sent and nothing is
+        // stamped: the rows stay unnotified and a later resubmit of this report
+        // retries the announcement, exactly like the rate-limit skip below. The
+        // student sees the work in their Study tab either way - this email is a
+        // nudge, not the delivery.
+        const { data: sheetRows, error: sheetError } = await adminClient
           .from('study_sheets')
           .select('id, title')
           .in('id', pending.map(r => r.study_sheet_id))
 
-        const titles = ((sheetRows ?? []) as { id: string; title: string }[]).map(r => r.title)
+        if (sheetError) {
+          console.error(
+            `[reports/actions] study sheet titles read failed (report ${reportId}); homework notification skipped:`,
+            sheetError
+          )
+        } else {
+          const titles = ((sheetRows ?? []) as { id: string; title: string }[]).map(r => r.title)
 
-        // Every assignment on one lesson belongs to that lesson's student, so
-        // the first row names the recipient.
-        const { data: student } = await adminClient
-          .from('students')
-          .select('email, full_name')
-          .eq('id', pending[0].student_id)
-          .maybeSingle()
-
-        if (student?.email) {
-          const { data: teacherProfile } = await adminClient
-            .from('profiles')
-            .select('full_name')
-            .eq('id', report.teacher_id)
+          // Every assignment on one lesson belongs to that lesson's student, so
+          // the first row names the recipient.
+          const { data: student } = await adminClient
+            .from('students')
+            .select('email, full_name')
+            .eq('id', pending[0].student_id)
             .maybeSingle()
 
-          const limit = await checkEmailDispatchLimit(user.id)
-          if (limit.blocked) {
-            // Nothing is stamped, so the rows stay unnotified and a later
-            // resubmit of this report retries the announcement.
-            console.warn(
-              `[reports/actions] email dispatch limit reached for user ${user.id}; report ${reportId} submitted, homework notification skipped`
-            )
-          } else {
-            const subject = 'Lingualink Online - Your teacher has assigned new exercises'
-            await resend.emails.send({
-              from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-              to: student.email,
-              subject,
-              html: buildEmailTemplate({
-                recipientName: student.full_name,
-                recipientFallback: 'Student',
-                subject,
-                bodyHtml: studentHomeworkAssignedEmailContent(
-                  teacherProfile?.full_name ?? 'Your teacher',
-                  titles
-                ),
-                contactEmail: 'support@lingualinkonline.com',
-              }),
-            })
+          if (student?.email) {
+            const { data: teacherProfile } = await adminClient
+              .from('profiles')
+              .select('full_name')
+              .eq('id', report.teacher_id)
+              .maybeSingle()
 
-            // Stamped ONLY once the send has resolved without throwing. A throw
-            // above lands in the catch with every row still unnotified, so the
-            // next submit retries. A failure of the stamp itself is logged and
-            // left alone: the worst case is one duplicate email on a resubmit,
-            // which is not worth compensating for.
-            const { error: stampError } = await adminClient
-              .from('assignments')
-              .update({ notified_at: new Date().toISOString() })
-              .in('id', pending.map(r => r.id))
-
-            if (stampError) {
-              console.error(
-                `[reports/actions] notified_at stamp failed after a successful send (report ${reportId}):`,
-                stampError
+            const limit = await checkEmailDispatchLimit(user.id)
+            if (limit.blocked) {
+              // Nothing is stamped, so the rows stay unnotified and a later
+              // resubmit of this report retries the announcement.
+              console.warn(
+                `[reports/actions] email dispatch limit reached for user ${user.id}; report ${reportId} submitted, homework notification skipped`
               )
+            } else {
+              const subject = 'Lingualink Online - Your teacher has assigned new exercises'
+              await resend.emails.send({
+                from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+                to: student.email,
+                subject,
+                html: buildEmailTemplate({
+                  recipientName: student.full_name,
+                  recipientFallback: 'Student',
+                  subject,
+                  bodyHtml: studentHomeworkAssignedEmailContent(
+                    teacherProfile?.full_name ?? 'Your teacher',
+                    titles
+                  ),
+                  contactEmail: 'support@lingualinkonline.com',
+                }),
+              })
+
+              // Stamped ONLY once the send has resolved without throwing. A throw
+              // above lands in the catch with every row still unnotified, so the
+              // next submit retries. A failure of the stamp itself is logged and
+              // left alone: the worst case is one duplicate email on a resubmit,
+              // which is not worth compensating for.
+              const { error: stampError } = await adminClient
+                .from('assignments')
+                .update({ notified_at: new Date().toISOString() })
+                .in('id', pending.map(r => r.id))
+
+              if (stampError) {
+                console.error(
+                  `[reports/actions] notified_at stamp failed after a successful send (report ${reportId}):`,
+                  stampError
+                )
+              }
             }
           }
         }
