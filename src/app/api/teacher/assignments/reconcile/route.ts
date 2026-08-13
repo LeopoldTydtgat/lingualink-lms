@@ -80,11 +80,10 @@ export async function POST(request: Request) {
 
     // 2. Role gate. Mirrors /api/teacher/library/assign: a query error is a
     // transient DB failure, not a missing row - it must 500, never fall through
-    // to the 403 denial below. full_name is read here for the email, so it comes
-    // from the session profile and never from the request body.
+    // to the 403 denial below.
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id, full_name, role')
+      .select('id, role')
       .eq('id', user.id)
       .maybeSingle()
 
