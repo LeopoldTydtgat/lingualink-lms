@@ -84,6 +84,12 @@ export async function POST(req: NextRequest) {
       .single()
     if (insertError) {
       console.error('Company insert error:', insertError)
+      // The unique index on lower(trim(name)) is PARTIAL on status = 'active',
+      // so an archived company does not hold its name — only a live company
+      // collides here. Surface that as a 409 rather than an opaque 500.
+      if (insertError.code === '23505') {
+        return NextResponse.json({ error: 'A company with that name already exists.' }, { status: 409 })
+      }
       return NextResponse.json({ error: 'Failed to create company.' }, { status: 500 })
     }
     return NextResponse.json({ id: company.id })
