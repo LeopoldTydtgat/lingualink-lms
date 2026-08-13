@@ -2,9 +2,6 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { checkEmailDispatchLimit } from '@/lib/rateLimit'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/email/templates'
 
 // POST /api/teacher/assignments/reconcile
 //
@@ -39,6 +36,14 @@ import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/e
 //
 // Serves teachers and admins alike: the only caller, the class report page,
 // admits both.
+//
+// NO EMAIL IS SENT FROM HERE. The homework-assigned notification fires when the
+// class report is submitted instead - submitReport in
+// src/app/(dashboard)/reports/actions.ts - and is deduped by
+// assignments.notified_at, which that action stamps on the rows it announces.
+// Rows are written the moment the teacher saves the modal, but the student must
+// only hear about them once the report is actually filed, and only once however
+// many times the set is saved, re-saved or edited before then.
 
 const ReconcileSchema = z.object({
   lesson_id: z.string().uuid(),
@@ -175,7 +180,6 @@ export async function POST(request: Request) {
     // only active, admin-published, student-audience sheets are assignable.
     // Teacher-owned prep is always audience='staff' and must never reach a
     // student. Same predicate as /api/teacher/library/assign.
-    let addTitles: string[] = []
     if (toAdd.length > 0) {
       const { data: sheetRows, error: sheetError } = await adminClient
         .from('study_sheets')
@@ -206,8 +210,6 @@ export async function POST(request: Request) {
           { status: 400 }
         )
       }
-
-      addTitles = toAdd.map(id => assignable.get(id) as string)
     }
 
     // 7. INSERT FIRST. student_id comes from the gated lesson row and assigned_by
@@ -270,52 +272,6 @@ export async function POST(request: Request) {
           `[teacher/assignments/reconcile] delete row count mismatch (lesson ${lessonId}): expected ${removeIds.length}, got ${(deleted ?? []).length}`
         )
         return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
-      }
-    }
-
-    // 9. Homework-assigned email - ADDITIONS ONLY, after both writes succeed.
-    // This is the notification the modal used to fire at
-    // /api/teacher/notify-homework-assigned, moved server-side unchanged: same
-    // sender, subject, template and support contact, the teacher's display name
-    // from the session profile, and the student's address resolved on the admin
-    // client. Removals still send nothing. Non-blocking throughout - a failed
-    // email must never undo a saved assignment. The per-user dispatch limit is
-    // carried over from that route, but it can only SKIP the email here: the
-    // rows are already written, so a 429 would misreport a successful save.
-    if (toAdd.length > 0) {
-      try {
-        const limit = await checkEmailDispatchLimit(user.id)
-        if (limit.blocked) {
-          console.warn(
-            `[teacher/assignments/reconcile] email dispatch limit reached for user ${user.id}; assignments saved, notification skipped`
-          )
-        } else {
-          const { data: student } = await adminClient
-            .from('students')
-            .select('email, full_name')
-            .eq('id', lesson.student_id)
-            .maybeSingle()
-
-          if (student?.email) {
-            await resend.emails.send({
-              from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-              to: student.email,
-              subject: 'Lingualink Online - Your teacher has assigned new exercises',
-              html: buildEmailTemplate({
-                recipientName: student.full_name,
-                recipientFallback: 'Student',
-                subject: 'Lingualink Online - Your teacher has assigned new exercises',
-                bodyHtml: studentHomeworkAssignedEmailContent(
-                  profile.full_name ?? 'Your teacher',
-                  addTitles
-                ),
-                contactEmail: 'support@lingualinkonline.com',
-              }),
-            })
-          }
-        }
-      } catch {
-        // email failure is non-blocking
       }
     }
 

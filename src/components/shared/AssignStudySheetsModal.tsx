@@ -258,9 +258,12 @@ export default function AssignStudySheetsModal({
     // add/remove diff from a fresh read. The browser cannot write this table
     // itself: `authenticated` holds SELECT + INSERT on assignments only, with no
     // DELETE grant and no DELETE policy, so the un-assign half of the old
-    // in-component save failed permanently while still reporting success. The
-    // homework-assigned email moved into that route too, so nothing is dispatched
-    // from here any more.
+    // in-component save failed permanently while still reporting success. No
+    // email is dispatched at save time at all, here or in that route: the
+    // homework-assigned email fires when the class report is submitted
+    // (submitReport in src/app/(dashboard)/reports/actions.ts), deduped via
+    // assignments.notified_at, so saving this modal repeatedly before the report
+    // goes in still produces exactly one notification.
     //
     // try/catch/finally guarantees the saving state is reset on EVERY exit path —
     // a rejected response, a thrown network error, or success — so the button can
