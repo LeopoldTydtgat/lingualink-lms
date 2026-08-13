@@ -1,0 +1,116 @@
+name: Storage Backup
+
+# Nightly backup of the file bytes held in Supabase Storage.
+# Supabase Free has no automated backups, so this workflow and db-backup.yml
+# are the only copies that exist outside the Supabase account itself.
+#
+# Runs 30 minutes after db-backup.yml so the database dump and the storage
+# snapshot for a given night land as a matched pair on the same date.
+#
+# Kept as a separate workflow from db-backup.yml deliberately: a storage
+# failure must not mark the database backup red, and vice versa.
+#
+# Connection note: Supabase direct connections are IPv6-only. GitHub Actions
+# runners are IPv4-only, so SUPABASE_BACKUP_DB_URL must hold the SESSION
+# POOLER string (pooler.supabase.com, port 5432), not the direct one.
+
+on:
+  schedule:
+    # 01:30 UTC = 03:30 SAST
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: storage-backup
+  cancel-in-progress: false
+
+jobs:
+  files:
+    name: Back up storage files to artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No npm cache: this job never runs npm ci against the repo lockfile.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Only psql is needed here, but the client is installed and put ahead on
+      # PATH exactly as db-backup.yml does it. Consistency with the sibling
+      # workflow is worth more than saving the apt install.
+      # pg_dump major version must match the server (Postgres 17.6).
+      # The runner's default client is older, so install 17 from PGDG.
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          # Ubuntu ships its own pg_dump at /usr/bin and it wins on PATH,
+          # so the PGDG 17 binaries must be put ahead of it for later steps.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
+
+      # storage.objects is the authoritative file list. The Storage list API is
+      # not, because it pages and returns folders as pseudo-entries.
+      # Only the byte size is echoed: object paths can carry filenames that
+      # identify a student.
+      - name: Build the file manifest
+        env:
+          DB_URL: ${{ secrets.SUPABASE_BACKUP_DB_URL }}
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          psql "$DB_URL" -At -c "SELECT coalesce(json_agg(json_build_object('bucket', bucket_id, 'name', name)), '[]'::json) FROM storage.objects WHERE name IS NOT NULL;" > manifest.json
+          echo "Manifest size: $(stat -c%s manifest.json) bytes"
+
+      # A temp dir rather than npm ci in the repo: this job needs one package,
+      # not the app's full dependency tree. NODE_PATH is not honoured for ESM
+      # imports, so the script has to sit beside its own node_modules.
+      # The version is pinned to match the ^2.101.0 the app depends on.
+      - name: Install the download dependency
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/storage-backup
+          cd /tmp/storage-backup
+          npm init -y
+          npm install @supabase/supabase-js@2.101.0
+          cp "$GITHUB_WORKSPACE/scripts/backup-storage.mjs" /tmp/storage-backup/
+          cp "$GITHUB_WORKSPACE/manifest.json" /tmp/storage-backup/
+
+      # The script's own exit code is the gate: it fails if any file failed or
+      # if the downloaded count does not match the manifest.
+      - name: Download storage files
+        working-directory: /tmp/storage-backup
+        env:
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MANIFEST_PATH: /tmp/storage-backup/manifest.json
+          OUT_DIR: /tmp/storage-backup/files
+        run: node backup-storage.mjs
+
+      - name: Create archive
+        run: |
+          set -euo pipefail
+          tar -czf "$GITHUB_WORKSPACE/lingualink-storage-${STAMP}.tar.gz" -C /tmp/storage-backup/files .
+          ls -lh "$GITHUB_WORKSPACE/lingualink-storage-${STAMP}.tar.gz"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: storage-backup-${{ env.STAMP }}
+          path: lingualink-storage-*.tar.gz
+          retention-days: 30
+          if-no-files-found: error
