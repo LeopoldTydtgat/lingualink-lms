@@ -117,7 +117,13 @@ export default async function StudentDetailPage({
         .eq('id', id)
         .single()
 
-  if (error || !student) notFound()
+  if (error || !student) {
+    console.error(
+      `[admin student detail] student query failed (id ${id}):`,
+      error ?? 'query returned no row'
+    )
+    notFound()
+  }
 
   // Flatten company
   const company = Array.isArray(student.companies)
