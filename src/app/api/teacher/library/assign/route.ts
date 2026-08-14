@@ -17,10 +17,10 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  // Gate pattern mirrors /api/teacher/notify-homework-assigned: session profile,
-  // role teacher or admin. full_name comes from the session profile, never the
-  // request body. A query error is a transient DB failure, not a missing row -
-  // it must 500, never fall through to the 403 denial below.
+  // Gate: session profile, role teacher or admin. full_name comes from the
+  // session profile, never the request body. A query error is a transient DB
+  // failure, not a missing row - it must 500, never fall through to the 403
+  // denial below.
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name, role')

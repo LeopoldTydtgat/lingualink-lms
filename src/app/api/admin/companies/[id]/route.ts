@@ -74,6 +74,13 @@ export async function PATCH(
 
     if (updateError) {
       console.error('Company update error:', updateError)
+      // The unique index on lower(trim(name)) is PARTIAL on status = 'active',
+      // so an archived company does not hold its name. Two writes can collide:
+      // renaming onto a live company's name, and re-activating an archived
+      // company whose name a live one now holds. Both are a 409, not a 500.
+      if (updateError.code === '23505') {
+        return NextResponse.json({ error: 'A company with that name already exists.' }, { status: 409 })
+      }
       return NextResponse.json({ error: 'Failed to update company.' }, { status: 500 })
     }
 

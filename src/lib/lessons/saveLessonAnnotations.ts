@@ -143,15 +143,13 @@ export async function saveLessonAnnotations(
   // attachment_index is still written, but it is now informational only: it
   // selects nothing.
   //
-  // The OLD constraint lesson_annotations_unique_pdf on (lesson_id,
-  // study_sheet_id, attachment_index) STILL EXISTS — do not assume it is gone. It
-  // is dropped in its own DDL session only AFTER this fix is promoted to main and
-  // deployed, because main's running code still upserts on it. While both uniques
-  // are live, the shifted-file case that used to overwrite instead violates the
-  // index unique and errors, so the write fails LOUDLY into the not_saving branch
-  // below (amber badge, marks kept in memory and re-queued) rather than
-  // destroying another file's marks. Fail-safe, and it stops happening once the
-  // old constraint is dropped.
+  // The index-keyed unique lesson_annotations_unique_pdf was dropped on 13 Aug
+  // 2026 (migration 20260813120000). (lesson_id, study_sheet_id,
+  // attachment_name) is now the only unique on this table. attachment_index is
+  // still written but is informational only and selects nothing. A file removed
+  // or re-uploaded mid-lesson shifts later attachments by a slot; because the
+  // upsert conflicts on name, the shifted file now resolves to its own row
+  // instead of colliding.
   //
   // W1: user-scoped client, so RLS re-checks teacher ownership AND the deadline
   // on this exact write — if the teacher is not the class's teacher, or the
