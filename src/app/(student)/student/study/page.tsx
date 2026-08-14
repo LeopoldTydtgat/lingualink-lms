@@ -77,8 +77,9 @@ export default async function StudyPage() {
   // /api/material-assignment-file. This is a Server Component, so nothing
   // service-role reaches the client bundle - only the plain title strings do.
   //
-  // Fail soft: a failed lookup or a missing sheet falls back to a generic label
-  // so the grant still lists and still opens.
+  // Fail soft: a failed lookup or a missing sheet falls back to the granted
+  // filename, matching /student/study/material/[assignmentId]. Never a generic
+  // label - the internal staff taxonomy must not surface on a student screen.
   const materialSheetIds = [
     ...new Set(materialRows.map((m) => m.study_sheet_id as string)),
   ]
@@ -104,7 +105,7 @@ export default async function StudyPage() {
 
   const materialAssignments = materialRows.map((m) => ({
     id: m.id as string,
-    title: materialTitles.get(m.study_sheet_id as string) ?? 'Teaching material',
+    title: materialTitles.get(m.study_sheet_id as string) ?? (m.attachment_name as string),
     attachment_name: m.attachment_name as string,
     page_start: m.page_start as number | null,
     page_end: m.page_end as number | null,
