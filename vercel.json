@@ -22,10 +22,6 @@
       "schedule": "0 8 1 * *"
     },
     {
-      "path": "/api/cron/training-ending-soon",
-      "schedule": "0 8 * * *"
-    },
-    {
       "path": "/api/cron/google-busy-sync",
       "schedule": "0 8 * * *"
     }
