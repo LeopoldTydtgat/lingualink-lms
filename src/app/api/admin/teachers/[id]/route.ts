@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { isTeacherProfile } from '@/lib/auth/isTeacherProfile'
 import { UpdateTeacherSchema } from '@/lib/validation/schemas'
+import { getMonthKeyInTz } from '@/lib/billing/monthRange'
 
 // ─── PATCH — update teacher profile ──────────────────────────────────────────
 
@@ -67,6 +68,147 @@ export async function PATCH(
           { error: 'You cannot change your own status, role, or account types. Ask another admin.' },
           { status: 403 }
         )
+      }
+    }
+
+    // Reprice not-yet-taught lessons when the hourly rate changes.
+    //
+    // lesson_rate_snapshots is maintained by trg_snapshot_lesson_rate, which
+    // fires only on lessons INSERT and on UPDATE OF teacher_id. Nothing fires on
+    // a profiles.hourly_rate change, so before this block a raise or a cut never
+    // reached lessons that were already booked - they billed at the old rate
+    // forever. Every pay surface reads the snapshot (NEW268 D1), so the stale
+    // snapshot WAS the stale amount the client reported.
+    //
+    // Scope is deliberately narrow: status 'scheduled' AND scheduled_at in the
+    // future. A past lesson still sitting at 'scheduled' (delivered, awaiting its
+    // report) was taught at the old rate and must keep it - which is why the
+    // status filter alone would be wrong.
+    //
+    // Paid months are excluded: a paid invoice freezes its amount by design, so
+    // repricing a lesson inside one would leave the invoice header disagreeing
+    // with its own itemised detail. Skipping keeps "paid is frozen" true
+    // everywhere.
+    //
+    // WHY THIS RUNS BEFORE THE PROFILE UPDATE. Every failure path here returns
+    // before profiles is touched, so a failed reprice leaves the rate unchanged
+    // and the admin's retry is a real retry. If this ran after the update, the
+    // stored rate would already equal the requested rate, rateChanged would be
+    // false on the retry, and the reprice could never be re-attempted - the
+    // lessons would stay stale with no way back short of editing the rate twice.
+    // The one surviving inconsistency is the reverse order (snapshots written,
+    // then the profiles UPDATE below fails): the rate stays old while future
+    // lessons hold the new one. That state self-heals, because the retry sees
+    // rateChanged still true and the upsert is idempotent.
+    //
+    // No invoice recompute is triggered here. The teacher widget, right panel and
+    // admin billing all price per lesson from the snapshot, so they correct as
+    // soon as this lands; invoices.amount_eur is recomputed on every billing page
+    // GET already. Calling recompute here would add a failure path for a value
+    // that self-corrects.
+    const rateChanged =
+      'hourly_rate' in parsed.data &&
+      Number(parsed.data.hourly_rate ?? 0) !== Number(current.hourly_rate ?? 0)
+
+    // A null rate (the schema permits clearing it) is NOT repriced. Writing null
+    // snapshots would blank the pay rate on already-booked future lessons, and
+    // the null would then be read as "no usable snapshot" (lessonRates Decision
+    // A), silently falling every one of them back to a live rate that is also
+    // null, i.e. zero. Leaving the existing snapshots intact is the fail-safe
+    // direction. The rate itself still saves.
+    const newRate = parsed.data.hourly_rate
+    if (rateChanged && newRate == null) {
+      console.error('[rate reprice] hourly_rate cleared to null; future lessons keep their existing snapshots', {
+        teacher_id: id,
+      })
+    }
+
+    if (rateChanged && newRate != null) {
+      // The timezone may be changing in this same request; the incoming value wins.
+      const tz = ('timezone' in parsed.data ? parsed.data.timezone : current.timezone) as
+        | string
+        | null
+
+      if (!tz) {
+        // Without a timezone the paid-month buckets cannot be derived, so a
+        // lesson cannot be proven to sit outside a paid month. Fail closed rather
+        // than reprice blind. Nothing has been written at this point.
+        console.error('[rate reprice] teacher has no timezone; nothing changed', { teacher_id: id })
+        return NextResponse.json(
+          {
+            error:
+              'This teacher has no timezone set, so future classes cannot be repriced. Set a timezone first, then change the rate.',
+          },
+          { status: 422 }
+        )
+      }
+
+      const nowIso = new Date().toISOString()
+
+      const [futureLessonsRes, paidInvoicesRes] = await Promise.all([
+        adminClient
+          .from('lessons')
+          .select('id, scheduled_at')
+          .eq('teacher_id', id)
+          .eq('status', 'scheduled')
+          .gt('scheduled_at', nowIso),
+        adminClient
+          .from('invoices')
+          .select('billing_month')
+          .eq('teacher_id', id)
+          .eq('status', 'paid'),
+      ])
+
+      // Fail closed on either read. An errored query yields an empty array, which
+      // reads as "no future lessons" (reprice nothing) or "no paid months"
+      // (reprice into a frozen invoice). Both are silently wrong, so neither is
+      // allowed to proceed. Nothing has been written at this point.
+      if (futureLessonsRes.error || paidInvoicesRes.error) {
+        console.error('[rate reprice] preflight read failed; nothing changed', {
+          teacher_id: id,
+          lessons_error: futureLessonsRes.error,
+          invoices_error: paidInvoicesRes.error,
+        })
+        return NextResponse.json(
+          { error: 'Could not reprice this teacher\'s future classes. Nothing was saved - please try again.' },
+          { status: 500 }
+        )
+      }
+
+      const paidMonths = new Set(
+        (paidInvoicesRes.data ?? []).map((inv) => inv.billing_month as string)
+      )
+
+      const repriceable = (futureLessonsRes.data ?? []).filter(
+        (l) => !paidMonths.has(getMonthKeyInTz(new Date(l.scheduled_at as string), tz))
+      )
+
+      if (repriceable.length > 0) {
+        // Upsert, not update: a future lesson missing its snapshot row gets one
+        // here rather than being skipped. captured_at is stamped to match the
+        // trigger's own ON CONFLICT behaviour.
+        const { error: snapshotError } = await adminClient
+          .from('lesson_rate_snapshots')
+          .upsert(
+            repriceable.map((l) => ({
+              lesson_id: l.id,
+              hourly_rate: newRate,
+              captured_at: nowIso,
+            })),
+            { onConflict: 'lesson_id' }
+          )
+
+        if (snapshotError) {
+          console.error('[rate reprice] snapshot upsert failed; nothing changed', {
+            teacher_id: id,
+            lesson_count: repriceable.length,
+            error: snapshotError,
+          })
+          return NextResponse.json(
+            { error: 'Could not reprice this teacher\'s future classes. Nothing was saved - please try again.' },
+            { status: 500 }
+          )
+        }
       }
     }
 
