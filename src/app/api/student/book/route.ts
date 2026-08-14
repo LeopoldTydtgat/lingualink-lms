@@ -118,11 +118,25 @@ export async function POST(req: NextRequest) {
     const hoursRemaining = training.total_hours - training.hours_consumed
     const hoursNeeded = durationMinutes / 60
 
-    if (hoursRemaining < hoursNeeded) {
-      return NextResponse.json(
-        { error: 'You do not have enough hours remaining for this class.' },
-        { status: 400 }
-      )
+    // FRESH BOOKINGS ONLY. A reschedule consumes no ADDITIONAL hours: the
+    // duration lock further down pins durationMinutes to the old lesson's
+    // duration, so reschedule_class_atomic's net delta (new - old) is always
+    // zero. This absolute check demands a full duration of free balance, so
+    // running it on the reschedule branch 400s a fully-consumed student trying
+    // to move their last lesson - a move the RPC itself would allow.
+    //
+    // Nothing is lost by skipping it here. reschedule_class_atomic is the
+    // authoritative gate on that branch: it takes FOR UPDATE on the training
+    // row and raises insufficient_hours on (consumed + net > total), which the
+    // reschedule branch already maps to this same 400 message. That check is
+    // delta-based and therefore correct whether or not the duration lock holds.
+    if (!rescheduleId) {
+      if (hoursRemaining < hoursNeeded) {
+        return NextResponse.json(
+          { error: 'You do not have enough hours remaining for this class.' },
+          { status: 400 }
+        )
+      }
     }
 
     // ── 3b. Enforce 24-hour booking rule ─────────────────────────────────────────
