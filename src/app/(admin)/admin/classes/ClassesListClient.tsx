@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { formatInstantInTz } from '@/lib/exportTime'
 
 interface Teacher {
@@ -24,7 +25,11 @@ interface Lesson {
   teacher_id: string
   student_id: string
   teacher: { id: string; full_name: string; photo_url: string | null } | null
-  student: { id: string; full_name: string; photo_url: string | null } | null
+  // allowed_durations is `unknown` on purpose. This interface describes an
+  // UNVALIDATED fetch body - GET /api/admin/classes returns raw PostgREST output
+  // and nothing checks it on either side of the wire - so asserting number[] here
+  // would be a claim the route does not make. checkAllowedDuration narrows it.
+  student: { id: string; full_name: string; photo_url: string | null; allowed_durations: unknown } | null
 }
 
 interface Props {
@@ -59,6 +64,47 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
       return { label: 'Flagged', bg: '#FEF9C3', color: '#A16207' }
     default:
       return { label: status, bg: '#F3F4F6', color: '#374151' }
+  }
+}
+
+// Read-only marker for a SCHEDULED lesson whose duration is not one this student is
+// allowed to book. Returns null when nothing should render. Same {label, bg, color}
+// shape getStatusMeta returns, because every pill in this file is styled from a plain
+// object with inline styles.
+//
+// INFORMATIONAL. Admin booking is deliberately exempt from the per-student duration
+// rule, so a marked row is not an error and nothing here blocks or writes.
+//
+// Two deliberate non-behaviours:
+//  - 'unknown' RENDERS (as "?"). It means the allowed list could not be read, which
+//    must never look the same as "this duration is fine". See checkAllowedDuration.
+//  - No clock is read. Status alone decides, so this is render-pure and identical on
+//    server and client; a past-but-still-'scheduled' row keeps its marker, which is
+//    correct - the row still claims the class is going ahead.
+function getDurationMarker(
+  status: string,
+  durationMinutes: number,
+  allowed: unknown
+): { char: string; bg: string; color: string; label: string } | null {
+  if (status !== 'scheduled') return null
+
+  const result = checkAllowedDuration(allowed, durationMinutes)
+  if (result.state === 'ok') return null
+
+  if (result.state === 'not_allowed') {
+    return {
+      char: '!',
+      bg: '#FFF8E8',
+      color: '#B45309',
+      label: `${durationMinutes} min is not in this student's allowed durations (${result.durations.join(', ')})`,
+    }
+  }
+
+  return {
+    char: '?',
+    bg: '#f3f4f6',
+    color: '#6b7280',
+    label: "This student's allowed durations could not be read",
   }
 }
 
@@ -419,6 +465,14 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
           lessons.map((lesson, index) => {
             const statusMeta = getStatusMeta(lesson.status)
             const statusLabel = getCancellationLabel(lesson, 'admin') ?? statusMeta.label
+            // A missing student join gives `undefined` here, which resolves to the
+            // 'unknown' marker rather than to no marker: we genuinely could not read
+            // the list, and that is what the row should say.
+            const durationMarker = getDurationMarker(
+              lesson.status,
+              lesson.duration_minutes,
+              lesson.student?.allowed_durations
+            )
             return (
               <div
                 key={lesson.id}
@@ -494,9 +548,30 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
                   {adminTz ? formatInstantInTz(lesson.scheduled_at, adminTz) : formatDateTime(lesson.scheduled_at)}
                 </span>
 
-                {/* Duration */}
+                {/* Duration. The marker is NESTED inside this span, never a sibling:
+                    the row is a CSS grid and every direct child is a grid item, so a
+                    sibling would silently consume the next column. No grid template
+                    changes, and none needed - Duration is a cell in both variants. */}
                 <span style={{ fontSize: '13px', color: '#374151' }}>
                   {lesson.duration_minutes} min
+                  {durationMarker && (
+                    <span
+                      title={durationMarker.label}
+                      aria-label={durationMarker.label}
+                      style={{
+                        display: 'inline-block',
+                        marginLeft: '6px',
+                        padding: '1px 7px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        backgroundColor: durationMarker.bg,
+                        color: durationMarker.color,
+                      }}
+                    >
+                      {durationMarker.char}
+                    </span>
+                  )}
                 </span>
 
                 {/* Status tag */}

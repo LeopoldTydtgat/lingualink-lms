@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
-import { checkEmailDispatchLimit } from '@/lib/rateLimit'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentMaterialHomeworkAssignedEmailContent } from '@/lib/email/templates'
 import { MaterialAssignmentCreateSchema } from '@/lib/validation/schemas'
 import { runMaterialAssignPreflight } from '@/lib/materials/materialAssignPreflight'
 
@@ -86,9 +83,7 @@ export async function POST(request: Request) {
     // so nothing about which students exist leaks.
     //
     // Explicit column list - students carries column-level REVOKEs
-    // (admin_notes, cancellation_policy) and select('*') is banned on it. The
-    // email/full_name read here is reused by the notification block below, so
-    // the student is looked up exactly once.
+    // (admin_notes, cancellation_policy) and select('*') is banned on it.
     const { data: student, error: studentError } = await adminClient
       .from('students')
       .select('id, full_name, email, status')
@@ -163,71 +158,6 @@ export async function POST(request: Request) {
     if (!inserted) {
       console.error(`${LOG_PREFIX} insert returned no row`)
       return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
-    }
-
-    // --- Notification email (best-effort, never affects the response) ---------
-    // The grant row already exists by this point, so NO outcome below may change
-    // what this route returns: a rate-limit block, a failed lookup, a missing
-    // address and a Resend failure all still yield the 201. Own try/catch so a
-    // throw cannot fall into the outer handler and turn a written grant into a
-    // 500. Revoke stays silent - only an insert notifies.
-    //
-    // Wording is deliberately identical to the teacher route's: the student is
-    // told "your teacher" either way, which is accurate to them and keeps one
-    // template for one event.
-    try {
-      // 20 dispatches per user per hour, the same bucket the teacher route uses.
-      // A block SKIPS the send; it is never a 429, because the assignment itself
-      // succeeded.
-      const limit = await checkEmailDispatchLimit(user.id)
-      if (limit.blocked) {
-        console.error(
-          `${LOG_PREFIX} email dispatch rate-limited, skipping send (assignment ${inserted.id})`
-        )
-      } else {
-        // Sender display name from the caller's OWN profile row, keyed on the
-        // verified session uuid - never from the request body, exactly as the
-        // teacher route does it. Service role rather than a user-scoped client
-        // only because requireAdmin() has already proved who this is and no
-        // second client is needed. A lookup failure is not worth losing the
-        // email over: continue with null, and the template renders the nameless
-        // variant rather than an empty name slot.
-        const { data: profile, error: profileError } = await adminClient
-          .from('profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .maybeSingle()
-
-        if (profileError) {
-          console.error(`${LOG_PREFIX} profiles lookup failed:`, profileError)
-        }
-        const senderName = profile?.full_name ?? null
-
-        // The student row was already read (and its error handled) by the gate
-        // above, so there is no second lookup to fail here - only a missing
-        // address to report.
-        if (!student.email) {
-          console.error(
-            `${LOG_PREFIX} no email address for student ${student_id}, skipping send`
-          )
-        } else {
-          const subject = 'Lingualink Online - Your teacher has assigned you a homework task'
-          await resend.emails.send({
-            from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-            to: student.email,
-            subject,
-            html: buildEmailTemplate({
-              recipientName: student.full_name,
-              recipientFallback: 'Student',
-              subject,
-              bodyHtml: studentMaterialHomeworkAssignedEmailContent(senderName),
-              contactEmail: 'support@lingualinkonline.com',
-            }),
-          })
-        }
-      }
-    } catch (err) {
-      console.error(`${LOG_PREFIX} email dispatch failed:`, err)
     }
 
     return NextResponse.json({ id: inserted.id }, { status: 201 })

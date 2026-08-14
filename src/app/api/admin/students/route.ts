@@ -240,6 +240,7 @@ export async function POST(req: NextRequest) {
         learning_goals: data.learning_goals ?? null,
         interests: data.interests ?? null,
         cancellation_policy: data.cancellation_policy,
+        allowed_durations: data.allowed_durations,
         admin_notes: data.admin_notes ?? null,
         teacher_notes: data.teacher_notes ?? null,
       })

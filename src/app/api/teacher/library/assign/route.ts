@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getTeacherScopedStudentIds } from '@/lib/access/bookedClass'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/email/templates'
 
 // POST /api/teacher/library/assign
 // Teacher (or admin) assigns an admin-published student worksheet directly to
@@ -17,13 +15,12 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  // Gate: session profile, role teacher or admin. full_name comes from the
-  // session profile, never the request body. A query error is a transient DB
-  // failure, not a missing row - it must 500, never fall through to the 403
+  // Gate: session profile, role teacher or admin. A query error is a transient
+  // DB failure, not a missing row - it must 500, never fall through to the 403
   // denial below.
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('full_name, role')
+    .select('role')
     .eq('id', user.id)
     .maybeSingle()
 
@@ -119,37 +116,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
     assigned = (inserted ?? []).map((r: { student_id: string }) => r.student_id)
-
-    // Homework-assigned email per newly assigned student (non-blocking). Mirrors
-    // the admin assign route: teacherName from the session profile, student email
-    // resolved via the admin client.
-    try {
-      const assignerName = profile.full_name ?? 'Your teacher'
-      const { data: students } = await adminClient
-        .from('students')
-        .select('id, email, full_name')
-        .in('id', assigned)
-
-      await Promise.all(
-        (students ?? []).map((s: { id: string; email: string | null; full_name: string }) => {
-          if (!s.email) return null
-          return resend.emails.send({
-            from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-            to: s.email,
-            subject: 'Lingualink Online - Your teacher has assigned new exercises',
-            html: buildEmailTemplate({
-              recipientName: s.full_name,
-              recipientFallback: 'Student',
-              subject: 'Lingualink Online - Your teacher has assigned new exercises',
-              bodyHtml: studentHomeworkAssignedEmailContent(assignerName, [sheet.title]),
-              contactEmail: 'support@lingualinkonline.com',
-            }),
-          })
-        })
-      )
-    } catch {
-      // email failure is non-blocking
-    }
   }
 
   return NextResponse.json({ assigned, skipped }, { status: 200 })

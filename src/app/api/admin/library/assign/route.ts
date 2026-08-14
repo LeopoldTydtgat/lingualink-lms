@@ -2,8 +2,6 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/email/templates'
 
 // POST /api/admin/library/assign
 // Assigns a study sheet directly to a student (not linked to a lesson).
@@ -85,31 +83,6 @@ export async function POST(request: Request) {
       )
     }
     return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  try {
-    const [{ data: student }, { data: sheet }, { data: assignerProfile }] = await Promise.all([
-      adminClient.from('students').select('email, full_name').eq('id', student_id).single(),
-      adminClient.from('study_sheets').select('title').eq('id', study_sheet_id).single(),
-      adminClient.from('profiles').select('full_name').eq('id', user.id).single(),
-    ])
-    const assignerName = assignerProfile?.full_name ?? 'Your teacher'
-    if (student?.email && sheet?.title) {
-      await resend.emails.send({
-        from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-        to: student.email,
-        subject: 'Lingualink Online - Your teacher has assigned new exercises',
-        html: buildEmailTemplate({
-          recipientName: student.full_name,
-          recipientFallback: 'Student',
-          subject: 'Lingualink Online - Your teacher has assigned new exercises',
-          bodyHtml: studentHomeworkAssignedEmailContent(assignerName, [sheet.title]),
-          contactEmail: 'support@lingualinkonline.com',
-        }),
-      })
-    }
-  } catch {
-    // email failure is non-blocking
   }
 
   return NextResponse.json(data, { status: 201 })

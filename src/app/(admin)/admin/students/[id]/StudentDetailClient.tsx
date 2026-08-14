@@ -6,6 +6,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
 import { DatePartInput } from '../../_components/DatePartInput'
@@ -231,6 +232,59 @@ function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: s
       style={{ backgroundColor: entry.bg, color: entry.color }}
     >
       {label}
+    </span>
+  )
+}
+
+/**
+ * Read-only marker for a SCHEDULED lesson whose duration is not one this student is
+ * allowed to book. Renders nothing at all when there is nothing to say.
+ *
+ * INFORMATIONAL. Admin booking is deliberately exempt from the per-student duration
+ * rule, so a marked row is not an error: nothing here blocks, writes, or is clickable.
+ *
+ * Two deliberate non-behaviours:
+ *  - 'unknown' RENDERS (as "?"). It means the allowed list could not be read - the
+ *    staff-view column list on this page is one place it could go missing - and that
+ *    must never look the same as "this duration is fine". See checkAllowedDuration.
+ *  - No clock is read. Status alone decides, so this is render-pure and identical on
+ *    server and client; a past-but-still-'scheduled' row keeps its marker, which is
+ *    correct - the row still claims the class is going ahead.
+ *
+ * `allowed` stays `unknown` end to end: it comes off the `student` prop, which is a
+ * Record<string, unknown>, and the narrowing belongs in the helper, not in a cast here.
+ */
+function DurationMarker({
+  status,
+  durationMinutes,
+  allowed,
+}: {
+  status: string
+  durationMinutes: number
+  allowed: unknown
+}) {
+  if (status !== 'scheduled') return null
+
+  const result = checkAllowedDuration(allowed, durationMinutes)
+  if (result.state === 'ok') return null
+
+  const label =
+    result.state === 'not_allowed'
+      ? `${durationMinutes} min is not in this student's allowed durations (${result.durations.join(', ')})`
+      : "This student's allowed durations could not be read"
+  const colour =
+    result.state === 'not_allowed'
+      ? { backgroundColor: '#FFF8E8', color: '#B45309' }
+      : { backgroundColor: '#f3f4f6', color: '#6b7280' }
+
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className="ml-1.5 inline-block px-1.5 py-0.5 rounded-full text-xs font-medium"
+      style={colour}
+    >
+      {result.state === 'not_allowed' ? '!' : '?'}
     </span>
   )
 }
@@ -1369,7 +1423,14 @@ export default function StudentDetailClient({
                         timeZone: adminTz,
                       })}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {lesson.duration_minutes} min
+                      <DurationMarker
+                        status={lesson.status}
+                        durationMinutes={lesson.duration_minutes}
+                        allowed={student.allowed_durations}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
                     </td>

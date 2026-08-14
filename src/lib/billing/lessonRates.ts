@@ -10,7 +10,9 @@ type AdminClient = ReturnType<typeof createAdminClient>
  * NEW268 D1 — per-lesson teacher pay rate.
  *
  * Fetch the teacher hourly rate captured for each lesson at booking / teacher-swap
- * time from `lesson_rate_snapshots` (one row per lesson, maintained by DB trigger).
+ * time, and re-captured for not-yet-taught lessons when an admin changes the
+ * teacher's hourly rate (paid months excluded)
+ * from `lesson_rate_snapshots` (one row per lesson, maintained by DB trigger).
  *
  * Returns Map<lesson_id, rate>. A lesson is OMITTED from the map when it has no
  * snapshot row OR its snapshot `hourly_rate` is null — Decision A: both are treated

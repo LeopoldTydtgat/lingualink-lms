@@ -39,11 +39,13 @@ export default async function EditStudentPage({
   // Fetch the student row — includes sensitive admin-only fields. Explicit
   // column list, never select('*'): students carries column-level REVOKEs.
   // These are exactly the columns EditStudentClient reads; extend the list only
-  // when the form starts using another one.
+  // when the form starts using another one. Do NOT drop allowed_durations: the
+  // form falls back to [60] when it is absent and re-sends it on every save,
+  // so removing it here would silently narrow every student it touches.
   const { data: student, error } = await supabase
     .from('students')
     .select(
-      'id, full_name, email, date_of_birth, phone, timezone, language_preference, status, customer_number, is_private, company_id, academic_advisor_id, native_language, learning_language, current_fluency_level, learning_goals, interests, cancellation_policy, admin_notes, teacher_notes'
+      'id, full_name, email, date_of_birth, phone, timezone, language_preference, status, customer_number, is_private, company_id, academic_advisor_id, native_language, learning_language, current_fluency_level, learning_goals, interests, cancellation_policy, allowed_durations, admin_notes, teacher_notes'
     )
     .eq('id', id)
     .single()

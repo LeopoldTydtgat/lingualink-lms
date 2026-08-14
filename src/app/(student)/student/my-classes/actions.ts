@@ -111,7 +111,6 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
           recipientFallback: 'Student',
           subject: 'Your class has been cancelled',
           bodyHtml: studentCancellationByStudentEmailContent(
-            teacher?.full_name ?? 'Your teacher',
             lesson.scheduled_at,
             lesson.duration_minutes,
             refunded ? hoursToRefund : 0,

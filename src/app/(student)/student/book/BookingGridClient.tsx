@@ -92,6 +92,11 @@ interface Props {
   hoursRemaining: number
   teachers: Teacher[]
   rescheduleLesson: RescheduleLesson | null
+  // The class lengths this student may book (NEW-A1), already sanitised by the
+  // server page to a subset of 30/60/90. A UX input only — /api/student/book
+  // re-reads students.allowed_durations and is the actual gate. Never widened
+  // here: an empty array means the account cannot book, not "all allowed".
+  allowedDurations: number[]
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -102,6 +107,23 @@ function formatHours(hours: number): string {
   if (h === 0) return `${m}min`
   if (m === 0) return `${h}h`
   return `${h}h ${m}min`
+}
+
+// Initial duration for a FRESH booking. The reschedule path locks to the
+// original lesson's duration and never calls this. Order of preference:
+//   1. 60 when it is both enabled and affordable — the previous default, kept
+//      for every student whose account still allows it.
+//   2. the LONGEST enabled duration the student can afford.
+//   3. the SHORTEST enabled duration, when none is affordable — the pill still
+//      names a real allowed length and the hours banner explains the block.
+//   4. 30 only for the empty-list edge, where the grid is suppressed anyway.
+function pickDefaultDuration(allowedDurations: number[], hoursRemaining: number): number {
+  const enabled = [...allowedDurations].sort((a, b) => a - b)
+  if (enabled.length === 0) return 30
+  if (enabled.includes(60) && hoursRemaining >= 1) return 60
+  const affordable = enabled.filter((minutes) => hoursRemaining >= minutes / 60)
+  if (affordable.length > 0) return affordable[affordable.length - 1]
+  return enabled[0]
 }
 
 // Monday of the week containing "now", as a YYYY-MM-DD key in the given
@@ -488,10 +510,32 @@ export default function BookingGridClient({
   hoursRemaining,
   teachers,
   rescheduleLesson,
+  allowedDurations,
 }: Props) {
   const router = useRouter()
 
   const isReschedule = rescheduleLesson !== null
+
+  // Fresh-book only: an account with no enabled class lengths cannot book at
+  // all. The server page passes an empty array straight through rather than
+  // widening it to "all durations", so this is where that state surfaces.
+  // Reschedule is exempt by design — the original lesson's length is kept
+  // regardless of what the account currently allows.
+  const noDurationsEnabled = !isReschedule && allowedDurations.length === 0
+
+  // The shortest class this page can actually book, in hours. This was a
+  // hard-coded 0.5 in the out-of-hours banner below, which stopped being the
+  // floor once NEW-A1 made 30-minute classes disableable per student: a
+  // {60}-only account (the column default for every new student) holding 0.75h
+  // can book nothing at all, yet 0.75 < 0.5 is false, so the banner stayed
+  // hidden while the grid kept offering 60-minute runs the API always rejects.
+  // Reschedule keeps its own floor — the locked duration, which the page's
+  // effective balance covers by construction — so that path is unchanged.
+  const minBookableHours = isReschedule
+    ? rescheduleLesson.duration_minutes / 60
+    : allowedDurations.length > 0
+    ? Math.min(...allowedDurations) / 60
+    : 0.5
 
   // On a reschedule, teacher and duration are locked to the original lesson
   // (degraded Stage B behaviour — Stage C polishes the messaging). The locked
@@ -503,7 +547,7 @@ export default function BookingGridClient({
       : teachers[0].id
   )
   const [selectedDuration, setSelectedDuration] = useState<number>(
-    rescheduleLesson?.duration_minutes ?? (hoursRemaining >= 1 ? 60 : 30)
+    rescheduleLesson?.duration_minutes ?? pickDefaultDuration(allowedDurations, hoursRemaining)
   )
 
   // Monday of the visible week as a YYYY-MM-DD key in the STUDENT timezone —
@@ -755,6 +799,11 @@ export default function BookingGridClient({
 
   function handleDurationSelect(minutes: number) {
     if (isReschedule) return // duration locked on the reschedule path
+    // Fail closed: a length outside the student's allowed list can never become
+    // the selection. The pill is already disabled, so this only catches a
+    // programmatic call. Deliberately placed AFTER the reschedule guard, so the
+    // reschedule path never consults allowedDurations at all.
+    if (!allowedDurations.includes(minutes)) return
     if (minutes === selectedDuration) return
     setSelectedDuration(minutes)
     // Local-only recompute: keep the selection if it is still a valid start
@@ -956,7 +1005,7 @@ export default function BookingGridClient({
         </div>
       )}
 
-      {hoursRemaining < 0.5 && (
+      {hoursRemaining < minBookableHours && (
         <div
           style={{
             marginBottom: '14px',
@@ -968,6 +1017,25 @@ export default function BookingGridClient({
         >
           <p style={{ fontSize: '13px', color: '#FD5602' }}>
             You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
+          </p>
+        </div>
+      )}
+
+      {/* Unbookable account: no class length is enabled. Same red-banner
+          treatment as the out-of-hours notice above — both are "you cannot book
+          right now, talk to admin" states. */}
+      {noDurationsEnabled && (
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '14px 16px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '8px',
+          }}
+        >
+          <p style={{ fontSize: '13px', color: '#FD5602' }}>
+            No class durations are enabled on your account. Please contact admin.
           </p>
         </div>
       )}
@@ -1104,16 +1172,28 @@ export default function BookingGridClient({
           <div style={{ display: 'flex', gap: '10px' }}>
         {durationOptions.map((option) => {
           const canBook = hoursRemaining >= option.hours
+          // NEW-A1: enabled on this student's account.
+          const isAllowed = allowedDurations.includes(option.minutes)
           const isSelected = selectedDuration === option.minutes
           // Reschedule locks the original duration: the other pills are inert.
-          const disabled = !canBook || (isReschedule && !isSelected)
+          // The allowed check is applied on the FRESH-BOOK branch only, so it can
+          // neither unlock a pill during a reschedule nor disable the locked one
+          // when that length has since been removed from the account — the
+          // reschedule arm here is byte-identical to what it was before NEW-A1.
+          const disabled = !canBook || (isReschedule ? !isSelected : !isAllowed)
           return (
             <button
               key={option.minutes}
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
               aria-label={`${option.minutes} minutes`}
-              title={!canBook ? 'Not enough hours remaining' : undefined}
+              title={
+                !canBook
+                  ? 'Not enough hours remaining'
+                  : !isReschedule && !isAllowed
+                  ? 'This class length is not enabled on your account'
+                  : undefined
+              }
               style={{
                 padding: '6px 12px',
                 borderRadius: '999px',
@@ -1208,7 +1288,18 @@ export default function BookingGridClient({
         </div>
       </div>
 
-      {/* ── Grid area: loading / error / empty / grid ── */}
+      {/* ── Grid area: loading / error / empty / grid ──
+          Suppressed wholesale when no class length is enabled (fresh book only).
+          Wrapping the region is the smallest change that removes slot selection:
+          with no cells rendered nothing can set selectedStartIso, and that is the
+          single value gating the confirm panel and its Confirm button. Gating
+          only the grid branch would still show "No openings this week", which
+          reads as a scheduling problem rather than an account one; disabling
+          cells individually would touch the hot render path for a state the DB
+          CHECK makes near-impossible. The availability fetch is left running —
+          it is harmless and keeps the effect's dependency logic untouched. ── */}
+      {!noDurationsEnabled && (
+        <>
           {loading && (
             <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>
               Loading availability...
@@ -1477,6 +1568,8 @@ export default function BookingGridClient({
               </div>
             </div>
           )}
+        </>
+      )}
       {/* ── end left column ── */}
       </div>
 

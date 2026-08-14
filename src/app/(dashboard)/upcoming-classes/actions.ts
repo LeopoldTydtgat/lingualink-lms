@@ -108,7 +108,6 @@ export async function teacherCancelLesson(
     if (student?.email) {
       const hoursRefunded = refunded ? (lesson.duration_minutes / 60) : 0
       const emailBody = studentCancellationByTeacherEmailContent(
-        teacherName,
         lesson.scheduled_at,
         lesson.duration_minutes,
         hoursRefunded,

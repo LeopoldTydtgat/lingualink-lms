@@ -326,7 +326,6 @@ export function teacherReassignedEmailContent(
 // ─── Student email content builders ───────────────────────────────────────────
 
 export function studentBookingConfirmationEmailContent(
-  teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
   studentTimezone: string
@@ -337,7 +336,6 @@ export function studentBookingConfirmationEmailContent(
       Your class has been confirmed. Here are your details:
     </p>
     ${buildDetailsTable('Class details', [
-      { label: 'Teacher', value: teacherName },
       { label: 'Date &amp; Time', value: formattedTime },
       { label: 'Duration', value: `${durationMinutes} minutes` },
     ])}
@@ -349,7 +347,6 @@ export function studentBookingConfirmationEmailContent(
 }
 
 export function studentCancellationByStudentEmailContent(
-  teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
   hoursRefunded: number | null,
@@ -364,7 +361,6 @@ export function studentCancellationByStudentEmailContent(
       Your class has been cancelled as requested. The details are below.
     </p>
     ${buildDetailsTable('Cancellation details', [
-      { label: 'Teacher', value: teacherName },
       { label: 'Cancelled class', value: formattedTime },
       refundRow,
     ])}
@@ -373,7 +369,6 @@ export function studentCancellationByStudentEmailContent(
 }
 
 export function studentCancellationByTeacherEmailContent(
-  teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
   hoursRefunded: number,
@@ -386,7 +381,6 @@ export function studentCancellationByTeacherEmailContent(
       Unfortunately your class has been cancelled by your teacher. Your hours have been returned to your balance.
     </p>
     ${buildDetailsTable('Cancellation details', [
-      { label: 'Teacher', value: teacherName },
       { label: 'Cancelled class', value: formattedTime },
       { label: 'Hours returned', value: `${hoursRefunded}h added back to your balance` },
     ])}
@@ -401,7 +395,6 @@ export function studentCancellationByTeacherEmailContent(
 }
 
 export function studentRescheduledEmailContent(
-  teacherName: string,
   oldScheduledAt: string | null,
   oldDurationMinutes: number | null,
   newScheduledAt: string,
@@ -419,8 +412,8 @@ export function studentRescheduledEmailContent(
   }
   rows.push({ label: 'Duration', value: `${durationMinutes} minutes` })
   const openingSentence = initiatedBy === 'student'
-    ? `Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled as requested.`
-    : `Your class with <strong style="color:#FF8303;">${teacherName}</strong> has been rescheduled by Lingualink admin.`
+    ? 'Your class has been rescheduled as requested.'
+    : 'Your class has been rescheduled by Lingualink Online.'
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
       ${openingSentence}
@@ -431,7 +424,6 @@ export function studentRescheduledEmailContent(
 }
 
 export function studentClassReminderEmailContent(
-  teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
   teamsJoinUrl: string | null,
@@ -442,10 +434,9 @@ export function studentClassReminderEmailContent(
   const formattedTime = formatClassTime(scheduledAt, studentTimezone, durationMinutes)
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your class with <strong style="color:#FF8303;">${teacherName}</strong> is in ${timeLabel}.
+      Your class is in ${timeLabel}.
     </p>
     ${buildDetailsTable('Class details', [
-      { label: 'Teacher', value: teacherName },
       { label: 'Date &amp; Time', value: formattedTime },
       { label: 'Duration', value: `${durationMinutes} minutes` },
     ])}
@@ -455,48 +446,6 @@ export function studentClassReminderEmailContent(
         <a href="${teamsJoinUrl}" style="color:#FF8303;word-break:break-all;">${teamsJoinUrl}</a>
       </p>
     ` : ''}
-  `
-}
-
-export function studentHomeworkAssignedEmailContent(
-  teacherName: string,
-  sheetTitles: string[]
-): string {
-  const sheetList = sheetTitles
-    .map(t => `<li style="margin:4px 0;font-size:14px;color:#111827;">${t}</li>`)
-    .join('')
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your teacher <strong style="color:#FF8303;">${teacherName}</strong> has assigned new exercises for you to complete.
-    </p>
-    <ul style="margin:0 0 24px;padding-left:20px;">
-      ${sheetList}
-    </ul>
-    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/study`, 'Go to My Study')}
-  `
-}
-
-// Teaching-material homework (material_assignments). Deliberately GENERIC per
-// client instruction: it never names the sheet, the PDF file or the page range -
-// the student sees all of that only after logging in. Sibling of
-// studentHomeworkAssignedEmailContent above, which lists worksheet titles.
-export function studentMaterialHomeworkAssignedEmailContent(
-  teacherName: string | null
-): string {
-  // Empty/whitespace name -> the name slot is dropped entirely rather than
-  // rendered blank.
-  const name = teacherName?.trim()
-  const openingSentence = name
-    ? `Your teacher <strong style="color:#FF8303;">${name}</strong> has assigned a homework task for you to complete.`
-    : 'Your teacher has assigned a homework task for you to complete.'
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      ${openingSentence}
-    </p>
-    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      Log in to your portal to see it.
-    </p>
-    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/study`, 'Go to My Study')}
   `
 }
 
@@ -514,11 +463,10 @@ export function studentLowHoursEmailContent(
   `
 }
 
-export function studentNewMessageEmailContent(teacherName: string): string {
+export function studentNewMessageEmailContent(): string {
   return `
     <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      You have a new message from <strong style="color:#FF8303;">${teacherName}</strong>
-      on the Lingualink Online portal.
+      You have a new message from your teacher on the Lingualink Online portal.
     </p>
     <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
       Log in to your portal to read and reply.
@@ -527,23 +475,7 @@ export function studentNewMessageEmailContent(teacherName: string): string {
   `
 }
 
-export function studentTrainingEndingSoonEmailContent(endDate: string): string {
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your current training package ends on <strong style="color:#FF8303;">${endDate}</strong>.
-    </p>
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Any remaining hours must be used before this date - you can book classes directly from your portal.
-    </p>
-    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      If you would like to continue after your package ends, contact our support team and they will be happy to help you arrange a new one.
-    </p>
-    ${buildButton('mailto:support@lingualinkonline.com', 'Contact Support')}
-  `
-}
-
 export function studentCancellationByAdminEmailContent(
-  teacherName: string,
   scheduledAt: string,
   durationMinutes: number,
   hoursRefunded: number,
@@ -556,7 +488,6 @@ export function studentCancellationByAdminEmailContent(
     ? "We're sorry to let you know that your upcoming class has been cancelled. Your hours have been returned to your balance and you are welcome to book a new class at your convenience."
     : "We're sorry to let you know that your upcoming class has been cancelled. Please reach out to us if you have any questions."
   const rows: { label: string; value: string }[] = [
-    { label: 'Teacher', value: teacherName },
     { label: 'Cancelled class', value: formattedTime },
   ]
   if (refunded) {

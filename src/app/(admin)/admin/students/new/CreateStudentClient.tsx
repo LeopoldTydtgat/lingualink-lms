@@ -51,6 +51,10 @@ const CANCELLATION_OPTIONS = [
   { value: '48hr', label: '48 hours (B2B)' },
 ]
 
+// The only three lengths the booking flow and the live
+// students_allowed_durations_valid CHECK accept.
+const DURATION_OPTIONS = [30, 60, 90]
+
 type FormData = {
   // Section A — Personal Info
   first_name: string
@@ -76,6 +80,7 @@ type FormData = {
   package_name: string
   total_hours: string
   end_date: string
+  allowed_durations: number[]
   cancellation_policy: string
   // Section D — Notes
   admin_notes: string
@@ -93,6 +98,9 @@ const EMPTY_FORM: FormData = {
   current_fluency_level: '',
   learning_goals: '', interests: '',
   package_name: '', total_hours: '', end_date: '',
+  // New students are 60-minute only until an admin widens it, matching the
+  // column default on students.allowed_durations.
+  allowed_durations: [60],
   cancellation_policy: '24hr',
   admin_notes: '', teacher_notes: '',
 }
@@ -152,7 +160,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
-  function set(field: keyof FormData, value: string | boolean | string[]) {
+  function set(field: keyof FormData, value: string | boolean | string[] | number[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -168,6 +176,21 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
     })
   }
 
+  // Refuses to clear the last remaining duration: an empty array is rejected by
+  // the schema and the DB CHECK alike, and a student with no allowed duration
+  // could never book at all. Belt and braces with the handleSubmit guard below.
+  // Kept ascending so the stored array is canonical regardless of click order.
+  function toggleDuration(minutes: number) {
+    setForm((prev) => {
+      const durations = prev.allowed_durations
+      if (durations.includes(minutes)) {
+        if (durations.length === 1) return prev
+        return { ...prev, allowed_durations: durations.filter((d) => d !== minutes) }
+      }
+      return { ...prev, allowed_durations: [...durations, minutes].sort((a, b) => a - b) }
+    })
+  }
+
   async function handleSubmit() {
     // Validation
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
@@ -177,6 +200,7 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
     if (form.assigned_teacher_ids.length === 0) { toast.error('At least one teacher must be assigned.'); return }
     if (!form.package_name.trim()) { toast.error('Training package name is required.'); return }
     if (!form.total_hours) { toast.error('Total hours is required.'); return }
+    if (form.allowed_durations.length === 0) { toast.error('At least one class duration must be allowed.'); return }
 
     setSaving(true)
     try {
@@ -184,6 +208,8 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          // allowed_durations rides along in this spread as a number[] — none of
+          // the overrides below touch it, so it reaches the schema unchanged.
           ...form,
           full_name: `${form.first_name.trim()} ${form.last_name.trim()}`,
           total_hours: parseFloat(form.total_hours),
@@ -437,6 +463,29 @@ export default function CreateStudentClient({ companies, teachers }: Props) {
               <DatePartInput value={form.end_date} onChange={(v) => set('end_date', v)} />
             </Field>
           </div>
+
+          <Field label="Allowed Class Durations">
+            <div className="flex flex-wrap gap-2 mt-1">
+              {DURATION_OPTIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => toggleDuration(d)}
+                  className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                  style={
+                    form.allowed_durations.includes(d)
+                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                  }
+                >
+                  {d} min
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              The student can only book classes of these lengths. Admin bookings are not restricted.
+            </p>
+          </Field>
 
           <Field label="Cancellation Policy" adminOnly>
             <div className="flex gap-0 border border-gray-200 rounded-lg overflow-hidden w-fit mt-1">
