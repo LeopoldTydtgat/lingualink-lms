@@ -200,7 +200,6 @@ export async function PATCH(
       if (studentData?.email) {
         const emailHoursValue = refunded ? hoursToRefund : 0
         const emailBody = studentCancellationByAdminEmailContent(
-          teacherProfile?.full_name ?? 'Your teacher',
           existing.scheduled_at,
           existing.duration_minutes,
           emailHoursValue,
@@ -551,7 +550,6 @@ export async function PATCH(
     } else {
       try {
         const emailBody = studentRescheduledEmailContent(
-          teacherName,
           existing.scheduled_at,
           existing.duration_minutes,
           newScheduledAt,

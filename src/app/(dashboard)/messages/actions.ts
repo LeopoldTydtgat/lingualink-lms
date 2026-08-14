@@ -24,7 +24,7 @@ export async function sendMessage(
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, full_name, status')
+    .select('role, status')
     .eq('id', user.id)
     .single()
 
@@ -134,7 +134,7 @@ export async function sendMessage(
         .single()
 
       if (student?.email) {
-        const subject = `Lingualink Online - New message from ${profile.full_name}`
+        const subject = 'Lingualink Online - New message from your teacher'
         await resend.emails.send({
           from: 'Lingualink Online <no-reply@lingualinkonline.com>',
           to: student.email,
@@ -143,7 +143,7 @@ export async function sendMessage(
             recipientName: student.full_name,
             recipientFallback: 'Student',
             subject,
-            bodyHtml: studentNewMessageEmailContent(profile.full_name),
+            bodyHtml: studentNewMessageEmailContent(),
             contactEmail: 'support@lingualinkonline.com',
           }),
         })

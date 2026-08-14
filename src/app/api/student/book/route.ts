@@ -679,8 +679,8 @@ export async function POST(req: NextRequest) {
       : 'Lingualink Online - Your class is confirmed'
 
     const studentBodyHtml = isReschedule
-      ? studentRescheduledEmailContent(teacher.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
-      : studentBookingConfirmationEmailContent(teacher.full_name, newScheduledAtIso, durationMinutes, studentTimezone)
+      ? studentRescheduledEmailContent(oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
+      : studentBookingConfirmationEmailContent(newScheduledAtIso, durationMinutes, studentTimezone)
 
     const teacherSubject = isReschedule
       ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`

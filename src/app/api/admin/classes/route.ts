@@ -557,7 +557,6 @@ export async function POST(request: NextRequest) {
 
     if (studentEmailData?.email) {
       const studentBody = studentBookingConfirmationEmailContent(
-        teacherEmailProfile?.full_name ?? 'Your teacher',
         scheduledAtUtc,
         duration_minutes,
         requireTz(studentEmailData.timezone, 'admin-book:student')
