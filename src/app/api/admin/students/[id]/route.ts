@@ -65,6 +65,10 @@ export async function PATCH(
     // This list is the IDOR gate for ALL training-side writes in this handler —
     // any new writable training column added to UpdateStudentSchema MUST be
     // added here, or its write path bypasses the ownership guard below.
+    // allowed_durations is deliberately absent: it is a students column, so it
+    // is governed by the eq('id', id) on the students update below, not by the
+    // training ownership guard, and gating it on training_id would make it
+    // unsavable for a student with no active training.
     const TRAINING_FIELD_KEYS = ['package_name', 'total_hours', 'end_date', 'assigned_teacher_ids'] as const
     const trainingFieldsPresent = TRAINING_FIELD_KEYS.some((k) => k in parsed.data)
 
@@ -207,7 +211,8 @@ export async function PATCH(
       'language_preference', 'customer_number', 'is_private', 'company_id',
       'academic_advisor_id', 'native_language', 'learning_language',
       'current_fluency_level', 'learning_goals',
-      'interests', 'cancellation_policy', 'admin_notes', 'teacher_notes',
+      'interests', 'cancellation_policy', 'allowed_durations', 'admin_notes',
+      'teacher_notes',
     ] as const
 
     const studentUpdate: Record<string, unknown> = {}

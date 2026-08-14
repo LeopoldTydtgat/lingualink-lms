@@ -93,6 +93,10 @@ const CANCELLATION_OPTIONS = [
   { value: '48hr', label: '48 hours (B2B)' },
 ]
 
+// The only three lengths the booking flow and the live
+// students_allowed_durations_valid CHECK accept.
+const DURATION_OPTIONS = [30, 60, 90]
+
 // Quiet grey "admin only" pill — the loud amber card at the bottom carries the message.
 function AdminOnlyBadge() {
   return (
@@ -200,6 +204,10 @@ export default function EditStudentClient({
     total_hours: activeTrain?.total_hours != null ? String(activeTrain.total_hours) : '',
     end_date: activeTrain?.end_date ?? '',
     // Section D - Notes (students column)
+    // The column is NOT NULL with a CHECK of at least one entry, so the ?? only
+    // fires if the server page stopped selecting it — see the note on that
+    // select list, which this form depends on.
+    allowed_durations: (student.allowed_durations as number[]) ?? [60],
     cancellation_policy: (student.cancellation_policy as string) ?? '24hr',
     admin_notes: (student.admin_notes as string) ?? '',
     teacher_notes: (student.teacher_notes as string) ?? '',
@@ -207,7 +215,7 @@ export default function EditStudentClient({
 
   const [saving, setSaving] = useState(false)
 
-  function set(field: string, value: string | boolean | string[]) {
+  function set(field: string, value: string | boolean | string[] | number[]) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
@@ -220,6 +228,21 @@ export default function EditStudentClient({
           ? ids.filter((i) => i !== tid)
           : [...ids, tid],
       }
+    })
+  }
+
+  // Refuses to clear the last remaining duration: an empty array is rejected by
+  // the schema and the DB CHECK alike, and a student with no allowed duration
+  // could never book at all. Belt and braces with the handleSave guard below.
+  // Kept ascending so the stored array is canonical regardless of click order.
+  function toggleDuration(minutes: number) {
+    setForm((prev) => {
+      const durations = prev.allowed_durations
+      if (durations.includes(minutes)) {
+        if (durations.length === 1) return prev
+        return { ...prev, allowed_durations: durations.filter((d) => d !== minutes) }
+      }
+      return { ...prev, allowed_durations: [...durations, minutes].sort((a, b) => a - b) }
     })
   }
 
@@ -237,6 +260,8 @@ export default function EditStudentClient({
     }
     if (!form.first_name.trim()) { toast.error('First name is required.'); return }
     if (!form.last_name.trim()) { toast.error('Last name is required.'); return }
+    // A students column, so it is required whether or not a training exists.
+    if (form.allowed_durations.length === 0) { toast.error('At least one class duration must be allowed.'); return }
     // Only required when there is a training to hold them.
     if (hasActiveTraining) {
       if (form.assigned_teacher_ids.length === 0) { toast.error('At least one teacher must be assigned.'); return }
@@ -276,9 +301,11 @@ export default function EditStudentClient({
                 end_date: form.end_date || null,
               }
             : {}),
-          // cancellation_policy is a students column, not a training column, so
-          // it is always sent regardless of whether a training exists.
+          // cancellation_policy and allowed_durations are students columns, not
+          // training columns, so they are always sent regardless of whether a
+          // training exists.
           cancellation_policy: form.cancellation_policy,
+          allowed_durations: form.allowed_durations,
           admin_notes: form.admin_notes || null,
           teacher_notes: form.teacher_notes || null,
           training_id: activeTrain?.id ?? null,
@@ -574,9 +601,33 @@ export default function EditStudentClient({
           </Section>
         )}
 
-        {/* 4. Notes. Cancellation Policy sits here because it is a students
-            column, not a training column, so it stays editable either way. */}
+        {/* 4. Notes. Allowed Class Durations and Cancellation Policy sit here
+            because they are students columns, not training columns, so they stay
+            editable either way. */}
         <Section title="Notes">
+          <Field label="Allowed Class Durations">
+            <div className="flex flex-wrap gap-2 mt-1">
+              {DURATION_OPTIONS.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => toggleDuration(d)}
+                  className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                  style={
+                    form.allowed_durations.includes(d)
+                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                  }
+                >
+                  {d} min
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              The student can only book classes of these lengths. Admin bookings are not restricted.
+            </p>
+          </Field>
+
           <Field label="Cancellation Policy" adminOnly>
             <div className="flex gap-0 border border-gray-200 rounded-lg overflow-hidden w-fit mt-1">
               {CANCELLATION_OPTIONS.map((opt) => (

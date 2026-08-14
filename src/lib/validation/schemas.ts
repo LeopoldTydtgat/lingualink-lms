@@ -134,6 +134,18 @@ export const CreateStudentSchema = z.object({
   language_preference: z.string().max(100).optional().nullable(),
   cancellation_policy: z.enum(CANCELLATION_POLICY).default('24hr'),
 
+  // The class lengths this student is allowed to book. Mirrors the live CHECK on
+  // students.allowed_durations (a subset of {30,60,90} with at least one entry),
+  // so a bad value comes back as a readable 400 rather than an opaque 23514 from
+  // Postgres. The no-duplicates rule is app-side only — the CHECK's <@ accepts
+  // repeats, and a repeated value would render as a double-counted pill.
+  // Deliberately REQUIRED: an absent array would silently fall back to the
+  // column default (60-only) while the admin form showed something else.
+  allowed_durations: z
+    .array(z.union([z.literal(30), z.literal(60), z.literal(90)]))
+    .min(1, 'At least one class duration must be allowed.')
+    .refine((a) => new Set(a).size === a.length, 'Durations must not repeat.'),
+
   // Learning profile
   native_language: z.string().max(100).optional().nullable(),
   learning_language: z.string().max(100).optional().nullable(),
@@ -255,6 +267,15 @@ export const UpdateStudentSchema = z.object({
   learning_goals: z.string().max(2000).optional().nullable(),
   interests: z.string().max(1000).optional().nullable(),
   cancellation_policy: z.enum(CANCELLATION_POLICY).optional(),
+  // Same rules as CreateStudentSchema.allowed_durations, but optional so a
+  // partial PATCH (e.g. Archive sending just { status }) stays legal. Optional,
+  // never nullable: the column is NOT NULL, so an explicit null must 400 here
+  // rather than reach the DB.
+  allowed_durations: z
+    .array(z.union([z.literal(30), z.literal(60), z.literal(90)]))
+    .min(1, 'At least one class duration must be allowed.')
+    .refine((a) => new Set(a).size === a.length, 'Durations must not repeat.')
+    .optional(),
   admin_notes: z.string().max(10_000).optional().nullable(),
   teacher_notes: z.string().max(5000).optional().nullable(),
   assigned_teacher_ids: z.array(uuid).optional(),
