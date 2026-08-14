@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     const { data: studentRow, error: studentError } = await supabase
       .from('students')
-      .select('id, full_name, email, timezone, auth_user_id, profile_completed')
+      .select('id, full_name, email, timezone, auth_user_id, profile_completed, allowed_durations')
       .eq('id', studentId)
       .single()
 
@@ -59,6 +59,35 @@ export async function POST(req: NextRequest) {
         { error: 'Please confirm your timezone in My Account before booking a class.', code: 'PROFILE_INCOMPLETE' },
         { status: 403 }
       )
+    }
+
+    // ── 2a. Per-student allowed class durations (NEW-A1) ─────────────────────
+    // FRESH BOOKINGS ONLY. A reschedule deliberately keeps the ORIGINAL
+    // lesson's duration even when that length has since been removed from the
+    // student's allowed list, so this branch must never read allowed_durations.
+    // The reschedule half of the rule is enforced further down, where oldLesson
+    // is loaded: durationMinutes must equal oldLesson.duration_minutes.
+    //
+    // Fail closed by construction. A null, absent or malformed column value
+    // fails Array.isArray (or the .includes below) and blocks the booking —
+    // there is deliberately NO permissive fallback, because "we could not read
+    // the list" must never resolve to "every duration is allowed". The read
+    // itself cannot fail silently either: it is part of the studentRow select
+    // above, whose failure already returns 404 before this point.
+    //
+    // Placed before the rate limiter so a rejected duration costs the student
+    // none of their booking-attempt budget; nothing is written on either side
+    // of this guard, so the ordering has no state consequences.
+    if (!rescheduleId) {
+      if (
+        !Array.isArray(studentRow.allowed_durations) ||
+        !studentRow.allowed_durations.includes(durationMinutes)
+      ) {
+        return NextResponse.json(
+          { error: 'This class length is not enabled on your account. Please contact admin.' },
+          { status: 403 }
+        )
+      }
     }
 
     // ── 2b. Rate limit per student (10 bookings / 60 min, fail closed) ───────
@@ -292,6 +321,27 @@ export async function POST(req: NextRequest) {
           {
             error:
               'You cannot change teacher when rescheduling. Please cancel and book a new class instead.',
+          },
+          { status: 400 }
+        )
+      }
+
+      // Duration lock (NEW-A1). Same shape as the teacher lock above: the client
+      // pins the duration to rescheduleLesson.duration_minutes, and until now
+      // nothing on the server enforced it, so a forged POST could silently
+      // change the class length (and, via the net-delta refund in
+      // reschedule_class_atomic, the hours) while rescheduling.
+      //
+      // This is ALSO the reschedule half of the allowed-durations rule, which is
+      // why it is an equality check against the OLD lesson and not a lookup of
+      // students.allowed_durations: rescheduling deliberately preserves a length
+      // that may since have been disabled on the account. One guard, both jobs.
+      // Runs before any mutation — the atomic RPC is further down.
+      if (durationMinutes !== oldLesson.duration_minutes) {
+        return NextResponse.json(
+          {
+            error:
+              'The class length cannot be changed when rescheduling. Please cancel and book a new class instead.',
           },
           { status: 400 }
         )

@@ -26,10 +26,12 @@ export default async function BookPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/student/login')
 
-  // Get student record
+  // Get student record. allowed_durations is a student-readable column
+  // (column-level SELECT granted to authenticated), so this stays on the
+  // session client with the rest of the row.
   const { data: student } = await supabase
     .from('students')
-    .select('id, timezone, profile_completed')
+    .select('id, timezone, profile_completed, allowed_durations')
     .eq('auth_user_id', user.id)
     .single()
   if (!student) redirect('/student/login')
@@ -37,6 +39,20 @@ export default async function BookPage({
   if (student.profile_completed !== true) {
     redirect('/student/account?confirm_tz=1')
   }
+
+  // Per-student allowed class durations (NEW-A1). Sanitised here to the three
+  // lengths the booking flow supports, so a malformed or unexpected value can
+  // never widen what the grid offers.
+  //
+  // An empty result is passed down AS EMPTY and is never defaulted to "all
+  // durations": that would turn an unreadable/absent list into a fully open
+  // booking page. The DB CHECK (at least one entry) makes empty near-impossible,
+  // but if it happens the client shows the unbookable-account banner and hides
+  // the grid, and /api/student/book re-checks the real column regardless — this
+  // array is a display input, never the authority.
+  const allowedDurations = Array.isArray(student.allowed_durations)
+    ? student.allowed_durations.filter((d): d is number => d === 30 || d === 60 || d === 90)
+    : []
 
   // Get active training
   const { data: training } = await supabase
@@ -159,6 +175,7 @@ export default async function BookPage({
       hoursRemaining={effectiveHoursRemaining}
       teachers={teachers}
       rescheduleLesson={rescheduleLesson}
+      allowedDurations={allowedDurations}
     />
   )
 }
