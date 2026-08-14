@@ -372,7 +372,16 @@ export async function PATCH(
       try {
         await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: 'none' })
       } catch (unbanError) {
+        // The unban is what actually restores login: if it throws, the student
+        // stays banned and locked out while the form would report "Changes
+        // saved!". Hard-fail with 500 like the ban branch above - the admin
+        // retries; the status is already written so re-running is idempotent
+        // and simply re-attempts the unban.
         console.error('[reactivate student] unban failed:', unbanError)
+        return NextResponse.json(
+          { error: 'Failed to restore student access. Please retry.' },
+          { status: 500 }
+        )
       }
     }
 
