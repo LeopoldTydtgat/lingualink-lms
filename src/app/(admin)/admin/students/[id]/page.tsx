@@ -59,11 +59,17 @@ export default async function StudentDetailPage({
   // admin-only fields (admin_notes, cancellation_policy, customer_number,
   // date_of_birth, follow-up and billing fields). Two literal selects (not an
   // interpolated column list) so the typed client can parse each query.
+  //
+  // allowed_durations is in the staff list deliberately. It is not admin-only (the
+  // student portal reads it under a column-level grant), and the Classes tab renders
+  // for staff too, so leaving it out would make the read-only duration marker there
+  // report 'unknown' on every row for exactly one class of viewer. The admin branch
+  // gets it via its select('*'); converting that select is tracked separately.
   const { data: student, error } = isStaffView
     ? await supabase
         .from('students')
         .select(`
-          id, full_name, email, phone, photo_url, status, timezone, language_preference, native_language, learning_language, current_fluency_level, learning_goals, interests, teacher_notes, email_bounced_at, email_bounce_reason,
+          id, full_name, email, phone, photo_url, status, timezone, language_preference, native_language, learning_language, current_fluency_level, learning_goals, interests, teacher_notes, email_bounced_at, email_bounce_reason, allowed_durations,
           companies (
             id,
             name

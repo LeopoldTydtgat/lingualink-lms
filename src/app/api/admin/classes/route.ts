@@ -88,6 +88,12 @@ export async function GET(request: NextRequest) {
   }
 
   // Build query — join profiles (teacher) and students
+  // allowed_durations rides along on the student embed as an EXPLICIT column
+  // (never select('*') - students carries column-level REVOKEs). It feeds the
+  // read-only duration marker in ClassesListClient and nothing else: admin
+  // booking stays deliberately exempt from the per-student duration rule, so
+  // this is display metadata on a row that already exists, never a gate. The
+  // POST handler below does not read it.
   let query = supabase
     .from('lessons')
     .select(`
@@ -111,7 +117,8 @@ export async function GET(request: NextRequest) {
       students!lessons_student_id_fkey (
         id,
         full_name,
-        photo_url
+        photo_url,
+        allowed_durations
       )
     `, { count: 'exact' })
 
