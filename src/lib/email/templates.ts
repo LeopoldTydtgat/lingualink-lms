@@ -458,48 +458,6 @@ export function studentClassReminderEmailContent(
   `
 }
 
-export function studentHomeworkAssignedEmailContent(
-  teacherName: string,
-  sheetTitles: string[]
-): string {
-  const sheetList = sheetTitles
-    .map(t => `<li style="margin:4px 0;font-size:14px;color:#111827;">${t}</li>`)
-    .join('')
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      Your teacher <strong style="color:#FF8303;">${teacherName}</strong> has assigned new exercises for you to complete.
-    </p>
-    <ul style="margin:0 0 24px;padding-left:20px;">
-      ${sheetList}
-    </ul>
-    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/study`, 'Go to My Study')}
-  `
-}
-
-// Teaching-material homework (material_assignments). Deliberately GENERIC per
-// client instruction: it never names the sheet, the PDF file or the page range -
-// the student sees all of that only after logging in. Sibling of
-// studentHomeworkAssignedEmailContent above, which lists worksheet titles.
-export function studentMaterialHomeworkAssignedEmailContent(
-  teacherName: string | null
-): string {
-  // Empty/whitespace name -> the name slot is dropped entirely rather than
-  // rendered blank.
-  const name = teacherName?.trim()
-  const openingSentence = name
-    ? `Your teacher <strong style="color:#FF8303;">${name}</strong> has assigned a homework task for you to complete.`
-    : 'Your teacher has assigned a homework task for you to complete.'
-  return `
-    <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6;">
-      ${openingSentence}
-    </p>
-    <p style="margin:0 0 24px;font-size:15px;color:#111827;line-height:1.6;">
-      Log in to your portal to see it.
-    </p>
-    ${buildButton(`${process.env.NEXT_PUBLIC_STUDENT_URL}/student/study`, 'Go to My Study')}
-  `
-}
-
 export function studentLowHoursEmailContent(
   hoursRemaining: number
 ): string {

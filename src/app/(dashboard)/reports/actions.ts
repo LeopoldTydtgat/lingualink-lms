@@ -1,12 +1,8 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
 import { SubmitReportSchema, type SubmitReportInput } from '@/lib/validation/schemas'
-import { checkEmailDispatchLimit } from '@/lib/rateLimit'
-import resend from '@/lib/email/client'
-import { buildEmailTemplate, studentHomeworkAssignedEmailContent } from '@/lib/email/templates'
 
 export async function reopenReport(reportId: string) {
   const supabase = await createClient()
@@ -203,141 +199,6 @@ export async function submitReport(reportId: string, payload: SubmitReportInput)
     // has no matching lesson row) and every unexpected Postgres failure.
     console.error('[reports/actions] complete_report_atomic failed:', rpcErr)
     return { error: 'Something went wrong saving this report. Please try again.' }
-  }
-
-  // Homework-assigned notification.
-  //
-  // The email lives HERE and not in /api/teacher/assignments/reconcile, where
-  // the assignment rows are actually written. The teacher assigns study sheets
-  // from the report form's modal, which saves immediately, but the student must
-  // not be told about homework for a class whose report has not been filed: the
-  // teacher may still be adding and removing sheets, and until the report is in
-  // the class is not finished.
-  //
-  // assignments.notified_at is the dedupe - NULL means "not announced yet".
-  // Only unnotified rows are listed and only those rows are stamped, so several
-  // modal saves, sheets added and taken away again before submit, and an
-  // admin-reopened report resubmitted with extra sheets all still produce one
-  // email each covering only what the student has not already heard about.
-  //
-  // The teacher's name comes from report.teacher_id, NOT the session user: an
-  // admin may submit on the teacher's behalf, and the student's email has to
-  // name their own teacher rather than whoever filed the paperwork.
-  //
-  // Applies on every successful submit whatever did_class_happen said - a
-  // no-show report can carry homework rows too. Wholly non-blocking: the report
-  // is already saved by the RPC above and nothing in here may change what this
-  // action returns.
-  try {
-    if (report.lesson_id) {
-      // Service role throughout: `authenticated` holds SELECT + INSERT on
-      // assignments only (no UPDATE), so the notified_at stamp cannot run on
-      // the user client, and the students email read needs it too - the same
-      // pattern the reconcile route used. Explicit columns, never select('*').
-      const adminClient = createAdminClient()
-
-      const { data: pendingRows, error: pendingError } = await adminClient
-        .from('assignments')
-        .select('id, student_id, study_sheet_id')
-        .eq('lesson_id', report.lesson_id)
-        .is('notified_at', null)
-
-      if (pendingError) {
-        console.error(
-          `[reports/actions] unnotified assignments read failed (report ${reportId}):`,
-          pendingError
-        )
-      }
-
-      const pending = (pendingRows ?? []) as {
-        id: string
-        student_id: string
-        study_sheet_id: string
-      }[]
-
-      if (pending.length > 0) {
-        // The titles are the whole point of this email, so a failed read must not
-        // be papered over with an empty list. Nothing is sent and nothing is
-        // stamped: the rows stay unnotified and a later resubmit of this report
-        // retries the announcement, exactly like the rate-limit skip below. The
-        // student sees the work in their Study tab either way - this email is a
-        // nudge, not the delivery.
-        const { data: sheetRows, error: sheetError } = await adminClient
-          .from('study_sheets')
-          .select('id, title')
-          .in('id', pending.map(r => r.study_sheet_id))
-
-        if (sheetError) {
-          console.error(
-            `[reports/actions] study sheet titles read failed (report ${reportId}); homework notification skipped:`,
-            sheetError
-          )
-        } else {
-          const titles = ((sheetRows ?? []) as { id: string; title: string }[]).map(r => r.title)
-
-          // Every assignment on one lesson belongs to that lesson's student, so
-          // the first row names the recipient.
-          const { data: student } = await adminClient
-            .from('students')
-            .select('email, full_name')
-            .eq('id', pending[0].student_id)
-            .maybeSingle()
-
-          if (student?.email) {
-            const { data: teacherProfile } = await adminClient
-              .from('profiles')
-              .select('full_name')
-              .eq('id', report.teacher_id)
-              .maybeSingle()
-
-            const limit = await checkEmailDispatchLimit(user.id)
-            if (limit.blocked) {
-              // Nothing is stamped, so the rows stay unnotified and a later
-              // resubmit of this report retries the announcement.
-              console.warn(
-                `[reports/actions] email dispatch limit reached for user ${user.id}; report ${reportId} submitted, homework notification skipped`
-              )
-            } else {
-              const subject = 'Lingualink Online - Your teacher has assigned new exercises'
-              await resend.emails.send({
-                from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-                to: student.email,
-                subject,
-                html: buildEmailTemplate({
-                  recipientName: student.full_name,
-                  recipientFallback: 'Student',
-                  subject,
-                  bodyHtml: studentHomeworkAssignedEmailContent(
-                    teacherProfile?.full_name ?? 'Your teacher',
-                    titles
-                  ),
-                  contactEmail: 'support@lingualinkonline.com',
-                }),
-              })
-
-              // Stamped ONLY once the send has resolved without throwing. A throw
-              // above lands in the catch with every row still unnotified, so the
-              // next submit retries. A failure of the stamp itself is logged and
-              // left alone: the worst case is one duplicate email on a resubmit,
-              // which is not worth compensating for.
-              const { error: stampError } = await adminClient
-                .from('assignments')
-                .update({ notified_at: new Date().toISOString() })
-                .in('id', pending.map(r => r.id))
-
-              if (stampError) {
-                console.error(
-                  `[reports/actions] notified_at stamp failed after a successful send (report ${reportId}):`,
-                  stampError
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error(`[reports/actions] homework notification failed (report ${reportId}):`, err)
   }
 
   revalidatePath('/reports')

@@ -37,13 +37,10 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // Serves teachers and admins alike: the only caller, the class report page,
 // admits both.
 //
-// NO EMAIL IS SENT FROM HERE. The homework-assigned notification fires when the
-// class report is submitted instead - submitReport in
-// src/app/(dashboard)/reports/actions.ts - and is deduped by
-// assignments.notified_at, which that action stamps on the rows it announces.
-// Rows are written the moment the teacher saves the modal, but the student must
-// only hear about them once the report is actually filed, and only once however
-// many times the set is saved, re-saved or edited before then.
+// NO EMAIL IS SENT FROM HERE, and none is sent anywhere else either: no
+// homework email exists on any path any more, all of them having been removed by
+// client decision. The student learns about new work in the portal - the
+// assignments appear in their Study tab and in their What's New feed.
 
 const ReconcileSchema = z.object({
   lesson_id: z.string().uuid(),

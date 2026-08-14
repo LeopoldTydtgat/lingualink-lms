@@ -259,11 +259,10 @@ export default function AssignStudySheetsModal({
     // itself: `authenticated` holds SELECT + INSERT on assignments only, with no
     // DELETE grant and no DELETE policy, so the un-assign half of the old
     // in-component save failed permanently while still reporting success. No
-    // email is dispatched at save time at all, here or in that route: the
-    // homework-assigned email fires when the class report is submitted
-    // (submitReport in src/app/(dashboard)/reports/actions.ts), deduped via
-    // assignments.notified_at, so saving this modal repeatedly before the report
-    // goes in still produces exactly one notification.
+    // email is dispatched at save time, or at any later point: no homework email
+    // exists on any path any more, all of them having been removed by client
+    // decision. The student learns about new work in the portal - the
+    // assignments appear in their Study tab and in their What's New feed.
     //
     // try/catch/finally guarantees the saving state is reset on EVERY exit path —
     // a rejected response, a thrown network error, or success — so the button can
