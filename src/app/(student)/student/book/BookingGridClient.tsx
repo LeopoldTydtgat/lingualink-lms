@@ -14,7 +14,7 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, type LucideIcon } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Lightbulb, type LucideIcon } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 import { isBookableStart } from '@/lib/bookingGrid'
 import {
@@ -34,7 +34,10 @@ import {
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
 const CELL_BOOKABLE_BG = '#E8F5E9'
 const CELL_GREY_BG = '#F7F6F4'
-const CELL_SELECTED_BG = '#FFDDB8'
+// Selected-run fill — solid brand orange, the same #FF8303 as the run outline,
+// so a selected block reads as one filled event instead of a pale amber tint.
+// The run's label, tick and duration line are painted white on top of it.
+const CELL_SELECTED_BG = '#FF8303'
 // Selected-teacher pill ring — green family derived from CELL_BOOKABLE_BG
 // (border a stronger green of the same hue, bg a slightly lighter tint).
 // PLACEHOLDER pending the client's portal-wide green-vs-orange decision,
@@ -658,6 +661,10 @@ export default function BookingGridClient({
   // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
   const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
+  // Empty-state copy only: suggest a shorter class only when one actually
+  // exists to switch to. Reschedule locks the duration, so that path never
+  // offers it.
+  const shorterLengthAllowed = !isReschedule && allowedDurations.some((m) => m < selectedDuration)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
@@ -708,25 +715,49 @@ export default function BookingGridClient({
     marginTop: isFirst ? '0' : '-2px',
   })
 
-  // Time-range text painted on the run's FIRST cell only. Dark amber for
-  // contrast on CELL_SELECTED_BG; aria-hidden where rendered — the start
-  // cell's aria-label already announces the slot.
+  // Time-range text painted on the run's FIRST cell only. White for contrast
+  // on the solid-orange CELL_SELECTED_BG; aria-hidden where rendered — the
+  // start cell's aria-label already announces the slot.
   const runLabelStyle: CSSProperties = {
     fontSize: '11px',
-    fontWeight: '600',
+    fontWeight: '700',
     lineHeight: 1,
-    color: '#92400e',
+    color: '#ffffff',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   }
-  // Layout added to the first run cell so the label sits left-aligned and
-  // vertically centred on a single clipped line.
+  // Same treatment one step down, for the duration line on the run's LAST cell.
+  const runSubLabelStyle: CSSProperties = {
+    fontSize: '10px',
+    fontWeight: '600',
+    lineHeight: 1,
+    color: '#ffffff',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  }
+  // Layout added to the first run cell so the tick and label sit centred on a
+  // single clipped line.
   const runFirstCellLayout: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
+    gap: '3px',
     padding: '0 4px 0 5px',
     overflow: 'hidden',
+  }
+  // Layout for the run's last cell, which carries the duration line.
+  const runLastCellLayout: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '0 4px',
+    overflow: 'hidden',
+  }
+  // Layout for an unselected bookable cell, centring its availability dot.
+  const bookableCellLayout: CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   }
 
   // The column header / week label Dates are anchored at NOON student-local
@@ -898,13 +929,13 @@ export default function BookingGridClient({
     { minutes: 90, label: '90', hours: 1.5 },
   ]
 
-  // Legend entries. Legend tints are STRONGER than the cell fills because
-  // small swatches need more saturation to read as the same colour: at 10px
-  // the pale Available cell fill reads grey (see LEGEND_AVAILABLE_DOT), and
-  // the Unavailable fill gets a palette-grey edge so it doesn't vanish on
-  // white. Cell colours themselves are unchanged. Decorative only.
+  // Legend entries. Each swatch now mirrors what the grid actually paints: the
+  // Available swatch is a white box with the same LEGEND_AVAILABLE_DOT edge and
+  // small green centre dot a bookable cell carries, the Unavailable fill gets a
+  // palette-grey edge so it doesn't vanish on white, and Selected takes the
+  // solid-orange run fill. Decorative only.
   const legendItems = [
-    { label: 'Available', bg: LEGEND_AVAILABLE_DOT, border: 'none' },
+    { label: 'Available', bg: '#ffffff', border: `1px solid ${LEGEND_AVAILABLE_DOT}` },
     { label: 'Unavailable', bg: CELL_GREY_BG, border: '1px solid #E0DFDC' },
     // Matches a real selected cell: selected bg + 1px #FF8303 border.
     { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
@@ -1016,7 +1047,7 @@ export default function BookingGridClient({
           }}
         >
           <p style={{ fontSize: '13px', color: '#FD5602' }}>
-            You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
+            You do not have enough hours remaining to book a class. Please contact support to purchase more hours.
           </p>
         </div>
       )}
@@ -1035,7 +1066,7 @@ export default function BookingGridClient({
           }}
         >
           <p style={{ fontSize: '13px', color: '#FD5602' }}>
-            No class durations are enabled on your account. Please contact admin.
+            No class durations are enabled on your account. Please contact support.
           </p>
         </div>
       )}
@@ -1181,12 +1212,24 @@ export default function BookingGridClient({
           // when that length has since been removed from the account — the
           // reschedule arm here is byte-identical to what it was before NEW-A1.
           const disabled = !canBook || (isReschedule ? !isSelected : !isAllowed)
+          // The two fresh-book disable reasons read identically at opacity 0.5,
+          // so each gets its own 12px glyph: wallet = out of hours, lock = not
+          // enabled on the account. Both are false on every reschedule render,
+          // so the reschedule branch stays byte-identical.
+          const showHoursIcon = !isReschedule && !canBook
+          const showLockIcon = !isReschedule && canBook && !isAllowed
           return (
             <button
               key={option.minutes}
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
-              aria-label={`${option.minutes} minutes`}
+              aria-label={
+                showHoursIcon
+                  ? `${option.minutes} minutes, not enough hours remaining`
+                  : showLockIcon
+                  ? `${option.minutes} minutes, not enabled on your account`
+                  : `${option.minutes} minutes`
+              }
               title={
                 !canBook
                   ? 'Not enough hours remaining'
@@ -1205,8 +1248,13 @@ export default function BookingGridClient({
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#111827',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
               }}
             >
+              {showHoursIcon && <Wallet size={12} aria-hidden="true" />}
+              {showLockIcon && <Lock size={12} aria-hidden="true" />}
               {option.label}
             </button>
           )
@@ -1216,7 +1264,7 @@ export default function BookingGridClient({
 
         {/* ── Week group — prev · label · Today · next; fixed width, nothing
             shifts or appears/disappears on navigation ── */}
-        <div style={{ flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, borderLeft: '1px solid #E0DFDC', paddingLeft: '14px' }}>
           <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
             Week
           </p>
@@ -1324,16 +1372,19 @@ export default function BookingGridClient({
           {!loading && !error && visibleColumns.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 16px' }}>
               <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-                No openings this week.
+                No {selectedDuration}-minute openings this week.
               </p>
               <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                Use the arrow above to check the next week.
+                {shorterLengthAllowed
+                  ? 'Use the arrow above to check the next week, or try a shorter class length.'
+                  : 'Use the arrow above to check the next week.'}
               </p>
             </div>
           )}
 
           {!loading && !error && visibleColumns.length > 0 && (
             // Horizontally scrollable on mobile; the time column stays sticky.
+            <>
             <div
               className="shadow-[0_1px_2px_rgba(0,0,0,0.05),0_2px_6px_rgba(0,0,0,0.05),0_8px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.07),0_14px_32px_rgba(0,0,0,0.08)] hover:-translate-y-[3px] transition-[box-shadow,transform] duration-200"
               style={{
@@ -1364,8 +1415,18 @@ export default function BookingGridClient({
                         backgroundColor: item.bg,
                         border: item.border,
                         flexShrink: 0,
+                        ...(item.label === 'Available'
+                          ? { display: 'flex', alignItems: 'center', justifyContent: 'center' }
+                          : {}),
                       }}
-                    />
+                    >
+                      {item.label === 'Available' && (
+                        <span
+                          aria-hidden="true"
+                          style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
+                        />
+                      )}
+                    </span>
                     <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
                       {item.label}
                     </span>
@@ -1513,10 +1574,17 @@ export default function BookingGridClient({
                                         backgroundColor: CELL_GREY_BG,
                                       }),
                                   ...(isRunFirst ? runFirstCellLayout : {}),
+                                  ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
                                 }}
                               >
                                 {isRunFirst && selectedRangeLabel !== null && (
-                                  <span style={runLabelStyle}>{selectedRangeLabel}</span>
+                                  <>
+                                    <Check size={11} strokeWidth={3} style={{ color: '#ffffff', flexShrink: 0 }} />
+                                    <span style={runLabelStyle}>{selectedRangeLabel}</span>
+                                  </>
+                                )}
+                                {isRunLast && !isRunFirst && (
+                                  <span style={runSubLabelStyle}>{selectedDuration} min</span>
                                 )}
                               </div>
                             )
@@ -1531,9 +1599,11 @@ export default function BookingGridClient({
                           const isRunFirst = inSelectedRun && t === runStartMs
                           const isRunLast =
                             inSelectedRun && runEndMs !== null && t + SLOT_MINUTES * 60000 === runEndMs
-                          // Text-less cell except the run's FIRST cell, which
-                          // paints the selected range; the slot time lives in
-                          // the aria-label (and in the summary column).
+                          // Text-less cell — an unselected bookable cell shows
+                          // only a small green dot, the run's FIRST cell paints
+                          // the selected range and its LAST cell the duration;
+                          // the slot time lives in the aria-label (and in the
+                          // summary column).
                           return (
                             <button
                               key={key}
@@ -1547,15 +1617,31 @@ export default function BookingGridClient({
                                   ? runCellChrome(isRunFirst, isRunLast)
                                   : {
                                       borderRadius: '6px',
-                                      border: 'none',
+                                      border: `1px solid ${LEGEND_AVAILABLE_DOT}`,
                                       backgroundColor: CELL_BOOKABLE_BG,
                                     }),
                                 ...(isRunFirst ? runFirstCellLayout : {}),
+                                ...(!inSelectedRun ? bookableCellLayout : {}),
+                                ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
                               }}
                             >
+                              {!inSelectedRun && (
+                                <span
+                                  aria-hidden="true"
+                                  style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
+                                />
+                              )}
                               {isRunFirst && selectedRangeLabel !== null && (
-                                <span aria-hidden="true" style={runLabelStyle}>
-                                  {selectedRangeLabel}
+                                <>
+                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#ffffff', flexShrink: 0 }} />
+                                  <span aria-hidden="true" style={runLabelStyle}>
+                                    {selectedRangeLabel}
+                                  </span>
+                                </>
+                              )}
+                              {isRunLast && !isRunFirst && (
+                                <span aria-hidden="true" style={runSubLabelStyle}>
+                                  {selectedDuration} min
                                 </span>
                               )}
                             </button>
@@ -1567,6 +1653,12 @@ export default function BookingGridClient({
                 ))}
               </div>
             </div>
+            {/* Hint under the grid — decorative, the cells carry their own labels. */}
+            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: '#6b7280' }}>
+              <Lightbulb size={13} color="#FF8303" aria-hidden="true" />
+              Click on any available slot to select your class time.
+            </p>
+            </>
           )}
         </>
       )}
@@ -1720,7 +1812,7 @@ export default function BookingGridClient({
                     color: '#92400e',
                   }}
                 >
-                  After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
+                  After this booking you will have less than 2 hours remaining. Contact support to purchase more hours.
                 </div>
               )}
 

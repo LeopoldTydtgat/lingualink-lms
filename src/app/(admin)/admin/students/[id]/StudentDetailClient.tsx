@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
+import { toast } from 'sonner'
 import { sanitizeHtml } from '@/lib/sanitize'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -785,6 +786,9 @@ export default function StudentDetailClient({
       setTrainingHours('')
       setTrainingEndDate('')
       setTrainingTeacherIds([])
+      // Success was previously silent: the card unmounts on refresh with nothing
+      // confirming the write. The toast is portaled, so it survives that unmount.
+      toast.success('Training created.')
       // Re-runs the server component: hasActiveTraining flips true, so the new
       // training renders in the Training card and this form disappears.
       router.refresh()
@@ -1188,13 +1192,6 @@ export default function StudentDetailClient({
               </p>
             </div>
 
-            {trainingError && (
-              <div className="px-4 py-3 rounded-lg text-sm"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {trainingError}
-              </div>
-            )}
-
             {teacherOptionsLoadFailed && (
               <div
                 className="text-xs rounded-lg px-3 py-2"
@@ -1209,6 +1206,7 @@ export default function StudentDetailClient({
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Package Name
+                <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
               </label>
               <input
                 className={inputClass}
@@ -1222,6 +1220,7 @@ export default function StudentDetailClient({
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Total Hours
+                  <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
                 </label>
                 <input
                   type="number" min="0.5" step="0.5"
@@ -1277,6 +1276,13 @@ export default function StudentDetailClient({
                 </p>
               )}
             </div>
+
+            {trainingError && (
+              <div className="px-4 py-3 rounded-lg text-sm"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                {trainingError}
+              </div>
+            )}
 
             <div className="flex justify-end">
               <button

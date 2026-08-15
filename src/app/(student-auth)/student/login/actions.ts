@@ -52,7 +52,7 @@ export async function studentLoginAction(formData: FormData) {
     await supabase.auth.signOut()
     const cookieStore = await cookies()
     cookieStore.delete('ll_status_checked_at')
-    return { error: 'Your account is not active. Please contact admin.' }
+    return { error: 'Your account is not active. Please contact support.' }
   }
 
   await clearRateLimit(ip, 'student')

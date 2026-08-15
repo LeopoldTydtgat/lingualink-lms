@@ -37,7 +37,7 @@ export default async function StudentAccountPage() {
         <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#111827', marginBottom: '8px' }}>
           Account not found
         </h2>
-        <p>Your student profile could not be loaded. Please contact admin.</p>
+        <p>Your student profile could not be loaded. Please contact support at support@lingualinkonline.com.</p>
       </div>
     )
   }

@@ -593,7 +593,7 @@ export default function EditStudentClient({
                   className="underline"
                   style={{ color: '#FF8303' }}
                 >
-                  Create a training on the student&apos;s profile page
+                  Use the Create Training card on the student&apos;s profile page
                 </Link>{' '}
                 to set the package, hours, end date and assigned teachers.
               </p>

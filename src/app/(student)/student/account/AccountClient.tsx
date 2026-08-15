@@ -425,14 +425,14 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
             <label style={labelStyle}>Full Name</label>
             <input style={readonlyStyle} value={student.full_name} readOnly />
             <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-              To change your name, contact admin.
+              To change your name, contact support.
             </p>
           </div>
           <div>
             <label style={labelStyle}>Email Address</label>
             <input style={readonlyStyle} value={student.email} readOnly />
             <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-              Your login email — assigned by admin.
+              Your login email — contact support to change it.
             </p>
           </div>
         </div>
@@ -612,7 +612,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
               fontSize: '13px',
               color: '#dc2626',
             }}>
-              ⚠️ You have no hours remaining. Contact admin to purchase more hours to keep learning.
+              ⚠️ You have no hours remaining. Contact support to purchase more hours to keep learning.
             </div>
           )}
 
@@ -627,7 +627,7 @@ export default function AccountClient({ student, activeTraining, allTrainings }:
               fontSize: '13px',
               color: '#92400e',
             }}>
-              ⚠️ You have less than 2 hours remaining. Contact admin to purchase more hours.
+              ⚠️ You have less than 2 hours remaining. Contact support to purchase more hours.
             </div>
           )}
 

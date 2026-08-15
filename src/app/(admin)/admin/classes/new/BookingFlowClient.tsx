@@ -72,6 +72,18 @@ function slotLocalTime(startIso: string, timezone: string): string {
   return `${hh.padStart(2, '0')}:${mm.padStart(2, '0')}`
 }
 
+// Add minutes to an "HH:MM" wall-clock string. Safe here without timezone
+// conversion: slots run 06:00-22:00 with max duration 90, so the latest end
+// is 23:30 - a class window can never cross midnight or a DST transition
+// (those occur 00:00-03:00 local).
+function addMinutesToTime(time: string, minutes: number): string {
+  const [h, m] = time.split(':').map(Number)
+  const total = h * 60 + m + minutes
+  const hh = Math.floor(total / 60)
+  const mm = total % 60
+  return `${hh.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`
+}
+
 export default function BookingFlowClient({ teachers, students }: Props) {
   const router = useRouter()
 
@@ -582,7 +594,7 @@ export default function BookingFlowClient({ teachers, students }: Props) {
             <Row label="Teacher" value={selectedTeacher.full_name} />
             <Row label="Student" value={selectedStudent.full_name} />
             <Row label="Date" value={selectedDate} />
-            <Row label="Time" value={`${selectedTime} (${selectedTeacher.timezone ?? 'unknown timezone'})`} />
+            <Row label="Time" value={`${selectedTime} - ${addMinutesToTime(selectedTime, selectedDuration)} (${selectedTeacher.timezone ?? 'unknown timezone'})`} />
             <Row label="Duration" value={`${selectedDuration} minutes`} />
             <div style={{ borderTop: '1px solid #F3F4F6', margin: '12px 0' }} />
             <Row label="Hours to deduct" value={`${hoursRequested.toFixed(1)}h`} />
