@@ -162,10 +162,22 @@ export async function GET(req: NextRequest) {
 
   // ── Fetch availability records ──────────────────────────────────────────────
 
-  const { data: availabilityData } = await admin
+  const { data: availabilityData, error: availabilityError } = await admin
     .from('availability')
     .select('type, day_of_week, start_time, end_time, start_at, end_at, is_available')
     .eq('teacher_id', teacherId)
+
+  // Fail closed, mirroring the three sibling reads in this handler: destructuring
+  // data only left availabilityData null on a query error, so records became []
+  // and the engine minted zero candidates. The student saw "no openings" under a
+  // 200 and the client retry path never fired because the status was success.
+  if (availabilityError) {
+    console.error('[student availability] availability query failed:', availabilityError)
+    return NextResponse.json(
+      { error: 'Could not load availability. Please try again.' },
+      { status: 500 }
+    )
+  }
 
   // Already booked lessons overlapping this week's instant window. BOTH bounds
   // are widened by the longest lesson duration: a lesson starting just before
