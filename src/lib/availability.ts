@@ -117,9 +117,7 @@ export async function isSlotAvailable(
     const endDate = r.end_at!.split('T')[0]
     while (d <= endDate) {
       holidayBlockedDates.add(d)
-      const [yy, mm, dd] = d.split('-').map(Number)
-      const next = new Date(yy, mm - 1, dd + 1)
-      d = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+      d = addDaysToDateKey(d, 1)
     }
   }
 
