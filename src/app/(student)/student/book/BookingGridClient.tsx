@@ -658,6 +658,10 @@ export default function BookingGridClient({
   // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
   const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
+  // Empty-state copy only: suggest a shorter class only when one actually
+  // exists to switch to. Reschedule locks the duration, so that path never
+  // offers it.
+  const shorterLengthAllowed = !isReschedule && allowedDurations.some((m) => m < selectedDuration)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
@@ -1324,10 +1328,12 @@ export default function BookingGridClient({
           {!loading && !error && visibleColumns.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 16px' }}>
               <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-                No openings this week.
+                No {selectedDuration}-minute openings this week.
               </p>
               <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                Use the arrow above to check the next week.
+                {shorterLengthAllowed
+                  ? 'Use the arrow above to check the next week, or try a shorter class length.'
+                  : 'Use the arrow above to check the next week.'}
               </p>
             </div>
           )}
