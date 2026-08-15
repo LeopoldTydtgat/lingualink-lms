@@ -1379,12 +1379,16 @@ export default function BookingGridClient({
           {!loading && !error && visibleColumns.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 16px' }}>
               <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-                No {selectedDuration}-minute openings this week.
+                No {selectedDuration}-minute openings {isCurrentWeek ? 'this week' : `the week of ${weekLabel}`}.
               </p>
               <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                {shorterLengthAllowed
-                  ? 'Use the arrow above to check the next week, or try a shorter class length.'
-                  : 'Use the arrow above to check the next week.'}
+                {isCurrentWeek
+                  ? shorterLengthAllowed
+                    ? 'Use the arrow above to check the next week, or try a shorter class length.'
+                    : 'Use the arrow above to check the next week.'
+                  : shorterLengthAllowed
+                    ? 'Use the arrows above to check another week, or try a shorter class length.'
+                    : 'Use the arrows above to check another week.'}
               </p>
             </div>
           )}
