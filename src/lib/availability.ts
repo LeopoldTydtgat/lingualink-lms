@@ -88,10 +88,17 @@ export async function isSlotAvailable(
   // This keeps the gate in agreement with the displayed booking calendar. Timed
   // 'specific' overrides stay exact-instant.
 
-  const { data: availabilityData } = await adminClient
+  const { data: availabilityData, error: availabilityError } = await adminClient
     .from('availability')
     .select('type, day_of_week, start_time, end_time, start_at, end_at, is_available')
     .eq('teacher_id', teacherId)
+  // Fail loud, matching the timezone lookup above. Discarding this error left
+  // records empty, so a DB fault surfaced to the student as a 409 "slot no
+  // longer available" and pinned a transient outage on the slot. Throwing
+  // reaches the route's outer catch as a generic 500 before any hours move.
+  if (availabilityError) {
+    throw new Error(`isSlotAvailable: availability lookup failed for teacher ${teacherId}: ${availabilityError.message}`)
+  }
 
   const records: AvailabilityRecord[] = availabilityData ?? []
   const generalRecords = records.filter((r) => r.type === 'general')

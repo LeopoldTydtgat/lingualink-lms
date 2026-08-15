@@ -501,3 +501,32 @@ describe('slotEngine grid and isSlotAvailable gate agree on DST transition days'
     }
   })
 })
+
+// ─── BOOK-SLOTCHECK-ERR-SWALLOWED: availability query error must throw ───────
+
+describe('isSlotAvailable - availability query error', () => {
+  it('throws when the availability lookup returns an error, instead of treating it as an empty list', async () => {
+    const client = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: { timezone: 'Europe/London' }, error: null }),
+              }),
+            }),
+          }
+        }
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
+          }),
+        }
+      },
+    } as unknown as AdminClient
+
+    await expect(isSlotAvailable('teacher-1', '2026-09-01T10:00:00.000Z', 30, client)).rejects.toThrow(
+      'availability lookup failed'
+    )
+  })
+})
