@@ -64,7 +64,8 @@ export async function POST(
     // messaging/access junction, so an unvalidated uuid here would hand an
     // arbitrary profile — a student, an archived teacher — a live access edge to
     // this student. The allowed set is copied VERBATIM from the create-student
-    // route (src/app/api/admin/students/route.ts:163-192 — profiles where
+    // route (src/app/api/admin/students/route.ts, the assignable-teacher
+    // gate ahead of the first mutation — profiles where
     // role in ('teacher','admin') AND status = 'current'), which in turn mirrors
     // the create form's teachers query. That filter is the canonical definition
     // of an assignable teacher; this gate must not diverge from it, or the form
