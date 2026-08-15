@@ -122,7 +122,7 @@ export default async function DashboardLayout({
     (async () => {
       const { data: candidateLessons } = await supabase
         .from('lessons')
-        .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, status')
+        .select('id, scheduled_at, duration_minutes, teams_join_url, student_id, training_id, status')
         .eq('teacher_id', profile?.id)
         .eq('status', 'scheduled')
         .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
@@ -148,6 +148,10 @@ export default async function DashboardLayout({
         duration_minutes: lessonRow.duration_minutes,
         teams_join_url: lessonRow.teams_join_url,
         student_name: studentRow?.full_name ?? 'Student',
+        // /students/[id] is keyed on trainings.id, not students.id — the panel's
+        // "See Training" deep link resolves through this, matching the links in
+        // upcoming-classes and the students list.
+        training_id: lessonRow.training_id,
         status: lessonRow.status,
       }
     })(),

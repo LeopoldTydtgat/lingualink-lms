@@ -21,6 +21,9 @@ interface NextLesson {
   duration_minutes: number
   teams_join_url: string | null
   student_name: string
+  // lessons.training_id — non-nullable everywhere else in the repo
+  // (UpcomingClassesClient, lib/access/bookedClass). Keys /students/[id].
+  training_id: string
   status: string
 }
 
@@ -467,10 +470,11 @@ export default function RightPanel({
                 with {nextLesson.student_name}
               </p>
 
-              {/* See Training button — always visible */}
+              {/* See Training button — always visible. Deep-links to this class's
+                  training detail page; falls back to the list if the id is absent. */}
               <PanelButton
                 className="w-full text-sm mb-2"
-                onClick={() => router.push('/students')}
+                onClick={() => router.push(nextLesson?.training_id ? `/students/${nextLesson.training_id}` : '/students')}
               >
                 <BookOpen size={14} className="mr-2" />
                 See Training
