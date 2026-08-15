@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
         !studentRow.allowed_durations.includes(durationMinutes)
       ) {
         return NextResponse.json(
-          { error: 'This class length is not enabled on your account. Please contact admin.' },
+          { error: 'This class length is not enabled on your account. Please contact support.' },
           { status: 403 }
         )
       }

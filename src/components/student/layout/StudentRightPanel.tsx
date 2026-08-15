@@ -304,12 +304,12 @@ export default function StudentRightPanel({
 
         {lowHours && hoursRemaining > 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
-            Running low — contact admin to purchase more hours.
+            Running low — contact support to purchase more hours.
           </p>
         )}
         {hoursRemaining === 0 && (
           <p style={{ fontSize: '12px', color: '#FD5602', marginTop: '4px' }}>
-            No hours remaining. Contact admin to continue.
+            No hours remaining. Contact support to continue.
           </p>
         )}
 

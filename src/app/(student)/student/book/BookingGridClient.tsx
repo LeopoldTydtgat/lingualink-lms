@@ -1016,7 +1016,7 @@ export default function BookingGridClient({
           }}
         >
           <p style={{ fontSize: '13px', color: '#FD5602' }}>
-            You do not have enough hours remaining to book a class. Please contact admin to purchase more hours.
+            You do not have enough hours remaining to book a class. Please contact support to purchase more hours.
           </p>
         </div>
       )}
@@ -1035,7 +1035,7 @@ export default function BookingGridClient({
           }}
         >
           <p style={{ fontSize: '13px', color: '#FD5602' }}>
-            No class durations are enabled on your account. Please contact admin.
+            No class durations are enabled on your account. Please contact support.
           </p>
         </div>
       )}
@@ -1720,7 +1720,7 @@ export default function BookingGridClient({
                     color: '#92400e',
                   }}
                 >
-                  After this booking you will have less than 2 hours remaining. Contact admin to purchase more hours.
+                  After this booking you will have less than 2 hours remaining. Contact support to purchase more hours.
                 </div>
               )}
 

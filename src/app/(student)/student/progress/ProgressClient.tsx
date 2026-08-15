@@ -245,7 +245,7 @@ export default function ProgressClient({
         ) : (
           <Card>
             <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
-              No active training found. Contact your admin if you believe this is an error.
+              No active training found. Contact support if you believe this is an error.
             </p>
           </Card>
         )}

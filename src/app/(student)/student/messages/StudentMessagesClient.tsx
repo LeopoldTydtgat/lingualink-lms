@@ -847,7 +847,7 @@ export default function StudentMessagesClient({
                 <p className="text-xs text-gray-400 mt-1">
                   {selectedContact.status !== 'current'
                     ? 'This account is no longer active. You can still read the conversation above.'
-                    : 'This teacher is not currently assigned to your training. Please contact an administrator if you need to reach them.'}
+                    : 'This teacher is not currently assigned to your training. Please contact support if you need to reach them.'}
                 </p>
               </div>
             ) : (
