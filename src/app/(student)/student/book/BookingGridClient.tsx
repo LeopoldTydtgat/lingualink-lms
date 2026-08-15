@@ -656,6 +656,24 @@ export default function BookingGridClient({
     return () => controller.abort()
   }, [selectedTeacherId, weekStartKey, studentTimezone, refetchNonce, rescheduleLesson])
 
+  // Refetch when the tab is refocused or becomes visible again. The 24h cutoff is
+  // computed on the server at fetch time, so a grid left open can keep showing a
+  // slot green after it crosses inside 24h. A fresh fetch re-greys it, and the
+  // selection backstop below drops a pick that is no longer bookable. No interval:
+  // the user must return to the tab to act, and this catches exactly that moment.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setRefetchNonce((n) => n + 1)
+    }
+    const onFocus = () => setRefetchNonce((n) => n + 1)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
   // ── Grid data (all pure Stage A helpers — local recompute, no fetch) ──
   const columnKeys = getWeekColumnKeys(weekStartKey)
   const instantSet = buildInstantSet(slots)
@@ -878,9 +896,10 @@ export default function BookingGridClient({
       if (!res.ok || data.error) {
         setSubmitError(data.message ?? data.error ?? 'Something went wrong. Please try again.')
         setIsSubmitting(false)
-        if (res.status === 409) {
-          // Slot conflict — the grid is stale: clear the selection and
-          // refetch availability so the taken slot greys out.
+        if (res.status === 409 || res.status === 400) {
+          // 409: slot conflict. 400: a server rule rejected the pick (24h
+          // window, hours, duration), which means the grid was stale too. Both:
+          // clear the selection and refetch so the grid reflects the server.
           setSelectedStartIso(null)
           setRefetchNonce((n) => n + 1)
         }
