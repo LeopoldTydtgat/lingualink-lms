@@ -643,7 +643,8 @@ export async function POST(req: NextRequest) {
         }
 
         console.error('Failed to create lesson — refunding deducted hours:', lessonError)
-        const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+        // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
+        const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
           p_training_id: trainingId,
           p_hours: hoursNeeded,
         })
@@ -653,6 +654,13 @@ export async function POST(req: NextRequest) {
             student_id: studentId,
             lesson_id: null,
             error: refundError,
+          })
+        } else if (refundData?.success === false) {
+          console.error('CRITICAL: refund_hours_atomic reported failure after lesson insert error:', {
+            training_id: trainingId,
+            student_id: studentId,
+            lesson_id: null,
+            code: refundData.code,
           })
         }
 
