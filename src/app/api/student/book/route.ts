@@ -21,6 +21,13 @@ import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability
 // ── POST /api/student/book ────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  // Set the moment the new lesson row is committed. Everything after that
+  // point is documented non-blocking, so the outer catch below must report
+  // success once this is non-null - a 500 there tells the student a booking
+  // failed when it exists, and a fresh-book retry on another slot books a
+  // second real class.
+  let committedLessonId: string | null = null
+
   try {
     const supabase = await createClient()
 
@@ -622,6 +629,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
     }
 
+    committedLessonId = newLesson.id
+
     // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
     // book_class_atomic returned the id of the 'class_booking' ledger row; now
     // that the lesson exists, link the two. Fresh-book path only — hoursLogId is
@@ -791,6 +800,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, lessonId: newLesson.id })
 
   } catch (err) {
+    if (committedLessonId) {
+      // The lesson exists and hours have moved. Whatever threw was one of the
+      // documented non-blocking follow-ups (ledger backfill, Teams null on the
+      // old row, pending report, emails, revalidate). Report success so the
+      // client does not offer a retry that would book a second class; the
+      // CRITICAL log is the signal for manual follow-up.
+      console.error('CRITICAL: post-commit step threw in /api/student/book - lesson committed, returning success:', {
+        lesson_id: committedLessonId,
+        error: err,
+      })
+      return NextResponse.json({ success: true, lessonId: committedLessonId })
+    }
     console.error('Unexpected error in /api/student/book:', err)
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
   }
