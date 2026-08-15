@@ -50,7 +50,8 @@ export default async function BillingPage() {
     )
   }
   const tz = billingInfo.timezone
-  const currentMonthDate = getMonthKeyInTz(new Date(), tz)
+  const now = new Date()
+  const currentMonthDate = getMonthKeyInTz(now, tz)
 
   // Decided here, not in the client. BillingClient used to compute this from the
   // BROWSER's clock while this page computed the billing month from `tz`, so one
@@ -59,7 +60,7 @@ export default async function BillingPage() {
   // route now enforces the window in, so the button can no longer offer an upload
   // the API refuses or hide one it would accept. Mirrors the route's test exactly:
   // it checks `day > 10` only, so there is no lower bound to mirror.
-  const isUploadWindow = Number(getDayKeyInTz(new Date(), tz).slice(8, 10)) <= 10
+  const isUploadWindow = Number(getDayKeyInTz(now, tz).slice(8, 10)) <= 10
 
   // ensureCurrentInvoice — moved here from BillingClient. Creates a 'pending'
   // row for the current month if none exists, so the recompute below has a
