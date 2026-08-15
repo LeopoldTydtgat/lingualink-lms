@@ -481,7 +481,8 @@ export async function POST(request: NextRequest) {
     }
 
     console.error('Create lesson error — refunding deducted hours:', lessonError)
-    const { error: refundError } = await adminClient.rpc('refund_hours_atomic', {
+    // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
+    const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
       p_training_id: training_id,
       p_hours: hoursRequested,
     })
@@ -491,6 +492,13 @@ export async function POST(request: NextRequest) {
         student_id,
         lesson_id: null,
         error: refundError,
+      })
+    } else if (refundData?.success === false) {
+      console.error('CRITICAL: refund_hours_atomic reported failure after admin-create lesson insert error:', {
+        training_id,
+        student_id,
+        lesson_id: null,
+        code: refundData.code,
       })
     }
 
