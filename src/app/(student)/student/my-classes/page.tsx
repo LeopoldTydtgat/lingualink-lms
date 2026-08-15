@@ -6,8 +6,19 @@ import { requireTz } from '@/lib/time/requireTz'
 import { computeStreakWeeks } from '@/lib/lessons/streak'
 import { MAX_LESSON_MS } from '@/app/api/student/availability/slotEngine'
 
-export default async function MyClassesPage() {
+export default async function MyClassesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>
+}) {
   const supabase = await createClient()
+  const params = await searchParams
+
+  // Whitelisted to the one literal this page knows how to render — any other value,
+  // including a crafted one, collapses to null. The raw query value is never forwarded
+  // to the client.
+  const notice: 'reschedule_unavailable' | null =
+    params.notice === 'reschedule_unavailable' ? 'reschedule_unavailable' : null
 
   const {
     data: { user },
@@ -179,6 +190,7 @@ export default async function MyClassesPage() {
       completedCount={completedCount}
       hoursCompleted={hoursCompleted}
       streakWeeks={streakWeeks}
+      notice={notice}
     />
   )
 }

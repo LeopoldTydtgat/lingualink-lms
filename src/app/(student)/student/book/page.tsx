@@ -102,6 +102,8 @@ export default async function BookPage({
       console.error('[student/book] reschedule lesson lookup failed:', lessonError)
       throw new Error('Failed to load lesson')
     }
+    // A dead reschedule id must never silently become a fresh booking.
+    if (!lesson) redirect('/student/my-classes?notice=reschedule_unavailable')
     rescheduleLesson = lesson ?? null
   }
 
