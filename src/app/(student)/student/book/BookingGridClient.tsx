@@ -105,11 +105,13 @@ interface Props {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatHours(hours: number): string {
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  if (h === 0) return `${m}min`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}min`
+  const sign = hours < 0 ? '-' : ''
+  const abs = Math.abs(hours)
+  const h = Math.floor(abs)
+  const m = Math.round((abs - h) * 60)
+  if (h === 0) return `${sign}${m}min`
+  if (m === 0) return `${sign}${h}h`
+  return `${sign}${h}h ${m}min`
 }
 
 // Initial duration for a FRESH booking. The reschedule path locks to the
