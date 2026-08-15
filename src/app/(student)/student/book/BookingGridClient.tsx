@@ -662,9 +662,13 @@ export default function BookingGridClient({
   const visibleColumns = getVisibleColumns(validStartsByColumn)
   const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
   // Empty-state copy only: suggest a shorter class only when one actually
-  // exists to switch to. Reschedule locks the duration, so that path never
-  // offers it.
-  const shorterLengthAllowed = !isReschedule && allowedDurations.some((m) => m < selectedDuration)
+  // has openings this week, not merely when it's enabled on the account.
+  // Reschedule locks the duration, so that path never offers it.
+  const shorterLengthAllowed =
+    !isReschedule &&
+    allowedDurations
+      .filter((m) => m < selectedDuration)
+      .some((m) => getVisibleColumns(getValidStartsByColumn(columnKeys, slots, instantSet, m)).length > 0)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
