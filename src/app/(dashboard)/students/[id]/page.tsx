@@ -177,6 +177,44 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         .order('completed_at', { ascending: false })
     : { data: [] }
 
+  // Study sheets assigned FOR each class, bucketed by lesson id — the Past Classes
+  // pre-class catch-up glance. One batched query on the same lesson ids the reports
+  // fetch above uses, and the same adminClient, copying the proven shape at
+  // upcoming-classes/page.tsx:115-128 (nested join flattened with Array.isArray).
+  //
+  // Deliberately NOT the student-scoped assignments read further down: that one
+  // feeds the General Info table and carries no lesson linkage. This is keyed on
+  // assignments.lesson_id, the column the reconcile route writes
+  // (api/teacher/assignments/reconcile/route.ts:221).
+  //
+  // Display-only, so it fails SAFE rather than closed: a failed lookup logs and
+  // leaves the map empty, and the tab still renders its classes, statuses and
+  // feedback. It must never blank a page that is already access-gated above.
+  type LessonSheet = { id: string; title: string; category: string | null; level: string | null }
+  type LessonSheetRow = { lesson_id: string | null; study_sheet: LessonSheet | LessonSheet[] | null }
+
+  const sheetsByLessonId: Record<string, LessonSheet[]> = {}
+
+  if (lessonIds.length > 0) {
+    const { data: lessonSheetRows, error: lessonSheetsError } = await adminClient
+      .from('assignments')
+      .select('lesson_id, study_sheet:study_sheets ( id, title, category, level )')
+      .in('lesson_id', lessonIds)
+
+    if (lessonSheetsError) {
+      console.error(`[dashboard/students/[id]] lesson assignments lookup failed (training ${id}):`, lessonSheetsError)
+    } else {
+      for (const row of ((lessonSheetRows ?? []) as LessonSheetRow[])) {
+        if (!row.lesson_id) continue
+        const sheet = Array.isArray(row.study_sheet) ? row.study_sheet[0] : row.study_sheet
+        if (!sheet) continue
+        const list = sheetsByLessonId[row.lesson_id] ?? []
+        list.push({ id: sheet.id, title: sheet.title, category: sheet.category, level: sheet.level })
+        sheetsByLessonId[row.lesson_id] = list
+      }
+    }
+  }
+
   // Fetch assignments for this student
   const studentRecord = Array.isArray(training.students)
     ? training.students[0]
@@ -337,6 +375,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       upcomingLessons={upcomingLessons as unknown as Parameters<typeof StudentDetailClient>[0]['upcomingLessons']}
       pastLessons={pastLessons as unknown as Parameters<typeof StudentDetailClient>[0]['pastLessons']}
       reports={reports ?? []}
+      sheetsByLessonId={sheetsByLessonId}
       isAdmin={isAdmin}
       viewerTz={viewerTz}
       currentUserId={user.id}
