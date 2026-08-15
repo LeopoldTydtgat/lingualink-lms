@@ -21,6 +21,9 @@ interface NextLesson {
   duration_minutes: number
   teams_join_url: string | null
   student_name: string
+  // lessons.training_id — non-nullable everywhere else in the repo
+  // (UpcomingClassesClient, lib/access/bookedClass). Keys /students/[id].
+  training_id: string
   status: string
 }
 
@@ -34,6 +37,11 @@ type RightPanelProps = {
   minAvailableHours?: number | null
   whatsNewItems?: WhatsNewItem[]
   showStaffTools?: boolean
+  // "May 2026"-style label for the previous month when its invoice still needs
+  // uploading, null when the reminder must not show. The whole decision — upload
+  // window, teacher timezone, uploaded_at — is made server-side in
+  // (dashboard)/layout.tsx; this component only renders off the prop.
+  invoiceReminderLabel: string | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,6 +106,7 @@ export default function RightPanel({
   minAvailableHours = null,
   whatsNewItems = [],
   showStaffTools = false,
+  invoiceReminderLabel,
 }: RightPanelProps) {
   const currencySymbol = (currency != null ? CURRENCY_SYMBOL[currency] ?? currency : '€')
   const router = useRouter()
@@ -461,10 +470,11 @@ export default function RightPanel({
                 with {nextLesson.student_name}
               </p>
 
-              {/* See Training button — always visible */}
+              {/* See Training button — always visible. Deep-links to this class's
+                  training detail page; falls back to the list if the id is absent. */}
               <PanelButton
                 className="w-full text-sm mb-2"
-                onClick={() => router.push('/students')}
+                onClick={() => router.push(nextLesson?.training_id ? `/students/${nextLesson.training_id}` : '/students')}
               >
                 <BookOpen size={14} className="mr-2" />
                 See Training
@@ -629,6 +639,38 @@ export default function RightPanel({
               </span>
             </div>
           </div>
+
+          {/* Invoice-upload reminder. Pure render off the server prop — no state, no
+              effects, no dismiss: the layout re-decides it on every render, and it
+              disappears the moment uploaded_at is set or the window closes.
+              Pending-state yellow via inline style props only; Tailwind v4 does not
+              apply dynamically constructed colour classes. */}
+          {invoiceReminderLabel !== null && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px',
+                borderRadius: '8px',
+                backgroundColor: '#FFF8E8',
+                borderWidth: '1px',
+                borderStyle: 'solid',
+                borderColor: '#FFB942',
+                color: '#000000',
+              }}
+            >
+              <p style={{ fontSize: '12px', color: '#000000', lineHeight: 1.4 }}>
+                Please upload your {invoiceReminderLabel} invoice by the 10th.
+              </p>
+              <PanelButton
+                className="mt-2 w-full text-sm"
+                onClick={() => router.push('/billing')}
+              >
+                Upload invoice
+                <ArrowRight size={14} className="ml-2" />
+              </PanelButton>
+            </div>
+          )}
+
           <PanelButton
             className="mt-3 w-full text-sm"
             onClick={() => router.push('/billing')}

@@ -55,7 +55,8 @@ export async function GET(request: Request) {
     //   (a) trainings, scoped by "Teachers can view own trainings"
     //       (trainings.teacher_id = auth.uid()) - the LEGACY link. Modern
     //       trainings are created without teacher_id
-    //       (src/app/api/admin/students/route.ts:275-284), so this path alone
+    //       (src/app/api/admin/students/route.ts, the "Create the training
+    //       record" insert), so this path alone
     //       returns an EMPTY picker for a normally-assigned teacher.
     //   (b) students, scoped by "Teachers read own students", which is the
     //       trainings x training_teachers JUNCTION - the same relationship

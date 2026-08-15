@@ -425,6 +425,21 @@ export const TeacherAvailabilitySchema = z.object({
     error: 'Holiday periods cannot be marked available',
     path: ['is_available'],
   })
+  // The same hole at the opposite polarity. Both slot readers,
+  // src/app/api/student/availability/slotEngine.ts (line 106) and
+  // src/lib/availability.ts (line 104), select general rows on
+  // type === 'general' alone and never consult is_available, so a general row
+  // stored false would be read as bookable availability - the exact opposite
+  // of what the row claims. No UI writer produces that shape
+  // (GeneralAvailability.tsx hardcodes is_available: true, DayToDay.tsx and the
+  // google-busy-sync cron write type 'specific', Holidays.tsx writes type
+  // 'holiday'), so this refine only rejects forged or buggy input. A DB-level
+  // CHECK is queued for the next DDL session as defence in depth; until it
+  // lands this schema is the only gate.
+  .refine((val) => !(val.type === 'general' && !val.is_available), {
+    error: 'General availability rows cannot be marked unavailable',
+    path: ['is_available'],
+  })
 
 export type TeacherAvailabilityInput = z.infer<typeof TeacherAvailabilitySchema>
 

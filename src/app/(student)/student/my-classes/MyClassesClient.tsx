@@ -57,6 +57,7 @@ interface MyClassesClientProps {
   completedCount: number
   hoursCompleted: number
   streakWeeks: number
+  notice: 'reschedule_unavailable' | null
 }
 
 // Format a date for display — uses Intl with explicit timezone, safe on client
@@ -100,10 +101,12 @@ function getLocalDateKey(isoString: string, timezone: string): string {
 // two in sync so the empty state always reads the same as the right panel.
 function formatHours(hours: number): string {
   if (hours === 0) return '0 hours' // bold "0h" reads as the word "oh"
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}min`
+  const sign = hours < 0 ? '-' : ''
+  const abs = Math.abs(hours)
+  const h = Math.floor(abs)
+  const m = Math.round((abs - h) * 60)
+  if (m === 0) return `${sign}${h}h`
+  return `${sign}${h}h ${m}min`
 }
 
 // trainings.end_date is a DATE column, not an instant.
@@ -411,11 +414,13 @@ export default function MyClassesClient({
   completedCount,
   hoursCompleted,
   streakWeeks,
+  notice,
 }: MyClassesClientProps) {
   const router = useRouter()
 
   const [showProfileBanner, setShowProfileBanner] = useState<boolean>(!profileCompleted && !bannerDismissed)
   const [isDismissingBanner, setIsDismissingBanner] = useState(false)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
   const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
@@ -532,6 +537,15 @@ export default function MyClassesClient({
     }
   }
 
+  // Unlike the profile banner there is nothing to persist — the query string IS the
+  // state, so dismissing strips it. router.replace rather than push so a Back
+  // navigation cannot resurrect the banner either. The local flag hides it at once,
+  // without waiting for the server render that drops the prop.
+  function handleDismissNotice() {
+    setNoticeDismissed(true)
+    router.replace('/student/my-classes')
+  }
+
   // Next class hero derivations
   const nextWithin24 = !!nextLesson && mounted && isWithin24Hours(nextLesson.scheduled_at, now)
   // Hero countdown and its NEXT / IN CLASS pill come from one describeLessonCountdown
@@ -552,6 +566,42 @@ export default function MyClassesClient({
 
   return (
     <div className="space-y-6">
+
+      {/* Reschedule-unavailable notice — the book page sends a dead reschedule id here
+          rather than letting it fall through to a fresh booking that charges hours.
+          Stacks above the profile banner: both can be on screen at once. */}
+      {notice === 'reschedule_unavailable' && !noticeDismissed && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: '#FFF8E8',
+          borderLeft: '4px solid #FFB942',
+          borderRadius: '8px',
+          padding: '12px 16px',
+          gap: '12px',
+        }}>
+          <p style={{ margin: 0, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>
+            That class can no longer be rescheduled - it may have been cancelled or already changed. Your classes are up to date below.
+          </p>
+          <button
+            onClick={handleDismissNotice}
+            aria-label="Dismiss"
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: '18px',
+              color: '#9ca3af',
+              lineHeight: 1,
+              padding: '0 4px',
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Profile completion banner */}
       {showProfileBanner && (

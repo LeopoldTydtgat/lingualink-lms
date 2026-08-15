@@ -9,6 +9,11 @@
 // Storage list API, because that API returns folders as pseudo-entries and
 // requires prefix recursion plus pagination. That is easy to get subtly wrong,
 // and getting it wrong means silently missing files instead of failing.
+//
+// Each manifest entry also carries the object's expected byte size as recorded
+// by storage.objects, and every download is verified against it before the file
+// is written, so a truncated or zero-byte response fails instead of being
+// archived as a good copy.
 
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -99,6 +104,24 @@ async function main() {
 
     try {
       const buffer = Buffer.from(await data.arrayBuffer())
+
+      // The size storage.objects recorded is the authority. Checking it before
+      // the write is what stops a truncated or zero-byte body from being
+      // archived as a good copy: a short file is a failure, not a smaller file.
+      const expectedSize = entry && entry.size
+
+      if (typeof expectedSize !== 'number' || !Number.isFinite(expectedSize) || expectedSize < 0) {
+        console.error(`FAIL ${label}: manifest entry has no usable expected size`)
+        failed++
+        continue
+      }
+
+      if (buffer.length !== expectedSize) {
+        console.error(`FAIL ${label}: size mismatch, expected ${expectedSize} bytes, got ${buffer.length}`)
+        failed++
+        continue
+      }
+
       const destination = path.join(outDir, bucket, name)
       await fs.mkdir(path.dirname(destination), { recursive: true })
       await fs.writeFile(destination, buffer)

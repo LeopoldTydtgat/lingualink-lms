@@ -34,10 +34,12 @@ interface StudentRightPanelProps {
 
 function formatHours(hours: number): string {
   if (hours === 0) return '0 hours' // bold "0h" reads as the word "oh"
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}min`
+  const sign = hours < 0 ? '-' : ''
+  const abs = Math.abs(hours)
+  const h = Math.floor(abs)
+  const m = Math.round((abs - h) * 60)
+  if (m === 0) return `${sign}${h}h`
+  return `${sign}${h}h ${m}min`
 }
 
 // trainings.end_date is a DATE column, not an instant.

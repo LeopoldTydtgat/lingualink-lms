@@ -67,6 +67,17 @@ type Assignment = {
   }
 }
 
+// One study sheet assigned FOR a specific class, as shown in the Past Classes
+// recap. Deliberately NOT an Assignment: it is keyed to a lesson rather than to
+// the student, and carries no completion state (the completion view lives in the
+// General Info table above). category/level are nullable on study_sheets.
+type LessonSheet = {
+  id: string
+  title: string
+  category: string | null
+  level: string | null
+}
+
 // One live teaching-material homework grant. Deliberately NOT an Assignment:
 // a material grant carries no completion state and no sheet metadata (the sheet
 // is audience='staff'), only a page range and whether the student has drawn on it
@@ -86,6 +97,10 @@ type Props = {
   upcomingLessons: Lesson[]
   pastLessons: Lesson[]
   reports: Report[]
+  // Study sheets assigned for each class, keyed by lessons.id. Display-only; an
+  // empty map is both "nothing assigned" and the degraded state upstream falls
+  // back to when the lookup fails, and neither hides a class from the tab.
+  sheetsByLessonId: Record<string, LessonSheet[]>
   isAdmin: boolean
   // Viewing teacher's own profiles.timezone (UTC display-only fallback upstream).
   // Instant labels project through this; date-only labels stay UTC-pinned.
@@ -149,6 +164,7 @@ export default function StudentDetailClient({
   upcomingLessons,
   pastLessons,
   reports,
+  sheetsByLessonId,
   viewerTz,
   assignments,
   assignedTeacherNames,
@@ -654,6 +670,11 @@ export default function StudentDetailClient({
                       {group.lessons.map(lesson => {
                         const report = reportsByLessonId[lesson.id]
                         const cancelled = isCancelledStatus(lesson.status)
+                        // Plain lookup, deliberately not memoised: this tab is INVOKED
+                        // as a function (see the tab block at the bottom of the file),
+                        // so any hook here would become a conditional hook of
+                        // StudentDetailClient and break the Rules of Hooks.
+                        const lessonSheets = sheetsByLessonId[lesson.id] ?? []
                         return (
                           <div key={lesson.id} className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
                             <div className="flex items-center justify-between mb-2">
@@ -696,10 +717,33 @@ export default function StudentDetailClient({
                                 {lesson.cancellation_reason ? ` · ${lesson.cancellation_reason}` : ''}
                               </p>
                             )}
+                            {/* Full feedback, not clamped: this tab is the teacher's
+                                pre-class catch-up read, and a 2-line preview with no
+                                way to expand hid most of it. */}
                             {!cancelled && report?.feedback_text && (
-                              <p className="text-sm text-gray-600 mt-2 line-clamp-2 italic">
+                              <p className="text-sm text-gray-600 mt-2 italic whitespace-pre-line">
                                 &ldquo;{report.feedback_text}&rdquo;
                               </p>
+                            )}
+                            {!cancelled && lessonSheets.length > 0 && (
+                              <div className="mt-3">
+                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                  Assigned for next time
+                                </p>
+                                <ul className="space-y-0.5">
+                                  {lessonSheets.map(sheet => (
+                                    <li key={sheet.id} className="text-xs text-gray-700">
+                                      {sheet.title}
+                                      {(sheet.category || sheet.level) && (
+                                        <span className="text-gray-400">
+                                          {sheet.category ? ` · ${sheet.category}` : ''}
+                                          {sheet.level ? ` · ${sheet.level}` : ''}
+                                        </span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
                             )}
                           </div>
                         )

@@ -66,6 +66,9 @@ jobs:
       # not, because it pages and returns folders as pseudo-entries.
       # Only the byte size is echoed: object paths can carry filenames that
       # identify a student.
+      # Each entry also carries that object's expected byte size, taken from the
+      # metadata column, which the download step checks every downloaded file
+      # against so a truncated or zero-byte download cannot pass as a success.
       - name: Build the file manifest
         env:
           DB_URL: ${{ secrets.SUPABASE_BACKUP_DB_URL }}
@@ -73,7 +76,7 @@ jobs:
           set -euo pipefail
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
           echo "STAMP=$STAMP" >> "$GITHUB_ENV"
-          psql "$DB_URL" -At -c "SELECT coalesce(json_agg(json_build_object('bucket', bucket_id, 'name', name)), '[]'::json) FROM storage.objects WHERE name IS NOT NULL;" > manifest.json
+          psql "$DB_URL" -At -c "SELECT coalesce(json_agg(json_build_object('bucket', bucket_id, 'name', name, 'size', (metadata->>'size')::bigint)), '[]'::json) FROM storage.objects WHERE name IS NOT NULL;" > manifest.json
           echo "Manifest size: $(stat -c%s manifest.json) bytes"
 
       # A temp dir rather than npm ci in the repo: this job needs one package,

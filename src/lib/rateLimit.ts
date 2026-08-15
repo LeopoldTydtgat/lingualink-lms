@@ -84,13 +84,46 @@ export async function clearRateLimit(
 // Uses students.id (stable across IP changes) instead of IP. Backed by a
 // dedicated booking_attempts table — see SQL block in the security review notes.
 //
+// TWO-PHASE (BOOK-RATELIMIT-CHARGES-REJECTS). This limiter used to count AND
+// insert in a single call at the top of the route, so every request spent
+// budget before a single validation had run: ten stale-grid rejections (409
+// SLOT_NOT_AVAILABLE) locked an honest student out for a full hour. It is now
+// split across the request:
+//
+//   1. checkStudentBookingLimit(studentId) runs at the TOP of the route and
+//      only COUNTS. It returns the early 429 when the student is already at or
+//      over the cap, and writes nothing.
+//   2. recordStudentBookingAttempt(studentId) runs IMMEDIATELY BEFORE each
+//      money RPC (book_class_atomic / reschedule_class_atomic) and only
+//      INSERTS. It does no counting.
+//
+// So the validation rejections between the two — duration, hours balance, the
+// 24-hour rule, teacher assignment, slot availability, teacher/student clashes
+// and the reschedule guards (old-lesson load, teacher lock, duration lock,
+// 24h-on-old-lesson) — cost the student none of their booking-attempt budget,
+// while every request that can actually move hours is still recorded.
+//
+// ACCEPTED TOCTOU: count and record are no longer one sequenced operation, so
+// concurrent requests can all pass the count before any of them records, and
+// the cap can be exceeded by the degree of concurrency (N requests in flight
+// can leave up to BOOKING_MAX_ATTEMPTS + N - 1 rows in the window). That is
+// accepted deliberately: booking_attempts is an abuse blast-radius cap, not a
+// strict invariant. The properties that matter still hold — every request that
+// reaches a money RPC is recorded, so sustained abuse converges on the cap
+// within one window, and the authoritative correctness gates on hours are the
+// atomic RPCs' own row-level locks, not this table.
+//
 // FAILS CLOSED on DB error (intentional reversal of the login rate limiter
 // which fails open). A booking is a write operation that costs hours, money,
-// and external API calls — denying on DB blip is safer than letting abuse through.
+// and external API calls — denying on a DB blip is safer than letting abuse
+// through. This applies to BOTH phases: a failed count read blocks with a 60s
+// retry, and a failed record insert must abort the booking BEFORE the RPC runs
+// — if the attempt cannot be written down, no hours may move.
 
 const BOOKING_WINDOW_MS = 60 * 60 * 1000
 const BOOKING_MAX_ATTEMPTS = 10
 
+// Phase 1: count only. Writes nothing — see the two-phase note above.
 export async function checkStudentBookingLimit(
   studentId: string
 ): Promise<RateLimitResult> {
@@ -120,18 +153,40 @@ export async function checkStudentBookingLimit(
       return { blocked: true, retryAfterSeconds }
     }
 
-    const { error: insertError } = await supabase
-      .from('booking_attempts')
-      .insert({ student_id: studentId })
-
-    if (insertError) {
-      // Fail closed.
-      return { blocked: true, retryAfterSeconds: 60 }
-    }
-
     return { blocked: false, retryAfterSeconds: 0 }
   } catch {
     return { blocked: true, retryAfterSeconds: 60 }
+  }
+}
+
+// Phase 2: insert only. No counting — the caller must already have passed
+// checkStudentBookingLimit. { ok: false } means the attempt could NOT be
+// recorded, and the caller must abort before the money RPC (fail closed).
+export async function recordStudentBookingAttempt(
+  studentId: string
+): Promise<{ ok: boolean }> {
+  try {
+    const supabase = createAdminClient()
+
+    const { error } = await supabase
+      .from('booking_attempts')
+      .insert({ student_id: studentId })
+
+    if (error) {
+      console.error(
+        '[recordStudentBookingAttempt] DB insert failed; failing closed:',
+        error
+      )
+      return { ok: false }
+    }
+
+    return { ok: true }
+  } catch (err) {
+    console.error(
+      '[recordStudentBookingAttempt] Unexpected error; failing closed:',
+      err
+    )
+    return { ok: false }
   }
 }
 

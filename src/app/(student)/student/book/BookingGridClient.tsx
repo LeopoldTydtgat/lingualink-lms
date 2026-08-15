@@ -1,7 +1,6 @@
 'use client'
 
-// BOOK-1 Stages B+C: single-page booking grid client. Not wired up yet —
-// page.tsx still renders BookingClient; Stage D swaps the import. Reschedule
+// BOOK-1: single-page booking grid client, rendered by page.tsx. Reschedule
 // locks teacher and duration to the original lesson and shows an
 // original-lesson context strip; error display (`data.message ?? data.error`),
 // confirm label, success redirect and the 24hr footnote are byte-identical to
@@ -105,11 +104,13 @@ interface Props {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatHours(hours: number): string {
-  const h = Math.floor(hours)
-  const m = Math.round((hours - h) * 60)
-  if (h === 0) return `${m}min`
-  if (m === 0) return `${h}h`
-  return `${h}h ${m}min`
+  const sign = hours < 0 ? '-' : ''
+  const abs = Math.abs(hours)
+  const h = Math.floor(abs)
+  const m = Math.round((abs - h) * 60)
+  if (h === 0) return `${sign}${m}min`
+  if (m === 0) return `${sign}${h}h`
+  return `${sign}${h}h ${m}min`
 }
 
 // Initial duration for a FRESH booking. The reschedule path locks to the
@@ -215,7 +216,7 @@ function cleanList(arr: string[] | null): string[] {
 }
 
 // ─── Teacher profile modal ────────────────────────────────────────────────────
-// Copied from BookingClient.tsx (which dies in Stage E — do not import from it).
+// Originally copied from the retired BookingClient.tsx wizard (now deleted).
 // Mirrors the student-portal ClassReminderModal overlay/card/close pattern
 // (src/components/student/ClassReminderModal.tsx): fixed backdrop + centred card,
 // backdrop click closes, plus Esc. Body scrolls; footer stays put.
@@ -588,7 +589,10 @@ export default function BookingGridClient({
     const controller = new AbortController()
     // weekStartKey is already a student-tz Monday key — the exact frame the
     // server windows and buckets by (NEW317), so it goes on the wire as is.
-    const url = `/api/student/availability?teacherId=${selectedTeacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}`
+    // On a reschedule, tell the server which lesson is being moved so its own
+    // slots are not blocked against itself (server verifies ownership).
+    const excludeParam = rescheduleLesson !== null ? `&excludeLessonId=${rescheduleLesson.id}` : ''
+    const url = `/api/student/availability?teacherId=${selectedTeacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}${excludeParam}`
 
     // Immediate first attempt, then up to two retries with short back-off.
     const RETRY_DELAYS = [400, 800]
@@ -651,7 +655,25 @@ export default function BookingGridClient({
     void load()
 
     return () => controller.abort()
-  }, [selectedTeacherId, weekStartKey, studentTimezone, refetchNonce])
+  }, [selectedTeacherId, weekStartKey, studentTimezone, refetchNonce, rescheduleLesson])
+
+  // Refetch when the tab is refocused or becomes visible again. The 24h cutoff is
+  // computed on the server at fetch time, so a grid left open can keep showing a
+  // slot green after it crosses inside 24h. A fresh fetch re-greys it, and the
+  // selection backstop below drops a pick that is no longer bookable. No interval:
+  // the user must return to the tab to act, and this catches exactly that moment.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') setRefetchNonce((n) => n + 1)
+    }
+    const onFocus = () => setRefetchNonce((n) => n + 1)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
 
   // ── Grid data (all pure Stage A helpers — local recompute, no fetch) ──
   const columnKeys = getWeekColumnKeys(weekStartKey)
@@ -662,9 +684,13 @@ export default function BookingGridClient({
   const visibleColumns = getVisibleColumns(validStartsByColumn)
   const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
   // Empty-state copy only: suggest a shorter class only when one actually
-  // exists to switch to. Reschedule locks the duration, so that path never
-  // offers it.
-  const shorterLengthAllowed = !isReschedule && allowedDurations.some((m) => m < selectedDuration)
+  // has openings this week, not merely when it's enabled on the account.
+  // Reschedule locks the duration, so that path never offers it.
+  const shorterLengthAllowed =
+    !isReschedule &&
+    allowedDurations
+      .filter((m) => m < selectedDuration)
+      .some((m) => getVisibleColumns(getValidStartsByColumn(columnKeys, slots, instantSet, m)).length > 0)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
   // Built for all 7 columns — a day with no bookable starts just yields no
@@ -871,9 +897,10 @@ export default function BookingGridClient({
       if (!res.ok || data.error) {
         setSubmitError(data.message ?? data.error ?? 'Something went wrong. Please try again.')
         setIsSubmitting(false)
-        if (res.status === 409) {
-          // Slot conflict — the grid is stale: clear the selection and
-          // refetch availability so the taken slot greys out.
+        if (res.status === 409 || res.status === 400) {
+          // 409: slot conflict. 400: a server rule rejected the pick (24h
+          // window, hours, duration), which means the grid was stale too. Both:
+          // clear the selection and refetch so the grid reflects the server.
           setSelectedStartIso(null)
           setRefetchNonce((n) => n + 1)
         }
@@ -1372,12 +1399,16 @@ export default function BookingGridClient({
           {!loading && !error && visibleColumns.length === 0 && (
             <div style={{ textAlign: 'center', padding: '32px 16px' }}>
               <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-                No {selectedDuration}-minute openings this week.
+                No {selectedDuration}-minute openings {isCurrentWeek ? 'this week' : `the week of ${weekLabel}`}.
               </p>
               <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                {shorterLengthAllowed
-                  ? 'Use the arrow above to check the next week, or try a shorter class length.'
-                  : 'Use the arrow above to check the next week.'}
+                {isCurrentWeek
+                  ? shorterLengthAllowed
+                    ? 'Use the arrow above to check the next week, or try a shorter class length.'
+                    : 'Use the arrow above to check the next week.'
+                  : shorterLengthAllowed
+                    ? 'Use the arrows above to check another week, or try a shorter class length.'
+                    : 'Use the arrows above to check another week.'}
               </p>
             </div>
           )}
