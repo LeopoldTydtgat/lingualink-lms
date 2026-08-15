@@ -29,11 +29,18 @@ export default async function BookPage({
   // Get student record. allowed_durations is a student-readable column
   // (column-level SELECT granted to authenticated), so this stays on the
   // session client with the rest of the row.
-  const { data: student } = await supabase
+  const { data: student, error: studentError } = await supabase
     .from('students')
     .select('id, timezone, profile_completed, allowed_durations')
     .eq('auth_user_id', user.id)
-    .single()
+    .maybeSingle()
+  // A query error and a missing row are different failures. Discarding the error
+  // made both look like null and bounced an authenticated student to login on a
+  // transient fault. Same treatment as the student layout.
+  if (studentError) {
+    console.error('[student/book] students lookup failed:', studentError)
+    throw new Error('Failed to load student')
+  }
   if (!student) redirect('/student/login')
 
   if (student.profile_completed !== true) {
@@ -55,7 +62,7 @@ export default async function BookPage({
     : []
 
   // Get active training
-  const { data: training } = await supabase
+  const { data: training, error: trainingError } = await supabase
     .from('trainings')
     .select('id, total_hours, hours_consumed, end_date')
     .eq('student_id', student.id)
@@ -63,6 +70,11 @@ export default async function BookPage({
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
+
+  if (trainingError) {
+    console.error('[student/book] trainings lookup failed:', trainingError)
+    throw new Error('Failed to load training')
+  }
 
   if (!training) {
     // No active training — student cannot book
@@ -79,13 +91,17 @@ export default async function BookPage({
   } | null = null
 
   if (params.reschedule) {
-    const { data: lesson } = await supabase
+    const { data: lesson, error: lessonError } = await supabase
       .from('lessons')
       .select('id, scheduled_at, duration_minutes, teacher_id')
       .eq('id', params.reschedule)
       .eq('student_id', student.id)
       .eq('status', 'scheduled')
       .maybeSingle()
+    if (lessonError) {
+      console.error('[student/book] reschedule lesson lookup failed:', lessonError)
+      throw new Error('Failed to load lesson')
+    }
     rescheduleLesson = lesson ?? null
   }
 
@@ -100,7 +116,7 @@ export default async function BookPage({
     : hoursRemaining
 
   // Get teachers assigned to this training via training_teachers
-  const { data: rawAssignments } = await supabase
+  const { data: rawAssignments, error: assignmentsError } = await supabase
     .from('training_teachers')
     .select(`
       teacher_id,
@@ -121,6 +137,11 @@ export default async function BookPage({
       )
     `)
     .eq('training_id', training.id)
+
+  if (assignmentsError) {
+    console.error('[student/book] training_teachers lookup failed:', assignmentsError)
+    throw new Error('Failed to load teachers')
+  }
 
   const flatTeachers = (rawAssignments ?? [])
     .map((row) => {
