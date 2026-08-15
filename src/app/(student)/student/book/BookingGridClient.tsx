@@ -1,7 +1,6 @@
 'use client'
 
-// BOOK-1 Stages B+C: single-page booking grid client. Not wired up yet —
-// page.tsx still renders BookingClient; Stage D swaps the import. Reschedule
+// BOOK-1: single-page booking grid client, rendered by page.tsx. Reschedule
 // locks teacher and duration to the original lesson and shows an
 // original-lesson context strip; error display (`data.message ?? data.error`),
 // confirm label, success redirect and the 24hr footnote are byte-identical to
@@ -217,7 +216,7 @@ function cleanList(arr: string[] | null): string[] {
 }
 
 // ─── Teacher profile modal ────────────────────────────────────────────────────
-// Copied from BookingClient.tsx (which dies in Stage E — do not import from it).
+// Originally copied from the retired BookingClient.tsx wizard (now deleted).
 // Mirrors the student-portal ClassReminderModal overlay/card/close pattern
 // (src/components/student/ClassReminderModal.tsx): fixed backdrop + centred card,
 // backdrop click closes, plus Esc. Body scrolls; footer stays put.
