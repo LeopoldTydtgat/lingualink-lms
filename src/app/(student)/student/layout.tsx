@@ -55,14 +55,27 @@ export default async function StudentDashboardLayout({
   // the student's zone rather than the viewer's browser zone.
   const studentTimezone = requireTz(student.timezone, 'student-layout')
 
-  // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
-  // pay-withholding model, so a single-row fetch would let it shadow the real next
-  // class. Fetch a few candidates and pick the first that hasn't ended; an
-  // in-progress class (start <= now < end) must still be picked — the panel's
-  // "In class" state depends on it.
-  const { data: candidateLessons } = await supabase
-    .from('lessons')
-    .select(`
+  const [
+    nextLessonRes,
+    protectedLessonRes,
+    trainingRes,
+    completedLessonsRes,
+    assignmentsRes,
+    attemptsRes,
+    unreadRes,
+    whatsNewItems,
+    dismissalsRes,
+    announcementsRes,
+  ] = await Promise.all([
+    // An ended-but-unreported class keeps status='scheduled' for up to 2h under the
+    // pay-withholding model, so a single-row fetch would let it shadow the real next
+    // class. Fetch a few candidates and pick the first that hasn't ended; an
+    // in-progress class (start <= now < end) must still be picked — the panel's
+    // "In class" state depends on it.
+    (async () => {
+      const { data: candidateLessons } = await supabase
+        .from('lessons')
+        .select(`
       id,
       scheduled_at,
       teams_join_url,
@@ -72,79 +85,132 @@ export default async function StudentDashboardLayout({
         full_name
       )
     `)
-    .eq('student_id', student.id)
-    .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
-    .order('scheduled_at', { ascending: true })
-    .limit(5)
+        .eq('student_id', student.id)
+        .eq('status', 'scheduled')
+        .gt('scheduled_at', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+        .order('scheduled_at', { ascending: true })
+        .limit(5)
 
-  const nowMs = Date.now()
-  const nextLesson = (candidateLessons ?? []).find(
-    (l) => nowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
-  ) ?? null
+      const nextLessonNowMs = Date.now()
+      const nextLesson = (candidateLessons ?? []).find(
+        (l) => nextLessonNowMs < new Date(l.scheduled_at).getTime() + l.duration_minutes * 60 * 1000
+      ) ?? null
 
-  const nextLessonTeacherName = nextLesson
-    ? (Array.isArray((nextLesson as any).teacher)
-        ? (nextLesson as any).teacher[0]?.full_name ?? null
-        : (nextLesson as any).teacher?.full_name ?? null)
-    : null
+      const nextLessonTeacherName = nextLesson
+        ? (Array.isArray((nextLesson as any).teacher)
+            ? (nextLesson as any).teacher[0]?.full_name ?? null
+            : (nextLesson as any).teacher?.full_name ?? null)
+        : null
 
-  // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
-  const { data: protectedLesson } = await supabase
-    .from('lessons')
-    .select('scheduled_at, duration_minutes')
-    .eq('student_id', student.id)
-    .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
-    .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+      return { nextLesson, nextLessonTeacherName }
+    })(),
 
-  const { data: training } = await supabase
-    .from('trainings')
-    .select('total_hours, hours_consumed, end_date')
-    .eq('student_id', student.id)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    // Separate query for idle timeout class protection — 90-min lookback catches in-progress classes
+    supabase
+      .from('lessons')
+      .select('scheduled_at, duration_minutes')
+      .eq('student_id', student.id)
+      .eq('status', 'scheduled')
+      .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
+      .order('scheduled_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
 
-  const { data: completedLessonRows } = await supabase
-    .from('lessons')
-    .select('scheduled_at')
-    .eq('student_id', student.id)
-    .eq('status', 'completed')
+    supabase
+      .from('trainings')
+      .select('total_hours, hours_consumed, end_date')
+      .eq('student_id', student.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+
+    supabase
+      .from('lessons')
+      .select('scheduled_at')
+      .eq('student_id', student.id)
+      .eq('status', 'completed'),
+
+    (async () => {
+      const { data: assignmentRows } = await supabase
+        .from('assignments')
+        .select('id, study_sheet_id, marked_done_at, study_sheets ( is_active )')
+        .eq('student_id', student.id)
+
+      // NEW345 bimodal completion (single-sourced): marked_done_at set, OR sheet has
+      // >= 1 activity and every activity has an attempt under that assignment.
+      const assignmentSheetIds = [
+        ...new Set((assignmentRows ?? []).map((a) => a.study_sheet_id as string)),
+      ]
+
+      let activityRows: { id: string; sheet_id: string }[] = []
+      if (assignmentSheetIds.length > 0) {
+        const { data } = await supabase
+          .from('activities')
+          .select('id, sheet_id')
+          .in('sheet_id', assignmentSheetIds)
+        activityRows = (data ?? []) as { id: string; sheet_id: string }[]
+      }
+
+      return { assignmentRows, activityRows }
+    })(),
+
+    supabase
+      .from('activity_attempts')
+      .select('activity_id, assignment_id')
+      .eq('student_id', student.id),
+
+    supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('receiver_id', student.id)
+      .is('read_at', null),
+
+    // What's New feed — student-scoped, uses the same anon server client the
+    // lessons/assignments lookups above use. students.id scopes the feed queries;
+    // user.id (auth uid) scopes the dismissals — see studentWhatsNew.ts.
+    fetchStudentWhatsNew(supabase, student.id, user.id),
+
+    // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
+    // route writes and what its RLS policy checks), never the students-table PK.
+    // user_id alone is unique per user, so no user_type filter belongs here. A failed
+    // read logs and leaves dismissedIds empty — a dismissed banner reappearing beats
+    // blanking the portal shell.
+    supabase
+      .from('announcement_dismissals')
+      .select('announcement_id')
+      .eq('user_id', user.id),
+
+    // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
+    // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
+    // The active window is applied in JS below rather than as chained PostgREST
+    // .or() filters: it is a plain instant comparison on stored UTC values (no local
+    // date construction), the table is single-digit rows so fetching out-of-window
+    // rows costs nothing, and an unparseable date yields NaN, which fails both
+    // comparisons and hides the row. Fail SAFE — a failed read logs and degrades to
+    // "no banner", never blanks the portal shell.
+    supabase
+      .from('announcements')
+      .select('id, title, message, is_dismissable, target_audience, target_id, start_date, end_date')
+      .eq('is_active', true),
+  ])
+
+  const { nextLesson, nextLessonTeacherName } = nextLessonRes
+
+  const protectedLesson = protectedLessonRes.data
+
+  const training = trainingRes.data
+
+  const completedLessonRows = completedLessonsRes.data
 
   const streakWeeks = computeStreakWeeks(
     (completedLessonRows ?? []).map((l) => l.scheduled_at),
     studentTimezone
   )
 
-  const { data: assignmentRows } = await supabase
-    .from('assignments')
-    .select('id, study_sheet_id, marked_done_at, study_sheets ( is_active )')
-    .eq('student_id', student.id)
+  const { assignmentRows, activityRows } = assignmentsRes
 
-  // NEW345 bimodal completion (single-sourced): marked_done_at set, OR sheet has
-  // >= 1 activity and every activity has an attempt under that assignment.
-  const assignmentSheetIds = [
-    ...new Set((assignmentRows ?? []).map((a) => a.study_sheet_id as string)),
-  ]
-
-  let activityRows: { id: string; sheet_id: string }[] = []
-  if (assignmentSheetIds.length > 0) {
-    const { data } = await supabase
-      .from('activities')
-      .select('id, sheet_id')
-      .in('sheet_id', assignmentSheetIds)
-    activityRows = (data ?? []) as { id: string; sheet_id: string }[]
-  }
-
-  const { data: attemptsRaw } = await supabase
-    .from('activity_attempts')
-    .select('activity_id, assignment_id')
-    .eq('student_id', student.id)
-  const attemptRows = (attemptsRaw ?? []) as {
+  const attemptRows = (attemptsRes.data ?? []) as {
     activity_id: string
     assignment_id: string | null
   }[]
@@ -171,30 +237,13 @@ export default async function StudentDashboardLayout({
     isComplete(a.id as string, a.study_sheet_id as string)
   ).length
 
-  const { count: unreadMessageCount } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('receiver_id', student.id)
-    .is('read_at', null)
+  const unreadMessageCount = unreadRes.count
 
   const hoursRemaining = training
     ? Math.max(0, (training.total_hours ?? 0) - (training.hours_consumed ?? 0))
     : 0
 
-  // What's New feed — student-scoped, uses the same anon server client the
-  // lessons/assignments lookups above use. students.id scopes the feed queries;
-  // user.id (auth uid) scopes the dismissals — see studentWhatsNew.ts.
-  const whatsNewItems = await fetchStudentWhatsNew(supabase, student.id, user.id)
-
-  // announcement_dismissals.user_id holds the AUTH uid (that is what the dismiss
-  // route writes and what its RLS policy checks), never the students-table PK.
-  // user_id alone is unique per user, so no user_type filter belongs here. A failed
-  // read logs and leaves dismissedIds empty — a dismissed banner reappearing beats
-  // blanking the portal shell.
-  const { data: dismissals, error: dismissalsError } = await supabase
-    .from('announcement_dismissals')
-    .select('announcement_id')
-    .eq('user_id', user.id)
+  const { data: dismissals, error: dismissalsError } = dismissalsRes
   if (dismissalsError) {
     console.error('[student/layout] announcement_dismissals lookup failed:', dismissalsError)
   }
@@ -205,18 +254,7 @@ export default async function StudentDashboardLayout({
 
   const announcementNowMs = Date.now()
 
-  // start_date/end_date are stored as UTC-pinned instants by AnnouncementForm
-  // (`T00:00:00.000Z` / `T23:59:59.000Z`); null means unbounded on that side.
-  // The active window is applied in JS below rather than as chained PostgREST
-  // .or() filters: it is a plain instant comparison on stored UTC values (no local
-  // date construction), the table is single-digit rows so fetching out-of-window
-  // rows costs nothing, and an unparseable date yields NaN, which fails both
-  // comparisons and hides the row. Fail SAFE — a failed read logs and degrades to
-  // "no banner", never blanks the portal shell.
-  const { data: allAnnouncements, error: announcementsError } = await supabase
-    .from('announcements')
-    .select('id, title, message, is_dismissable, target_audience, target_id, start_date, end_date')
-    .eq('is_active', true)
+  const { data: allAnnouncements, error: announcementsError } = announcementsRes
   if (announcementsError) {
     console.error('[student/layout] announcements lookup failed:', announcementsError)
   }
