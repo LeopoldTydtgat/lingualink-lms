@@ -13,7 +13,7 @@ import { createTeamsMeeting, cancelTeamsMeeting } from '@/lib/microsoft/graph'
 import { BookClassSchema } from '@/lib/validation/schemas'
 import { revalidatePath } from 'next/cache'
 import { isSlotAvailable } from '@/lib/availability'
-import { checkStudentBookingLimit } from '@/lib/rateLimit'
+import { checkStudentBookingLimit, recordStudentBookingAttempt } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
@@ -82,9 +82,11 @@ export async function POST(req: NextRequest) {
     // itself cannot fail silently either: it is part of the studentRow select
     // above, whose failure already returns 404 before this point.
     //
-    // Placed before the rate limiter so a rejected duration costs the student
-    // none of their booking-attempt budget; nothing is written on either side
-    // of this guard, so the ordering has no state consequences.
+    // A rejected duration costs the student none of their booking-attempt
+    // budget. That no longer depends on this guard sitting above the limiter:
+    // the 2b check below only COUNTS, and budget is spent only where an attempt
+    // is recorded, immediately before the money RPCs in 4c. Nothing is written
+    // on either side of this guard, so the ordering has no state consequences.
     if (!rescheduleId) {
       if (
         !Array.isArray(studentRow.allowed_durations) ||
@@ -98,6 +100,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 2b. Rate limit per student (10 bookings / 60 min, fail closed) ───────
+    // Early over-limit gate ONLY: this call counts the attempts already in the
+    // window and writes nothing. The attempt for THIS request is recorded later,
+    // immediately before the money RPC in 4c, so every validation rejection
+    // between here and there costs the student no booking-attempt budget.
     const rl = await checkStudentBookingLimit(studentRow.id)
     if (rl.blocked) {
       return NextResponse.json(
@@ -387,6 +393,19 @@ export async function POST(req: NextRequest) {
       oldScheduledAt = oldLesson.scheduled_at ?? null
       oldDurationMinutes = oldLesson.duration_minutes ?? null
 
+      // Record the booking attempt HERE, not at 2b: recording immediately
+      // before the money RPC means every validation rejection above (duration,
+      // hours, 24h, assignment, slot, clashes, and the four reschedule guards)
+      // costs the student none of their booking-attempt budget. Fail closed —
+      // if the attempt cannot be recorded, no hours may move.
+      const rescheduleAttempt = await recordStudentBookingAttempt(studentRow.id)
+      if (!rescheduleAttempt.ok) {
+        return NextResponse.json(
+          { error: 'Too many booking attempts. Please try again shortly.' },
+          { status: 429, headers: { 'Retry-After': '60' } }
+        )
+      }
+
       const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
         p_old_lesson_id: rescheduleId,
         p_student_id: studentId,
@@ -419,6 +438,19 @@ export async function POST(req: NextRequest) {
         )
       }
     } else {
+      // Record the booking attempt HERE, not at 2b — same reasoning as the
+      // reschedule branch: recording immediately before the money RPC means
+      // validation rejections cost the student none of their booking-attempt
+      // budget. Fail closed — if the attempt cannot be recorded, no hours may
+      // move.
+      const bookAttempt = await recordStudentBookingAttempt(studentRow.id)
+      if (!bookAttempt.ok) {
+        return NextResponse.json(
+          { error: 'Too many booking attempts. Please try again shortly.' },
+          { status: 429, headers: { 'Retry-After': '60' } }
+        )
+      }
+
       const { data: deductData, error: deductError } = await adminClient.rpc('book_class_atomic', {
         p_training_id: trainingId,
         p_hours_needed: hoursNeeded,
