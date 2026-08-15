@@ -48,21 +48,30 @@ export async function GET(req: NextRequest) {
 // ─── POST – create teacher ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    // ── 1. Verify the requesting user is an admin ────────────────────────────
+    // Auth runs BEFORE the body is read: an unauthorised caller must get a bare
+    // 401 and never a Zod validation message describing the schema.
+    const user = await requireAdmin()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
-    // ── 1. Validate input ────────────────────────────────────────────────────
+    // ── 2. Parse and validate input ──────────────────────────────────────────
+    // The parse gets its own catch: malformed JSON is a client error, and
+    // letting it reach the outer catch returned a 500 for a bad request.
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+    }
+
     const parsed = CreateTeacherSchema.safeParse(body)
     if (!parsed.success) {
       const firstError = parsed.error.issues[0]
       return NextResponse.json({ error: firstError.message }, { status: 400 })
     }
     const data = parsed.data
-
-    // ── 2. Verify the requesting user is an admin ────────────────────────────
-    const user = await requireAdmin()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     // ── Cross-role email guard: reject if a student already uses this email ──
     const guardClient = createAdminClient()

@@ -31,8 +31,23 @@ export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
 
-    // ── 1. Parse and validate request body ───────────────────────────────────
-    const body = await req.json()
+    // ── 1. Verify the student is authenticated ───────────────────────────────
+    // Auth runs BEFORE the body is read: an unauthenticated caller must get a
+    // bare 401 and never a Zod validation message describing the schema.
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorised.' }, { status: 401 })
+    }
+
+    // ── 2. Parse and validate request body ───────────────────────────────────
+    // The parse gets its own catch: malformed JSON is a client error, and
+    // letting it reach the outer catch returned a 500 for a bad request.
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
+    }
 
     const parsed = BookClassSchema.safeParse(body)
     if (!parsed.success) {
@@ -41,12 +56,9 @@ export async function POST(req: NextRequest) {
     }
     const { trainingId, teacherId, studentId, durationMinutes, scheduledAt, rescheduleId } = parsed.data
 
-    // ── 2. Verify the student is authenticated and matches the studentId ──────
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorised.' }, { status: 401 })
-    }
-
+    // Ownership check — the authenticated user must own the requested
+    // studentId. Stays below the parse because it needs studentId from the
+    // body; step 1 above is what now gates anonymous callers.
     const { data: studentRow, error: studentError } = await supabase
       .from('students')
       .select('id, full_name, email, timezone, auth_user_id, profile_completed, allowed_durations')
