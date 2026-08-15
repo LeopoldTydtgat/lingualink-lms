@@ -14,7 +14,7 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, type LucideIcon } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, type LucideIcon } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 import { isBookableStart } from '@/lib/bookingGrid'
 import {
@@ -1185,12 +1185,24 @@ export default function BookingGridClient({
           // when that length has since been removed from the account — the
           // reschedule arm here is byte-identical to what it was before NEW-A1.
           const disabled = !canBook || (isReschedule ? !isSelected : !isAllowed)
+          // The two fresh-book disable reasons read identically at opacity 0.5,
+          // so each gets its own 12px glyph: wallet = out of hours, lock = not
+          // enabled on the account. Both are false on every reschedule render,
+          // so the reschedule branch stays byte-identical.
+          const showHoursIcon = !isReschedule && !canBook
+          const showLockIcon = !isReschedule && canBook && !isAllowed
           return (
             <button
               key={option.minutes}
               onClick={() => handleDurationSelect(option.minutes)}
               disabled={disabled}
-              aria-label={`${option.minutes} minutes`}
+              aria-label={
+                showHoursIcon
+                  ? `${option.minutes} minutes, not enough hours remaining`
+                  : showLockIcon
+                  ? `${option.minutes} minutes, not enabled on your account`
+                  : `${option.minutes} minutes`
+              }
               title={
                 !canBook
                   ? 'Not enough hours remaining'
@@ -1209,8 +1221,13 @@ export default function BookingGridClient({
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#111827',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
               }}
             >
+              {showHoursIcon && <Wallet size={12} aria-hidden="true" />}
+              {showLockIcon && <Lock size={12} aria-hidden="true" />}
               {option.label}
             </button>
           )
