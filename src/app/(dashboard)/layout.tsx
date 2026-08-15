@@ -2,7 +2,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
-import { getMonthRangeInTz } from '@/lib/billing/monthRange'
+import { getMonthRangeInTz, getMonthKeyInTz, getDayKeyInTz } from '@/lib/billing/monthRange'
 import { getBillability, projectedContribution } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import LeftNav from '@/components/layout/LeftNav'
@@ -14,6 +14,14 @@ import ChatWidget from '@/components/ChatWidget'
 import IdleTimeoutWatcher from '@/components/IdleTimeoutWatcher'
 import { fetchWhatsNew } from '@/lib/whatsNew'
 import { weeklyGeneralMinutes } from '@/lib/availability'
+
+// Display names for the invoice-upload reminder label. A static array indexed off
+// the parsed month number — no Intl month formatting and no Date, so the string is
+// built purely from the 'YYYY-MM-01' key and is identical on server and client.
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
 
 export default async function DashboardLayout({
   children,
@@ -67,11 +75,38 @@ export default async function DashboardLayout({
   // billing page, not here. Surface the null via log.
   const tz = profile.timezone
 
+  // ── Invoice-upload reminder window (previous month, 1st–10th) ─────────────
+  // Reuses the tz resolved just above — the teacher's own account timezone — so the
+  // panel runs one clock, the same one the billing page and the upload route apply
+  // (billing/page.tsx:63, api/teacher/invoice/upload/route.ts:78-79). The panel can
+  // therefore never nag for an upload the API would refuse.
+  //
+  // A null timezone takes the billing widget's exact degrade path: no query, no
+  // reminder, no throw. The CRITICAL log further down already surfaces that null
+  // once per render, so this block adds no second log for the same cause.
+  //
+  // The previous month is derived by string/integer math on the 'YYYY-MM-01' key —
+  // never a Date built from local parts, never toISOString.
+  const dayOfMonth = tz ? Number(getDayKeyInTz(now, tz).slice(8, 10)) : null
+  const currentMonthKey = tz ? getMonthKeyInTz(now, tz) : null
+  let prevMonthKey: string | null = null
+  let prevMonthLabel: string | null = null
+  if (currentMonthKey) {
+    const curYear = Number(currentMonthKey.slice(0, 4))
+    const curMonth = Number(currentMonthKey.slice(5, 7))
+    const prevYear = curMonth === 1 ? curYear - 1 : curYear
+    const prevMonth = curMonth === 1 ? 12 : curMonth - 1
+    prevMonthKey = `${prevYear}-${String(prevMonth).padStart(2, '0')}-01`
+    prevMonthLabel = `${MONTH_NAMES[prevMonth - 1]} ${prevYear}`
+  }
+  const inUploadWindow = dayOfMonth !== null && dayOfMonth <= 10
+
   const [
     nextLesson,
     protectedLessonRes,
     rateRes,
     billingRes,
+    prevInvoiceRes,
     whatsNewItems,
     availabilityRes,
     minHoursRes,
@@ -154,6 +189,20 @@ export default async function DashboardLayout({
 
           return { monthLessons, rateMap }
         })()
+      : Promise.resolve(null),
+
+    // Previous month's invoice row, for the upload reminder. teacher_id on invoices
+    // is the auth uid — the same key the upload route and billing page filter on.
+    // Admin client because invoices is service-role territory here, matching the
+    // rate/settings lookups above. Skipped entirely outside the 1st–10th window or
+    // with no timezone: both states hide the reminder without a round trip.
+    inUploadWindow && prevMonthKey
+      ? admin
+          .from('invoices')
+          .select('uploaded_at')
+          .eq('teacher_id', user.id)
+          .eq('billing_month', prevMonthKey)
+          .maybeSingle()
       : Promise.resolve(null),
 
     // What's New feed — teacher-scoped, uses the same anon server client the
@@ -274,6 +323,25 @@ export default async function DashboardLayout({
 
   const billingData = { currentAmount, projectedAmount }
 
+  // Reminder decision. prevInvoiceRes is null when the query never ran — outside the
+  // 1st–10th window, or no timezone — and both of those hide the reminder.
+  //
+  // Fail-SAFE, the same posture as the billing widget above: a failed read SHOWS the
+  // reminder, because silently hiding a deadline the teacher can still act on is the
+  // worse failure. The reminder is suppressed only by a row that actually carries
+  // uploaded_at, which is exactly what the upload route writes on success
+  // (api/teacher/invoice/upload/route.ts:111).
+  let invoiceReminderLabel: string | null = null
+  if (prevInvoiceRes !== null && prevMonthLabel !== null) {
+    const { data: prevInvoice, error: prevInvoiceError } = prevInvoiceRes
+    if (prevInvoiceError) {
+      console.error('[dashboard/layout] previous-month invoice lookup failed:', prevInvoiceError)
+      invoiceReminderLabel = prevMonthLabel
+    } else if (!prevInvoice || prevInvoice.uploaded_at == null) {
+      invoiceReminderLabel = prevMonthLabel
+    }
+  }
+
   const availabilityRows = availabilityRes.data
   const offeredMinutes = weeklyGeneralMinutes(availabilityRows ?? [])
 
@@ -343,6 +411,7 @@ export default async function DashboardLayout({
               minAvailableHours={minAvailableHours}
               whatsNewItems={whatsNewItems}
               showStaffTools={showStaffTools}
+              invoiceReminderLabel={invoiceReminderLabel}
             />
           </div>
         </div>
