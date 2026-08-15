@@ -588,7 +588,10 @@ export default function BookingGridClient({
     const controller = new AbortController()
     // weekStartKey is already a student-tz Monday key — the exact frame the
     // server windows and buckets by (NEW317), so it goes on the wire as is.
-    const url = `/api/student/availability?teacherId=${selectedTeacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}`
+    // On a reschedule, tell the server which lesson is being moved so its own
+    // slots are not blocked against itself (server verifies ownership).
+    const excludeParam = rescheduleLesson !== null ? `&excludeLessonId=${rescheduleLesson.id}` : ''
+    const url = `/api/student/availability?teacherId=${selectedTeacherId}&weekStart=${weekStartKey}&timezone=${encodeURIComponent(studentTimezone)}${excludeParam}`
 
     // Immediate first attempt, then up to two retries with short back-off.
     const RETRY_DELAYS = [400, 800]
@@ -651,7 +654,7 @@ export default function BookingGridClient({
     void load()
 
     return () => controller.abort()
-  }, [selectedTeacherId, weekStartKey, studentTimezone, refetchNonce])
+  }, [selectedTeacherId, weekStartKey, studentTimezone, refetchNonce, rescheduleLesson])
 
   // ── Grid data (all pure Stage A helpers — local recompute, no fetch) ──
   const columnKeys = getWeekColumnKeys(weekStartKey)

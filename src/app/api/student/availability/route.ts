@@ -73,18 +73,24 @@ export async function GET(req: NextRequest) {
   }
 
   // Optional: drop a single lesson from the booked set so its own slot is not
-  // reported unavailable against itself (admin edit-class re-timing the lesson).
-  // ADMIN/STAFF ONLY. The student booking WRITE paths enforce overlap
-  // independently of this advisory endpoint (api/student/book: isSlotAvailable +
-  // clash query + DB exclusion constraint; api/admin/classes: clash + constraint),
-  // so this cannot enable a double-book — but gating it to admins keeps the student
-  // availability response byte-identical and removes any occupied-slot-hiding
-  // vector. Malformed ids are ignored silently.
+  // reported unavailable against itself.
+  //  - Admin/staff: honoured as-is (edit-class re-timing). Malformed ids are
+  //    ignored silently.
+  //  - Student: honoured ONLY after the ownership check further down (the
+  //    student must own the lesson, it must be with THIS teacher, and it must
+  //    still be scheduled). This mirrors api/student/book, which excludes
+  //    rescheduleId from both clash queries and enforces a same-teacher lock,
+  //    so read and write halves agree on what a reschedule may overlap.
+  // The student booking WRITE paths enforce overlap independently of this
+  // advisory endpoint (api/student/book: clash queries + DB exclusion
+  // constraint; api/admin/classes: clash + constraint), so this cannot enable
+  // a double-book. Without a param the student response is unchanged.
   const excludeLessonIdRaw = searchParams.get('excludeLessonId')
   const isUuid = (v: string) =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)
-  const excludeLessonId =
-    isAdmin && excludeLessonIdRaw && isUuid(excludeLessonIdRaw) ? excludeLessonIdRaw : null
+  const excludeLessonIdCandidate =
+    excludeLessonIdRaw && isUuid(excludeLessonIdRaw) ? excludeLessonIdRaw : null
+  let excludeLessonId: string | null = isAdmin ? excludeLessonIdCandidate : null
 
   // ── Fetch teacher's timezone ────────────────────────────────────────────────
   // Use the admin client so RLS on profiles/availability does not block the student's session.
@@ -139,6 +145,28 @@ export async function GET(req: NextRequest) {
     }
     if (!assignedTeacherIds.has(teacherId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // Student excludeLessonId ownership check. Fail closed on query error.
+    // A non-matching row (not theirs, other teacher, not scheduled) is
+    // ignored silently, exactly like a malformed id.
+    if (excludeLessonIdCandidate) {
+      const { data: ownedLesson, error: ownedLessonError } = await admin
+        .from('lessons')
+        .select('id')
+        .eq('id', excludeLessonIdCandidate)
+        .eq('student_id', callerStudent.id)
+        .eq('teacher_id', teacherId)
+        .eq('status', 'scheduled')
+        .maybeSingle()
+      if (ownedLessonError) {
+        console.error('[student availability] excludeLessonId ownership check failed:', ownedLessonError)
+        return NextResponse.json(
+          { error: 'Could not load availability. Please try again.' },
+          { status: 500 }
+        )
+      }
+      if (ownedLesson) excludeLessonId = ownedLesson.id
     }
   }
 
