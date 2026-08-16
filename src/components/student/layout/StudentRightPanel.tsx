@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy } from 'lucide-react'
+import { Clock, Hourglass, Pencil, Flag, Video, BookOpen, Trophy, Plus } from 'lucide-react'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { describeLessonCountdown, formatRemainingCountdown, formatHeroCountdown } from '@/lib/lessons/countdown'
 import { utcInstantToTzParts } from '@/lib/utils/timezone'
@@ -78,6 +78,7 @@ export default function StudentRightPanel({
   const [mounted, setMounted] = useState(false)
   const [joinHovered, setJoinHovered] = useState(false)
   const [exercisesHovered, setExercisesHovered] = useState(false)
+  const [bookHovered, setBookHovered] = useState(false)
 
   const panelRef = useRef<HTMLElement>(null)
 
@@ -258,10 +259,50 @@ export default function StudentRightPanel({
           </>
         ) : (
           <>
-            <p style={{ fontSize: '22px', fontWeight: '700', color: '#111827' }}>--</p>
-            <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
-              No upcoming classes
+            <p style={{ fontSize: '14px', fontWeight: '600', color: '#111827', lineHeight: '1.3' }}>
+              No classes booked
             </p>
+            {hoursRemaining > 0 ? (
+              <>
+                <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
+                  {formatHours(hoursRemaining)} left to book with.
+                </p>
+                <Link
+                  href="/student/book"
+                  prefetch={false}
+                  onMouseEnter={() => setBookHovered(true)}
+                  onMouseLeave={() => setBookHovered(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    marginTop: '10px',
+                    padding: '8px 12px',
+                    backgroundColor: bookHovered ? '#FFE4CC' : '#FFF0E0',
+                    color: '#FF8303',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    textDecoration: 'none',
+                    transition: 'background-color 0.18s ease',
+                  }}
+                >
+                  <Plus size={14} />
+                  Book a class
+                </Link>
+              </>
+            ) : (
+              // hoursRemaining is 0 for BOTH "no hours left" and "no active
+              // training" (the layout collapses both to 0), so the copy must not
+              // claim hours were used up. No booking link here either: /student/book
+              // redirects a trainingless student straight back, which would be a
+              // bounce loop.
+              <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
+                No hours available. Contact us to add hours before booking.
+              </p>
+            )}
           </>
         )}
       </div>

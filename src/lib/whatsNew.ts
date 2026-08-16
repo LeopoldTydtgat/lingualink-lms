@@ -127,15 +127,15 @@ export async function fetchWhatsNew(
       .gte('created_at', sinceIso),
     supabase
       .from('lessons')
-      .select('id, student_id, scheduled_at, cancelled_at')
+      .select('id, student_id, scheduled_at, cancelled_at, cancelled_by')
       .eq('teacher_id', teacherId)
-      .eq('cancelled_by', 'student')
+      .in('cancelled_by', ['student', 'admin'])
       .gte('cancelled_at', sinceIso),
     supabase
       .from('lessons')
-      .select('id, student_id, rescheduled_at')
+      .select('id, student_id, rescheduled_at, rescheduled_by')
       .eq('teacher_id', teacherId)
-      .eq('rescheduled_by', 'student')
+      .in('rescheduled_by', ['student', 'admin'])
       .gte('rescheduled_at', sinceIso),
     supabase
       .from('reports')
@@ -246,7 +246,7 @@ export async function fetchWhatsNew(
       id: `assigned-${r.training_id}`,
       kind: 'student_assigned',
       text: `New student assigned: ${nameOf(t.student_id)}`,
-      href: '/students',
+      href: `/students/${r.training_id}`,
       at: r.assigned_at,
     })
   }
@@ -267,29 +267,38 @@ export async function fetchWhatsNew(
     })
   }
 
-  // Cancelled by student (event, windowed)
+  // Cancelled by student or admin (event, windowed)
   for (const l of cancelledRes.data ?? []) {
     if (!l.cancelled_at) continue
-    const shortNotice =
-      new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
+    let cancelledText: string
+    if (l.cancelled_by === 'student') {
+      const shortNotice =
+        new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
+      cancelledText = shortNotice
+        ? `${nameOf(l.student_id)} cancelled within 24hr - you are paid for this class`
+        : `${nameOf(l.student_id)} cancelled a class`
+    } else {
+      // No pay claim in the admin branch: admin-cancel pay depends on the refund decision and is not guaranteed.
+      cancelledText = `Admin cancelled your class with ${nameOf(l.student_id)}`
+    }
     items.push({
       id: `cancelled-${l.id}`,
       kind: 'class_cancelled',
-      text: shortNotice
-        ? `${nameOf(l.student_id)} cancelled within 24hr - you are paid for this class`
-        : `${nameOf(l.student_id)} cancelled a class`,
+      text: cancelledText,
       href: '/upcoming-classes',
       at: l.cancelled_at,
     })
   }
 
-  // Rescheduled by student (event, windowed)
+  // Rescheduled by student or admin (event, windowed)
   for (const l of rescheduledRes.data ?? []) {
     if (!l.rescheduled_at) continue
     items.push({
       id: `rescheduled-${l.id}`,
       kind: 'class_rescheduled',
-      text: `${nameOf(l.student_id)} rescheduled a class`,
+      text: l.rescheduled_by === 'student'
+        ? `${nameOf(l.student_id)} rescheduled a class`
+        : `Admin rescheduled your class with ${nameOf(l.student_id)}`,
       href: '/upcoming-classes',
       at: l.rescheduled_at,
     })
@@ -304,7 +313,7 @@ export async function fetchWhatsNew(
       text: lesson
         ? `Report reopened by admin: ${nameOf(lesson.student_id)}, ${formatClassDay(lesson.scheduled_at, tz)}`
         : 'A report was reopened by admin',
-      href: '/reports',
+      href: `/reports/${r.id}`,
       at: r.updated_at ?? nowIso,
       attention: true,
     })
@@ -319,7 +328,7 @@ export async function fetchWhatsNew(
       text: lesson
         ? `Report not submitted: ${nameOf(lesson.student_id)}, ${formatClassDay(lesson.scheduled_at, tz)}`
         : 'A class report was not submitted in time',
-      href: '/reports',
+      href: `/reports/${r.id}`,
       at: r.flagged_at ?? r.updated_at ?? nowIso,
       attention: true,
     })
@@ -374,7 +383,7 @@ export async function fetchWhatsNew(
         // Stable `at` = when the training row last changed (the hours mutation that
         // dropped it under 2h), so a seen-stamp covers it. Falls back to nowIso.
         text: `${nameOf(t.student_id)} has less than 2 hours remaining`,
-        href: '/students',
+        href: `/students/${t.id}`,
         at: t.updated_at ?? nowIso,
         attention: true,
         showTime: false,
@@ -395,7 +404,7 @@ export async function fetchWhatsNew(
         id: `training-ending-${t.id}-${t.end_date}`,
         kind: 'training_ending',
         text: `${nameOf(t.student_id)}'s training ends on ${formatDateOnly(t.end_date)}`,
-        href: '/students',
+        href: `/students/${t.id}`,
         at: enteredWindowAt,
         attention: true,
         showTime: false,

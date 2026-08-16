@@ -26,6 +26,22 @@ export async function GET(request: Request) {
   const authFail = verifyCronAuth(request)
   if (authFail) return authFail
 
+  // Heartbeat: records that this cron FIRED (auth passed), not that it finished --
+  // completed_at here is the fire time. cron_runs has UNIQUE (cron_name, run_date);
+  // default upsert (ignoreDuplicates false) means sub-daily runs refresh completed_at
+  // to the latest fire. Best-effort: a heartbeat failure must never abort the job.
+  {
+    const hbNow = new Date()
+    const hbDate = `${hbNow.getUTCFullYear()}-${String(hbNow.getUTCMonth() + 1).padStart(2, '0')}-${String(hbNow.getUTCDate()).padStart(2, '0')}`
+    const { error: hbErr } = await supabase
+      .from('cron_runs')
+      .upsert(
+        { cron_name: 'low-hours-warning', run_date: hbDate, completed_at: hbNow.toISOString() },
+        { onConflict: 'cron_name,run_date' }
+      )
+    if (hbErr) console.error('[heartbeat] cron_runs write failed:', hbErr)
+  }
+
   // Find active trainings where hours remaining < threshold
   // and warning hasn't been sent yet for this training
   const { data: trainings, error } = await supabase
