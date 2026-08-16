@@ -147,20 +147,34 @@ export default async function ReportPage({ params }: Props) {
     redirect('/reports')
   }
 
-  // Fetch study sheets already assigned for this lesson
-  const { data: assignments } = await supabase
-    .from('assignments')
-    .select('study_sheet_id')
-    .eq('lesson_id', lesson?.id ?? '')
+  // Fetch study sheets already assigned for this lesson. reports.lesson_id is
+  // NOT NULL in the live schema, so a missing lesson here means the embed
+  // returned nothing (RLS or a broken join), not a legitimately lesson-less report.
+  let assignedSheetIds: string[] = []
+  if (typeof lesson?.id === 'string' && lesson.id.length > 0) {
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('assignments')
+      .select('study_sheet_id')
+      .eq('lesson_id', lesson.id)
 
-  const assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
+    if (assignmentsError) {
+      console.error('Report page: assignments load failed:', assignmentsError.message, { reportId: id, lessonId: lesson.id })
+    }
+
+    assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
+  }
 
   let assignedSheets: { id: string; title: string }[] = []
   if (assignedSheetIds.length > 0) {
-    const { data: sheets } = await supabase
+    const { data: sheets, error: sheetsError } = await supabase
       .from('study_sheets')
       .select('id, title')
       .in('id', assignedSheetIds)
+
+    if (sheetsError) {
+      console.error('Report page: assigned study sheets load failed:', sheetsError.message, { reportId: id, lessonId: lesson?.id })
+    }
+
     assignedSheets = sheets ?? []
   }
 
