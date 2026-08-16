@@ -1,8 +1,17 @@
 // src/app/(admin)/admin/reports/[id]/page.tsx
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { redirect, notFound } from 'next/navigation';
 import ReportDetailClient from './ReportDetailClient';
+
+// Mirrors the `assignments` prop of ReportDetailClient exactly — the sheet fields stay
+// non-nullable (only the whole sheet is nullable), so the prop type needs no widening.
+type FlatAssignment = {
+  id:          string;
+  assigned_at: string;
+  sheet:       { id: string; title: string; category: string | null; level: string | null } | null;
+};
 
 export default async function AdminReportDetailPage({
   params,
@@ -82,28 +91,66 @@ export default async function AdminReportDetailPage({
     student = s;
   }
 
-  const { data: assignments } = await supabase
-    .from('assignments')
-    .select(`
-      id,
-      assigned_at,
-      study_sheets (
-        id,
-        title,
-        category,
-        level
-      )
-    `)
-    .eq('report_id', id);
+  // SERVICE-ROLE ON PURPOSE — do not "fix" this back to the cookie client.
+  // `assignments` has no report_id column, so the row is keyed on the report's own
+  // lesson_id. It also has RLS on with NO admin SELECT policy: the only SELECT policies
+  // are "Students read own assignments" and "Teachers can view assignments" (scoped through
+  // trainings), so the RLS client returns zero rows for every student who is not the
+  // logged-in admin. This page is already admin-gated above (get_user_role === 'admin'),
+  // which is what authorises the bypass. Two-step read (ids, then sheets) — the PostgREST
+  // embed form has never executed successfully in this codebase.
+  // A failed read is logged and degrades to an empty list; it must never blank the report.
+  const admin = createAdminClient();
+  const flatAssignments: FlatAssignment[] = [];
 
-  const flatAssignments = (assignments ?? []).map((a) => {
-    const sheet = Array.isArray(a.study_sheets) ? a.study_sheets[0] : a.study_sheets;
-    return {
-      id:          a.id,
-      assigned_at: a.assigned_at,
-      sheet: sheet ? { id: sheet.id, title: sheet.title, category: sheet.category, level: sheet.level } : null,
-    };
-  });
+  // No lesson_id means nothing to key on. Skip both queries — an empty string against a
+  // uuid column is a 400, not an empty result.
+  if (report.lesson_id) {
+    const { data: assignmentRows, error: assignmentsError } = await admin
+      .from('assignments')
+      .select('id, assigned_at, study_sheet_id')
+      .eq('lesson_id', report.lesson_id)
+      .order('assigned_at', { ascending: true });
+
+    if (assignmentsError) {
+      console.error(
+        `Admin report detail: assignments read failed (report ${id}, lesson ${report.lesson_id}):`,
+        assignmentsError.message
+      );
+    }
+
+    const rows = assignmentRows ?? [];
+    const sheetIds = [...new Set(
+      rows.map((a) => a.study_sheet_id).filter((sid): sid is string => !!sid)
+    )];
+
+    const sheetById = new Map<string, NonNullable<FlatAssignment['sheet']>>();
+    if (sheetIds.length > 0) {
+      const { data: sheetRows, error: sheetsError } = await admin
+        .from('study_sheets')
+        .select('id, title, category, level')
+        .in('id', sheetIds);
+
+      if (sheetsError) {
+        console.error(
+          `Admin report detail: study_sheets lookup failed (report ${id}, lesson ${report.lesson_id}):`,
+          sheetsError.message
+        );
+      }
+
+      for (const s of sheetRows ?? []) {
+        sheetById.set(s.id, { id: s.id, title: s.title, category: s.category, level: s.level });
+      }
+    }
+
+    for (const a of rows) {
+      flatAssignments.push({
+        id:          a.id,
+        assigned_at: a.assigned_at,
+        sheet:       (a.study_sheet_id ? sheetById.get(a.study_sheet_id) : undefined) ?? null,
+      });
+    }
+  }
 
   return (
     <ReportDetailClient
