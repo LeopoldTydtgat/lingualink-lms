@@ -142,8 +142,13 @@ export default async function ReportPage({ params }: Props) {
   const teacher = (Array.isArray(lesson?.teacher) ? lesson.teacher[0] : lesson?.teacher) as { id: string; full_name: string } | null
   const student = (Array.isArray(lesson?.student) ? lesson.student[0] : lesson?.student) as { id: string; full_name: string; photo_url: string | null } | null
 
-  // Teachers can only view their own reports
-  if (!isAdmin && teacher?.id !== user.id) {
+  // The teacher portal is the signed-in teacher's OWN workspace — admins
+  // included — so a report belonging to another teacher bounces regardless of
+  // role. Cross-teacher report oversight is the admin portal's job and lives at
+  // /admin/reports/[id]. The list this page is reached from is already scoped to
+  // teacher_id = user.id ((dashboard)/reports/page.tsx), so this guard is a
+  // backstop against a hand-typed URL, not the primary scoping.
+  if (teacher?.id !== user.id) {
     redirect('/reports')
   }
 
