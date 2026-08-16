@@ -258,6 +258,65 @@ export async function PATCH(
         changed_at: new Date().toISOString(),
       }))
 
+    // Reinstating a teacher must LIFT the ban that archiving applied. Writing
+    // status 'current' does not restore login on its own - the auth user stays
+    // banned, so the profile reads active while every sign-in is refused.
+    // Gated on the transition (was not 'current', is becoming 'current') so an
+    // ordinary edit of an already-active teacher never touches auth.
+    //
+    // WHY THIS RUNS BEFORE THE PROFILE UPDATE. Same reasoning as the rate
+    // reprice above. Every failure path here returns before profiles is touched,
+    // so the stored status is still 'former'/'on_hold' and the admin's retry is a
+    // REAL retry. If this ran after the update, a failed unban would leave status
+    // already 'current', the `current.status !== 'current'` gate would then be
+    // false on every subsequent attempt, and the unban could never be re-fired -
+    // the teacher would be permanently locked out: banned in auth, active in the
+    // UI, with no route back through the portal short of archiving and
+    // reinstating all over again.
+    //
+    // The reverse inconsistency (unban lands, the UPDATE below fails) is the safe
+    // direction, not a hole: src/app/(auth)/login/actions.ts:41 rejects 'former'
+    // and 'on_hold' on its own, independently of the ban, so an unbanned but
+    // still-archived teacher still cannot sign in. The retry re-runs an
+    // idempotent unban and completes the save.
+    if (parsed.data.status === 'current' && current.status !== 'current') {
+      try {
+        // auth-js catches AuthError and RETURNS it in `error` - it only rethrows
+        // non-auth failures. So BOTH paths have to be handled: bind the returned
+        // error (an unbound call discards every API-level failure and this route
+        // would report success on a login that was never restored) and keep the
+        // try/catch for the throwing half.
+        const { error: unbanError } = await adminClient.auth.admin.updateUserById(id, {
+          ban_duration: 'none',
+        })
+        if (unbanError) {
+          // Tolerate ONLY user-not-found, exactly as the ban block below and the
+          // DELETE handler's deleteUser do. An auth user that does not exist has
+          // no login to restore, so there is nothing this call could have
+          // achieved - and blocking the status write on it is pure downside: the
+          // profile would be stuck at 'former' forever, failing every retry, with
+          // no route back through the portal. That state is reachable today: the
+          // DELETE handler below deletes the auth user FIRST and can then fail on
+          // the profile delete, leaving exactly a profile row whose auth user is
+          // already gone (its own 500 tells the admin to retry the purge).
+          // Continue to the row write; every other error stays fatal.
+          const isUserNotFound =
+            unbanError.status === 404 || unbanError.code === 'user_not_found'
+          if (!isUserNotFound) throw unbanError
+          console.error('[reactivate teacher] no auth user to unban (tolerated):', unbanError)
+        }
+      } catch (unbanError) {
+        console.error('[reactivate teacher] unban failed; status not changed', {
+          teacher_id: id,
+          error: unbanError,
+        })
+        return NextResponse.json(
+          { error: 'Could not restore this teacher\'s login access. The status change was not saved - please try again.' },
+          { status: 500 }
+        )
+      }
+    }
+
     const { error: updateError } = await adminClient
       .from('profiles')
       .update(updatePayload)
@@ -285,12 +344,28 @@ export async function PATCH(
       // Archiving must remove ALL access, not just current sessions. signOut
       // alone leaves the password valid, so a former teacher could log straight
       // back in. Ban the auth user first (locks login), then kill live sessions
-      // — so sessions die only after the login is already locked. The ban is
-      // lifted again when status returns to 'current' below.
+      // — so sessions die only after the login is already locked. The matching
+      // unban is NOT here: it runs ABOVE, before the profile UPDATE, so that a
+      // failed reinstatement stays retryable (see the comment there).
       try {
-        await adminClient.auth.admin.updateUserById(id, { ban_duration: '876000h' })
+        // auth-js catches AuthError and RETURNS it; only non-auth failures are
+        // rethrown. Bind the returned error or an API-level ban failure is
+        // silently discarded and this route answers 200 on an unlocked login.
+        const { error: banError } = await adminClient.auth.admin.updateUserById(id, {
+          ban_duration: '876000h',
+        })
+        if (banError) {
+          // Tolerate ONLY user-not-found, exactly as the DELETE handler below
+          // tolerates it on deleteUser: an auth user that does not exist cannot
+          // log in, so there is no access left to revoke. Every other error is
+          // treated as a throw.
+          const isUserNotFound =
+            banError.status === 404 || banError.code === 'user_not_found'
+          if (!isUserNotFound) throw banError
+          console.error('[archive teacher] no auth user to ban (tolerated):', banError)
+        }
       } catch (banError) {
-        // The ban is the security-critical half: if it throws, the login is NOT
+        // The ban is the security-critical half: if it fails, the login is NOT
         // locked. Hard-fail with 500 rather than returning success — otherwise we
         // re-open the exact hole this block closes (a former teacher logging back
         // in). The admin retries; the profile is already 'former' so re-running is
@@ -302,16 +377,16 @@ export async function PATCH(
         )
       }
       try {
-        await adminClient.auth.admin.signOut(id, 'global')
+        // Same bind-the-returned-error rule as the ban above; signOut also
+        // returns its AuthError instead of throwing it. Stays NON-fatal: the ban
+        // has already landed, so a surviving session is a nuisance, not an open
+        // door.
+        const { error: signOutError } = await adminClient.auth.admin.signOut(id, 'global')
+        if (signOutError) {
+          console.error('[archive teacher] signOut failed:', signOutError)
+        }
       } catch (signOutError) {
         console.error('[archive teacher] signOut failed:', signOutError)
-      }
-    } else if (parsed.data.status === 'current') {
-      // Reinstating a teacher must restore login by lifting any prior ban.
-      try {
-        await adminClient.auth.admin.updateUserById(id, { ban_duration: 'none' })
-      } catch (unbanError) {
-        console.error('[reactivate teacher] unban failed:', unbanError)
       }
     }
 

@@ -100,7 +100,7 @@ export default async function ReportPage({ params }: Props) {
     redirect('/account?confirm_tz=1')
   }
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = profile.role === 'admin'
 
   const { data: report, error } = await supabase
     .from('reports')
@@ -133,7 +133,7 @@ export default async function ReportPage({ params }: Props) {
       )
     `)
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (error || !report) notFound()
 
@@ -142,25 +142,44 @@ export default async function ReportPage({ params }: Props) {
   const teacher = (Array.isArray(lesson?.teacher) ? lesson.teacher[0] : lesson?.teacher) as { id: string; full_name: string } | null
   const student = (Array.isArray(lesson?.student) ? lesson.student[0] : lesson?.student) as { id: string; full_name: string; photo_url: string | null } | null
 
-  // Teachers can only view their own reports
-  if (!isAdmin && teacher?.id !== user.id) {
+  // The teacher portal is the signed-in teacher's OWN workspace — admins
+  // included — so a report belonging to another teacher bounces regardless of
+  // role. Cross-teacher report oversight is the admin portal's job and lives at
+  // /admin/reports/[id]. The list this page is reached from is already scoped to
+  // teacher_id = user.id ((dashboard)/reports/page.tsx), so this guard is a
+  // backstop against a hand-typed URL, not the primary scoping.
+  if (teacher?.id !== user.id) {
     redirect('/reports')
   }
 
-  // Fetch study sheets already assigned for this lesson
-  const { data: assignments } = await supabase
-    .from('assignments')
-    .select('study_sheet_id')
-    .eq('lesson_id', lesson?.id ?? '')
+  // Fetch study sheets already assigned for this lesson. reports.lesson_id is
+  // NOT NULL in the live schema, so a missing lesson here means the embed
+  // returned nothing (RLS or a broken join), not a legitimately lesson-less report.
+  let assignedSheetIds: string[] = []
+  if (typeof lesson?.id === 'string' && lesson.id.length > 0) {
+    const { data: assignments, error: assignmentsError } = await supabase
+      .from('assignments')
+      .select('study_sheet_id')
+      .eq('lesson_id', lesson.id)
 
-  const assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
+    if (assignmentsError) {
+      console.error('Report page: assignments load failed:', assignmentsError.message, { reportId: id, lessonId: lesson.id })
+    }
+
+    assignedSheetIds = (assignments ?? []).map(a => a.study_sheet_id)
+  }
 
   let assignedSheets: { id: string; title: string }[] = []
   if (assignedSheetIds.length > 0) {
-    const { data: sheets } = await supabase
+    const { data: sheets, error: sheetsError } = await supabase
       .from('study_sheets')
       .select('id, title')
       .in('id', assignedSheetIds)
+
+    if (sheetsError) {
+      console.error('Report page: assigned study sheets load failed:', sheetsError.message, { reportId: id, lessonId: lesson?.id })
+    }
+
     assignedSheets = sheets ?? []
   }
 
@@ -305,7 +324,7 @@ export default async function ReportPage({ params }: Props) {
   return (
     <ReportFormClient
       report={cleanReport as any}
-      profile={profile ?? { id: '', full_name: '', role: '' }}
+      profile={profile}
       isAdmin={isAdmin}
       assignedSheetIds={assignedSheetIds}
       assignedSheets={assignedSheets}

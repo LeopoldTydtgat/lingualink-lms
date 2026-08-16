@@ -37,9 +37,13 @@ export async function PATCH(
 
     const adminClient = createAdminClient()
 
+    // status is read here for the reactivation gate below: the unban must fire
+    // only on the archived → current TRANSITION, which needs the stored value.
+    // Explicit column list, never select('*') — students carries column-level
+    // REVOKEs (admin_notes, cancellation_policy).
     const { data: current, error: fetchError } = await adminClient
       .from('students')
-      .select('id, auth_user_id')
+      .select('id, auth_user_id, status')
       .eq('id', id)
       .single()
 
@@ -221,6 +225,74 @@ export async function PATCH(
     }
     studentUpdate.updated_at = new Date().toISOString()
 
+    // Reinstating a student must LIFT the ban that archiving applied. Writing
+    // status 'current' does not restore login on its own - the auth user stays
+    // banned, so the record reads active while every sign-in is refused. Gated
+    // on the transition (was not 'current', is becoming 'current') so an
+    // ordinary edit of an already-active student never touches auth.
+    //
+    // WHY THIS RUNS BEFORE THE STUDENTS UPDATE. Every failure path here returns
+    // before students is touched, so the stored status is still
+    // 'former'/'on_hold' and the admin's retry is a REAL retry. If this ran
+    // after the update, a failed unban would leave status already 'current', the
+    // `current.status !== 'current'` gate would then be false on every
+    // subsequent attempt, and the unban could never be re-fired - the student
+    // would be permanently locked out: banned in auth, active in the UI, with no
+    // route back through the portal short of archiving and reinstating all over
+    // again.
+    //
+    // The reverse inconsistency (unban lands, the UPDATE below fails) is the safe
+    // direction, not a hole: src/app/(student-auth)/student/login/actions.ts:51
+    // rejects 'former' and 'on_hold' on its own, independently of the ban, so an
+    // unbanned but still-archived student still cannot sign in. The retry re-runs
+    // an idempotent unban and completes the save.
+    //
+    // Placed after the training-ownership and assignable-teacher gates so a
+    // request those gates reject never reaches auth at all.
+    if (
+      parsed.data.status === 'current' &&
+      current.status !== 'current' &&
+      current.auth_user_id
+    ) {
+      try {
+        // auth-js catches AuthError and RETURNS it in `error` - it only rethrows
+        // non-auth failures. So BOTH paths have to be handled: bind the returned
+        // error (an unbound call discards every API-level failure and this route
+        // would report success on a login that was never restored) and keep the
+        // try/catch for the throwing half.
+        const { error: unbanError } = await adminClient.auth.admin.updateUserById(
+          current.auth_user_id,
+          { ban_duration: 'none' }
+        )
+        if (unbanError) {
+          // Tolerate ONLY user-not-found, exactly as the ban block below and the
+          // teacher DELETE handler's deleteUser do. An auth user that does not
+          // exist has no login to restore, so there is nothing this call could
+          // have achieved - and blocking the status write on it is pure downside:
+          // the record would be stuck at 'former' forever, failing every retry,
+          // with no route back through the portal. The teacher DELETE handler
+          // manufactures exactly that state (auth user deleted first, profile row
+          // delete can then fail), and an auth user removed by hand in Supabase
+          // Auth produces it here too. Continue to the row write; every other
+          // error stays fatal.
+          const isUserNotFound =
+            unbanError.status === 404 || unbanError.code === 'user_not_found'
+          if (!isUserNotFound) throw unbanError
+          console.error('[reactivate student] no auth user to unban (tolerated):', unbanError)
+        }
+      } catch (unbanError) {
+        console.error('[reactivate student] unban failed; nothing changed', {
+          student_id: id,
+          auth_user_id: current.auth_user_id,
+          error: unbanError,
+        })
+        return NextResponse.json(
+          { error: 'Could not restore this student\'s login access. Nothing was saved - please try again.' },
+          { status: 500 }
+        )
+      }
+    }
+
     const { error: studentError } = await adminClient
       .from('students')
       .update(studentUpdate)
@@ -346,12 +418,29 @@ export async function PATCH(
       // Archiving must remove ALL access, not just current sessions. signOut
       // alone leaves the password valid, so a former student could log straight
       // back in. Ban the auth user first (locks login), then kill live sessions
-      // — so sessions die only after the login is already locked. The ban is
-      // lifted again when status returns to 'current' below.
+      // — so sessions die only after the login is already locked. The matching
+      // unban is NOT here: it runs ABOVE, before the students UPDATE, so that a
+      // failed reinstatement stays retryable (see the comment there).
       try {
-        await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: '876000h' })
+        // auth-js catches AuthError and RETURNS it; only non-auth failures are
+        // rethrown. Bind the returned error or an API-level ban failure is
+        // silently discarded and this route answers 200 on an unlocked login.
+        const { error: banError } = await adminClient.auth.admin.updateUserById(
+          current.auth_user_id,
+          { ban_duration: '876000h' }
+        )
+        if (banError) {
+          // Tolerate ONLY user-not-found, exactly as the teacher DELETE handler
+          // tolerates it on deleteUser: an auth user that does not exist cannot
+          // log in, so there is no access left to revoke. Every other error is
+          // treated as a throw.
+          const isUserNotFound =
+            banError.status === 404 || banError.code === 'user_not_found'
+          if (!isUserNotFound) throw banError
+          console.error('[archive student] no auth user to ban (tolerated):', banError)
+        }
       } catch (banError) {
-        // The ban is the security-critical half: if it throws, the login is NOT
+        // The ban is the security-critical half: if it fails, the login is NOT
         // locked. Hard-fail with 500 rather than returning success — otherwise we
         // re-open the exact hole this block closes (a former student logging back
         // in). The admin retries; the status is already written so re-running is
@@ -363,25 +452,19 @@ export async function PATCH(
         )
       }
       try {
-        await adminClient.auth.admin.signOut(current.auth_user_id, 'global')
+        // Same bind-the-returned-error rule as the ban above; signOut also
+        // returns its AuthError instead of throwing it. Stays NON-fatal: the ban
+        // has already landed, so a surviving session is a nuisance, not an open
+        // door.
+        const { error: signOutError } = await adminClient.auth.admin.signOut(
+          current.auth_user_id,
+          'global'
+        )
+        if (signOutError) {
+          console.error('[archive student] signOut failed:', signOutError)
+        }
       } catch (signOutError) {
         console.error('[archive student] signOut failed:', signOutError)
-      }
-    } else if (parsed.data.status === 'current' && current.auth_user_id) {
-      // Reinstating a student must restore login by lifting any prior ban.
-      try {
-        await adminClient.auth.admin.updateUserById(current.auth_user_id, { ban_duration: 'none' })
-      } catch (unbanError) {
-        // The unban is what actually restores login: if it throws, the student
-        // stays banned and locked out while the form would report "Changes
-        // saved!". Hard-fail with 500 like the ban branch above - the admin
-        // retries; the status is already written so re-running is idempotent
-        // and simply re-attempts the unban.
-        console.error('[reactivate student] unban failed:', unbanError)
-        return NextResponse.json(
-          { error: 'Failed to restore student access. Please retry.' },
-          { status: 500 }
-        )
       }
     }
 

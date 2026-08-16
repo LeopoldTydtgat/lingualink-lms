@@ -17,7 +17,6 @@ type Lesson = {
   scheduled_at: string
   duration_minutes: number
   student: Student
-  teacher: { id: string; full_name: string }
 }
 
 type Report = {

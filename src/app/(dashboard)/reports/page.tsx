@@ -43,7 +43,7 @@ export default async function ReportsPage() {
     redirect('/account?confirm_tz=1')
   }
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = profile.role === 'admin'
 
   const query = supabase
     .from('reports')
@@ -65,10 +65,6 @@ export default async function ReportsPage() {
           id,
           full_name,
           photo_url
-        ),
-        teacher:profiles (
-          id,
-          full_name
         )
       )
     `)
@@ -86,18 +82,17 @@ export default async function ReportsPage() {
   // Supabase returns nested joins as arrays — flatten them into single objects
   const reports = (rawReports ?? []).map((r: any) => {
     const lesson = Array.isArray(r.lesson) ? r.lesson[0] : r.lesson
-    const teacher = lesson && Array.isArray(lesson.teacher) ? lesson.teacher[0] : lesson?.teacher
     const student = lesson && Array.isArray(lesson.student) ? lesson.student[0] : lesson?.student
     return {
       ...r,
-      lesson: lesson ? { ...lesson, teacher, student } : null,
+      lesson: lesson ? { ...lesson, student } : null,
     }
   })
 
   return (
     <ReportsClient
       reports={reports}
-      profile={profile ?? { id: '', full_name: '', role: '' }}
+      profile={profile}
       isAdmin={isAdmin}
       viewerTimezone={viewerTimezone}
     />
