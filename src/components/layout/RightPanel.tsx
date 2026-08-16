@@ -587,7 +587,8 @@ export default function RightPanel({
                   onDismiss={() => handleDismiss(item.id)}
                   onClick={() => {
                     const targetPath = item.href.split('?')[0].split('#')[0]
-                    if (pathname !== targetPath) router.push(item.href)
+                    router.push(item.href)
+                    if (pathname === targetPath) router.refresh()
                   }}
                 />
               ))}

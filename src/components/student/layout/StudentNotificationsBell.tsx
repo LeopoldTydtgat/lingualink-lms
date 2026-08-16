@@ -398,7 +398,8 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
                   onClick={() => {
                     setOpen(false)
                     const targetPath = item.href.split('?')[0].split('#')[0]
-                    if (pathname !== targetPath) router.push(item.href)
+                    router.push(item.href)
+                    if (pathname === targetPath) router.refresh()
                   }}
                 />
               ))}

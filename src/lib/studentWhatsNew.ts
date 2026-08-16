@@ -154,7 +154,8 @@ export async function fetchStudentWhatsNew(
       text: l.cancelled_by === 'teacher'
         ? `Your teacher cancelled your class on ${formatClassMoment(l.scheduled_at, tz)} - your hours were refunded`
         : `Your class on ${formatClassMoment(l.scheduled_at, tz)} was cancelled`,
-      href: '/student/my-classes',
+      // Cancelled lessons are not rendered anywhere in the student portal (deliberate, S506), so the notification links to rebooking instead.
+      href: '/student/book',
       at: l.cancelled_at,
     })
   }
@@ -182,7 +183,9 @@ export async function fetchStudentWhatsNew(
       id: `homework-${a.id}`,
       kind: 'homework_assigned',
       text: title ? `New exercise assigned: ${title}` : 'New exercises assigned by your teacher',
-      href: '/student/study',
+      href: a.study_sheet_id
+        ? `/student/study/${a.study_sheet_id}?assignment=${a.id}`
+        : '/student/study',
       at: a.assigned_at,
     })
   }
