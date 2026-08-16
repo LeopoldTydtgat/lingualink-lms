@@ -133,7 +133,7 @@ export default async function ReportPage({ params }: Props) {
       )
     `)
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (error || !report) notFound()
 
