@@ -43,7 +43,7 @@ export default async function ReportsPage() {
     redirect('/account?confirm_tz=1')
   }
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = profile.role === 'admin'
 
   const query = supabase
     .from('reports')
@@ -97,7 +97,7 @@ export default async function ReportsPage() {
   return (
     <ReportsClient
       reports={reports}
-      profile={profile ?? { id: '', full_name: '', role: '' }}
+      profile={profile}
       isAdmin={isAdmin}
       viewerTimezone={viewerTimezone}
     />

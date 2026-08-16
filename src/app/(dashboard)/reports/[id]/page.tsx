@@ -100,7 +100,7 @@ export default async function ReportPage({ params }: Props) {
     redirect('/account?confirm_tz=1')
   }
 
-  const isAdmin = profile?.role === 'admin'
+  const isAdmin = profile.role === 'admin'
 
   const { data: report, error } = await supabase
     .from('reports')
@@ -324,7 +324,7 @@ export default async function ReportPage({ params }: Props) {
   return (
     <ReportFormClient
       report={cleanReport as any}
-      profile={profile ?? { id: '', full_name: '', role: '' }}
+      profile={profile}
       isAdmin={isAdmin}
       assignedSheetIds={assignedSheetIds}
       assignedSheets={assignedSheets}
