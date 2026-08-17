@@ -46,10 +46,18 @@ export async function POST(
     const { error } = await adminClient.auth.admin.updateUserById(id, { password })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    try {
-      await adminClient.auth.admin.signOut(id, 'global')
-    } catch (signOutError) {
-      console.error('[password reset teacher] signOut failed:', signOutError)
+    // Fatal here, unlike the archive path: nothing else evicts the old session -
+    // there is no ban and no status gate - so a session that survives this reset
+    // leaves the previous holder signed in with full access after the admin has
+    // changed the password, which is the exact attack this reset exists to stop.
+    // Retrying is safe: the password update is idempotent and the revoke re-runs.
+    const { error: revokeError } = await adminClient.rpc('revoke_user_sessions', { p_user_id: id })
+    if (revokeError) {
+      console.error('[password reset teacher] session revocation failed:', revokeError)
+      return NextResponse.json(
+        { error: 'The password was updated, but existing sessions could not be signed out. Please retry to force sign-out everywhere.' },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({ success: true })

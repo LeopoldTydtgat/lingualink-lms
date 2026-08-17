@@ -629,7 +629,9 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
     setPasswordSaving(true)
 
-    // Verify current password by re-signing in
+    // Verify current password by re-signing in (friendly error + fresh
+    // session), and pass current_password so the server enforces it too
+    // once the Supabase "require current password" toggle is on (H2).
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: profile.email,
       password: currentPassword,
@@ -643,6 +645,7 @@ export default function AccountClient({ profile, resources, reviews, userId }: P
 
     const { error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
+      current_password: currentPassword,
     })
 
     if (updateError) {

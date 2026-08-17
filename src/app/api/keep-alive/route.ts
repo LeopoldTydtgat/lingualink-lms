@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
 import { verifyCronAuth } from '@/lib/cron-auth'
 
 const adminSupabase = createAdminClient(
@@ -28,8 +27,7 @@ export async function GET(request: Request) {
     if (hbErr) console.error('[heartbeat] cron_runs write failed:', hbErr)
   }
 
-  const supabase = await createClient()
-  const { error } = await supabase.from('profiles').select('id').limit(1)
+  const { error } = await adminSupabase.from('profiles').select('id').limit(1)
   if (error) {
     console.error('[keep-alive] profiles select failed:', error)
     return NextResponse.json({ ok: false }, { status: 500 })

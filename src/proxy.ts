@@ -6,6 +6,7 @@ import {
   expectedPortal,
   getPortal,
   isProductionHost,
+  isTrustedOrigin,
   loginUrlForPath,
   portalUrl,
 } from '@/lib/host'
@@ -13,6 +14,23 @@ import {
 export async function proxy(request: NextRequest) {
   const host = request.headers.get('host')
   const cookieDomain = isProductionHost(host) ? SHARED_COOKIE_DOMAIN : undefined
+
+  // ── CSRF origin gate for mutating API requests ──────────────────────────────
+  // The auth cookie is Domain=.lingualinkonline.com, so SameSite alone does
+  // not stop a sibling subdomain from driving authenticated /api/* mutations.
+  // Reject any POST/PUT/PATCH/DELETE to /api/* whose Origin header is present
+  // but is neither this request's own host nor one of the portal URLs.
+  // Requests with no Origin header pass: cron, webhooks and other non-browser
+  // clients send none, and browsers always attach Origin to cross-site
+  // mutating requests.
+  const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+  if (
+    request.nextUrl.pathname.startsWith('/api/') &&
+    MUTATING_METHODS.has(request.method) &&
+    !isTrustedOrigin(request.headers.get('origin'), host)
+  ) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   let response = NextResponse.next({ request })
 
