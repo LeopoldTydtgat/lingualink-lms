@@ -64,3 +64,32 @@ export function loginUrlForPath(pathname: string): string {
   }
   return `${process.env.NEXT_PUBLIC_TEACHER_URL ?? ''}/login`
 }
+
+// CSRF origin check for mutating /api/* requests (see src/proxy.ts). Compares
+// full hosts (including port), NOT the port-stripped hostname normalizeHost
+// produces — the Origin header and the Host header both carry the port, and a
+// different port is a different origin.
+export function isTrustedOrigin(origin: string | null, host: string | null | undefined): boolean {
+  // Non-browser clients (cron, Resend webhook, calendar apps) send no Origin
+  // header; browsers always send one on cross-site mutating requests, so a
+  // missing header cannot be a CSRF vector and is allowed through.
+  if (origin === null) return true
+  let originHost: string
+  try {
+    originHost = new URL(origin).host.toLowerCase()
+  } catch {
+    // Malformed Origin or the literal string "null" (sandboxed iframe) - forgeable, reject.
+    return false
+  }
+  const requestHost = (host ?? '').split(',')[0].trim().toLowerCase()
+  if (originHost === requestHost) return true
+  // Cross-portal fetches between the portal subdomains are legitimate.
+  return [process.env.NEXT_PUBLIC_TEACHER_URL, process.env.NEXT_PUBLIC_STUDENT_URL].some((u) => {
+    if (!u) return false
+    try {
+      return new URL(u).host.toLowerCase() === originHost
+    } catch {
+      return false
+    }
+  })
+}
