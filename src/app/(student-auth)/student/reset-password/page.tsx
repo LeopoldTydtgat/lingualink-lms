@@ -1,13 +1,14 @@
 'use client'
 
 import { Suspense, useState, useEffect, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { validatePassword } from '@/lib/passwordValidation'
 
 function ResetPasswordContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,21 +21,35 @@ function ResetPasswordContent() {
 
   const supabase = createClient()
 
-  // Recovery session is established by the teacher reset-password page's
-  // verifyOtp call. Cookies are .lingualinkonline.com domain-scoped, so the
-  // session carries over to this subdomain — we just confirm it exists.
-  const linkInvalid = verifyFailed
+  // Reset email links carry ?token_hash=...&type=recovery (Supabase OTP flow).
+  // The token MUST be verified here: a bare live session is never sufficient
+  // to change a password (SEC-C2). Today all reset/invite emails point at the
+  // teacher-domain page, which now completes student resets in place, so this
+  // page is only reached with a token if emails are ever pointed here directly.
+  const tokenHash = searchParams.get('token_hash')
+  const recoveryType = searchParams.get('type')
+  const tokenMissing = !tokenHash || recoveryType !== 'recovery'
+  const linkInvalid = tokenMissing || verifyFailed
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user }, error }) => {
-      if (error || !user) {
-        setVerifyFailed(true)
-        return
-      }
-      setSessionReady(true)
-    })
+    if (tokenMissing) return
+
+    supabase.auth
+      .verifyOtp({ token_hash: tokenHash!, type: 'recovery' })
+      .then(async ({ error: verifyError }) => {
+        if (verifyError) {
+          setVerifyFailed(true)
+          return
+        }
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          setVerifyFailed(true)
+          return
+        }
+        setSessionReady(true)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [tokenMissing, tokenHash])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

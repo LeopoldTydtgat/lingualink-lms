@@ -34,11 +34,10 @@ export function generateThrowawayPassword(): string {
  * creation can never be rolled back or failed by an email problem.
  *
  * The link for BOTH portals points at the teacher-domain /reset-password
- * page: it is the only page that consumes ?token_hash=...&type=recovery
- * (verifyOtp) and it forwards students to /student/reset-password on the
- * shared domain-scoped recovery session — the same route the forgot-password
- * emails take. The student reset page ignores query params entirely, so a
- * student invite must NOT link there directly.
+ * page: it consumes ?token_hash=...&type=recovery (verifyOtp) and completes
+ * the reset in place for teachers AND students, routing students to the
+ * student login on success. The student reset page also accepts a token
+ * directly but never a bare session (SEC-C2).
  */
 export async function sendAccountInviteEmail(
   adminClient: SupabaseClient,

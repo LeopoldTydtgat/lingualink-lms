@@ -3,7 +3,6 @@
 import { Suspense, useState, useEffect, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
-import * as Sentry from '@sentry/nextjs'
 import { createClient } from '@/lib/supabase/client'
 import { validatePassword } from '@/lib/passwordValidation'
 
@@ -16,6 +15,7 @@ function ResetPasswordContent() {
   const [success, setSuccess] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const [verifyFailed, setVerifyFailed] = useState(false)
+  const [isStudent, setIsStudent] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -46,32 +46,27 @@ function ResetPasswordContent() {
           return
         }
 
-        const studentUrl = process.env.NEXT_PUBLIC_STUDENT_URL
-        if (!studentUrl) {
-          Sentry.captureMessage(
-            'NEXT_PUBLIC_STUDENT_URL is undefined on teacher reset-password redirect',
-            'error'
-          )
-          setVerifyFailed(true)
-          return
-        }
-
         try {
-          const { data: profile } = await supabase
+          const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('id')
             .eq('id', user.id)
             .maybeSingle()
 
-          if (!profile) {
-            // No profiles row → user is a student. Cookies are domain-scoped to
-            // .lingualinkonline.com, so the recovery session carries over.
-            window.location.href = `${studentUrl}/student/reset-password`
-            return
-          }
+          // No profiles row = student. The recovery token was verified on THIS
+          // page, so the student sets their password right here; we only route
+          // them to the student login afterwards. (The old cross-domain
+          // redirect relied on a bare session and let any live session reach
+          // the student reset form - SEC-C2.)
+          // On a lookup ERROR we cannot classify, so default to teacher
+          // routing - maybeSingle returns { data: null, error } without
+          // throwing, and a null-from-error must not read as "student".
+          if (!profileError && !profile) setIsStudent(true)
           setSessionReady(true)
         } catch {
-          window.location.href = `${studentUrl}/student/reset-password`
+          // Profiles lookup failed: the token itself was just verified, so the
+          // reset is legitimate - show the form, default to teacher routing.
+          setSessionReady(true)
         }
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,10 +100,17 @@ function ResetPasswordContent() {
 
       setSuccess(true)
 
-      // Sign out so the teacher lands on a clean login page
+      // Sign out so the user lands on a clean login page
       await supabase.auth.signOut()
 
       setTimeout(() => {
+        if (isStudent) {
+          const studentUrl = process.env.NEXT_PUBLIC_STUDENT_URL
+          if (studentUrl) {
+            window.location.href = `${studentUrl}/student/login`
+            return
+          }
+        }
         router.push('/login')
       }, 3000)
     })
