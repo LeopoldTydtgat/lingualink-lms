@@ -2,7 +2,7 @@
 
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
-import { checkRateLimit, clearRateLimit } from '@/lib/rateLimit'
+import { checkRateLimit } from '@/lib/rateLimit'
 
 export async function forgotPasswordAction(formData: FormData) {
   // Rate-limit on the same bucket as teacher login: a forgot-password endpoint
@@ -34,6 +34,10 @@ export async function forgotPasswordAction(formData: FormData) {
     return { error: 'Something went wrong. Please try again.' }
   }
 
-  await clearRateLimit(ip, 'teacher')
+  // Deliberately NO clearRateLimit here (SEC-C1): resetPasswordForEmail
+  // succeeds even for unknown addresses, so clearing on "success" let any
+  // forgot-password POST wipe the shared login brute-force counter. The
+  // counter now only expires with its 10-minute window; a successful LOGIN
+  // still clears it in the login action.
   return { success: true }
 }
