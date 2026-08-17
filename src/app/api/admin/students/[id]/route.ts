@@ -415,9 +415,14 @@ export async function PATCH(
     }
 
     if ((parsed.data.status === 'former' || parsed.data.status === 'on_hold') && current.auth_user_id) {
-      // Archiving must remove ALL access, not just current sessions. signOut
-      // alone leaves the password valid, so a former student could log straight
-      // back in. Ban the auth user first (locks login), then kill live sessions
+      // Archiving must remove ALL access, not just current sessions. The ban is
+      // what locks the account: it refuses new sign-ins AND the refresh-token
+      // grant (GoTrue answers user_banned), so a former student can neither log
+      // back in nor renew a token. What a ban does NOT do is delete anything -
+      // the rows in auth.sessions survive it, so an access token already issued
+      // keeps working until it expires. revoke_user_sessions deletes those rows,
+      // which is what makes the eviction immediate rather than at the next token
+      // refresh. Ban first, then revoke
       // — so sessions die only after the login is already locked. The matching
       // unban is NOT here: it runs ABOVE, before the students UPDATE, so that a
       // failed reinstatement stays retryable (see the comment there).
@@ -444,28 +449,19 @@ export async function PATCH(
         // locked. Hard-fail with 500 rather than returning success — otherwise we
         // re-open the exact hole this block closes (a former student logging back
         // in). The admin retries; the status is already written so re-running is
-        // idempotent. signOut below is skipped, but is moot until the ban lands.
+        // idempotent. the session revocation below is skipped, but is moot until the ban lands.
         console.error('[archive student] ban failed:', banError)
         return NextResponse.json(
           { error: 'Failed to revoke student access. Please retry.' },
           { status: 500 }
         )
       }
-      try {
-        // Same bind-the-returned-error rule as the ban above; signOut also
-        // returns its AuthError instead of throwing it. Stays NON-fatal: the ban
-        // has already landed, so a surviving session is a nuisance, not an open
-        // door.
-        const { error: signOutError } = await adminClient.auth.admin.signOut(
-          current.auth_user_id,
-          'global'
-        )
-        if (signOutError) {
-          console.error('[archive student] signOut failed:', signOutError)
-        }
-      } catch (signOutError) {
-        console.error('[archive student] signOut failed:', signOutError)
-      }
+      // Stays NON-fatal: the ban above has already landed, so refresh is dead
+      // regardless and a session row that outlives it buys access only until the
+      // current access token expires - a nuisance, not an open door. This call
+      // only buys immediacy, so a failure is logged, not returned.
+      const { error: revokeError } = await adminClient.rpc('revoke_user_sessions', { p_user_id: current.auth_user_id })
+      if (revokeError) console.error('[archive student] session revocation failed:', revokeError)
     }
 
     revalidatePath('/student/account')
@@ -573,13 +569,11 @@ export async function DELETE(
     // separate pre-read, which could race the purge.
     const authUserId = result.auth_user_id
     if (authUserId) {
-      // Non-fatal: the account is about to be deleted anyway.
-      try {
-        await adminClient.auth.admin.signOut(authUserId, 'global')
-      } catch (signOutError) {
-        console.error('[purge student] signOut failed but proceeding with delete:', signOutError)
-      }
-
+      // No separate session kill is needed. deleteUser below cascades
+      // auth.sessions and invalidates the user's refresh tokens on its own
+      // (Supabase-documented), and purge_student_atomic admits only status
+      // 'former', so the ban applied when this student was archived has already
+      // been refusing the refresh grant for the whole time.
       const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(authUserId)
       if (authDeleteError) {
         // NOT a silent success: the DB rows are already gone, so retrying this

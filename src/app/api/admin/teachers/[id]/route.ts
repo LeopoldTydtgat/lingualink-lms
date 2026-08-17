@@ -341,9 +341,14 @@ export async function PATCH(
     }
 
     if (parsed.data.status === 'former' || parsed.data.status === 'on_hold') {
-      // Archiving must remove ALL access, not just current sessions. signOut
-      // alone leaves the password valid, so a former teacher could log straight
-      // back in. Ban the auth user first (locks login), then kill live sessions
+      // Archiving must remove ALL access, not just current sessions. The ban is
+      // what locks the account: it refuses new sign-ins AND the refresh-token
+      // grant (GoTrue answers user_banned), so a former teacher can neither log
+      // back in nor renew a token. What a ban does NOT do is delete anything -
+      // the rows in auth.sessions survive it, so an access token already issued
+      // keeps working until it expires. revoke_user_sessions deletes those rows,
+      // which is what makes the eviction immediate rather than at the next token
+      // refresh. Ban first, then revoke
       // — so sessions die only after the login is already locked. The matching
       // unban is NOT here: it runs ABOVE, before the profile UPDATE, so that a
       // failed reinstatement stays retryable (see the comment there).
@@ -369,25 +374,19 @@ export async function PATCH(
         // locked. Hard-fail with 500 rather than returning success — otherwise we
         // re-open the exact hole this block closes (a former teacher logging back
         // in). The admin retries; the profile is already 'former' so re-running is
-        // idempotent. signOut below is skipped, but is moot until the ban lands.
+        // idempotent. the session revocation below is skipped, but is moot until the ban lands.
         console.error('[archive teacher] ban failed:', banError)
         return NextResponse.json(
           { error: 'Failed to revoke teacher access. Please retry.' },
           { status: 500 }
         )
       }
-      try {
-        // Same bind-the-returned-error rule as the ban above; signOut also
-        // returns its AuthError instead of throwing it. Stays NON-fatal: the ban
-        // has already landed, so a surviving session is a nuisance, not an open
-        // door.
-        const { error: signOutError } = await adminClient.auth.admin.signOut(id, 'global')
-        if (signOutError) {
-          console.error('[archive teacher] signOut failed:', signOutError)
-        }
-      } catch (signOutError) {
-        console.error('[archive teacher] signOut failed:', signOutError)
-      }
+      // Stays NON-fatal: the ban above has already landed, so refresh is dead
+      // regardless and a session row that outlives it buys access only until the
+      // current access token expires - a nuisance, not an open door. This call
+      // only buys immediacy, so a failure is logged, not returned.
+      const { error: revokeError } = await adminClient.rpc('revoke_user_sessions', { p_user_id: id })
+      if (revokeError) console.error('[archive teacher] session revocation failed:', revokeError)
     }
 
     revalidatePath('/account')
@@ -518,13 +517,11 @@ export async function DELETE(
     // preflight above, so none exist at purge time;
     // activity_attempts.reviewed_by is likewise blocked by the preflight above.
 
-    // 3a. Kill every live session first. Non-fatal: on a retry after a partial
-    // failure the auth user may already be gone, which makes this throw.
-    try {
-      await adminClient.auth.admin.signOut(id, 'global')
-    } catch (signOutError) {
-      console.error('[purge teacher] signOut failed (non-fatal):', signOutError)
-    }
+    // 3a. No separate session kill is needed. deleteUser below cascades
+    // auth.sessions and invalidates the user's refresh tokens on its own
+    // (Supabase-documented), and the gate above admits only status 'former', so
+    // the ban applied when this teacher was archived has already been refusing
+    // the refresh grant for the whole time.
 
     // 3b. Delete the auth user. Tolerate ONLY user-not-found so a retry after
     // a partial failure (auth gone, profile row left) is idempotent; any other
