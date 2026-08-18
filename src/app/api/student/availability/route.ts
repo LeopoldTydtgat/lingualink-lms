@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getCallerProfile } from '@/lib/auth/callerProfile'
+import { isStaffProfile } from '@/lib/auth/requireStaff'
 import { getAssignedTeacherIds } from '@/lib/access/trainingAssignment'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import {
@@ -18,30 +19,28 @@ import {
 // two DB reads, then hands the rows to the engine.
 
 export async function GET(req: NextRequest) {
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  // Detect admin/staff caller: they bypass the 24hr booking rule (enforced
+  // independently on the write paths, e.g. student/book/route.ts), so the
+  // 24hr-derived advisory cutoff below should not apply to them.
+  //
+  // The staff rule comes from isStaffProfile() (src/lib/auth/requireStaff.ts),
+  // the single canonical definition shared with requireStaff() itself, rather
+  // than a private copy of the expression here. Students have no profiles row,
+  // so profile is null and isStaffProfile returns false.
+  //
+  // status === 'current' is part of that rule - the canonical active-account
+  // gate - so a 'former'/'on_hold' profile keeps neither the 24hr cutoff bypass
+  // nor the excludeLessonId privilege below.
+  //
+  // Deliberate change: a FAILED profiles read now throws out of
+  // getCallerProfile() and surfaces as a 500, where it was previously swallowed
+  // and treated as a non-staff caller. That is fail-closed and matches every
+  // other gate in the app.
+  const { user, profile } = await getCallerProfile()
   if (!user) {
     return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   }
-
-  // Detect admin/staff caller: they bypass the 24hr booking rule (enforced
-  // independently on the write paths, e.g. student/book/route.ts), so the
-  // 24hr-derived advisory cutoff below should not apply to them. Students
-  // have no profiles row -> maybeSingle returns null -> isAdmin false.
-  // status === 'current' is required alongside the role/account_types check,
-  // matching requireStaff (src/lib/auth/requireStaff.ts) - the canonical
-  // active-account gate. A 'former'/'on_hold' profile therefore keeps neither
-  // the 24hr cutoff bypass nor the excludeLessonId privilege below.
-  const { data: callerProfile } = await supabase
-    .from('profiles')
-    .select('role, account_types, status')
-    .eq('id', user.id)
-    .maybeSingle()
-  const isAdmin =
-    callerProfile?.status === 'current' &&
-    (callerProfile?.role === 'admin' ||
-      callerProfile?.account_types?.includes('staff'))
+  const isAdmin = isStaffProfile(profile)
 
   const { searchParams } = new URL(req.url)
   const teacherId = searchParams.get('teacherId')

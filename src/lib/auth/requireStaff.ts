@@ -1,5 +1,30 @@
-import { getCallerProfile } from '@/lib/auth/callerProfile'
+import { getCallerProfile, type CallerProfile } from '@/lib/auth/callerProfile'
 import type { User } from '@supabase/supabase-js'
+
+/**
+ * THE canonical staff rule, as a pure predicate:
+ *
+ *   isStaffProfile = status === 'current'
+ *                    AND (role === 'admin' OR account_types contains 'staff')
+ *
+ * Pure — no I/O, no session read, no DB access. requireStaff() below is the
+ * GATE (it resolves the caller, then applies this); this function is only the
+ * RULE. They share this one definition so no caller can drift into a private
+ * copy of it.
+ *
+ * requireStaff() collapses "anonymous" and "authenticated but not staff" into
+ * the same null. Callers that must distinguish the two pair this predicate with
+ * getCallerProfile() instead of calling requireStaff(): the user says whether
+ * there is a session at all, this says whether that session is staff.
+ */
+export function isStaffProfile(profile: CallerProfile | null): boolean {
+  return (
+    profile?.status === 'current' &&
+    (profile.role === 'admin' ||
+      (Array.isArray(profile.account_types) &&
+        profile.account_types.includes('staff')))
+  )
+}
 
 /**
  * Resolves the caller and returns them only if they may perform staff-level
@@ -10,6 +35,8 @@ import type { User } from '@supabase/supabase-js'
  *
  * Authorised = role === 'admin' (the school owner) OR account_types contains
  * 'staff', AND status === 'current' (the canonical active-account gate).
+ *
+ * The rule itself lives in isStaffProfile() above — this is only the gate.
  *
  * Returns null for anonymous callers AND for non-staff, so the caller cannot
  * accidentally treat "logged in" as "authorised".
@@ -29,10 +56,5 @@ export async function requireStaff(): Promise<User | null> {
   const { user, profile } = await getCallerProfile()
   if (!user) return null
 
-  const isStaff =
-    profile?.status === 'current' &&
-    (profile.role === 'admin' ||
-      (Array.isArray(profile.account_types) && profile.account_types.includes('staff')))
-
-  return isStaff ? user : null
+  return isStaffProfile(profile) ? user : null
 }
