@@ -82,6 +82,7 @@ export default async function AdminLayout({
     announcementRes,
     unreadMessagesRes,
     unreadSupportRes,
+    protectedLessonRes,
   ] = await Promise.all([
     // Classes today (excluding cancelled), only when a real timezone is present; else null
     todayRange
@@ -155,6 +156,17 @@ export default async function AdminLayout({
       .select('id', { count: 'exact', head: true })
       .eq('sender_role', 'user')
       .is('read_at', null),
+
+    // ── protected lesson for idle timeout — 90-min lookback catches in-progress classes ─
+    supabase
+      .from('lessons')
+      .select('scheduled_at, duration_minutes')
+      .eq('teacher_id', profile.id)
+      .eq('status', 'scheduled')
+      .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
+      .order('scheduled_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   // Each result's error was previously discarded, so a failed query rendered as a
@@ -203,24 +215,13 @@ export default async function AdminLayout({
   const unreadMessagesCount = unreadMessagesRes?.count ?? 0
   const unreadSupportCount = unreadSupportRes.count ?? 0
 
-  // ── protected lesson for idle timeout — 90-min lookback catches in-progress classes ─
-  const { data: protectedLesson } = await supabase
-    .from('lessons')
-    .select('scheduled_at, duration_minutes')
-    .eq('teacher_id', profile.id)
-    .eq('status', 'scheduled')
-    .gt('scheduled_at', new Date(Date.now() - 90 * 60 * 1000).toISOString())
-    .order('scheduled_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
-
   return (
     <AdminLayoutClient
       profile={profile}
       rightPanelStats={rightPanelStats}
       unreadMessagesCount={unreadMessagesCount}
       unreadSupportCount={unreadSupportCount}
-      protectedLesson={protectedLesson ?? null}
+      protectedLesson={protectedLessonRes.data ?? null}
       isStaffView={isStaffView}
     >
       {children}
