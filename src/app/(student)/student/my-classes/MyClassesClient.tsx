@@ -15,7 +15,8 @@ import {
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
 import { describeLessonCountdown } from '@/lib/lessons/countdown'
-import { formatDayDate } from '@/lib/lessons/agendaDates'
+import { formatDayDivider, formatMonth, endOfWeekKey, endOfMonthKey } from '@/lib/lessons/agendaDates'
+import { getLocalDateKey as getTzDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -512,6 +513,12 @@ export default function MyClassesClient({
   const [noticeDismissed, setNoticeDismissed] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
+  // Today's date key in the STUDENT's timezone. Set in the effect below, never during
+  // render: a clock read in a render body would make the SSR pass disagree with hydration.
+  // Null until mounted, which formatDayDivider treats as "no relative label", falling back
+  // to the absolute date.
+  const [todayKey, setTodayKey] = useState<string | null>(null)
+  const [rangeFilter, setRangeFilter] = useState<'week' | 'month' | 'all'>('month')
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
@@ -532,6 +539,37 @@ export default function MyClassesClient({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // todayKey is refreshed at each local midnight by this self-rescheduling timer, so a tab
+  // left open across the boundary does not keep labelling yesterday's group "Today". Kept
+  // separate from the tick effect above on purpose: that one is pinned to an empty dep
+  // array, this one must re-run when the student's timezone changes.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    // Reads the key from the clock on every hop rather than incrementing the previous key.
+    // That is what makes an imprecise fire harmless: early (clock skew) leaves the old key
+    // and reschedules a second later; late (throttled background tab, or a zone whose DST
+    // transition lands ON midnight so 00:00 does not exist that day and wallTimeToUtcMs
+    // resolves past the gap) still reads the correct current day.
+    function schedule() {
+      const key = getTzDateKey(new Date(), studentTimezone)
+      setTodayKey(key)
+
+      const [y, m, d] = addDaysToDateKey(key, 1).split('-').map(Number)
+      const nextMidnightMs = wallTimeToUtcMs(y, m, d, 0, 0, studentTimezone)
+      // Floor the delay: an early fire must never schedule a zero-delay loop. One extra
+      // hop a second later lands past the boundary and settles.
+      const delay = Math.max(nextMidnightMs - Date.now(), 1000)
+      timer = setTimeout(schedule, delay)
+    }
+
+    schedule()
+
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [studentTimezone])
+
   // Every scheduled lesson is a row in the flat agenda below - nothing is lifted out of
   // the list any more, so the next class is simply the first row of its own day group.
   const scheduledLessons = lessons.filter((l) => l.status === 'scheduled')
@@ -539,11 +577,33 @@ export default function MyClassesClient({
   // The row that carries the left rail, the NEXT / IN CLASS pill, the Join button and the
   // recap. lessons arrives ordered by scheduled_at ascending, so the first scheduled row
   // is the next class.
+  // Deliberately read off the UNFILTERED list: the earliest class's date key is always
+  // <= the bound of any window that shows anything at all, so the rail, the pill, the Join
+  // button and the recap can never be filtered out from under themselves.
   const nextId = scheduledLessons[0]?.id ?? null
 
-  // Group every upcoming lesson by its date in the student's own timezone
+  // Calendar window from today, in the student's own timezone, so both labels are
+  // literally true: "This Week" ends on the coming Sunday and "This Month" on the last day
+  // of today's own month. The bound is derived once per render here, not rebuilt for every
+  // lesson in the callback.
+  //
+  // While todayKey is null (pre-mount), no filter is applied - the list must match the
+  // server-rendered HTML exactly on the first client pass, narrowing only after hydration
+  // supplies today's key, the same pattern the Today/Tomorrow divider labels follow.
+  const rangeMaxKey =
+    todayKey === null || rangeFilter === 'all'
+      ? null
+      : rangeFilter === 'week'
+        ? endOfWeekKey(todayKey)
+        : endOfMonthKey(todayKey)
+
+  const visibleLessons = rangeMaxKey === null
+    ? scheduledLessons
+    : scheduledLessons.filter((l) => getLocalDateKey(l.scheduled_at, studentTimezone) <= rangeMaxKey)
+
+  // Group the visible lessons by their date in the student's own timezone
   const groupedByDate: Record<string, Lesson[]> = {}
-  scheduledLessons.forEach((lesson) => {
+  visibleLessons.forEach((lesson) => {
     const key = getLocalDateKey(lesson.scheduled_at, studentTimezone)
     if (!groupedByDate[key]) groupedByDate[key] = []
     groupedByDate[key].push(lesson)
@@ -821,6 +881,40 @@ export default function MyClassesClient({
       {/* ── Upcoming classes list ── */}
       {scheduledLessons.length > 0 && (
         <div>
+          {/* Range filter over the agenda below. It is a view of the list only - the
+              "Upcoming Classes" stat card and the count in the page header above both keep
+              counting every upcoming class, filtered out or not. */}
+          <div style={{ display: 'inline-flex', marginBottom: '16px' }}>
+            {([
+              ['week', 'This Week'],
+              ['month', 'This Month'],
+              ['all', 'All'],
+            ] as const).map(([value, label], i, arr) => {
+              const selected = rangeFilter === value
+              return (
+                <button
+                  key={value}
+                  onClick={() => setRangeFilter(value)}
+                  style={{
+                    fontSize: '13px',
+                    padding: '6px 14px',
+                    backgroundColor: selected ? '#FF8303' : 'white',
+                    color: selected ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderLeft: i === 0 ? '1px solid #d1d5db' : 'none',
+                    borderTopLeftRadius: i === 0 ? '6px' : 0,
+                    borderBottomLeftRadius: i === 0 ? '6px' : 0,
+                    borderTopRightRadius: i === arr.length - 1 ? '6px' : 0,
+                    borderBottomRightRadius: i === arr.length - 1 ? '6px' : 0,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -832,54 +926,96 @@ export default function MyClassesClient({
             </h2>
           </div>
 
-          <div className="space-y-5">
-            {sortedDays.map((dayKey) => {
-              const dayLessons = groupedByDate[dayKey]
+          {sortedDays.length === 0 ? (
+            /* The window emptied the list. The no-classes-at-all empty state above stays
+               gated on scheduledLessons.length === 0 and must not fire here: the student
+               does have upcoming classes, just none inside the period they picked. */
+            <p className="text-sm text-gray-500 text-center">No classes in this period.</p>
+          ) : (
+            <div className="space-y-5">
+              {sortedDays.map((dayKey, dayIndex) => {
+                const dayLessons = groupedByDate[dayKey]
 
-              return (
-                <div key={dayKey}>
-                  {/* Slim text divider, not a card and not a control: nothing collapses
-                      here, so it carries no chevron and no lesson count. The mounted gate
-                      is the one the old accordion heading used - the raw dateKey renders
-                      until the effect sets mounted, so the server pass and the first
-                      client pass emit the same string. */}
-                  <p
-                    style={{
-                      margin: '0 0 6px 2px',
-                      fontSize: '11px',
-                      fontWeight: '600',
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: '#9ca3af',
-                    }}
-                  >
-                    {mounted ? formatDayDate(dayLessons[0].scheduled_at, studentTimezone) : dayKey}
-                  </p>
+                // Every calendar month in the list carries its header, the first one
+                // included: two structurally identical months must not look different, and
+                // in a flat agenda 31 Aug and 1 Sept are otherwise indistinguishable
+                // neighbours. The first day has no previous day to compare against, so it
+                // counts as a month change by definition. Months are compared on the day
+                // keys, which getLocalDateKey already built in the student's timezone, so
+                // the comparison and the text below it agree by construction.
+                //
+                // Gated on todayKey, like the filter: pre-mount the list is unfiltered and
+                // no separator renders, so the server pass and the first client pass emit
+                // the same markup.
+                const showMonthSeparator =
+                  todayKey !== null &&
+                  (dayIndex === 0 || dayKey.slice(0, 7) !== sortedDays[dayIndex - 1].slice(0, 7))
 
-                  <div className="card-elevated" style={{ overflow: 'hidden' }}>
-                    {dayLessons.map((lesson, i) => (
-                      <LessonRow
-                        key={lesson.id}
-                        lesson={lesson}
-                        studentTimezone={studentTimezone}
-                        mounted={mounted}
-                        now={now}
-                        isFirst={i === 0}
-                        isNext={lesson.id === nextId}
-                        lastFeedback={lesson.id === nextId ? lastFeedback : null}
-                        showDate={false}
-                        cancellingId={cancellingId}
-                        showCancelWarning={showCancelWarning}
-                        onReschedule={handleReschedule}
-                        onCancel={handleCancel}
-                        onDismissWarning={() => setShowCancelWarning(null)}
-                      />
-                    ))}
+                return (
+                  <div key={dayKey}>
+                    {showMonthSeparator && (
+                      <p
+                        style={{
+                          // The first header already has the segmented control's gap above
+                          // it; only a mid-list month break has to open a break of its own.
+                          margin: dayIndex === 0 ? '0 0 10px' : '28px 0 10px',
+                          paddingBottom: '6px',
+                          paddingLeft: '2px',
+                          borderBottom: '1px solid #E0DFDC',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          letterSpacing: '0.06em',
+                          color: '#111827',
+                        }}
+                      >
+                        {formatMonth(dayLessons[0].scheduled_at, studentTimezone)}
+                      </p>
+                    )}
+                    {/* Slim text divider, not a card and not a control: nothing collapses
+                        here, so it carries no chevron and no lesson count. The mounted gate
+                        is the one the old accordion heading used - the raw dateKey renders
+                        until the effect sets mounted, so the server pass and the first
+                        client pass emit the same string. formatDayDivider returns the bare
+                        absolute date while todayKey is still null, so the text settles from
+                        the key to a date to a relative label without ever mismatching. */}
+                    <p
+                      style={{
+                        margin: '0 0 6px 2px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: '#9ca3af',
+                      }}
+                    >
+                      {mounted ? formatDayDivider(dayLessons[0].scheduled_at, studentTimezone, dayKey, todayKey) : dayKey}
+                    </p>
+
+                    <div className="card-elevated" style={{ overflow: 'hidden' }}>
+                      {dayLessons.map((lesson, i) => (
+                        <LessonRow
+                          key={lesson.id}
+                          lesson={lesson}
+                          studentTimezone={studentTimezone}
+                          mounted={mounted}
+                          now={now}
+                          isFirst={i === 0}
+                          isNext={lesson.id === nextId}
+                          lastFeedback={lesson.id === nextId ? lastFeedback : null}
+                          showDate={false}
+                          cancellingId={cancellingId}
+                          showCancelWarning={showCancelWarning}
+                          onReschedule={handleReschedule}
+                          onCancel={handleCancel}
+                          onDismissWarning={() => setShowCancelWarning(null)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )
-            })}
-          </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
