@@ -1,3 +1,4 @@
+import { getCallerProfile } from '@/lib/auth/callerProfile'
 import { createClient } from '@/lib/supabase/server'
 import type { User } from '@supabase/supabase-js'
 
@@ -32,24 +33,20 @@ export type TeacherAuth = {
  * teacher on a transient DB error (which callers would report as a misleading
  * 401 Unauthorised).
  *
+ * The user and profile come from getCallerProfile(), so the auth call and the
+ * profiles read are request-memoised and shared with the other gates - see
+ * src/lib/auth/callerProfile.ts. The returned client is still created here by
+ * createClient(), which is deliberately never memoised (CLAUDE.md:119,
+ * JOURNAL.md:4279-4283); it is the caller's own RLS-scoped session client,
+ * reading the same session cookie the gate authorised on.
+ *
  * Server-only - it reads the session cookie. Never import into a client component.
  */
 export async function requireTeacher(): Promise<TeacherAuth | null> {
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user, profile } = await getCallerProfile()
   if (!user) return null
 
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('account_types, status')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  if (error) {
-    console.error('[requireTeacher] profiles lookup failed:', error)
-    throw new Error('Failed to load profile')
-  }
+  const supabase = await createClient()
 
   const isCurrentTeacher =
     profile?.status === 'current' &&
