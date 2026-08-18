@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireTeacher } from '@/lib/auth/requireTeacher'
+import { requireStaff } from '@/lib/auth/requireStaff'
 
 const UuidSchema = z.string().uuid()
 
@@ -11,16 +13,25 @@ const UuidSchema = z.string().uuid()
 // also the student's homework layer (annotations jsonb), so deleting it would
 // destroy their work; and the row is the audit trail of what was handed out.
 //
-// AUTHORISATION MODEL - the write and the check are deliberately split:
-//   - Teachers hold only `grant update (annotations, updated_at)` on this table,
-//     so revoked_at CANNOT be written by the user-scoped client. The UPDATE runs
-//     on the service-role client.
-//   - Service role bypasses RLS, so this route must do the relationship check
-//     itself FIRST, and it does it the only way that cannot drift from the live
-//     policy: a user-scoped SELECT of the row. The material_assignments SELECT
-//     policies (teacher -> students they teach, admin -> all) ARE the check. A
-//     row this caller cannot read is a 404, indistinguishable from "no such
-//     assignment", so nothing leaks.
+// AUTHORISATION MODEL - three separate questions, answered in this order:
+//   1. MAY THIS ACTOR TYPE REVOKE AT ALL? An explicit role gate, admitting only
+//      current teachers, staff and admins. This is required and cannot be
+//      replaced by the read below: the material_assignments SELECT policies are
+//      WIDER than the intended actor set - they also admit the STUDENT who owns
+//      the row. A student passes a user-scoped read of their own assignment, so
+//      the read alone would let them self-revoke their own homework grant and
+//      free the partial-unique live slot. Read-policy-as-write-gate only holds
+//      where the read set equals the write set, which is true for the POST on
+//      the sibling route (its INSERT policy WITH CHECK is teacher-shaped) and
+//      false here.
+//   2. IS THIS ROW THEIRS? The user-scoped SELECT that follows is the
+//      RELATIONSHIP check, kept because it cannot drift from the live policy:
+//      the database answers, not a re-implementation of it here. A row this
+//      caller cannot read is a 404, indistinguishable from "no such
+//      assignment", so nothing leaks.
+//   3. WHO WRITES? Teachers hold only `grant update (annotations, updated_at)`
+//      on this table, so revoked_at CANNOT be written by the user-scoped
+//      client. The UPDATE runs on the service-role client, after both checks.
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -29,11 +40,19 @@ export async function DELETE(
   try {
     ;({ id: assignmentId } = await params)
 
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+    // Role gate. Teachers revoke from the assign modal; admins revoke from
+    // the admin student detail page. requireTeacher is tried first because
+    // it is the common caller. Both helpers apply status === 'current' and
+    // both THROW on a failed profiles read rather than denying, so a
+    // transient DB fault surfaces as a 500 from the outer catch and never as
+    // a misleading 403.
+    const teacherAuth = await requireTeacher()
+    const staffUser = teacherAuth ? null : await requireStaff()
+    if (!teacherAuth && !staffUser) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
+
+    const supabase = teacherAuth ? teacherAuth.supabase : await createClient()
 
     // A non-uuid path segment can never name a row and would otherwise reach
     // Postgres as a 22P02 cast error and surface as a 500.

@@ -6,10 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   User,
-  ChevronDown,
-  ChevronUp,
   Plus,
-  Calendar,
   CalendarDays,
   GraduationCap,
   Clock,
@@ -18,6 +15,8 @@ import {
 } from 'lucide-react'
 import { cancelLessonAction } from './actions'
 import { describeLessonCountdown } from '@/lib/lessons/countdown'
+import { formatDayDivider, formatMonth, endOfWeekKey, endOfMonthKey } from '@/lib/lessons/agendaDates'
+import { getLocalDateKey as getTzDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 import { isCancelledStatus } from '@/lib/billing/billability'
 import { isLessonJoinable } from '@/lib/billing/joinable'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -252,6 +251,8 @@ function LessonRow({
   mounted,
   now,
   isFirst,
+  isNext,
+  lastFeedback,
   showDate,
   cancellingId,
   showCancelWarning,
@@ -264,6 +265,8 @@ function LessonRow({
   mounted: boolean
   now: number
   isFirst: boolean
+  isNext: boolean
+  lastFeedback: string | null
   showDate: boolean
   cancellingId: string | null
   showCancelWarning: string | null
@@ -272,17 +275,31 @@ function LessonRow({
   onDismissWarning: () => void
 }) {
   const [hovered, setHovered] = useState(false)
+  const [joinHovered, setJoinHovered] = useState(false)
   const isCancelled = isCancelledStatus(lesson.status)
   const cancelLabel = getCancellationLabel(lesson, 'student')
   const within24 = mounted && !isCancelled && isWithin24Hours(lesson.scheduled_at, now)
-  // Defensive: a live class is normally the hero, not a list row, but should one ever
-  // land here the shared helper keeps it reading "47:37" instead of "Starting now".
+  // A class stays in this list until it ENDS, so a live class is an ordinary row here and
+  // the shared helper keeps it reading "47:37" instead of "Starting now". The same result
+  // drives the IN CLASS pill below, so pill and timer can never disagree.
   // Pure epoch ms - scheduled_at is an instant and duration_minutes is a plain offset.
   const startMs = new Date(lesson.scheduled_at).getTime()
   const countdown = mounted
     ? describeLessonCountdown(startMs, startMs + lesson.duration_minutes * 60000, now)
     : null
   const isCancelling = cancellingId === lesson.id
+  // The next class is marked where it sits rather than lifted into a hero above the list.
+  // ANDed with mounted before it can affect anything rendered, so the server emits no
+  // rail, no pill and no Join button, and the first client pass agrees with it.
+  const isNextRow = mounted && isNext
+  // Join replaces the countdown inside the 10-minute window, on the next row only - the
+  // same four arguments the deleted hero passed, ticked by the same `now`, so the button
+  // appears and disappears on its own with no reload. A null teams_join_url falls back to
+  // the countdown rather than rendering a button that cannot work.
+  const canJoin =
+    isNextRow &&
+    !!lesson.teams_join_url &&
+    isLessonJoinable(lesson.scheduled_at, lesson.duration_minutes, lesson.status, now)
 
   const timeText = showDate
     ? `${formatDate(lesson.scheduled_at, studentTimezone)} · ${formatTimeRange(lesson.scheduled_at, studentTimezone, lesson.duration_minutes)}`
@@ -296,6 +313,10 @@ function LessonRow({
         style={{
           backgroundColor: hovered ? '#f9fafb' : '#ffffff',
           borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
+          // The left rail marks the next class in place. isNextRow already carries the
+          // mounted gate the pill uses, so the server renders no rail and the first
+          // client pass agrees with it.
+          borderLeft: isNextRow ? '3px solid #FF8303' : undefined,
           padding: '14px 16px',
         }}
       >
@@ -348,17 +369,57 @@ function LessonRow({
                   Cancelled
                 </span>
               )}
+              {isNextRow && (
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: '700',
+                  letterSpacing: '0.06em',
+                  padding: '2px 8px',
+                  backgroundColor: '#FF8303',
+                  color: '#ffffff',
+                  borderRadius: '4px',
+                }}>
+                  {countdown?.live ? 'IN CLASS' : 'NEXT'}
+                </span>
+              )}
             </div>
             <span style={{ fontSize: '13px', color: '#6b7280' }}>
               {mounted ? timeText : ''} · {lesson.duration_minutes} min
             </span>
           </div>
 
-          {/* Countdown */}
+          {/* Join Class inside the 10-minute window, otherwise the countdown - never both,
+              and never a permanently disabled button. Join-click logging stays with the
+              right panel: a second caller here would double-count it. */}
           {!isCancelled && mounted && (
-            <span className="font-mono text-sm" style={{ color: '#FF8303', flexShrink: 0 }}>
-              {countdown?.value ?? ''}
-            </span>
+            canJoin ? (
+              <a
+                href={lesson.teams_join_url!}
+                target="_blank"
+                rel="noopener noreferrer"
+                onMouseEnter={() => setJoinHovered(true)}
+                onMouseLeave={() => setJoinHovered(false)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  flexShrink: 0,
+                  padding: '6px 14px',
+                  backgroundColor: joinHovered ? '#e67300' : '#FF8303',
+                  color: '#ffffff',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  textDecoration: 'none',
+                  transition: 'background-color 0.18s ease',
+                }}
+              >
+                Join Class
+              </a>
+            ) : (
+              <span className="font-mono text-sm" style={{ color: '#FF8303', flexShrink: 0 }}>
+                {countdown?.value ?? ''}
+              </span>
+            )
           )}
 
           {/* Reschedule / Cancel buttons */}
@@ -384,6 +445,35 @@ function LessonRow({
             </div>
           )}
         </div>
+
+        {/* About This Class - the most recent report feedback, carried down from the
+            deleted hero card. Only the next class row is passed it; every other row
+            receives null and renders nothing here. */}
+        {lastFeedback && (
+          <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
+            <p style={{
+              fontSize: '11px',
+              fontWeight: '600',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: '#9ca3af',
+              marginBottom: '6px',
+            }}>
+              About This Class
+            </p>
+            <p style={{
+              fontSize: '13px',
+              color: '#6b7280',
+              lineHeight: 1.5,
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}>
+              {lastFeedback}
+            </p>
+          </div>
+        )}
 
         {/* 24-hour cancel warning — inline in list */}
         {showCancelWarning === lesson.id && (
@@ -423,12 +513,16 @@ export default function MyClassesClient({
   const [noticeDismissed, setNoticeDismissed] = useState(false)
   const [now, setNow] = useState(0) // 0 until mounted — avoids hydration mismatch
   const [mounted, setMounted] = useState(false)
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
+  // Today's date key in the STUDENT's timezone. Set in the effect below, never during
+  // render: a clock read in a render body would make the SSR pass disagree with hydration.
+  // Null until mounted, which formatDayDivider treats as "no relative label", falling back
+  // to the absolute date.
+  const [todayKey, setTodayKey] = useState<string | null>(null)
+  const [rangeFilter, setRangeFilter] = useState<'week' | 'month' | 'all'>('month')
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [showCancelWarning, setShowCancelWarning] = useState<string | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [bookHovered, setBookHovered] = useState(false)
-  const [joinHovered, setJoinHovered] = useState(false)
 
   useEffect(() => {
     const currentNow = Date.now()
@@ -445,29 +539,76 @@ export default function MyClassesClient({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // First scheduled lesson gets the prominent next class hero card
-  const nextLesson = lessons.find((l) => l.status === 'scheduled') ?? null
+  // todayKey is refreshed at each local midnight by this self-rescheduling timer, so a tab
+  // left open across the boundary does not keep labelling yesterday's group "Today". Kept
+  // separate from the tick effect above on purpose: that one is pinned to an empty dep
+  // array, this one must re-run when the student's timezone changes.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
 
-  // All scheduled lessons (for counts) and the grouped list (which excludes the hero)
+    // Reads the key from the clock on every hop rather than incrementing the previous key.
+    // That is what makes an imprecise fire harmless: early (clock skew) leaves the old key
+    // and reschedules a second later; late (throttled background tab, or a zone whose DST
+    // transition lands ON midnight so 00:00 does not exist that day and wallTimeToUtcMs
+    // resolves past the gap) still reads the correct current day.
+    function schedule() {
+      const key = getTzDateKey(new Date(), studentTimezone)
+      setTodayKey(key)
+
+      const [y, m, d] = addDaysToDateKey(key, 1).split('-').map(Number)
+      const nextMidnightMs = wallTimeToUtcMs(y, m, d, 0, 0, studentTimezone)
+      // Floor the delay: an early fire must never schedule a zero-delay loop. One extra
+      // hop a second later lands past the boundary and settles.
+      const delay = Math.max(nextMidnightMs - Date.now(), 1000)
+      timer = setTimeout(schedule, delay)
+    }
+
+    schedule()
+
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [studentTimezone])
+
+  // Every scheduled lesson is a row in the flat agenda below - nothing is lifted out of
+  // the list any more, so the next class is simply the first row of its own day group.
   const scheduledLessons = lessons.filter((l) => l.status === 'scheduled')
-  const listLessons = scheduledLessons.filter((l) => l.id !== nextLesson?.id)
 
-  // Group upcoming (non-hero) lessons by local date
+  // The row that carries the left rail, the NEXT / IN CLASS pill, the Join button and the
+  // recap. lessons arrives ordered by scheduled_at ascending, so the first scheduled row
+  // is the next class.
+  // Deliberately read off the UNFILTERED list: the earliest class's date key is always
+  // <= the bound of any window that shows anything at all, so the rail, the pill, the Join
+  // button and the recap can never be filtered out from under themselves.
+  const nextId = scheduledLessons[0]?.id ?? null
+
+  // Calendar window from today, in the student's own timezone, so both labels are
+  // literally true: "This Week" ends on the coming Sunday and "This Month" on the last day
+  // of today's own month. The bound is derived once per render here, not rebuilt for every
+  // lesson in the callback.
+  //
+  // While todayKey is null (pre-mount), no filter is applied - the list must match the
+  // server-rendered HTML exactly on the first client pass, narrowing only after hydration
+  // supplies today's key, the same pattern the Today/Tomorrow divider labels follow.
+  const rangeMaxKey =
+    todayKey === null || rangeFilter === 'all'
+      ? null
+      : rangeFilter === 'week'
+        ? endOfWeekKey(todayKey)
+        : endOfMonthKey(todayKey)
+
+  const visibleLessons = rangeMaxKey === null
+    ? scheduledLessons
+    : scheduledLessons.filter((l) => getLocalDateKey(l.scheduled_at, studentTimezone) <= rangeMaxKey)
+
+  // Group the visible lessons by their date in the student's own timezone
   const groupedByDate: Record<string, Lesson[]> = {}
-  listLessons.forEach((lesson) => {
+  visibleLessons.forEach((lesson) => {
     const key = getLocalDateKey(lesson.scheduled_at, studentTimezone)
     if (!groupedByDate[key]) groupedByDate[key] = []
     groupedByDate[key].push(lesson)
   })
   const sortedDays = Object.keys(groupedByDate).sort()
-
-  function toggleDay(key: string) {
-    setExpandedDays((prev) => {
-      const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
-      return next
-    })
-  }
 
   async function handleCancel(lessonId: string, within24: boolean) {
     // Show warning first if within 24 hours — user must confirm
@@ -545,24 +686,6 @@ export default function MyClassesClient({
     setNoticeDismissed(true)
     router.replace('/student/my-classes')
   }
-
-  // Next class hero derivations
-  const nextWithin24 = !!nextLesson && mounted && isWithin24Hours(nextLesson.scheduled_at, now)
-  // Hero countdown and its NEXT / IN CLASS pill come from one describeLessonCountdown
-  // result, ticked by the same `now` as the rest of the card, so the hero flips to the
-  // in-class state on its own at the start instant with no reload. Pure epoch ms: no
-  // timezone and no local date construction anywhere in this derivation.
-  const nextStartMs = nextLesson ? new Date(nextLesson.scheduled_at).getTime() : 0
-  const nextCountdown =
-    nextLesson && mounted
-      ? describeLessonCountdown(nextStartMs, nextStartMs + nextLesson.duration_minutes * 60000, now)
-      : null
-  const nextCancelling = !!nextLesson && cancellingId === nextLesson.id
-  const canJoinNext =
-    !!nextLesson &&
-    mounted &&
-    !!nextLesson.teams_join_url &&
-    isLessonJoinable(nextLesson.scheduled_at, nextLesson.duration_minutes, nextLesson.status, now)
 
   return (
     <div className="space-y-6">
@@ -714,186 +837,7 @@ export default function MyClassesClient({
         />
       </div>
 
-      {/* Next class hero card */}
-      {nextLesson && (
-        <div
-          className="shadow-sm"
-          style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '12px',
-            border: '1px solid #f3f4f6',
-            borderLeft: '3px solid #FF8303',
-            padding: '20px 24px',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
-
-            {/* Teacher photo */}
-            <div style={{ flexShrink: 0, width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid #E0DFDC' }}>
-              {nextLesson.teacher?.photo_url ? (
-                <Image
-                  src={nextLesson.teacher.photo_url}
-                  alt={nextLesson.teacher.full_name}
-                  width={64}
-                  height={64}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                <div style={{
-                  width: '64px',
-                  height: '64px',
-                  borderRadius: '50%',
-                  backgroundColor: '#f3f4f6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <User size={20} color="#9ca3af" />
-                </div>
-              )}
-            </div>
-
-            {/* Name, NEXT pill, date + time */}
-            <div style={{ flex: 1, minWidth: '200px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '16px', fontWeight: '700', color: '#111827' }}>
-                  {nextLesson.teacher?.full_name ?? 'Teacher'}
-                </span>
-                <span style={{
-                  fontSize: '10px',
-                  fontWeight: '700',
-                  letterSpacing: '0.06em',
-                  padding: '2px 8px',
-                  backgroundColor: '#FF8303',
-                  color: '#ffffff',
-                  borderRadius: '4px',
-                }}>
-                  {nextCountdown?.live ? 'IN CLASS' : 'NEXT'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  padding: '3px 10px',
-                  backgroundColor: '#FFF3E0',
-                  color: '#FF8303',
-                  borderRadius: '6px',
-                }}>
-                  {mounted ? formatDate(nextLesson.scheduled_at, studentTimezone) : ''}
-                </span>
-                <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                  {mounted ? formatTimeRange(nextLesson.scheduled_at, studentTimezone, nextLesson.duration_minutes) : ''} · {nextLesson.duration_minutes} min
-                </span>
-              </div>
-            </div>
-
-            {/* Countdown */}
-            <div className="font-mono text-base" style={{ textAlign: 'right', flexShrink: 0, color: '#FF8303', lineHeight: 1 }}>
-              {nextCountdown?.value ?? '—'}
-            </div>
-          </div>
-
-          {/* About This Class — most recent report feedback */}
-          {lastFeedback && (
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #f3f4f6' }}>
-              <p style={{
-                fontSize: '11px',
-                fontWeight: '600',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: '#9ca3af',
-                marginBottom: '6px',
-              }}>
-                About This Class
-              </p>
-              <p style={{
-                fontSize: '13px',
-                color: '#6b7280',
-                lineHeight: 1.5,
-                display: '-webkit-box',
-                WebkitLineClamp: 3,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-              }}>
-                {lastFeedback}
-              </p>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div style={{ display: 'flex', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
-            {canJoinNext ? (
-              <a
-                href={nextLesson.teams_join_url!}
-                target="_blank"
-                rel="noopener noreferrer"
-                onMouseEnter={() => setJoinHovered(true)}
-                onMouseLeave={() => setJoinHovered(false)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '8px 18px',
-                  backgroundColor: joinHovered ? '#e67300' : '#FF8303',
-                  color: '#ffffff',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  transition: 'background-color 0.18s ease',
-                }}
-              >
-                Join Class
-              </a>
-            ) : (
-              <span
-                title="Available 10 minutes before class"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  padding: '8px 18px',
-                  backgroundColor: '#E5E7EB',
-                  color: '#9CA3AF',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  cursor: 'not-allowed',
-                }}
-              >
-                Join Class
-              </span>
-            )}
-            <SecondaryButton
-              onClick={() => handleReschedule(nextLesson.id)}
-              disabled={nextWithin24}
-              title={nextWithin24 ? 'Reschedule not available within 24 hours of class' : ''}
-              padding="8px 14px"
-              fontSize="13px"
-            >
-              Reschedule
-            </SecondaryButton>
-            <SecondaryButton
-              onClick={() => handleCancel(nextLesson.id, nextWithin24)}
-              disabled={nextCancelling}
-              padding="8px 14px"
-              fontSize="13px"
-            >
-              {nextCancelling ? 'Cancelling...' : 'Cancel'}
-            </SecondaryButton>
-          </div>
-
-          {/* 24-hour cancel warning for the hero */}
-          {showCancelWarning === nextLesson.id && (
-            <CancelWarning
-              onConfirm={() => handleCancel(nextLesson.id, true)}
-              onDismiss={() => setShowCancelWarning(null)}
-            />
-          )}
-        </div>
-      )}
-
-      {!nextLesson && (hoursRemaining != null && hoursRemaining <= 0 ? (
+      {scheduledLessons.length === 0 && (hoursRemaining != null && hoursRemaining <= 0 ? (
         /* No upcoming classes + zero hours — contact variant. Only shown when the
            balance is KNOWN to be zero; missing data falls through to Book a Class. */
         <div className="flex flex-col items-center text-center py-16">
@@ -935,8 +879,42 @@ export default function MyClassesClient({
       ))}
 
       {/* ── Upcoming classes list ── */}
-      {listLessons.length > 0 && (
+      {scheduledLessons.length > 0 && (
         <div>
+          {/* Range filter over the agenda below. It is a view of the list only - the
+              "Upcoming Classes" stat card and the count in the page header above both keep
+              counting every upcoming class, filtered out or not. */}
+          <div style={{ display: 'inline-flex', marginBottom: '16px' }}>
+            {([
+              ['week', 'This Week'],
+              ['month', 'This Month'],
+              ['all', 'All'],
+            ] as const).map(([value, label], i, arr) => {
+              const selected = rangeFilter === value
+              return (
+                <button
+                  key={value}
+                  onClick={() => setRangeFilter(value)}
+                  style={{
+                    fontSize: '13px',
+                    padding: '6px 14px',
+                    backgroundColor: selected ? '#FF8303' : 'white',
+                    color: selected ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderLeft: i === 0 ? '1px solid #d1d5db' : 'none',
+                    borderTopLeftRadius: i === 0 ? '6px' : 0,
+                    borderBottomLeftRadius: i === 0 ? '6px' : 0,
+                    borderTopRightRadius: i === arr.length - 1 ? '6px' : 0,
+                    borderBottomRightRadius: i === arr.length - 1 ? '6px' : 0,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
@@ -948,80 +926,96 @@ export default function MyClassesClient({
             </h2>
           </div>
 
-          {sortedDays.map((dayKey) => {
-            const dayLessons = groupedByDate[dayKey]
-            const isExpanded = expandedDays.has(dayKey)
-            const count = dayLessons.length
-            const dayLabel = mounted
-              ? new Intl.DateTimeFormat('en-GB', {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                  timeZone: studentTimezone,
-                }).format(new Date(dayLessons[0].scheduled_at))
-              : dayKey
+          {sortedDays.length === 0 ? (
+            /* The window emptied the list. The no-classes-at-all empty state above stays
+               gated on scheduledLessons.length === 0 and must not fire here: the student
+               does have upcoming classes, just none inside the period they picked. */
+            <p className="text-sm text-gray-500 text-center">No classes in this period.</p>
+          ) : (
+            <div className="space-y-5">
+              {sortedDays.map((dayKey, dayIndex) => {
+                const dayLessons = groupedByDate[dayKey]
 
-            return (
-              <div key={dayKey} className="card-elevated" style={{ overflow: 'hidden', marginBottom: '12px' }}>
+                // Every calendar month in the list carries its header, the first one
+                // included: two structurally identical months must not look different, and
+                // in a flat agenda 31 Aug and 1 Sept are otherwise indistinguishable
+                // neighbours. The first day has no previous day to compare against, so it
+                // counts as a month change by definition. Months are compared on the day
+                // keys, which getLocalDateKey already built in the student's timezone, so
+                // the comparison and the text below it agree by construction.
+                //
+                // Gated on todayKey, like the filter: pre-mount the list is unfiltered and
+                // no separator renders, so the server pass and the first client pass emit
+                // the same markup.
+                const showMonthSeparator =
+                  todayKey !== null &&
+                  (dayIndex === 0 || dayKey.slice(0, 7) !== sortedDays[dayIndex - 1].slice(0, 7))
 
-                {/* Day group header — click to expand/collapse */}
-                <button
-                  onClick={() => toggleDay(dayKey)}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '10px 16px',
-                    backgroundColor: '#f9fafb',
-                    borderBottom: isExpanded ? '1px solid #E0DFDC' : 'none',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    color: '#374151',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Calendar size={15} color="#9ca3af" />
-                    <span style={{ display: 'inline-block', minWidth: '100px' }}>{dayLabel}</span>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      padding: '1px 8px',
-                      backgroundColor: '#f3f4f6',
-                      color: '#4b5563',
-                      borderRadius: '10px',
-                    }}>
-                      {count}
-                    </span>
-                  </span>
-                  {isExpanded
-                    ? <ChevronUp size={16} color="#9ca3af" />
-                    : <ChevronDown size={16} color="#9ca3af" />
-                  }
-                </button>
+                return (
+                  <div key={dayKey}>
+                    {showMonthSeparator && (
+                      <p
+                        style={{
+                          // The first header already has the segmented control's gap above
+                          // it; only a mid-list month break has to open a break of its own.
+                          margin: dayIndex === 0 ? '0 0 10px' : '28px 0 10px',
+                          paddingBottom: '6px',
+                          paddingLeft: '2px',
+                          borderBottom: '1px solid #E0DFDC',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          letterSpacing: '0.06em',
+                          color: '#111827',
+                        }}
+                      >
+                        {formatMonth(dayLessons[0].scheduled_at, studentTimezone)}
+                      </p>
+                    )}
+                    {/* Slim text divider, not a card and not a control: nothing collapses
+                        here, so it carries no chevron and no lesson count. The mounted gate
+                        is the one the old accordion heading used - the raw dateKey renders
+                        until the effect sets mounted, so the server pass and the first
+                        client pass emit the same string. formatDayDivider returns the bare
+                        absolute date while todayKey is still null, so the text settles from
+                        the key to a date to a relative label without ever mismatching. */}
+                    <p
+                      style={{
+                        margin: '0 0 6px 2px',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: '#9ca3af',
+                      }}
+                    >
+                      {mounted ? formatDayDivider(dayLessons[0].scheduled_at, studentTimezone, dayKey, todayKey) : dayKey}
+                    </p>
 
-                {/* Lessons within this day */}
-                {isExpanded && dayLessons.map((lesson, i) => (
-                  <LessonRow
-                    key={lesson.id}
-                    lesson={lesson}
-                    studentTimezone={studentTimezone}
-                    mounted={mounted}
-                    now={now}
-                    isFirst={i === 0}
-                    showDate={false}
-                    cancellingId={cancellingId}
-                    showCancelWarning={showCancelWarning}
-                    onReschedule={handleReschedule}
-                    onCancel={handleCancel}
-                    onDismissWarning={() => setShowCancelWarning(null)}
-                  />
-                ))}
-              </div>
-            )
-          })}
+                    <div className="card-elevated" style={{ overflow: 'hidden' }}>
+                      {dayLessons.map((lesson, i) => (
+                        <LessonRow
+                          key={lesson.id}
+                          lesson={lesson}
+                          studentTimezone={studentTimezone}
+                          mounted={mounted}
+                          now={now}
+                          isFirst={i === 0}
+                          isNext={lesson.id === nextId}
+                          lastFeedback={lesson.id === nextId ? lastFeedback : null}
+                          showDate={false}
+                          cancellingId={cancellingId}
+                          showCancelWarning={showCancelWarning}
+                          onReschedule={handleReschedule}
+                          onCancel={handleCancel}
+                          onDismissWarning={() => setShowCancelWarning(null)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

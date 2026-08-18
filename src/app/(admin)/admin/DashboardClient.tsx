@@ -167,10 +167,20 @@ export default function DashboardClient({
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  // Auto-refresh server data every 30 seconds by re-running server components
+  // Refresh only while the tab is visible; an idle hidden tab previously issued 17
+  // service-role queries every 30s and starved the nano database instance (18 Aug incident).
   useEffect(() => {
-    const id = setInterval(() => router.refresh(), 30_000)
-    return () => clearInterval(id)
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') router.refresh()
+    }, 60_000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') router.refresh()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
   }, [router])
 
   const alertCount =

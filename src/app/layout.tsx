@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { Toaster } from '@/components/ui/toaster'
+import { TranslateCrashGuard } from '@/components/TranslateCrashGuard'
 import './globals.css'
 
 const inter = localFont({
@@ -22,6 +23,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <TranslateCrashGuard />
+      </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         {children}
         <Toaster />

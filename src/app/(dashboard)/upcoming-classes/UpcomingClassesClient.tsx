@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { CalendarDays, Plus, History, Loader2 } from 'lucide-react'
 import { teacherCancelLesson } from './actions'
 import { describeLessonCountdown, type LessonCountdown } from '@/lib/lessons/countdown'
+import { formatDayDate as formatDate, formatMonth, endOfWeekKey, endOfMonthKey, formatDayDivider } from '@/lib/lessons/agendaDates'
 import { getLocalDateKey as getTzDateKey, addDaysToDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 import { isCancelledStatus, getBillability } from '@/lib/billing/billability'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -70,15 +71,6 @@ function formatTime(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
-function formatDate(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
-
 function groupByDay(classes: Class[], timezone: string): Record<string, Class[]> {
   return classes.reduce((groups, cls) => {
     const day = getTzDateKey(new Date(cls.starts_at), timezone)
@@ -86,23 +78,6 @@ function groupByDay(classes: Class[], timezone: string): Record<string, Class[]>
     groups[day].push(cls)
     return groups
   }, {} as Record<string, Class[]>)
-}
-
-// Today/Tomorrow must be decided on the SAME day boundary that built the group this
-// heading labels - the teacher's account timezone, not the browser's. date-fns
-// isToday/isTomorrow compare Date objects on the browser's boundary, so a teacher
-// whose device zone differs from their account zone read a heading one day off near
-// midnight while the group beneath it was correct.
-//
-// dateKey is the group's own key, already produced by getLocalDateKey in the teacher's
-// timezone; todayKey is supplied by the caller from a clock read in an effect, never
-// during render (react-hooks/purity is ON in this file).
-function formatDayHeading(isoString: string, timezone: string, dateKey: string, todayKey: string | null): string {
-  if (todayKey !== null) {
-    if (dateKey === todayKey) return 'Today'
-    if (dateKey === addDaysToDateKey(todayKey, 1)) return 'Tomorrow'
-  }
-  return formatDate(isoString, timezone)
 }
 
 // One 1s ticker feeding the countdown value, its label and the NEXT / IN CLASS pill from
@@ -150,21 +125,6 @@ function Countdown({ countdown, withLabel = false }: { countdown: LessonCountdow
       </span>
       {value}
     </div>
-  )
-}
-
-// The section heading above the hero card must agree with the pill inside it, so it is
-// driven by the same liveness rather than hardcoded. It is its own component so the hook
-// stays unconditional: heroClass can be null, and this only renders when it is not. The
-// alternative - calling the hook in the parent with placeholder dates - would run a real
-// interval over NaN timestamps for every teacher with no upcoming class.
-function HeroHeading({ startsAt, endsAt }: { startsAt: string; endsAt: string }) {
-  const countdown = useLessonCountdown(startsAt, endsAt)
-
-  return (
-    <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.06em', color: '#9ca3af', marginBottom: '8px' }}>
-      {countdown?.live === true ? 'IN CLASS' : 'NEXT CLASS'}
-    </p>
   )
 }
 
@@ -278,7 +238,7 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
   )
 }
 
-function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero = false, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; hero?: boolean; isFirst?: boolean }) {
+function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; isFirst?: boolean }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
@@ -325,38 +285,35 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
 
   return (
     <div
-      className={hero ? 'card-elevated overflow-hidden' : 'bg-white overflow-hidden'}
-      style={
-        hero
-          ? {
-              borderLeft: '3px solid #FF8303',
-              opacity: isCancelled ? 0.75 : undefined,
-            }
-          : {
-              borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
-              opacity: isCancelled ? 0.75 : undefined,
-            }
-      }
+      className="bg-white overflow-hidden"
+      style={{
+        borderTop: isFirst ? 'none' : '1px solid #F3F4F6',
+        // The next class is marked where it sits rather than lifted into a hero above the
+        // list. isNext already carries the mounted gate the pill uses, so the server
+        // renders no rail and the first client pass agrees with it.
+        borderLeft: isNext ? '3px solid #FF8303' : undefined,
+        opacity: isCancelled ? 0.75 : undefined,
+      }}
     >
       <div
         onClick={() => setExpanded(!expanded)}
-        className={`w-full flex items-center gap-4 ${hero ? 'p-5' : 'p-4'} text-left hover:bg-gray-50 transition-colors cursor-pointer`}
+        className="w-full flex items-center gap-4 p-4 text-left hover:bg-gray-50 transition-colors cursor-pointer"
       >
         <Link
           href={`/students/${cls.training_id}`}
           prefetch={false}
           onClick={e => e.stopPropagation()}
-          className={`${hero ? 'w-14 h-14' : 'w-10 h-10'} rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden`}
+          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{ backgroundColor: '#FFE8C2' }}
         >
           {cls.student.photo_url ? (
             <img
               src={cls.student.photo_url}
               alt={cls.student.full_name}
-              className={`${hero ? 'w-14 h-14' : 'w-10 h-10'} rounded-full object-cover`}
+              className="w-10 h-10 rounded-full object-cover"
             />
           ) : (
-            <span className={`font-semibold ${hero ? 'text-lg' : 'text-sm'}`} style={{ color: '#FF8303' }}>
+            <span className="font-semibold text-sm" style={{ color: '#FF8303' }}>
               {cls.student.full_name.charAt(0)}
             </span>
           )}
@@ -364,19 +321,17 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
 
         <div className="flex-1 min-w-0">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <p className={hero ? 'font-semibold text-lg' : 'font-semibold'}>{cls.student.full_name}</p>
+            <p className="font-semibold">{cls.student.full_name}</p>
             {isNext && (
               <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', padding: '2px 8px', backgroundColor: '#FF8303', color: '#ffffff', borderRadius: '4px' }}>
                 {isLive ? 'IN CLASS' : 'NEXT'}
               </span>
             )}
           </div>
+          {/* Time only: the divider above the group carries the date for every row beneath
+              it. A cancelled row keeps its own date, since it is not guaranteed to be read
+              under a divider. */}
           <p className="text-sm text-gray-500" style={{ display: 'flex', alignItems: 'center' }}>
-            {isNext && mounted && (
-              <span style={{ fontSize: '12px', fontWeight: '600', padding: '3px 10px', backgroundColor: '#FFF3E0', color: '#FF8303', borderRadius: '6px', marginRight: '8px' }}>
-                {new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: teacherTimezone }).format(new Date(cls.starts_at))}
-              </span>
-            )}
             {mounted
               ? isCancelled
                 ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
@@ -388,7 +343,7 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
         <div className="flex items-center gap-3 flex-shrink-0">
           {isCancelled
             ? <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', backgroundColor: '#f3f4f6', color: '#4b5563', borderRadius: '4px' }}>{cancelLabel ?? 'Cancelled'}</span>
-            : <Countdown countdown={countdown} withLabel={hero} />}
+            : <Countdown countdown={countdown} />}
           <ChevronIcon rotated={expanded} />
         </div>
       </div>
@@ -428,44 +383,6 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
   )
 }
 
-function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, nextId, todayKey }: { dateStr: string; classes: Class[]; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; todayKey: string | null }) {
-  // The next class is now the hero above the list, so every day group starts collapsed.
-  const [open, setOpen] = useState(false)
-  const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone, dateStr, todayKey) : dateStr
-
-  return (
-    <div className="card-elevated overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-left"
-        style={{
-          width: '100%',
-          padding: '12px 16px',
-          backgroundColor: '#f9fafb',
-          borderBottom: open ? '1px solid #E0DFDC' : 'none',
-        }}
-      >
-        <CalendarDays size={15} color="#9ca3af" />
-        <span className="font-semibold text-gray-800" style={{ display: 'inline-block', minWidth: '120px' }}>{heading}</span>
-        <span style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', backgroundColor: '#f3f4f6', borderRadius: '9999px', padding: '2px 10px' }}>
-          {classes.length} {classes.length === 1 ? 'lesson' : 'lessons'}
-        </span>
-        <div className="ml-auto">
-          <ChevronIcon rotated={open} />
-        </div>
-      </button>
-
-      {open && (
-        <div>
-          {classes.map((cls, i) => (
-            <ClassCard key={cls.id} cls={cls} onReschedule={onReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} isFirst={i === 0} />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function UpcomingClassesClient({ classes, profile, profileCompleted, bannerDismissed, teacherTimezone }: Props) {
   const router = useRouter()
 
@@ -480,6 +397,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   // Refreshed at each local midnight by the self-rescheduling timer below, so a tab left
   // open across the boundary does not keep labelling yesterday's group "Today".
   const [todayKey, setTodayKey] = useState<string | null>(null)
+  const [rangeFilter, setRangeFilter] = useState<'week' | 'month' | 'all'>('month')
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -518,12 +436,35 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       const tb = b.cancelled_at ?? b.starts_at
       return new Date(tb).getTime() - new Date(ta).getTime()
     })
+  // nextId is deliberately computed from the UNFILTERED upcomingClasses: the earliest
+  // upcoming class's date key is always <= the date key bound of any window that shows
+  // anything at all, so the next-class rail and pill can never be filtered out from under
+  // themselves.
   const nextId = upcomingClasses.length > 0 ? upcomingClasses[0].id : null
-  // The next class is pulled out as a hero above the list; the day groups are built
-  // from the remainder, so a day that held only the next class disappears entirely.
-  const heroClass = upcomingClasses.find(c => c.id === nextId) ?? null
-  const listClasses = upcomingClasses.filter(c => c.id !== nextId)
-  const grouped = groupByDay(listClasses, teacherTimezone)
+
+  // Calendar window from today, in the teacher's own timezone, so both labels are literally
+  // true: "This Week" ends on the coming Sunday and "This Month" on the last day of today's
+  // own month. The old rolling +6 / +29 was not - on 18 Aug "This Month" reached 16 Sept.
+  // The bound is derived once per render here, not rebuilt for every class in the callback.
+  //
+  // While todayKey is null (pre-mount), no filter is applied - the list must match the
+  // server-rendered HTML exactly on first client pass, narrowing only after hydration
+  // supplies today's key, the same pattern the Today/Tomorrow divider labels follow.
+  const rangeMaxKey =
+    todayKey === null || rangeFilter === 'all'
+      ? null
+      : rangeFilter === 'week'
+        ? endOfWeekKey(todayKey)
+        : endOfMonthKey(todayKey)
+
+  const filteredUpcomingClasses = rangeMaxKey === null
+    ? upcomingClasses
+    : upcomingClasses.filter(cls => getTzDateKey(new Date(cls.starts_at), teacherTimezone) <= rangeMaxKey)
+
+  // Flat agenda: every upcoming class is a row, the next one included. It is marked in
+  // place by its left rail and NEXT / IN CLASS pill rather than pulled out into a hero, so
+  // no day can lose its only lesson to a card above the list.
+  const grouped = groupByDay(filteredUpcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -644,15 +585,40 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       </div>
 
-      {/* Next class hero: mounted-gated, matching the isNext gating inside ClassCard. */}
-      {mounted && heroClass && (
-        <div>
-          <HeroHeading startsAt={heroClass.starts_at} endsAt={heroClass.ends_at} />
-          <ClassCard cls={heroClass} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} hero />
+      {upcomingClasses.length > 0 && (
+        <div style={{ display: 'inline-flex' }}>
+          {([
+            ['week', 'This Week'],
+            ['month', 'This Month'],
+            ['all', 'All'],
+          ] as const).map(([value, label], i, arr) => {
+            const selected = rangeFilter === value
+            return (
+              <button
+                key={value}
+                onClick={() => setRangeFilter(value)}
+                style={{
+                  fontSize: '13px',
+                  padding: '6px 14px',
+                  backgroundColor: selected ? '#FF8303' : 'white',
+                  color: selected ? 'white' : '#374151',
+                  border: '1px solid #d1d5db',
+                  borderLeft: i === 0 ? '1px solid #d1d5db' : 'none',
+                  borderTopLeftRadius: i === 0 ? '6px' : 0,
+                  borderBottomLeftRadius: i === 0 ? '6px' : 0,
+                  borderTopRightRadius: i === arr.length - 1 ? '6px' : 0,
+                  borderBottomRightRadius: i === arr.length - 1 ? '6px' : 0,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
       )}
 
-      {!heroClass && days.length === 0 ? (
+      {upcomingClasses.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
@@ -676,11 +642,79 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             )}
           </div>
         </div>
+      ) : days.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center">No classes in this period.</p>
       ) : (
-        <div className="space-y-3">
-          {days.map(day => (
-            <DayGroup key={day} dateStr={day} classes={grouped[day]} onReschedule={handleOpenReschedule} teacherTimezone={teacherTimezone} mounted={mounted} nextId={nextId} todayKey={todayKey} />
-          ))}
+        <div className="space-y-5">
+          {days.map((day, dayIndex) => {
+            // Every calendar month in the list carries its header, the first one included:
+            // two structurally identical months must not look different, and in a flat
+            // agenda 31 Aug and 1 Sept are otherwise indistinguishable neighbours. The
+            // first day has no previous day to compare against, so it counts as a month
+            // change by definition. Months are compared on the day keys, which
+            // getLocalDateKey already built in the teacher's timezone, so the comparison
+            // and the text below it agree by construction.
+            //
+            // Gated on todayKey, like the filter: pre-mount the list is unfiltered and no
+            // separator renders, so the server and the first client pass emit the same
+            // markup.
+            const showMonthSeparator =
+              todayKey !== null &&
+              (dayIndex === 0 || day.slice(0, 7) !== days[dayIndex - 1].slice(0, 7))
+
+            return (
+              <div key={day}>
+                {showMonthSeparator && (
+                  <p
+                    style={{
+                      // The first header already has the segmented control's gap above it;
+                      // only a mid-list month break has to open a break of its own.
+                      margin: dayIndex === 0 ? '0 0 10px' : '28px 0 10px',
+                      paddingBottom: '6px',
+                      paddingLeft: '2px',
+                      borderBottom: '1px solid #E0DFDC',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      color: '#111827',
+                    }}
+                  >
+                    {formatMonth(grouped[day][0].starts_at, teacherTimezone)}
+                  </p>
+                )}
+                {/* Slim text divider, not a card and not a control: nothing collapses here,
+                    so it carries no chevron and no lesson count. The mounted gate is the one
+                    the old accordion heading used - the raw dateKey renders until the effect
+                    supplies todayKey, so the server and the first client pass emit the same
+                    string. */}
+                <p
+                  style={{
+                    margin: '0 0 6px 2px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: '#9ca3af',
+                  }}
+                >
+                  {mounted ? formatDayDivider(grouped[day][0].starts_at, teacherTimezone, day, todayKey) : day}
+                </p>
+                <div className="card-elevated overflow-hidden">
+                  {grouped[day].map((cls, i) => (
+                    <ClassCard
+                      key={cls.id}
+                      cls={cls}
+                      onReschedule={handleOpenReschedule}
+                      teacherTimezone={teacherTimezone}
+                      mounted={mounted}
+                      nextId={nextId}
+                      isFirst={i === 0}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

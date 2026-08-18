@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin } from '@/lib/auth/requireAdmin'
 
 export async function DELETE(
   _request: NextRequest,
@@ -27,7 +28,19 @@ export async function DELETE(
   }
   if (!record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (record.teacher_id !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Admin escalation - see the comment in the sibling POST route for why this is
+  // requireAdmin and not requireStaff.
+  if (record.teacher_id !== user.id) {
+    try {
+      const adminUser = await requireAdmin()
+      if (!adminUser) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    } catch (err) {
+      console.error('[DELETE /api/teacher/availability/[id]] admin escalation check failed:', err)
+      return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+    }
+  }
 
   const { error } = await admin.from('availability').delete().eq('id', id)
 
