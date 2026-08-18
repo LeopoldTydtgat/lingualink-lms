@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getCallerUser } from '@/lib/auth/callerProfile'
 import { requireStaff } from '@/lib/auth/requireStaff'
 import AdminLayoutClient from './AdminLayoutClient'
 import { isCancelledStatus } from '@/lib/billing/billability'
@@ -30,20 +31,32 @@ export default async function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Still needed below for the protected-lesson query inside the nine-query batch.
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+
+  // Request-memoised, so the requireStaff() below reuses this auth read instead of
+  // issuing its own — see src/lib/auth/callerProfile.ts.
+  const user = await getCallerUser()
   if (!user) redirect('/login')
 
   const adminDb = createAdminClient()
 
-  // A query error and a genuinely missing row are different failures: the first is
-  // transient and must surface, the second is a real "no profile" state. Discarding
-  // the error made both look like null and bounced the user to /login.
-  const { data: profile, error: profileError } = await adminDb
-    .from('profiles')
-    .select('id, full_name, role, account_types, photo_url, timezone')
-    .eq('id', user.id)
-    .maybeSingle()
+  // The display profile and the staff gate share no data, so they run concurrently
+  // rather than serially. requireStaff() THROWS on a failed profiles read; inside
+  // Promise.all that rejection propagates straight out of this await, which is the
+  // fail-closed behaviour the gate requires — never catch or soften it.
+  const [profileRes, staffUser] = await Promise.all([
+    // A query error and a genuinely missing row are different failures: the first is
+    // transient and must surface, the second is a real "no profile" state. Discarding
+    // the error made both look like null and bounced the user to /login.
+    adminDb
+      .from('profiles')
+      .select('id, full_name, role, account_types, photo_url, timezone')
+      .eq('id', user.id)
+      .maybeSingle(),
+    requireStaff(),
+  ])
+  const { data: profile, error: profileError } = profileRes
 
   if (profileError) {
     console.error('[admin/layout] profiles lookup failed:', profileError)
@@ -53,7 +66,6 @@ export default async function AdminLayout({
 
   // Staff-or-admin gate (ROLE-5b): role 'admin', or account_types contains
   // 'staff' with status 'current'. Per-page gates decide anything finer.
-  const staffUser = await requireStaff()
   if (!staffUser) redirect('/dashboard')
 
   // requireStaff already admitted the user; anyone here who is not role 'admin'
