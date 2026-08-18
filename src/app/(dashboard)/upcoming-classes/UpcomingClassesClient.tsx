@@ -278,7 +278,7 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
   )
 }
 
-function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero = false, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; hero?: boolean; isFirst?: boolean }) {
+function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero = false, isFirst = false, dayLabel }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; hero?: boolean; isFirst?: boolean; dayLabel?: string }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
@@ -380,8 +380,8 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, hero =
             {mounted
               ? isCancelled
                 ? `${formatDate(cls.starts_at, teacherTimezone)} · ${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
-                : `${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
-              : ''}
+                : `${dayLabel ? `${dayLabel} · ` : ''}${formatTime(cls.starts_at, teacherTimezone)} - ${formatTime(cls.ends_at, teacherTimezone)} · ${durationMin} min`
+              : (dayLabel ?? '')}
           </p>
         </div>
 
@@ -432,6 +432,26 @@ function DayGroup({ dateStr, classes, onReschedule, teacherTimezone, mounted, ne
   // The next class is now the hero above the list, so every day group starts collapsed.
   const [open, setOpen] = useState(false)
   const heading = mounted ? formatDayHeading(classes[0].starts_at, teacherTimezone, dateStr, todayKey) : dateStr
+
+  // A single-lesson day spends a whole accordion row hiding one item. Render the card
+  // itself and hand it the day heading, which is the only place the date appears: a
+  // non-cancelled ClassCard prints time only. heading already carries the mounted gate,
+  // so nothing here reads the clock during render.
+  if (classes.length === 1) {
+    return (
+      <div className="card-elevated overflow-hidden">
+        <ClassCard
+          cls={classes[0]}
+          onReschedule={onReschedule}
+          teacherTimezone={teacherTimezone}
+          mounted={mounted}
+          nextId={nextId}
+          isFirst
+          dayLabel={heading}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="card-elevated overflow-hidden">
