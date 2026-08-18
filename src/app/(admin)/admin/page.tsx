@@ -1,8 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { requireStaff } from '@/lib/auth/requireStaff'
+import { getCallerDisplayProfile } from '@/lib/auth/callerDisplayProfile'
 import DashboardClient from './DashboardClient'
 import { isCancelledStatus, CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { getDayRangeInTz } from '@/lib/billing/monthRange'
@@ -92,15 +92,13 @@ export default async function AdminDashboardPage() {
     redirect(staffUser ? '/admin/classes' : '/dashboard')
   }
 
-  // Identify the logged-in admin (the admin layout has already gated access) and read their
-  // timezone, so every date/time below renders in the admin's own zone, not a hardcoded SAST
-  // offset. The service-role client below is for data; this cookie client only learns who is
-  // viewing.
-  const cookieClient = await createClient()
-  const { data: { user } } = await cookieClient.auth.getUser()
-  const { data: adminProfile } = user
-    ? await cookieClient.from('profiles').select('timezone').eq('id', user.id).maybeSingle()
-    : { data: null }
+  // The viewing admin's identity and timezone come from the layout's already-memoised display
+  // read, so every date/time below renders in the admin's own zone, not a hardcoded SAST
+  // offset — and it is the SAME row the admin shell bucketed its own "today" with, instead of
+  // a second read that could disagree about the zone.
+  // The error on this read is logged and thrown by (admin)/layout.tsx, which shares this same
+  // memoised result — it is handled once there, not swallowed here.
+  const { data: adminProfile } = await getCallerDisplayProfile()
 
   // If the admin has no timezone set, fall back to UTC and flag it so the client shows a
   // warning banner. Never silently guess a zone, and never block the dashboard over a

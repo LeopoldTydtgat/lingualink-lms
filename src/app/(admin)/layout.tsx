@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getCallerUser } from '@/lib/auth/callerProfile'
+import { getCallerDisplayProfile } from '@/lib/auth/callerDisplayProfile'
 import { requireStaff } from '@/lib/auth/requireStaff'
 import AdminLayoutClient from './AdminLayoutClient'
 import { isCancelledStatus } from '@/lib/billing/billability'
@@ -49,11 +50,7 @@ export default async function AdminLayout({
     // A query error and a genuinely missing row are different failures: the first is
     // transient and must surface, the second is a real "no profile" state. Discarding
     // the error made both look like null and bounced the user to /login.
-    adminDb
-      .from('profiles')
-      .select('id, full_name, role, account_types, photo_url, timezone')
-      .eq('id', user.id)
-      .maybeSingle(),
+    getCallerDisplayProfile(),
     requireStaff(),
   ])
   const { data: profile, error: profileError } = profileRes
