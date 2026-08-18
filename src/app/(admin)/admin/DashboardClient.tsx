@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useTransition } from 'react'
+import { useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -152,6 +152,10 @@ function hoursOverdue(report: PendingReportItem): number {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
+// Data is at most 60s stale by design, so a refresh sooner than 30s after the
+// last one adds nothing and only costs queries.
+const MIN_REFRESH_MS = 30_000
+
 export default function DashboardClient({
   stats,
   todayLessons,
@@ -166,20 +170,29 @@ export default function DashboardClient({
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const lastRefreshRef = useRef(0)
 
   // Refresh only while the tab is visible; an idle hidden tab previously issued 17
   // service-role queries every 30s and starved the nano database instance (18 Aug incident).
+  // The shared MIN_REFRESH_MS floor also stops rapid tab switching from issuing unbounded
+  // refreshes, and stops a tab-return from firing a second refresh moments before the interval.
   useEffect(() => {
-    const id = setInterval(() => {
-      if (document.visibilityState === 'visible') router.refresh()
-    }, 60_000)
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') router.refresh()
+    // Mount already rendered fresh server data - start the clock here so an
+    // immediate tab-return does not refetch what we just received.
+    lastRefreshRef.current = Date.now()
+
+    const maybeRefresh = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastRefreshRef.current < MIN_REFRESH_MS) return
+      lastRefreshRef.current = Date.now()
+      router.refresh()
     }
-    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    const id = setInterval(maybeRefresh, 60_000)
+    document.addEventListener('visibilitychange', maybeRefresh)
     return () => {
       clearInterval(id)
-      document.removeEventListener('visibilitychange', onVisibilityChange)
+      document.removeEventListener('visibilitychange', maybeRefresh)
     }
   }, [router])
 
@@ -258,7 +271,7 @@ export default function DashboardClient({
           <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
         </div>
         <button
-          onClick={() => startTransition(() => router.refresh())}
+          onClick={() => startTransition(() => { lastRefreshRef.current = Date.now(); router.refresh() })}
           disabled={isPending}
           className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-60"
         >
