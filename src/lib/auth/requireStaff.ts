@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { getCallerProfile } from '@/lib/auth/callerProfile'
 import type { User } from '@supabase/supabase-js'
 
 /**
@@ -19,24 +19,15 @@ import type { User } from '@supabase/supabase-js'
  * about the caller's role, so it throws rather than silently demoting a valid
  * admin to non-staff on a transient DB error.
  *
+ * The user and profile come from getCallerProfile(), so the auth call and the
+ * profiles read are request-memoised and shared with the other gates — see
+ * src/lib/auth/callerProfile.ts.
+ *
  * Server-only — it reads the session cookie. Never import into a client component.
  */
 export async function requireStaff(): Promise<User | null> {
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user, profile } = await getCallerProfile()
   if (!user) return null
-
-  const { data: profile, error } = await supabase
-    .from('profiles')
-    .select('id, role, account_types, status')
-    .eq('id', user.id)
-    .maybeSingle()
-
-  if (error) {
-    console.error('[requireStaff] profiles lookup failed:', error)
-    throw new Error('Failed to load profile')
-  }
 
   const isStaff =
     profile?.status === 'current' &&
