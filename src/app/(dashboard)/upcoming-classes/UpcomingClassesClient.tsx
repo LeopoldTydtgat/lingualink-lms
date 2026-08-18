@@ -79,6 +79,45 @@ function formatDate(isoString: string, timezone: string): string {
   }).format(new Date(isoString))
 }
 
+// Full month and year for the month separator, read off the day's own first class in the
+// teacher's timezone - the same source and the same zone formatDate uses, so a separator
+// can never name a different month from the divider directly beneath it.
+function formatMonth(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: timezone,
+  }).format(new Date(isoString)).toUpperCase()
+}
+
+// ISO weekday (Monday = 1 ... Sunday = 7) of a YYYY-MM-DD key, by Sakamoto's closed-form
+// day-of-week. Pure arithmetic on the triple: no Date, no local formatting, so nothing
+// between the key and its weekday can shift with the browser's zone.
+function isoWeekday(dateKey: string): number {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  const monthOffsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+  const yy = m < 3 ? y - 1 : y
+  const sundayZero =
+    (yy + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) + monthOffsets[m - 1] + d) % 7
+  return sundayZero === 0 ? 7 : sundayZero
+}
+
+// The coming Sunday's key - the end of the week the teacher is actually in, not a rolling
+// six days. On a Sunday the week already ends today, so the bound is dateKey itself.
+function endOfWeekKey(dateKey: string): string {
+  return addDaysToDateKey(dateKey, 7 - isoWeekday(dateKey))
+}
+
+// The last day of dateKey's OWN calendar month, so "This Month" cannot reach into the next
+// one. The year-month prefix is sliced off the key rather than reformatted, and February's
+// leap day is decided by the Gregorian rule instead of by Date rollover.
+function endOfMonthKey(dateKey: string): string {
+  const [y, m] = dateKey.split('-').map(Number)
+  const isLeap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0
+  const lastDay = m === 2 && isLeap ? 29 : [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+  return `${dateKey.slice(0, 8)}${String(lastDay).padStart(2, '0')}`
+}
+
 function groupByDay(classes: Class[], timezone: string): Record<string, Class[]> {
   return classes.reduce((groups, cls) => {
     const day = getTzDateKey(new Date(cls.starts_at), timezone)
@@ -435,6 +474,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
   // Refreshed at each local midnight by the self-rescheduling timer below, so a tab left
   // open across the boundary does not keep labelling yesterday's group "Today".
   const [todayKey, setTodayKey] = useState<string | null>(null)
+  const [rangeFilter, setRangeFilter] = useState<'week' | 'month' | 'all'>('month')
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -473,11 +513,35 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
       const tb = b.cancelled_at ?? b.starts_at
       return new Date(tb).getTime() - new Date(ta).getTime()
     })
+  // nextId is deliberately computed from the UNFILTERED upcomingClasses: the earliest
+  // upcoming class's date key is always <= the date key bound of any window that shows
+  // anything at all, so the next-class rail and pill can never be filtered out from under
+  // themselves.
   const nextId = upcomingClasses.length > 0 ? upcomingClasses[0].id : null
+
+  // Calendar window from today, in the teacher's own timezone, so both labels are literally
+  // true: "This Week" ends on the coming Sunday and "This Month" on the last day of today's
+  // own month. The old rolling +6 / +29 was not - on 18 Aug "This Month" reached 16 Sept.
+  // The bound is derived once per render here, not rebuilt for every class in the callback.
+  //
+  // While todayKey is null (pre-mount), no filter is applied - the list must match the
+  // server-rendered HTML exactly on first client pass, narrowing only after hydration
+  // supplies today's key, the same pattern the Today/Tomorrow divider labels follow.
+  const rangeMaxKey =
+    todayKey === null || rangeFilter === 'all'
+      ? null
+      : rangeFilter === 'week'
+        ? endOfWeekKey(todayKey)
+        : endOfMonthKey(todayKey)
+
+  const filteredUpcomingClasses = rangeMaxKey === null
+    ? upcomingClasses
+    : upcomingClasses.filter(cls => getTzDateKey(new Date(cls.starts_at), teacherTimezone) <= rangeMaxKey)
+
   // Flat agenda: every upcoming class is a row, the next one included. It is marked in
   // place by its left rail and NEXT / IN CLASS pill rather than pulled out into a hero, so
   // no day can lose its only lesson to a card above the list.
-  const grouped = groupByDay(upcomingClasses, teacherTimezone)
+  const grouped = groupByDay(filteredUpcomingClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -598,7 +662,40 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       </div>
 
-      {days.length === 0 ? (
+      {upcomingClasses.length > 0 && (
+        <div style={{ display: 'inline-flex' }}>
+          {([
+            ['week', 'This Week'],
+            ['month', 'This Month'],
+            ['all', 'All'],
+          ] as const).map(([value, label], i, arr) => {
+            const selected = rangeFilter === value
+            return (
+              <button
+                key={value}
+                onClick={() => setRangeFilter(value)}
+                style={{
+                  fontSize: '13px',
+                  padding: '6px 14px',
+                  backgroundColor: selected ? '#FF8303' : 'white',
+                  color: selected ? 'white' : '#374151',
+                  border: '1px solid #d1d5db',
+                  borderLeft: i === 0 ? '1px solid #d1d5db' : 'none',
+                  borderTopLeftRadius: i === 0 ? '6px' : 0,
+                  borderBottomLeftRadius: i === 0 ? '6px' : 0,
+                  borderTopRightRadius: i === arr.length - 1 ? '6px' : 0,
+                  borderBottomRightRadius: i === arr.length - 1 ? '6px' : 0,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {upcomingClasses.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>
@@ -622,42 +719,79 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
             )}
           </div>
         </div>
+      ) : days.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center">No classes in this period.</p>
       ) : (
         <div className="space-y-5">
-          {days.map(day => (
-            <div key={day}>
-              {/* Slim text divider, not a card and not a control: nothing collapses here,
-                  so it carries no chevron and no lesson count. The mounted gate is the one
-                  the old accordion heading used - the raw dateKey renders until the effect
-                  supplies todayKey, so the server and the first client pass emit the same
-                  string. */}
-              <p
-                style={{
-                  margin: '0 0 6px 2px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  letterSpacing: '0.06em',
-                  textTransform: 'uppercase',
-                  color: '#9ca3af',
-                }}
-              >
-                {mounted ? formatDayDivider(grouped[day][0].starts_at, teacherTimezone, day, todayKey) : day}
-              </p>
-              <div className="card-elevated overflow-hidden">
-                {grouped[day].map((cls, i) => (
-                  <ClassCard
-                    key={cls.id}
-                    cls={cls}
-                    onReschedule={handleOpenReschedule}
-                    teacherTimezone={teacherTimezone}
-                    mounted={mounted}
-                    nextId={nextId}
-                    isFirst={i === 0}
-                  />
-                ))}
+          {days.map((day, dayIndex) => {
+            // Every calendar month in the list carries its header, the first one included:
+            // two structurally identical months must not look different, and in a flat
+            // agenda 31 Aug and 1 Sept are otherwise indistinguishable neighbours. The
+            // first day has no previous day to compare against, so it counts as a month
+            // change by definition. Months are compared on the day keys, which
+            // getLocalDateKey already built in the teacher's timezone, so the comparison
+            // and the text below it agree by construction.
+            //
+            // Gated on todayKey, like the filter: pre-mount the list is unfiltered and no
+            // separator renders, so the server and the first client pass emit the same
+            // markup.
+            const showMonthSeparator =
+              todayKey !== null &&
+              (dayIndex === 0 || day.slice(0, 7) !== days[dayIndex - 1].slice(0, 7))
+
+            return (
+              <div key={day}>
+                {showMonthSeparator && (
+                  <p
+                    style={{
+                      // The first header already has the segmented control's gap above it;
+                      // only a mid-list month break has to open a break of its own.
+                      margin: dayIndex === 0 ? '0 0 10px' : '28px 0 10px',
+                      paddingBottom: '6px',
+                      paddingLeft: '2px',
+                      borderBottom: '1px solid #E0DFDC',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      letterSpacing: '0.06em',
+                      color: '#111827',
+                    }}
+                  >
+                    {formatMonth(grouped[day][0].starts_at, teacherTimezone)}
+                  </p>
+                )}
+                {/* Slim text divider, not a card and not a control: nothing collapses here,
+                    so it carries no chevron and no lesson count. The mounted gate is the one
+                    the old accordion heading used - the raw dateKey renders until the effect
+                    supplies todayKey, so the server and the first client pass emit the same
+                    string. */}
+                <p
+                  style={{
+                    margin: '0 0 6px 2px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: '#9ca3af',
+                  }}
+                >
+                  {mounted ? formatDayDivider(grouped[day][0].starts_at, teacherTimezone, day, todayKey) : day}
+                </p>
+                <div className="card-elevated overflow-hidden">
+                  {grouped[day].map((cls, i) => (
+                    <ClassCard
+                      key={cls.id}
+                      cls={cls}
+                      onReschedule={handleOpenReschedule}
+                      teacherTimezone={teacherTimezone}
+                      mounted={mounted}
+                      nextId={nextId}
+                      isFirst={i === 0}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
