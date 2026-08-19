@@ -20,7 +20,7 @@ import ExcelJS from 'exceljs'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type ExportCellFormat = 'text' | 'integer' | 'decimal2' | 'money2'
+export type ExportCellFormat = 'text' | 'integer' | 'decimal1' | 'decimal2' | 'money2'
 
 export interface ExportColumn {
   header: string
@@ -67,6 +67,7 @@ const TOTALS_FILL = 'FFF3F4F6'
 const NUM_FMT: Record<ExportCellFormat, string | null> = {
   text: null,
   integer: '0',
+  decimal1: '0.0',
   decimal2: '0.00',
   money2: '#,##0.00',
 }

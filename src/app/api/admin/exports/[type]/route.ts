@@ -780,7 +780,7 @@ export async function GET(
           { header: 'Teacher', key: 'Teacher', width: 24 },
           { header: 'Student', key: 'Student', width: 24 },
           { header: classDateHeader, key: classDateHeader, width: 20 },
-          { header: 'Hours Since Class', key: 'Hours Since Class', width: 18, format: 'decimal2' },
+          { header: 'Hours Since Class', key: 'Hours Since Class', width: 18, format: 'decimal1' },
           { header: 'Report Status', key: 'Report Status', width: 22 },
           { header: deadlineHeader, key: deadlineHeader, width: 20 },
           { header: flaggedAtHeader, key: flaggedAtHeader, width: 20 },
