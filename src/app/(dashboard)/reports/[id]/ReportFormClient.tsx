@@ -8,7 +8,7 @@ import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
-import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS } from '@/lib/levels/levelData'
+import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS, computeOverallLevel, listUnassessedSkillLabels } from '@/lib/levels/levelData'
 
 // --- Types ---
 
@@ -113,6 +113,13 @@ function formatSubmittedAt(iso: string, timezone: string): string {
 // wording stays the form's own: SKILL_FORM_LABELS spells out "Overall Spoken
 // Level" for an input row, where a chart axis needs the short "Spoken".
 const SKILLS = SKILL_KEYS.map((key) => ({ key, label: SKILL_FORM_LABELS[key] }))
+
+// Character ceilings for the three free-text fields on this form. These MUST
+// match SubmitReportSchema in src/lib/validation/schemas.ts: the schema is the
+// server-side gate, and a form that lets a teacher type past it fails the save
+// with a raw zod message after they have already written the text.
+const FEEDBACK_MAX_CHARS = 5000
+const DETAILS_MAX_CHARS = 2000
 
 const CEFR_DESCRIPTIONS: Record<string, string> = {
   A1: 'Can understand and use very basic expressions. Introduces themselves and asks/answers simple questions.',
@@ -292,6 +299,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   // report what the invoice will actually carry, not an unsaved selection.
   const invoiceInfo = invoiceNotice(report.status, report.did_class_happen)
 
+  // Derived headline level, live as the teacher grades. null until all seven
+  // skills are set - see computeOverallLevel for the rounding rule.
+  const overallLevel = computeOverallLevel(levelData)
+
   const selectedMaterialSheet =
     materialSheets.find(sheet => sheet.id === selectedMaterialSheetId) ?? null
 
@@ -334,6 +345,18 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       setSubmitAttempted(true)
       feedbackSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
+    }
+
+    // All seven skills are mandatory when the class took place. Same gate as
+    // SubmitReportSchema.superRefine - client half gives the friendly message,
+    // server half makes it non-bypassable. No-show reports never reach this
+    // (level_data is sent null on that path).
+    if (didClassHappen) {
+      const unassessed = listUnassessedSkillLabels(levelData)
+      if (unassessed.length > 0) {
+        setError(`Please grade every skill before submitting. Missing: ${unassessed.join(', ')}.`)
+        return
+      }
     }
 
     setSaving(true)
@@ -511,14 +534,17 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                   disabled={!isEditable}
                   value={impersonationNote}
                   onChange={e => setImpersonationNote(e.target.value)}
-                  rows={3}
+                  rows={4}
+                  maxLength={DETAILS_MAX_CHARS}
                   placeholder="Who attended this class instead? Please provide as much detail as possible..."
+                  style={{ minHeight: '110px' }}
                   className={[
                     'w-full border border-amber-300 rounded-xl px-4 py-3 text-sm',
-                    'focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none',
+                    'focus:outline-none focus:ring-2 focus:ring-amber-400 resize-y',
                     !isEditable ? 'bg-gray-50 text-gray-500' : 'bg-white',
                   ].join(' ')}
                 />
+                <p className="text-xs text-gray-400 text-right mt-1">{impersonationNote.length} / {DETAILS_MAX_CHARS}</p>
               </div>
             )}
           </div>
@@ -540,12 +566,13 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                   disabled={!isEditable}
                   value={feedbackText}
                   onChange={e => setFeedbackText(e.target.value)}
-                  rows={5}
-                  maxLength={1000}
+                  rows={10}
+                  maxLength={FEEDBACK_MAX_CHARS}
                   placeholder="Summarise what was covered, how the student performed, and what to focus on next time..."
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+                  style={{ minHeight: '200px' }}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-y"
                 />
-                <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 1000</p>
+                <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / {FEEDBACK_MAX_CHARS}</p>
               </>
             ) : (
               <p className="whitespace-pre-wrap text-sm text-gray-700">{feedbackText}</p>
@@ -663,28 +690,51 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               )}
             </div>
 
-            <div className="flex flex-col">
-              {SKILLS.map((skill, idx) => (
+            <div className="flex flex-col md:flex-row md:items-stretch gap-6">
+              <div className="flex flex-col flex-1">
+                {SKILLS.map((skill, idx) => (
+                  <div
+                    key={skill.key}
+                    className="flex items-center gap-4"
+                    style={{
+                      paddingTop: '10px',
+                      paddingBottom: '10px',
+                      borderBottom: idx === SKILLS.length - 1 ? 'none' : '1px solid #f8f9fa',
+                    }}
+                  >
+                    <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
+                    <LevelTrack
+                      value={levelData[skill.key]}
+                      onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
+                      editable={isEditable}
+                    />
+                    {!isEditable && !levelData[skill.key] && (
+                      <span className="text-xs text-gray-400">Not assessed</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {(isEditable || overallLevel) && (
                 <div
-                  key={skill.key}
-                  className="flex items-center gap-4"
-                  style={{
-                    paddingTop: '10px',
-                    paddingBottom: '10px',
-                    borderBottom: idx === SKILLS.length - 1 ? 'none' : '1px solid #f8f9fa',
-                  }}
+                  className="flex flex-col items-center justify-center flex-shrink-0"
+                  style={{ width: '200px', borderLeft: '1px solid #f3f4f6', paddingLeft: '24px' }}
                 >
-                  <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
-                  <LevelTrack
-                    value={levelData[skill.key]}
-                    onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
-                    editable={isEditable}
-                  />
-                  {!isEditable && !levelData[skill.key] && (
-                    <span className="text-xs text-gray-400">Not assessed</span>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                    Overall Level
+                  </p>
+                  {overallLevel ? (
+                    <>
+                      <p style={{ fontSize: '40px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: 0 }}>
+                        {overallLevel}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center">
+                      Grade all seven skills to see the overall level
+                    </p>
                   )}
                 </div>
-              ))}
+              )}
             </div>
           </section>
         </>
@@ -748,14 +798,19 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}
           {isEditable ? (
-            <textarea
-              disabled={!isEditable}
-              value={additionalDetails}
-              onChange={e => setAdditionalDetails(e.target.value)}
-              rows={3}
-              placeholder="Any additional notes..."
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
-            />
+            <>
+              <textarea
+                disabled={!isEditable}
+                value={additionalDetails}
+                onChange={e => setAdditionalDetails(e.target.value)}
+                rows={6}
+                maxLength={DETAILS_MAX_CHARS}
+                placeholder="Any additional notes..."
+                style={{ minHeight: '140px' }}
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-y"
+              />
+              <p className="text-xs text-gray-400 text-right mt-1">{additionalDetails.length} / {DETAILS_MAX_CHARS}</p>
+            </>
           ) : (
             <p className="whitespace-pre-wrap text-sm text-gray-700">{additionalDetails || '—'}</p>
           )}

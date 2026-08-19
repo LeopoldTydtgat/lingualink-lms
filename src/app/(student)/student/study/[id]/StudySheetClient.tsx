@@ -154,14 +154,15 @@ export default function StudySheetClient({
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      {/* Back button */}
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors"
+      {/* Back link - the Study index, not a sheet, so no assignment param. */}
+      <Link
+        href="/student/study"
+        prefetch={false}
+        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors w-fit"
       >
         <ArrowLeft size={16} />
         Back to Study
-      </button>
+      </Link>
 
       {/* Sheet header */}
       <div className="mb-6">
@@ -413,7 +414,15 @@ export default function StudySheetClient({
 
       {/* Mark as done - sheet-level assignment completion. Practice context
           (no assignment) has no sheet-level state; the per-activity pills
-          carry it instead. */}
+          carry it instead.
+
+          The BUTTON is offered only on a zero-activity sheet, which has no
+          other way to register completion. A sheet with activities completes
+          by attempting them (lib/study/assignmentCompletion.ts), so a
+          sheet-level mark there would be a false completion - the server
+          refuses it too. The already-done confirmation stays gated on the
+          assignment alone: historical rows on activity-bearing sheets carry
+          marked_done_at and must still read Completed. */}
       {assignmentId !== null && (
         assignmentMarkedDone || markedDone ? (
           <div
@@ -425,7 +434,7 @@ export default function StudySheetClient({
               <p className="text-sm font-medium text-green-700">Completed</p>
             </div>
           </div>
-        ) : (
+        ) : totalActivities === 0 ? (
           <div className="mt-8">
             <button
               onClick={handleMarkAsDone}
@@ -439,8 +448,21 @@ export default function StudySheetClient({
               <p className="text-sm mt-2" style={{ color: '#FD5602' }}>{markError}</p>
             )}
           </div>
-        )
+        ) : null
       )}
+
+      {/* Foot exit - a long sheet must not strand the student at the bottom. */}
+      <div className="mt-8 pt-6" style={{ borderTop: '1px solid #f3f4f6' }}>
+        <Link
+          href="/student/study"
+          prefetch={false}
+          className="inline-flex items-center gap-1 text-sm font-medium"
+          style={{ color: '#FF8303' }}
+        >
+          <ArrowLeft size={16} />
+          Back to Study
+        </Link>
+      </div>
     </div>
   )
 }

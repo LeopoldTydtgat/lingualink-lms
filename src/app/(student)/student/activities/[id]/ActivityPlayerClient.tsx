@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { ArrowLeft, CheckCircle, XCircle, RotateCcw } from 'lucide-react'
 import type { McqQuestion } from '@/lib/validation/activities'
 
@@ -15,6 +16,7 @@ interface QuestionResult {
 
 interface Props {
   activityId: string
+  sheetId: string
   assignmentId: string | null
   title: string | null
   questions: McqQuestion[]
@@ -29,12 +31,21 @@ type Phase = 'answering' | 'review' | 'score'
 
 export default function ActivityPlayerClient({
   activityId,
+  sheetId,
   assignmentId,
   title,
   questions,
   previousScore,
 }: Props) {
   const router = useRouter()
+
+  // An explicit destination, not history: a fresh tab or a refresh must still
+  // lead back to the sheet. The assignment param has to survive the round trip
+  // or the sheet falls back to practice context and drops its status pills and
+  // the mark-as-done control.
+  const backHref = assignmentId
+    ? `/student/study/${sheetId}?assignment=${assignmentId}`
+    : `/student/study/${sheetId}`
 
   const [phase, setPhase] = useState<Phase>('answering')
   const [currentIdx, setCurrentIdx] = useState(0)
@@ -132,13 +143,14 @@ export default function ActivityPlayerClient({
 
     return (
       <div className="p-6 max-w-3xl mx-auto">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors"
+        <Link
+          href={backHref}
+          prefetch={false}
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors w-fit"
         >
           <ArrowLeft size={16} />
-          Back
-        </button>
+          Back to sheet
+        </Link>
 
         <div className="text-center py-12">
           {scorePct >= 60 ? (
@@ -177,11 +189,20 @@ export default function ActivityPlayerClient({
             </button>
             <button
               onClick={handleReviewAgain}
-              className="px-6 py-2.5 rounded-lg text-sm font-semibold text-white"
-              style={{ backgroundColor: '#FF8303' }}
+              className="px-6 py-2.5 rounded-lg text-sm font-semibold"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: '#FF8303' }}
             >
               Review Answers
             </button>
+            {/* Rightmost and the only primary left on this screen — the exit. */}
+            <Link
+              href={backHref}
+              prefetch={false}
+              className="inline-flex items-center px-6 py-2.5 rounded-lg text-sm font-semibold text-white"
+              style={{ backgroundColor: '#FF8303' }}
+            >
+              Back to Sheet
+            </Link>
           </div>
         </div>
       </div>
@@ -192,13 +213,14 @@ export default function ActivityPlayerClient({
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors"
+      <Link
+        href={backHref}
+        prefetch={false}
+        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors w-fit"
       >
         <ArrowLeft size={16} />
-        Back
-      </button>
+        Back to sheet
+      </Link>
 
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{title ?? 'Activity'}</h1>

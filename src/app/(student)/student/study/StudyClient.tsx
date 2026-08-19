@@ -39,6 +39,15 @@ interface Props {
   studentId: string
   assignments: Assignment[]
   completedAssignmentIds: string[]
+  /**
+   * assignment id -> percentage score. Populated ONLY where the number is
+   * unambiguous: a completed assignment whose sheet has exactly one activity
+   * and whose latest attempt under that assignment carries a numeric score
+   * (see study/page.tsx). A MISSING entry means "no unambiguous number to
+   * show" - the card falls back to a plain "Completed" pill. Never read a
+   * missing entry as 0.
+   */
+  assignmentScores: Record<string, number>
   practicedSheetIds: string[]
   library: StudySheet[]
   materialAssignments: MaterialAssignment[]
@@ -157,7 +166,7 @@ function StatCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completedAssignmentIds, practicedSheetIds, library, materialAssignments, sheetTopicTags }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, assignmentScores, practicedSheetIds, library, materialAssignments, sheetTopicTags }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
@@ -358,6 +367,7 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
                         key={a.id}
                         assignment={a}
                         status="completed"
+                        score={assignmentScores[a.id]}
                         deactivated={!a.study_sheet!.is_active}
                         onStart={() => openSheet(a.study_sheet!.id, a.id)}
                       />
@@ -501,11 +511,18 @@ function AssignmentCard({
   status,
   onStart,
   deactivated = false,
+  score,
 }: {
   assignment: Assignment
   status: 'pending' | 'completed'
   onStart: () => void
   deactivated?: boolean
+  /**
+   * Percentage shown on the Completed pill. Supplied ONLY where the number is
+   * unambiguous (see study/page.tsx); undefined keeps the plain "Completed"
+   * label. Never rendered on a pending card.
+   */
+  score?: number
 }) {
   const sheet = assignment.study_sheet!
 
@@ -542,11 +559,13 @@ function AssignmentCard({
           <div className="flex items-center gap-2">
             <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
             {status === 'completed' && (
+              /* Same pill, same colours whatever the number: a low score is a
+                 result to read, not a failure to style red. */
               <span
                 className="px-2 py-0.5 rounded-full text-xs font-medium"
                 style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
               >
-                Completed
+                {typeof score === 'number' ? `Completed ${score}%` : 'Completed'}
               </span>
             )}
           </div>

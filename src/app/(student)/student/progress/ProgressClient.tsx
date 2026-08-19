@@ -4,12 +4,10 @@ import type { ReactNode } from 'react'
 import { Activity, History, Pencil, type LucideIcon } from 'lucide-react'
 import { requireTz } from '@/lib/time/requireTz'
 import {
+  computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
   type LevelData,
 } from '@/lib/levels/levelData'
-import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
 
 // ----- Types -----
 
@@ -201,14 +199,14 @@ export default function ProgressClient({
   const totalMinutesLearned = completedLessons.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0)
   const avgPerWeek = avgClassesPerWeek(completedLessons)
 
-  // ----- Radar chart data -----
-  // All three chart surfaces share these helpers: same presence predicate, same
-  // canonical skill order, same 1..CEFR_MAX_VALUE scale, and unassessed skills
-  // dropped from the chart rather than plotted at zero. They are named
-  // underneath instead.
   const hasLevels = hasUsableLevelData(latestLevelData)
-  const radarData = toRadarData(latestLevelData)
-  const unassessedSkills = listUnassessedSkillLabels(latestLevelData)
+
+  // Derived headline level: the equal-weight average of all seven skills, or
+  // null when the assessment is partial. Same function the teacher report form
+  // uses, so the student never sees a different number from the one the teacher
+  // saw when filing. Legacy partial assessments render the chart with no
+  // headline rather than an average that would overstate the level.
+  const overallLevel = computeOverallLevel(latestLevelData)
 
   // ----- Exercises -----
   const pending = Math.max(0, totalAssigned - totalCompleted)
@@ -279,24 +277,37 @@ export default function ProgressClient({
 
           {hasLevels ? (
             <>
-            {/* Chart and the "not yet assessed" line are one shared component,
-                rendered in a single full-width column. The chart is a
-                fixed-size hand-rolled SVG ported from the admin report detail:
-                each skill's CEFR level prints on the chart under its axis
-                label, so the per-skill scorecard that used to sit below is
-                gone. This used to be a `grid lg:grid-cols-2` with the chart
-                inline, which handed the chart only half the card width from lg
-                up, and kept a second, drifting copy of the chart config. */}
-            <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
+            {overallLevel && (
+              <div
+                className="flex flex-col items-center"
+                style={{ marginBottom: '20px' }}
+              >
+                <p
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#9ca3af',
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    margin: 0,
+                  }}
+                >
+                  Overall Level
+                </p>
+                <p style={{ fontSize: '44px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                  {overallLevel}
+                </p>
+              </div>
+            )}
 
-            {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
+            {/* CEFR scale hint: gives the headline level above its context. */}
             <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
               Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
             </p>
             </>
           ) : (
             <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
-              Your level chart will appear here after your teacher submits your first assessment.
+              Your level will appear here after your teacher submits your first assessment.
             </p>
           )}
         </Card>

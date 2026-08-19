@@ -4,9 +4,8 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
+  computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
 } from '@/lib/levels/levelData';
 import {
   MessageSquareText,
@@ -18,7 +17,6 @@ import {
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
 import PastClassStatusTag from '@/components/student/PastClassStatusTag';
 import StarRating from '@/components/student/StarRating';
-import LevelAssessmentChart from '@/components/student/LevelAssessmentChart';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,17 +77,15 @@ interface Props {
   studentTimezone: string;
 }
 
-// ─── CEFR level → numeric for radar chart ─────────────────────────────────────
+// ─── CEFR level assessment ─────────────────────────────────────────────────
 
-// The skill keys, their short labels and the CEFR-to-number scale now live in
-// one module that the report form (the only writer) and all three chart
-// surfaces import, so they cannot drift apart again.
-// See src/lib/levels/levelData.ts.
+// The skill keys, their labels and the CEFR-to-number scale live in one
+// module that the report form (the only writer) and every reader import
+// from, so they cannot drift apart. See src/lib/levels/levelData.ts.
 //
-// The chart itself and the "not yet assessed" line are shared with the Progress
-// page as <LevelAssessmentChart />; only the card shell, header and empty
-// states below are page-specific. The chart prints each skill's CEFR level on
-// the chart itself, so there is no scorecard listed beneath it.
+// This card renders the overall level headline only, shared with the
+// Progress page; the per-skill breakdown is a teacher and admin view. The
+// card shell, header and empty states below are page-specific.
 
 // ─── Design system ────────────────────────────────────────────────────────────
 
@@ -165,19 +161,18 @@ export default function PastClassDetailClient({
   // deadlines or teacher pay is surfaced to the student.
   const awaitingReport = lesson.status === 'scheduled';
 
-  // Build radar chart data from report level_data. Shared with the Progress and
-  // admin surfaces: same presence predicate, same canonical order, same
-  // 1..CEFR_MAX_VALUE scale. Skills the teacher left blank are DROPPED from the
-  // chart - they used to be plotted at zero, which drew a spike to the centre
-  // that read as a failing grade rather than as "not graded". They are named
-  // underneath instead.
+  // The level assessment is read from the report and reduced to a single
+  // overall level for the student here; the per-skill breakdown is a teacher
+  // and admin view.
   const levelData = lesson.report?.level_data ?? null;
-  const radarData = toRadarData(levelData);
-  const unassessedSkills = listUnassessedSkillLabels(levelData);
 
   // A null report, jsonb null, {} and empty-string values all yield false here,
-  // so the radar is never rendered from unusable level_data.
+  // so the level card is never rendered from unusable level_data.
   const hasLevelData = hasUsableLevelData(levelData);
+
+  // The student sees the overall level only - the per-skill breakdown is a
+  // teacher and admin view. Null when the assessment is partial.
+  const overallLevel = computeOverallLevel(levelData);
 
   const hasSheets = assignments.some((a) => a.study_sheet);
 
@@ -293,17 +288,40 @@ export default function PastClassDetailClient({
         )}
       </div>
 
-      {/* ── Level radar chart ── */}
+      {/* ── Level assessment ── */}
       {hasLevelData ? (
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
           </div>
-          <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
+          {overallLevel ? (
+            <div className="flex flex-col items-center">
+              <p
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#9ca3af',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  margin: 0,
+                }}
+              >
+                Overall Level
+              </p>
+              <p style={{ fontSize: '44px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                {overallLevel}
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+              Your teacher graded some skills for this class but not all of them, so
+              there is no overall level to show.
+            </p>
+          )}
         </div>
       ) : awaitingReport ? (
         /* Ended class, report not filed yet: keep the section visible with an
-           explicit pending message instead of rendering an empty radar. */
+           explicit pending message instead of rendering an empty level card. */
         <div style={{ ...CARD_STYLE, padding: '20px', marginBottom: '16px' }} className="shadow-sm">
           <div className="mb-3">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
