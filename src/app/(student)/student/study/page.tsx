@@ -203,13 +203,23 @@ export default async function StudyPage() {
     activityRows = (data ?? []) as { id: string; sheet_id: string }[]
   }
 
+  // Ordered ASCENDING on created_at: the assignmentScores derivation below keeps
+  // the LAST matching row it sees, so that row must be the NEWEST attempt. A
+  // student who retries at 90% after 50% must see 90.
+  //
+  // score/created_at are extra columns for that derivation only - the completion
+  // rule is unchanged: buildAssignmentCompletion's AttemptActivityRow type is
+  // structural, so the extra fields are accepted and ignored.
   const { data: attemptsRaw } = await supabase
     .from('activity_attempts')
-    .select('activity_id, assignment_id')
+    .select('activity_id, assignment_id, score, created_at')
     .eq('student_id', student.id)
+    .order('created_at', { ascending: true })
   const attemptRows = (attemptsRaw ?? []) as {
     activity_id: string
     assignment_id: string | null
+    score: number | null
+    created_at: string
   }[]
 
   const markedDoneAssignmentIds = new Set(
@@ -224,6 +234,42 @@ export default async function StudyPage() {
   const completedAssignmentIds = assignmentsList
     .filter((a) => isComplete(a.id as string, a.study_sheet_id as string))
     .map((a) => a.id as string)
+
+  // SCORE RULE: a completed assignment card shows a percentage ONLY where that
+  // number is unambiguous - the sheet has EXACTLY ONE activity, and the latest
+  // attempt for that activity under that assignment carries a numeric score.
+  //
+  // Deliberately NO average or any other aggregate across several activities:
+  // which number to show for a multi-activity sheet is a business decision that
+  // has not been made. More than one activity, zero activities, a writing task
+  // (score null), and a marked_done_at assignment with no attempt at all ALL get
+  // no entry - never a 0, never a placeholder. Those cards keep the plain
+  // "Completed" label.
+  //
+  // attemptRows is ascending on created_at, so the last match wins = newest.
+  const completedAssignmentIdSet = new Set(completedAssignmentIds)
+  const assignmentScores: Record<string, number> = {}
+  for (const a of assignmentsList) {
+    const assignmentId = a.id as string
+    if (!completedAssignmentIdSet.has(assignmentId)) continue
+
+    const acts = activityIdsBySheet.get(a.study_sheet_id as string)
+    if (!acts || acts.length !== 1) continue
+    const activityId = acts[0]
+
+    // Stays null when no attempt row matches, so "no attempt at all" and
+    // "attempt with a null score" both fall through to no entry.
+    let latest: { score: number | null } | null = null
+    for (const t of attemptRows) {
+      if (t.assignment_id === assignmentId && t.activity_id === activityId) {
+        latest = t
+      }
+    }
+
+    if (latest && typeof latest.score === 'number') {
+      assignmentScores[assignmentId] = latest.score
+    }
+  }
 
   // PRACTICE RULE: a sheet is practiced when it has >= 1 activity and every one
   // of its activities has at least one attempt with assignment_id === null.
@@ -251,6 +297,7 @@ export default async function StudyPage() {
       studentId={student.id}
       assignments={assignments}
       completedAssignmentIds={completedAssignmentIds}
+      assignmentScores={assignmentScores}
       practicedSheetIds={practicedSheetIds}
       library={library}
       materialAssignments={materialAssignments}
