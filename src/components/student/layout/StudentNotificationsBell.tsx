@@ -120,9 +120,25 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
       }, 800)
     }
 
-    const establish = () => {
+    const establish = async () => {
       if (disposed) return
       health = 'connecting'
+
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) {
+        health = 'unhealthy'
+        return
+      }
+      if (disposed) return
 
       // Drop any previous channel BEFORE opening the new one so a re-establish can
       // never leave an orphan subscription on the shared socket.
@@ -158,14 +174,14 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
       })
     }
 
-    establish()
+    void establish()
 
     // Heal on focus/visibility. BOTH listeners are needed: tab-switch fires
     // visibilitychange but not focus; alt-tabbing back to the window fires focus. The
     // debounce collapses a double-fire into one refresh.
     const heal = () => {
       scheduleRefresh()
-      if (health === 'none' || health === 'unhealthy') establish()
+      if (health === 'none' || health === 'unhealthy') void establish()
     }
     function onFocus() {
       heal()

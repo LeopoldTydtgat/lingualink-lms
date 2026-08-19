@@ -485,24 +485,49 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // Realtime: any change to this teacher's lessons re-fetches the visible week.
   // profile.id is stable for the component's lifetime so this runs once.
   useEffect(() => {
-    const channel = supabase
-      .channel(`lessons-daytoday-${profile.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'lessons',
-          filter: `teacher_id=eq.${profile.id}`,
-        },
-        () => {
-          const range = visibleRangeRef.current
-          if (range) fetchClassesForRange(range.start, range.end)
-        }
-      )
-      .subscribe()
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
 
-    return () => { supabase.removeChannel(channel) }
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel(`lessons-daytoday-${profile.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'lessons',
+            filter: `teacher_id=eq.${profile.id}`,
+          },
+          () => {
+            const range = visibleRangeRef.current
+            if (range) fetchClassesForRange(range.start, range.end)
+          }
+        )
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id])
 
