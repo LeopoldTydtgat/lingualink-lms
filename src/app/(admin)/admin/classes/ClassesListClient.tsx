@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { formatInstantInTz } from '@/lib/exportTime'
-import { DateRangeFilter } from '../_components/DateRangeFilter'
+import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../_components/DateRangeFilter'
+import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
 
 interface Teacher {
   id: string
@@ -42,6 +44,67 @@ interface Props {
   // Admin's profile timezone; null when unset. Date & Time column renders
   // in this zone so it agrees with the GET route's date-filter bucketing.
   adminTz: string | null
+  // True when the URL carried a filter/deep-link param. The URL then wins outright:
+  // no restore from sessionStorage, and storage is overwritten from what the URL
+  // produced. A '' seed (?filter=today with no profile timezone, or an unrecognised
+  // ?filter= value) still counts — the admin asked for a specific view via the URL,
+  // so a remembered filter must not silently widen or narrow it.
+  hasUrlFilters?: boolean
+}
+
+// The Status dropdown's options, and with them the set of status values this page is
+// willing to restore. One list rather than two: a value read back out of storage is
+// accepted only if it is still something the dropdown can display.
+const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '', label: 'All statuses' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'no_show', label: 'No-Show' },
+  { value: 'flagged', label: 'Flagged' },
+]
+
+// Page-scoped, so the sibling admin lists can each keep their own record later.
+const FILTERS_STORAGE_KEY = 'll-admin-classes-filters'
+
+/**
+ * What this page remembers for the rest of the browsing session.
+ *
+ * NOT the search text and NOT the page number, both deliberate: a remembered search
+ * term reads as a broken list ("where did my classes go?") on a page you did not type
+ * it on, and a remembered page 7 is meaningless against a result set that has moved on.
+ *
+ * The date range is stored as EITHER a preset id OR concrete day keys, never both:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "Today" must still mean today tomorrow;
+ *                       storing its dates would pin the filter to a day that has
+ *                       passed, which is the exact staleness this split avoids.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+interface StoredFilters {
+  teacher: string
+  status: string
+  preset: DateRangePreset | null
+  from: string
+  to: string
+}
+
+const DEFAULT_STORED_FILTERS: StoredFilters = {
+  teacher: '',
+  status: '',
+  preset: null,
+  from: '',
+  to: '',
+}
+
+// 'YYYY-MM-DD' or empty. The stored value goes straight back into a date input and
+// into the GET route's date_from/date_to, so anything else is rejected at the door
+// rather than sent to the server as a query the route never expects.
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+function isDayKeyOrEmpty(value: string): boolean {
+  return value === '' || DAY_KEY_RE.test(value)
 }
 
 // Maps raw DB status values to a display label and colour
@@ -121,7 +184,7 @@ function formatDateTime(isoString: string): string {
   return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
-export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '', adminTz }: Props) {
+export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '', adminTz, hasUrlFilters = false }: Props) {
   const router = useRouter()
 
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -151,11 +214,111 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
     return () => clearTimeout(timer)
   }, [search])
 
+  // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves —
+  // `search` and `page` are not dependencies, so typing in the search box neither
+  // rewrites storage nor pays for the preset match below.
+  //
+  // matchDateRangePreset is the same call that decides which quick-range button is
+  // highlighted, so what the screen shows as active and what gets stored are one
+  // decision. A hand-typed range that happens to equal a preset is therefore stored
+  // as that preset — which is exactly what the row is telling the admin it is.
+  const persistedFilters = useMemo<StoredFilters>(() => {
+    const preset = matchDateRangePreset(filterDateFrom, filterDateTo, adminTz, new Date())
+    return {
+      teacher: filterTeacher,
+      status: filterStatus,
+      preset,
+      from: preset ? '' : filterDateFrom,
+      to: preset ? '' : filterDateTo,
+    }
+  }, [filterTeacher, filterStatus, filterDateFrom, filterDateTo, adminTz])
+
+  /**
+   * Shape validation for a decoded stored record. Null rejects the whole record and
+   * the page opens on defaults.
+   *
+   * STRUCTURAL problems reject everything: not an object, a field of the wrong type,
+   * a malformed day key, or a preset id this build does not know (a record written by
+   * a different version of this page, or edited by hand — nothing about it can be
+   * trusted field by field).
+   *
+   * DATA DRIFT does not: a teacher who has since left, or a status the dropdown no
+   * longer offers, is a well-formed record whose target has moved. Those single fields
+   * fall back to "all", instead of throwing away a still-valid date range with them.
+   * Left as-is, a teacher id absent from the dropdown would filter the list by an
+   * invisible selection — the select would render blank while the fetch quietly
+   * narrowed the results.
+   */
+  function parseStoredFilters(raw: unknown): StoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const record = raw as Record<string, unknown>
+
+    const teacher = record.teacher
+    const status = record.status
+    const from = record.from
+    const to = record.to
+    if (typeof teacher !== 'string' || typeof status !== 'string') return null
+    if (typeof from !== 'string' || typeof to !== 'string') return null
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
+
+    let preset: DateRangePreset | null
+    if (record.preset === null) preset = null
+    else if (isDateRangePreset(record.preset)) preset = record.preset
+    else return null
+
+    return {
+      teacher: teachers.some((t) => t.id === teacher) ? teacher : '',
+      status: STATUS_OPTIONS.some((o) => o.value === status) ? status : '',
+      preset,
+      // Enforces the invariant on the way in as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to: preset ? '' : to,
+    }
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect
+   * — never during render, so the clock read below cannot desync server and client
+   * markup. `page` is untouched: a restore only ever happens on mount, where it is
+   * already 1.
+   */
+  function applyStoredFilters(stored: StoredFilters) {
+    setFilterTeacher(stored.teacher)
+    setFilterStatus(stored.status)
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab reopened the next morning, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" — the same reason
+      // DateRangeFilter disables the preset buttons and the server page declines to
+      // seed ?filter=today. The range restores empty rather than guessing UTC, and the
+      // hook then rewrites storage to match what is on screen.
+      const range = adminTz ? getPresetRange(stored.preset, new Date(), adminTz) : null
+      setFilterDateFrom(range?.from ?? '')
+      setFilterDateTo(range?.to ?? '')
+    } else {
+      setFilterDateFrom(stored.from)
+      setFilterDateTo(stored.to)
+    }
+  }
+
+  const { clear: clearStoredFilters } = useFilterPersistence<StoredFilters>({
+    storageKey: FILTERS_STORAGE_KEY,
+    value: persistedFilters,
+    defaultValue: DEFAULT_STORED_FILTERS,
+    skipRestore: hasUrlFilters,
+    parse: parseStoredFilters,
+    apply: applyStoredFilters,
+  })
+
   // Monotonic request token. Filter controls stay enabled during a fetch, so a
   // newer request can start while an older one is in flight — without this, a slow
   // earlier response would overwrite the newer rows, and a late-FAILING stale
   // request (the Clear case) would blank the list and raise the error banner over
-  // fresher results.
+  // fresher results. It also covers the restore: the default-filter request fired on
+  // mount is superseded by the restored-filter one a frame later.
   const lessonsRequestIdRef = useRef(0)
 
   const fetchLessons = useCallback(async (currentPage: number) => {
@@ -224,6 +387,10 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
     setFilterDateFrom('')
     setFilterDateTo('')
     setPage(1)
+    // Clear the remembered record too, immediately — "Clear" has to mean cleared for
+    // the next visit as well, including when the filters were already at their
+    // defaults and no state change would reach the persistence effect.
+    clearStoredFilters()
   }
 
   const totalPages = Math.ceil(total / pageSize)
@@ -335,12 +502,9 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
               boxSizing: 'border-box',
             }}
           >
-            <option value="">All statuses</option>
-            <option value="upcoming">Upcoming</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="no_show">No-Show</option>
-            <option value="flagged">Flagged</option>
+            {STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </div>
 

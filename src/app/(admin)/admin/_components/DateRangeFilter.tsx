@@ -10,6 +10,43 @@ const PRESETS: ReadonlyArray<{ key: DateRangePreset; label: string }> = [
   { key: 'last_month', label: 'Last month' },
 ]
 
+/**
+ * Which preset, if any, the range [from, to] IS at instant `now` in `tz`.
+ *
+ * The single definition of "active preset": the highlight below and the filter
+ * persistence that stores a preset id both call this, so what the row highlights and
+ * what gets remembered can never disagree. Exported rather than duplicated for that
+ * reason — a fifth preset added to PRESETS is understood by both at once.
+ *
+ * Null for the cleared state (no preset produces empty keys) and null without a
+ * timezone, where "which day is today" has no honest answer.
+ */
+export function matchDateRangePreset(
+  from: string,
+  to: string,
+  tz: string | null,
+  now: Date
+): DateRangePreset | null {
+  if (!tz || !(from || to)) return null
+  return (
+    PRESETS.find((p) => {
+      const range = getPresetRange(p.key, now, tz)
+      return range.from === from && range.to === to
+    })?.key ?? null
+  )
+}
+
+/**
+ * Whether `value` is one of the preset ids this component knows about.
+ *
+ * Reads a value from outside the type system — a sessionStorage record written by an
+ * older or newer build, or hand-edited. Keyed off the same PRESETS list, so an id
+ * this build cannot resolve is rejected rather than handed to getPresetRange.
+ */
+export function isDateRangePreset(value: unknown): value is DateRangePreset {
+  return typeof value === 'string' && PRESETS.some((p) => p.key === value)
+}
+
 // Lifted verbatim from the two date inputs this component replaces on the admin
 // Classes filter row, so the row is pixel-identical after the swap.
 const labelStyle: CSSProperties = {
@@ -78,17 +115,10 @@ export function DateRangeFilter({
   // colour, so the worst case of an SSR and a hydration render straddling local
   // midnight in tz is one button momentarily drawn in the wrong style.
   //
-  // The (from || to) guard is the cleared state, which no preset can ever match
-  // because every preset returns real day keys; it skips four Intl probes per render
-  // in the case the filter spends most of its life in.
-  const now = new Date()
-  const activePreset: DateRangePreset | null =
-    tz && (from || to)
-      ? PRESETS.find((p) => {
-          const range = getPresetRange(p.key, now, tz)
-          return range.from === from && range.to === to
-        })?.key ?? null
-      : null
+  // matchDateRangePreset short-circuits on the cleared state, which no preset can
+  // ever match because every preset returns real day keys; that skips four Intl
+  // probes per render in the case the filter spends most of its life in.
+  const activePreset = matchDateRangePreset(from, to, tz, new Date())
 
   return (
     <>
