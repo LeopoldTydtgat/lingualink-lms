@@ -67,8 +67,8 @@ const securityHeaders = [
       "font-src 'self' https://fonts.gstatic.com",
       // Images: self + data URIs (avatars/placeholders) + Supabase Storage
       `img-src 'self' data: blob: https://${supabaseHost}`,
-      // Connections: self + Supabase REST & Realtime + MS Graph + Microsoft login
-      `connect-src 'self' https://${supabaseHost} wss://${supabaseHost} https://graph.microsoft.com https://login.microsoftonline.com`,
+      // Connections: self + Supabase REST & Realtime + MS Graph + Microsoft login + Sentry ingest (browser error reports)
+      `connect-src 'self' https://${supabaseHost} wss://${supabaseHost} https://graph.microsoft.com https://login.microsoftonline.com https://*.ingest.de.sentry.io`,
       // No plugins (Flash etc.)
       "object-src 'none'",
       // Forms must post to same origin only
