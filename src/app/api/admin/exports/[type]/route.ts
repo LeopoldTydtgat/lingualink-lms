@@ -6,34 +6,12 @@ import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates
 import { getDayKeyInTz, getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
-// ─── CSV helper ───────────────────────────────────────────────────────────────
-
-function escapeCSV(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  let str = String(value)
-  // Neutralise spreadsheet formula injection: leading = + @ tab CR,
-  // or leading - that is not a plain number (negative amounts stay intact)
-  if (/^[=+@\t\r]/.test(str) || (str.startsWith('-') && !/^-\d+(\.\d+)?$/.test(str))) {
-    str = "'" + str
-  }
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
-}
-
-function toCSV(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return ''
-  const headers = Object.keys(rows[0])
-  const lines = [
-    headers.map(escapeCSV).join(','),
-    ...rows.map(row => headers.map(h => escapeCSV(row[h])).join(',')),
-  ]
-  return lines.join('\r\n')
-}
+// ExcelJS is Node-only (Buffer, zlib) — this route must not run on Edge.
+export const runtime = 'nodejs'
 
 // Date-only helper — used for `date`-typed columns (training start/end) that are
 // NOT instants and must stay exactly as stored. Instant (timestamptz) columns are
@@ -41,6 +19,63 @@ function toCSV(rows: Record<string, unknown>[]): string {
 function formatDate(iso: string | null): string {
   if (!iso) return ''
   return iso.slice(0, 10)
+}
+
+// Human-readable description of the filters actually applied, written into the
+// workbook header block so a saved file is self-describing. IDs resolve to names
+// through the cookie client (the route is already admin-gated). A missing row or
+// a failed read degrades to the raw id — this must never throw and must never
+// block an export.
+async function buildFilterLines(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  f: {
+    fromDate: string | null
+    toDate: string | null
+    teacherId: string | null
+    studentId: string | null
+    companyId: string | null
+  }
+): Promise<string[]> {
+  const lines: string[] = []
+
+  if (f.fromDate || f.toDate) {
+    lines.push(`Date range: ${f.fromDate || 'start'} to ${f.toDate || 'today'}`)
+  }
+
+  if (f.teacherId) {
+    let name: string | null = null
+    try {
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', f.teacherId).maybeSingle()
+      name = data?.full_name ?? null
+    } catch {
+      name = null
+    }
+    lines.push(`Teacher: ${name ?? f.teacherId}`)
+  }
+
+  if (f.studentId) {
+    let name: string | null = null
+    try {
+      const { data } = await supabase.from('students').select('full_name').eq('id', f.studentId).maybeSingle()
+      name = data?.full_name ?? null
+    } catch {
+      name = null
+    }
+    lines.push(`Student: ${name ?? f.studentId}`)
+  }
+
+  if (f.companyId) {
+    let name: string | null = null
+    try {
+      const { data } = await supabase.from('companies').select('name').eq('id', f.companyId).maybeSingle()
+      name = data?.name ?? null
+    } catch {
+      name = null
+    }
+    lines.push(`Company: ${name ?? f.companyId}`)
+  }
+
+  return lines
 }
 
 // Teacher billability comes from the canonical getBillability() in @/lib/billing/billability — do not reintroduce a local copy.
@@ -74,15 +109,39 @@ export async function GET(
   const fromTs = fromDate ? `${fromDate}T00:00:00.000Z` : null
   const toTs   = toDate   ? `${toDate}T23:59:59.999Z`   : null
 
-  let csvContent = ''
-  let filename = 'export.csv'
+  let rows: Record<string, unknown>[] = []
+  let columns: ExportColumn[] = []
+  let title = ''
+  let sheetName = ''
+  let totals: Record<string, unknown> | undefined
+  let freezeColumns = 0
+  let filename = 'export.xlsx'
 
   try {
     switch (type) {
 
       // ── 1. All Classes Report ──────────────────────────────────────────────
       case 'all-classes': {
-        filename = `lingualink-all-classes-${Date.now()}.csv`
+        filename = `lingualink-all-classes-${Date.now()}.xlsx`
+        title = 'All Classes Report'
+        sheetName = 'All Classes'
+        freezeColumns = 2 // Date + Time stay visible when scrolling right
+
+        const dateHeader = `Date (${exportTzLabel})`
+        const timeHeader = `Time (${exportTzLabel})`
+
+        columns = [
+          { header: dateHeader, key: dateHeader, width: 14 },
+          { header: timeHeader, key: timeHeader, width: 14 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
+          { header: 'Status', key: 'Status', width: 22 },
+          { header: 'Report Status', key: 'Report Status', width: 22 },
+          { header: 'Billable to Teacher', key: 'Billable to Teacher', width: 20 },
+          { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
+        ]
 
         let query = supabase
           .from('lessons')
@@ -136,7 +195,7 @@ export async function GET(
           ? (lessons ?? []).filter((l: any) => studentMap[l.student_id]?.companyId === companyId)
           : (lessons ?? [])
 
-        const rows = filtered.map((l: any) => {
+        rows = filtered.map((l: any) => {
           const report = reportMap[l.id]
           const student = studentMap[l.student_id]
           const billable = getBillability({
@@ -151,7 +210,7 @@ export async function GET(
           }).billableToTeacher
 
           // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
-          // helper, mirroring the reports export so both admin CSVs read identically.
+          // helper, mirroring the reports export so both admin exports read identically.
           // Non-cancel labels are export-specific and match reports/export/route.ts verbatim.
           const st = l.status as string
           const cancelLabel = getCancellationLabel(
@@ -168,8 +227,8 @@ export async function GET(
           else statusLabel = st
 
           return {
-            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
-            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
+            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Teacher': teacherMap[l.teacher_id] ?? '',
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
@@ -181,19 +240,33 @@ export async function GET(
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 2. Teacher Earnings Summary ────────────────────────────────────────
       case 'teacher-earnings': {
-        filename = `lingualink-teacher-earnings-${Date.now()}.csv`
+        filename = `lingualink-teacher-earnings-${Date.now()}.xlsx`
+        title = 'Teacher Earnings Summary'
+        sheetName = 'Teacher Earnings'
+        freezeColumns = 1 // Teacher stays visible
+
+        columns = [
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Month', key: 'Month', width: 12 },
+          { header: 'Classes Taken', key: 'Classes Taken', width: 14, format: 'integer' },
+          { header: 'Student No-Shows', key: 'Student No-Shows', width: 18, format: 'integer' },
+          { header: 'Total Hours', key: 'Total Hours', width: 14, format: 'decimal2' },
+          { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
+          { header: 'Total Owed', key: 'Total Owed', width: 14, format: 'money2' },
+          { header: 'Currency', key: 'Currency', width: 10 },
+          { header: 'Invoice Status', key: 'Invoice Status', width: 18 },
+        ]
 
         // fromDate/toDate feed TWO consumers with different strictness: Date.parse
         // for the coarse UTC bound (lenient — it accepts 'YYYY-MM' and 'YYYY') and a
         // 10-char lexical day-key compare below (strict). A value that is valid to
         // the first and not the second passes the DB bound then rejects every day
-        // key, silently emitting an EMPTY earnings CSV. Reject it loudly instead —
+        // key, silently emitting an EMPTY earnings sheet. Reject it loudly instead —
         // the admin UI's <input type="date"> always sends YYYY-MM-DD.
         const DAY_PARAM = /^\d{4}-\d{2}-\d{2}$/
         if ((fromDate && !DAY_PARAM.test(fromDate)) || (toDate && !DAY_PARAM.test(toDate))) {
@@ -302,7 +375,7 @@ export async function GET(
 
           // NEW271: Month buckets in the TEACHER's own timezone (matches NEW268 D3 /
           // recomputeAmounts.ts invoice basis). Display columns render in the export tz,
-          // but the billing-period KEY is teacher-local so this CSV's Month/Total agree
+          // but the billing-period KEY is teacher-local so this sheet's Month/Total agree
           // with invoices.amount_eur and the invoice-status join keys correctly.
           // The from/to range scoping above now resolves in this same teacher-local
           // zone, so scoping and bucketing can no longer disagree at a boundary.
@@ -350,28 +423,60 @@ export async function GET(
           invoiceMap[`${inv.teacher_id}__${ym}`] = inv.status
         })
 
-        const rows = Object.entries(summary).map(([key, s]) => ({
+        const earningRows = Object.entries(summary).map(([key, s]) => ({
           'Teacher': s.teacher,
           'Month': s.month,
           'Classes Taken': s.classesTaken,
           'Student No-Shows': s.studentNoShows,
-          'Total Hours': (s.totalMinutes / 60).toFixed(2),
+          'Total Hours': Number((s.totalMinutes / 60).toFixed(2)),
           // Decision B: one rate if every lesson in the teacher-month resolved to the
           // same rate, else "varies" (amounts above are per-lesson snapshot-correct).
-          'Hourly Rate': s.rates.size === 0 ? '0.00' : s.rates.size === 1 ? [...s.rates][0].toFixed(2) : 'varies',
-          'Total Owed': s.billableAmount.toFixed(2),
+          // 'varies' is deliberately a STRING in an otherwise numeric column.
+          'Hourly Rate': s.rates.size === 0 ? 0 : s.rates.size === 1 ? [...s.rates][0] : 'varies',
+          'Total Owed': Number(s.billableAmount.toFixed(2)),
           'Currency': s.currency,
           'Invoice Status': invoiceMap[key] ?? 'not uploaded',
         }))
 
-        rows.sort((a, b) => a['Teacher'].localeCompare(b['Teacher']) || a['Month'].localeCompare(b['Month']))
-        csvContent = toCSV(rows)
+        earningRows.sort((a, b) => a['Teacher'].localeCompare(b['Teacher']) || a['Month'].localeCompare(b['Month']))
+        rows = earningRows
+
+        if (earningRows.length > 0) {
+          // Currency guard: money may only be summed within ONE currency. Counts and
+          // hours are currency-independent and always sum.
+          const currencies = [...new Set(earningRows.map(r => r['Currency']))]
+          const owedSum = earningRows.reduce((sum, r) => sum + r['Total Owed'], 0)
+          totals = {
+            'Teacher': 'TOTAL',
+            'Classes Taken': earningRows.reduce((sum, r) => sum + r['Classes Taken'], 0),
+            'Student No-Shows': earningRows.reduce((sum, r) => sum + r['Student No-Shows'], 0),
+            'Total Hours': Number(earningRows.reduce((sum, r) => sum + r['Total Hours'], 0).toFixed(2)),
+            'Total Owed': currencies.length === 1 ? Number(owedSum.toFixed(2)) : 'Mixed currencies - see rows',
+            ...(currencies.length === 1 ? { 'Currency': currencies[0] } : {}),
+          }
+        }
+
         break
       }
 
       // ── 3. Student Hours Usage ─────────────────────────────────────────────
       case 'student-hours': {
-        filename = `lingualink-student-hours-${Date.now()}.csv`
+        filename = `lingualink-student-hours-${Date.now()}.xlsx`
+        title = 'Student Hours Usage'
+        sheetName = 'Student Hours'
+        freezeColumns = 1 // Student stays visible
+
+        columns = [
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Package', key: 'Package', width: 28 },
+          { header: 'Total Hours', key: 'Total Hours', width: 14, format: 'decimal2' },
+          { header: 'Hours Used', key: 'Hours Used', width: 14, format: 'decimal2' },
+          { header: 'Hours Remaining', key: 'Hours Remaining', width: 16, format: 'decimal2' },
+          { header: 'Start Date', key: 'Start Date', width: 14 },
+          { header: 'End Date', key: 'End Date', width: 14 },
+          { header: 'Status', key: 'Status', width: 22 },
+        ]
 
         // Service-role read — the route is requireAdmin-gated above.
         const adminClient = createAdminClient()
@@ -407,29 +512,47 @@ export async function GET(
           ? (trainings ?? []).filter((t: any) => sMap[t.student_id]?.companyId === companyId)
           : (trainings ?? [])
 
-        const rows = filtered.map((t: any) => {
+        rows = filtered.map((t: any) => {
           const student = sMap[t.student_id]
           const remaining = Number(t.total_hours) - Number(t.hours_consumed)
           return {
             'Student': student?.name ?? '',
             'Company': student?.companyId ? cMap[student.companyId] ?? '' : 'Private',
             'Package': t.package_name ?? t.package_type ?? '',
-            'Total Hours': Number(t.total_hours).toFixed(2),
-            'Hours Used': Number(t.hours_consumed).toFixed(2),
-            'Hours Remaining': remaining.toFixed(2),
+            'Total Hours': Number(Number(t.total_hours).toFixed(2)),
+            'Hours Used': Number(Number(t.hours_consumed).toFixed(2)),
+            'Hours Remaining': Number(remaining.toFixed(2)),
             'Start Date': formatDate(t.start_date),
             'End Date': formatDate(t.end_date),
             'Status': t.status,
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 4. Company Billing Report ──────────────────────────────────────────
       case 'company-billing': {
-        filename = `lingualink-company-billing-${Date.now()}.csv`
+        filename = `lingualink-company-billing-${Date.now()}.xlsx`
+        title = 'Company Billing Report'
+        sheetName = 'Company Billing'
+        freezeColumns = 1 // Company stays visible
+
+        const dateHeader = `Date (${exportTzLabel})`
+        const timeHeader = `Time (${exportTzLabel})`
+
+        columns = [
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: dateHeader, key: dateHeader, width: 14 },
+          { header: timeHeader, key: timeHeader, width: 14 },
+          { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
+          { header: 'Status', key: 'Status', width: 22 },
+          { header: 'Billable (standard)', key: 'Billable (standard)', width: 20 },
+          { header: 'Billable cancellation (48hr policy)', key: 'Billable cancellation (48hr policy)', width: 36 },
+          { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
+          { header: 'Currency', key: 'Currency', width: 10 },
+        ]
 
         // cancellation_policy has a column-level REVOKE on `authenticated` — must use
         // the admin client. Role check above has already gated access here.
@@ -446,7 +569,8 @@ export async function GET(
         if (sErr) throw sErr
 
         const studentIds = (students ?? []).map((s: any) => s.id)
-        if (studentIds.length === 0) { csvContent = toCSV([]); break }
+        // No B2B students in scope — emit the empty workbook (title block + headers).
+        if (studentIds.length === 0) break
 
         const cIds = [...new Set((students ?? []).map((s: any) => s.company_id).filter(Boolean))] as string[]
         const cRes = await supabase.from('companies').select('id, name').in('id', cIds)
@@ -484,7 +608,7 @@ export async function GET(
         const sMap: Record<string, any> = {}
         students?.forEach((s: any) => { sMap[s.id] = s })
 
-        const rows = (lessons ?? []).map((l: any) => {
+        const billingRows = (lessons ?? []).map((l: any) => {
           const student = sMap[l.student_id]
 
           // company-standard billing intentionally tracks billableToTeacher; the 48hr B2B split is billable48hr — single source of truth, do not reintroduce inline arithmetic.
@@ -502,7 +626,7 @@ export async function GET(
           const billable48 = bill.billable48hr
 
           // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
-          // helper, mirroring the all-classes export so both admin CSVs read identically.
+          // helper, mirroring the all-classes export so both admin exports read identically.
           // Display-only: getBillability above still keys off the raw l.status.
           const st = l.status as string
           const cancelLabel = getCancellationLabel(
@@ -521,8 +645,8 @@ export async function GET(
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
-            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
-            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
+            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
             'Status': statusLabel,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
@@ -532,13 +656,43 @@ export async function GET(
           }
         })
 
-        csvContent = toCSV(rows)
+        rows = billingRows
+
+        if (billingRows.length > 0) {
+          // Currency guard: money may only be summed within ONE currency.
+          const currencies = [...new Set(billingRows.map((r: any) => r['Currency'] as string))]
+          const amountSum = billingRows.reduce((sum: number, r: any) => sum + Number(r['Amount'] ?? 0), 0)
+          totals = {
+            'Company': 'TOTAL',
+            'Amount': currencies.length === 1 ? Number(amountSum.toFixed(2)) : 'Mixed currencies - see rows',
+            ...(currencies.length === 1 ? { 'Currency': currencies[0] } : {}),
+          }
+        }
+
         break
       }
 
       // ── 5. Student Progress Report ─────────────────────────────────────────
       case 'student-progress': {
-        filename = `lingualink-student-progress-${Date.now()}.csv`
+        filename = `lingualink-student-progress-${Date.now()}.xlsx`
+        title = 'Student Progress Report'
+        sheetName = 'Student Progress'
+        freezeColumns = 1 // Student stays visible
+
+        const classDateHeader = `Class Date (${exportTzLabel})`
+
+        columns = [
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: classDateHeader, key: classDateHeader, width: 20 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Grammar', key: 'Grammar', width: 14 },
+          { header: 'Expression', key: 'Expression', width: 14 },
+          { header: 'Comprehension', key: 'Comprehension', width: 16 },
+          { header: 'Vocabulary', key: 'Vocabulary', width: 14 },
+          { header: 'Accent', key: 'Accent', width: 12 },
+          { header: 'Overall Spoken Level', key: 'Overall Spoken Level', width: 22 },
+          { header: 'Overall Written Level', key: 'Overall Written Level', width: 22 },
+        ]
 
         let reportsQuery = supabase
           .from('reports')
@@ -584,7 +738,7 @@ export async function GET(
         const studentMap: Record<string, string> = {}
         studentRes2.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
-        const rows: Record<string, unknown>[] = []
+        rows = []
 
         for (const report of reports ?? []) {
           const lesson = lessonMap[report.lesson_id]
@@ -596,7 +750,7 @@ export async function GET(
 
           rows.push({
             'Student': studentMap[lesson.studentId] ?? '',
-            [`Class Date (${exportTzLabel})`]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
             'Teacher': teacherMap[report.teacher_id] ?? '',
             'Grammar': ld.grammar ?? '',
             'Expression': ld.expression ?? '',
@@ -608,13 +762,29 @@ export async function GET(
           })
         }
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 6. Pending Reports Log ─────────────────────────────────────────────
       case 'pending-reports': {
-        filename = `lingualink-pending-reports-${Date.now()}.csv`
+        filename = `lingualink-pending-reports-${Date.now()}.xlsx`
+        title = 'Pending Reports Log'
+        sheetName = 'Pending Reports'
+        freezeColumns = 1 // Teacher stays visible
+
+        const classDateHeader = `Class Date (${exportTzLabel})`
+        const deadlineHeader = `Deadline (${exportTzLabel})`
+        const flaggedAtHeader = `Flagged At (${exportTzLabel})`
+
+        columns = [
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: classDateHeader, key: classDateHeader, width: 20 },
+          { header: 'Hours Since Class', key: 'Hours Since Class', width: 18, format: 'decimal2' },
+          { header: 'Report Status', key: 'Report Status', width: 22 },
+          { header: deadlineHeader, key: deadlineHeader, width: 20 },
+          { header: flaggedAtHeader, key: flaggedAtHeader, width: 20 },
+        ]
 
         let query = supabase
           .from('reports')
@@ -659,27 +829,28 @@ export async function GET(
 
         const now = Date.now()
 
-        const rows = (reports ?? []).map((r: any) => {
+        rows = (reports ?? []).map((r: any) => {
           const lesson = lessonMap[r.lesson_id]
           const classEndTime = lesson
             ? new Date(lesson.scheduledAt).getTime()
             : null
+          // Number, not a string — sorts and filters in Excel. No lesson row leaves
+          // the cell EMPTY (never 0, which would read as "reported on time").
           const hoursSinceClass = classEndTime
-            ? ((now - classEndTime) / (1000 * 60 * 60)).toFixed(1)
+            ? Number(((now - classEndTime) / (1000 * 60 * 60)).toFixed(1))
             : ''
 
           return {
             'Teacher': teacherMap[r.teacher_id] ?? '',
             'Student': lesson ? studentMap[lesson.studentId] ?? '' : '',
-            [`Class Date (${exportTzLabel})`]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
             'Hours Since Class': hoursSinceClass,
             'Report Status': r.status,
-            [`Deadline (${exportTzLabel})`]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
-            [`Flagged At (${exportTzLabel})`]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
+            [deadlineHeader]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
+            [flaggedAtHeader]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
@@ -692,10 +863,24 @@ export async function GET(
     return NextResponse.json({ error: err.message ?? 'Export failed' }, { status: 500 })
   }
 
-  return new NextResponse(csvContent, {
+  const filterLines = await buildFilterLines(supabase, { fromDate, toDate, teacherId, studentId, companyId })
+
+  const buffer = await buildExportWorkbook({
+    title,
+    columns,
+    rows,
+    generatedAtLabel: formatInstantInTz(new Date(), exportTz),
+    timezoneLabel: exportTzLabel,
+    filterLines,
+    sheetName,
+    totalsRow: totals,
+    freezeColumns,
+  })
+
+  return new NextResponse(buffer, {
     status: 200,
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
   })
