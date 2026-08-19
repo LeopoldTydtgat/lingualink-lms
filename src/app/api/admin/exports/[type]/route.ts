@@ -488,6 +488,7 @@ export async function GET(
         columns = [
           { header: 'Company', key: 'Company', width: 24 },
           { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
           { header: dateHeader, key: dateHeader, width: 14 },
           { header: timeHeader, key: timeHeader, width: 14 },
           { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
@@ -496,6 +497,8 @@ export async function GET(
           { header: 'Billable cancellation (48hr policy)', key: 'Billable cancellation (48hr policy)', width: 36 },
           { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
           { header: 'Currency', key: 'Currency', width: 10 },
+          { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
+          { header: 'Amount Owed to Teacher', key: 'Amount Owed to Teacher', width: 24, format: 'money2' },
         ]
 
         // cancellation_policy has a column-level REVOKE on `authenticated` — must use
@@ -539,11 +542,11 @@ export async function GET(
         // company-owed Amount can be computed from getBillability's single source.
         const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))] as string[]
         const teacherRes = teacherIds.length > 0
-          ? await adminClient.from('profiles').select('id, hourly_rate, currency').in('id', teacherIds)
+          ? await adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', teacherIds)
           : { data: [] }
         if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
-        const teacherMap: Record<string, { rate: number; currency: string }> = {}
-        teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
+        const teacherMap: Record<string, { name: string; rate: number; currency: string }> = {}
+        teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { name: p.full_name ?? '', rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
         // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
         // teacherMap rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
@@ -589,6 +592,7 @@ export async function GET(
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
+            'Teacher': teacherMap[l.teacher_id]?.name ?? '',
             [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
             [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
@@ -597,6 +601,11 @@ export async function GET(
             'Billable cancellation (48hr policy)': billable48 ? 'Yes' : 'No',
             'Amount': bill.companyAmount,
             'Currency': teacherMap[l.teacher_id]?.currency ?? 'EUR',
+            // Historical per-lesson snapshot rate (live profiles.hourly_rate is the
+            // fallback only) — the live rate would retro-restate closed months.
+            'Hourly Rate': resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
+            // Teacher pay. Deliberately NOT 'Amount' above, which is bill.companyAmount.
+            'Amount Owed to Teacher': bill.amount,
           }
         })
 
@@ -606,10 +615,14 @@ export async function GET(
           // Currency guard: money may only be summed within ONE currency.
           const currencies = [...new Set(billingRows.map((r: any) => r['Currency'] as string))]
           const amountSum = billingRows.reduce((sum: number, r: any) => sum + Number(r['Amount'] ?? 0), 0)
+          // Teacher pay is denominated in the same teacher currency as Amount, so the
+          // single `currencies` guard above governs both sums. No second guard.
+          const teacherPaySum = billingRows.reduce((sum: number, r: any) => sum + Number(r['Amount Owed to Teacher'] ?? 0), 0)
           totals = {
             'Company': 'TOTAL',
             'Amount': currencies.length === 1 ? Number(amountSum.toFixed(2)) : 'Mixed currencies - see rows',
             ...(currencies.length === 1 ? { 'Currency': currencies[0] } : {}),
+            'Amount Owed to Teacher': currencies.length === 1 ? Number(teacherPaySum.toFixed(2)) : 'Mixed currencies - see rows',
           }
         }
 
