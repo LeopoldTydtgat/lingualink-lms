@@ -96,11 +96,51 @@ export async function POST(
     // -- 6. Idempotency -------------------------------------------------------
     // If already marked done, report success without writing - never overwrite
     // the original completion timestamp.
+    //
+    // This runs BEFORE the activity-count guard on purpose: an assignment that
+    // is already marked done must never come back as an error. Returning 409 for
+    // a row that is already complete would report failure for something that
+    // already succeeded, and an existing completion is never degraded. Checking
+    // it first also avoids a pointless count query on a row that needs no write.
     if (assignment.marked_done_at) {
       return NextResponse.json({ success: true, alreadyDone: true })
     }
 
-    // -- 7. Persist the completion --------------------------------------------
+    // -- 7. Sheet-level marking is for ZERO-ACTIVITY sheets only --------------
+    // Completion is bimodal (lib/study/assignmentCompletion.ts): marked_done_at
+    // set, OR the sheet has >= 1 activity and every one of them has an attempt
+    // under this assignment. So on a sheet that HAS activities, completion is
+    // already earned by doing the work - a sheet-level mark there would record a
+    // completion the student never earned, and the teacher would read a false
+    // completion. Only a zero-activity sheet (vocabulary list, reading passage,
+    // links) has no other way to register completion, so only it may use this.
+    //
+    // Read with the USER-SCOPED client, not admin: the student can already see
+    // these activities through RLS (student/study/[id]/page.tsx reads them the
+    // same way), and the audience gate in step 5 has already run.
+    const { count, error: activityCountError } = await supabase
+      .from('activities')
+      .select('id', { count: 'exact', head: true })
+      .eq('sheet_id', assignment.study_sheet_id)
+
+    // A failed count is not proof of zero activities, and neither is a null one.
+    // Falling through on either would reopen the exact hole this check closes.
+    if (activityCountError || count === null) {
+      console.error(
+        'activities count error:',
+        assignment.study_sheet_id,
+        activityCountError
+      )
+      return NextResponse.json({ error: 'Failed to mark as done' }, { status: 500 })
+    }
+    if (count > 0) {
+      return NextResponse.json(
+        { error: 'Complete the activities on this sheet to finish it.' },
+        { status: 409 }
+      )
+    }
+
+    // -- 8. Persist the completion --------------------------------------------
     // Writes to assignments are service-role only. toISOString() is banned for
     // LOCAL DATE construction in this project; here it produces a UTC instant
     // for a timestamptz column, which is the correct usage.
