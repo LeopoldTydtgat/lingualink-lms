@@ -8,6 +8,10 @@ import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { formatInstantInTz, formatDateInTz } from '@/lib/exportTime'
 import { Receipt, CheckCircle2, Info, ChevronDown } from 'lucide-react'
 
+// Hosted invoice generator (static site). Stopgap until an in-portal generator,
+// prefilled from lesson data, replaces it. Public URL, carries no secret.
+const INVOICE_GENERATOR_URL = 'https://lingualink-invoices.netlify.app/index.html'
+
 interface Profile {
   id: string
   full_name: string
@@ -99,6 +103,14 @@ function currencySymbol(code: string | null | undefined): string {
   return '€'
 }
 
+// Mirrors currencySymbol's branches exactly so the generator hint can never name
+// a currency different from the symbol rendered on this page.
+function currencyLabel(code: string | null | undefined): string {
+  if (code === 'USD') return 'USD'
+  if (code === 'GBP') return 'GBP'
+  return 'EUR'
+}
+
 // Supabase joins return object or array depending on relationship — flatten safely
 function getStudentName(lesson: Lesson): string {
   if (!lesson.students) return 'Unknown'
@@ -156,6 +168,7 @@ export default function BillingClient({
   // FIX: initialised from server-side prop instead of fetched client-side
   const [billingInfo] = useState<BillingInfoDisplay | null>(initialBillingInfo)
   const sym = currencySymbol(billingInfo?.currency)
+  const currencyCode = currencyLabel(billingInfo?.currency)
 
   // Teacher's account timezone for rendering instants. The server page
   // fails closed when profiles.timezone is unset, so this is populated on
@@ -393,18 +406,37 @@ export default function BillingClient({
             </p>
           )}
 
-          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 flex items-center justify-between gap-4">
             <div>
-              <p className="font-medium text-gray-900">Invoice Template</p>
-              <p className="text-sm text-gray-500">Download the Lingualink branded template to complete your invoice</p>
+              <p className="font-medium text-gray-900">Create Your Invoice</p>
+              <p className="text-sm text-gray-500">
+                Fill in the invoice generator and download the PDF, then upload it against the relevant month below. Set the currency to {currencyCode}.
+              </p>
+              {templateUrl && (
+                <div className="mt-1">
+                  <a
+                    href={templateUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm underline"
+                    style={{ color: '#FF8303' }}
+                  >
+                    Download the branded template instead
+                  </a>
+                </div>
+              )}
             </div>
-            {templateUrl ? (
-              <a href={templateUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 text-sm rounded-lg text-white btn-primary-hover" onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')} onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')} style={{ backgroundColor: '#FF8303' }}>
-                Download Template
-              </a>
-            ) : (
-              <span className="text-sm text-gray-400">No template uploaded yet</span>
-            )}
+            <a
+              href={INVOICE_GENERATOR_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 text-sm rounded-lg text-white btn-primary-hover whitespace-nowrap"
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#e67300')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FF8303')}
+              style={{ backgroundColor: '#FF8303' }}
+            >
+              Open Invoice Generator
+            </a>
           </div>
 
           <div className="space-y-3">
