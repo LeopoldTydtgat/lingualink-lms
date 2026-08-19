@@ -10,6 +10,11 @@ import {
   recomputeInvoiceAmountsForAllTeachers,
 } from '@/lib/billing/recomputeAmounts'
 import { getExportTimezone, formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
+import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook'
+import { buildFilterLines } from '@/lib/exports/filterLines'
+
+// ExcelJS is Node-only (Buffer, zlib) — this route must not run on Edge.
+export const runtime = 'nodejs'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
@@ -17,40 +22,18 @@ import { getExportTimezone, formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds
 // (BillingAdminClient.tsx status <select>: pending / uploaded / paid / overdue).
 // 'All Statuses' sends no param at all, so absence — not a member of this list —
 // is what means "every status". Anything outside the set is rejected rather than
-// passed to .eq(), so a typo can never export an empty CSV that reads as a real,
+// passed to .eq(), so a typo can never export an empty file that reads as a real,
 // settled "no invoices in this status" answer.
 const INVOICE_STATUSES: readonly string[] = ['pending', 'uploaded', 'paid', 'overdue']
 
 // Instant (timestamptz) columns render in the resolved export timezone via
 // formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
 // is NOT an instant, so it keeps its own month formatter.
-function formatMonthCSV(dateStr: string): string {
+function formatMonthLabel(dateStr: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'UTC',
     month: 'long', year: 'numeric',
   }).format(new Date(dateStr + 'T12:00:00Z'))
-}
-
-function escapeCSV(val: unknown): string {
-  if (val === null || val === undefined) return ''
-  let str = String(val)
-  // Neutralise spreadsheet formula injection: leading = + @ tab CR,
-  // or leading - that is not a plain number (negative amounts stay intact)
-  if (/^[=+@\t\r]/.test(str) || (str.startsWith('-') && !/^-\d+(\.\d+)?$/.test(str))) {
-    str = "'" + str
-  }
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
-}
-
-function toCSV(headers: string[], rows: (string | number | boolean | null | undefined)[][]): string {
-  const lines = [headers.map(escapeCSV).join(',')]
-  for (const row of rows) {
-    lines.push(row.map(escapeCSV).join(','))
-  }
-  return lines.join('\n')
 }
 
 // ── Route ──────────────────────────────────────────────────────────────────────────────
@@ -99,15 +82,20 @@ export async function GET(req: NextRequest) {
     dateLtIso = zonedDayRangeToUtcBounds(dateTo, dateTo, exportTz).ltIso
   }
 
-  let csv = ''
-  let filename = 'export.csv'
+  let columns: ExportColumn[] = []
+  let rows: Record<string, unknown>[] = []
+  let title = ''
+  let sheetName = ''
+  let filename = 'export.xlsx'
+  let freezeColumns = 0
+  let filterLines: string[] = []
 
   try {
 
   // ── 1. Teacher Invoice Summary ────────────────────────────────────────────────────────
   if (type === 'teacher_invoices') {
     // Validate before the recompute below: an unknown status must cost nothing and
-    // must not answer 200 with a CSV whose scope the caller did not ask for.
+    // must not answer 200 with a workbook whose scope the caller did not ask for.
     if (status !== null && !INVOICE_STATUSES.includes(status)) {
       return NextResponse.json(
         { error: `Unknown invoice status '${status}'. Expected one of: ${INVOICE_STATUSES.join(', ')}.` },
@@ -115,7 +103,7 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Refresh amount_eur before export so the CSV matches the admin Billing
+    // Refresh amount_eur before export so the workbook matches the admin Billing
     // page header. Scope to one teacher when filtered, else recompute everyone.
     if (teacherId) {
       try {
@@ -132,6 +120,26 @@ export async function GET(req: NextRequest) {
     } else {
       await recomputeInvoiceAmountsForAllTeachers()
     }
+
+    title = 'Teacher Invoice Summary'
+    sheetName = 'Teacher Invoices'
+    filename = 'teacher-invoices.xlsx'
+    freezeColumns = 2 // Reference + Teacher stay visible when scrolling right
+
+    const uploadedAtHeader = `Uploaded At (${exportTzLabel})`
+    const paidAtHeader = `Paid At (${exportTzLabel})`
+
+    columns = [
+      { header: 'Reference', key: 'Reference', width: 20 },
+      { header: 'Teacher', key: 'Teacher', width: 24 },
+      { header: 'Email', key: 'Email', width: 28 },
+      { header: 'Month', key: 'Month', width: 16 },
+      { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
+      { header: 'Currency', key: 'Currency', width: 10 },
+      { header: 'Status', key: 'Status', width: 14 },
+      { header: uploadedAtHeader, key: uploadedAtHeader, width: 20 },
+      { header: paidAtHeader, key: paidAtHeader, width: 20 },
+    ]
 
     // The embedded profiles join exposes teacher email — read it on the admin
     // client, never the RLS-bound server client (NEW262d). The isAdmin gate
@@ -150,28 +158,61 @@ export async function GET(req: NextRequest) {
     const { data: invoices, error: invoicesErr } = await query
     if (invoicesErr) throw invoicesErr
 
-    const headers = ['Reference', 'Teacher', 'Email', 'Month', 'Amount', 'Currency', 'Status', `Uploaded At (${exportTzLabel})`, `Paid At (${exportTzLabel})`]
-    const rows = (invoices || []).map(inv => {
+    rows = (invoices || []).map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
-      return [
-        inv.reference_number,
-        teacher?.full_name,
-        teacher?.email,
-        formatMonthCSV(inv.billing_month),
-        inv.amount_eur != null ? Number(inv.amount_eur).toFixed(2) : '0.00',
-        (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
-        inv.status,
-        inv.uploaded_at ? formatInstantInTz(inv.uploaded_at, exportTz) : '',
-        inv.paid_at ? formatInstantInTz(inv.paid_at, exportTz) : '',
-      ]
+      return {
+        'Reference': inv.reference_number,
+        'Teacher': teacher?.full_name,
+        'Email': teacher?.email,
+        'Month': formatMonthLabel(inv.billing_month),
+        // A real NUMBER, not a formatted string, so Excel sorts and sums it. A
+        // null amount_eur still exports as 0 — exactly what the CSV wrote as
+        // '0.00' — never a blank cell, which would read as "not yet priced".
+        'Amount': inv.amount_eur != null ? Number(inv.amount_eur) : 0,
+        'Currency': (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
+        'Status': inv.status,
+        [uploadedAtHeader]: inv.uploaded_at ? formatInstantInTz(inv.uploaded_at, exportTz) : '',
+        [paidAtHeader]: inv.paid_at ? formatInstantInTz(inv.paid_at, exportTz) : '',
+      }
     })
 
-    csv = toCSV(headers, rows)
-    filename = 'teacher-invoices.csv'
+    // fromDate/toDate are passed as null DELIBERATELY: this branch never applies
+    // dateFrom or dateTo to its query (it scopes by teacher, month and status),
+    // so printing a date range in the header block would state a scope this
+    // export does not have.
+    filterLines = await buildFilterLines(supabase, {
+      fromDate: null, toDate: null,
+      teacherId, studentId: null, companyId: null,
+    })
+    if (month) filterLines.push(`Month: ${formatMonthLabel(month)}`)
+    if (status) filterLines.push(`Invoice Status: ${status}`)
   }
 
   // ── 4. Company Billing Report ─────────────────────────────────────────────────────────
   else if (type === 'company_billing') {
+    title = 'Company Billing Report'
+    sheetName = 'Company Billing'
+    filename = 'company-billing.xlsx'
+    freezeColumns = 3 // Company + Student + Teacher stay visible when scrolling right
+
+    const dateTimeHeader = `Date & Time (${exportTzLabel})`
+
+    // No totals row on this sheet: Amount is per-lesson in the TEACHER's currency,
+    // so one sum would silently add GBP or USD rows into a euro figure the moment
+    // a non-EUR teacher appears. A currency-aware total is its own decision.
+    columns = [
+      { header: 'Company', key: 'Company', width: 24 },
+      { header: 'Student', key: 'Student', width: 24 },
+      { header: 'Teacher', key: 'Teacher', width: 24 },
+      { header: dateTimeHeader, key: dateTimeHeader, width: 20 },
+      { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
+      { header: 'Status', key: 'Status', width: 22 },
+      { header: 'Billable (24hr)', key: 'Billable (24hr)', width: 16 },
+      { header: 'Billable (48hr policy)', key: 'Billable (48hr policy)', width: 22 },
+      { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
+      { header: 'Currency', key: 'Currency', width: 10 },
+    ]
+
     // cancellation_policy and hourly_rate have column-level REVOKEs on `authenticated` —
     // must read them via the admin client. The role check above has already gated this branch.
     const adminClient = createAdminClient()
@@ -209,9 +250,6 @@ export async function GET(req: NextRequest) {
     // The teacher's live profiles.hourly_rate is used only as the fallback (NEW268 D1).
     const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map(l => l.id))
 
-    const headers = ['Company', 'Student', 'Teacher', `Date & Time (${exportTzLabel})`, 'Duration (min)', 'Status', 'Billable (24hr)', 'Billable (48hr policy)', 'Amount', 'Currency']
-    const rows: (string | number | boolean | null)[][] = []
-
     for (const company of (companies || [])) {
       const cStudents = (companyStudents || []).filter(s => s.company_id === company.id)
 
@@ -235,24 +273,26 @@ export async function GET(req: NextRequest) {
           // Skip lessons that are neither billable in any way
           if (!bill.billableToTeacher && !bill.billable48hr) continue
 
-          rows.push([
-            company.name,
-            student.full_name,
-            teacher?.full_name || '',
-            formatInstantInTz(lesson.scheduled_at, exportTz),
-            lesson.duration_minutes,
-            lesson.status,
-            bill.billableToTeacher ? 'Yes' : 'No',
-            bill.billable48hr ? 'Yes' : 'No',
-            bill.companyAmount,
-            teacher?.currency || 'EUR',
-          ])
+          rows.push({
+            'Company': company.name,
+            'Student': student.full_name,
+            'Teacher': teacher?.full_name || '',
+            [dateTimeHeader]: formatInstantInTz(lesson.scheduled_at, exportTz),
+            'Duration (min)': lesson.duration_minutes,
+            'Status': lesson.status,
+            'Billable (24hr)': bill.billableToTeacher ? 'Yes' : 'No',
+            'Billable (48hr policy)': bill.billable48hr ? 'Yes' : 'No',
+            'Amount': bill.companyAmount,
+            'Currency': teacher?.currency || 'EUR',
+          })
         }
       }
     }
 
-    csv = toCSV(headers, rows)
-    filename = 'company-billing.csv'
+    filterLines = await buildFilterLines(supabase, {
+      fromDate: dateFrom, toDate: dateTo,
+      teacherId: null, studentId: null, companyId,
+    })
   }
 
   else {
@@ -265,9 +305,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: err.message ?? 'Export failed' }, { status: 500 })
   }
 
-  return new NextResponse(csv, {
+  const buffer = await buildExportWorkbook({
+    title,
+    columns,
+    rows,
+    generatedAtLabel: formatInstantInTz(new Date(), exportTz),
+    timezoneLabel: exportTzLabel,
+    filterLines,
+    sheetName,
+    freezeColumns,
+  })
+
+  return new NextResponse(buffer, {
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
   })

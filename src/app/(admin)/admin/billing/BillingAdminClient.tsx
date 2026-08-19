@@ -730,13 +730,13 @@ export default function BillingAdminClient({
     }
   }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, exportTz, hydrateLessons])
 
-  // ── CSV export helper ──────────────────────────────────────────────────────
+  // ── Export download helper ─────────────────────────────────────────────────
   // Uses fetch + blob (not window.open) so a failed export surfaces a friendly
   // inline message instead of dumping the route's JSON error body into a new
   // tab. Reads data.message ?? data.error so the TIMEZONE_MISSING 422 (whose
   // human-readable text lives in `message`, alongside error:'TIMEZONE_MISSING')
   // reaches the admin rather than the bare code.
-  const downloadCSV = async (type: string, extraParams: Record<string, string> = {}) => {
+  const downloadExport = async (type: string, extraParams: Record<string, string> = {}) => {
     setDownloadingType(type)
     setExportError(null)
     try {
@@ -752,7 +752,7 @@ export default function BillingAdminClient({
       a.href = url
       const disposition = res.headers.get('Content-Disposition')
       const match = disposition?.match(/filename="(.+)"/)
-      a.download = match?.[1] ?? `${type}-export.csv`
+      a.download = match?.[1] ?? `${type}-export.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -805,7 +805,7 @@ export default function BillingAdminClient({
   }
 
   // Download the on-screen Student Billing rows as CSV. Client-generated blob,
-  // mirroring downloadCSV's blob/anchor download but with no network round-trip.
+  // mirroring downloadExport's blob/anchor download but with no network round-trip.
   const exportStudentBillingCSV = () => {
     if (sbLessons.length === 0) {
       setExportError('No lessons to export - load lessons first.')
@@ -1044,7 +1044,7 @@ export default function BillingAdminClient({
             </select>
 
             <button
-              onClick={() => downloadCSV('teacher_invoices', {
+              onClick={() => downloadExport('teacher_invoices', {
                 ...(invoiceFilterTeacher && { teacherId: invoiceFilterTeacher }),
                 ...(invoiceFilterMonth && { month: invoiceFilterMonth }),
                 // The status filter scopes the CSV exactly as it scopes the table
@@ -1059,7 +1059,7 @@ export default function BillingAdminClient({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              {downloadingType === 'teacher_invoices' ? 'Generating…' : 'Export CSV'}
+              {downloadingType === 'teacher_invoices' ? 'Generating…' : 'Export Excel'}
             </button>
           </div>
 
@@ -1420,7 +1420,7 @@ export default function BillingAdminClient({
               {cbLoading ? 'Loading…' : 'Apply'}
             </button>
             <button
-              onClick={() => downloadCSV('company_billing', {
+              onClick={() => downloadExport('company_billing', {
                 ...(cbFilterCompany && { companyId: cbFilterCompany }),
                 ...(cbFilterDateFrom && { dateFrom: cbFilterDateFrom }),
                 ...(cbFilterDateTo && { dateTo: cbFilterDateTo }),
@@ -1431,7 +1431,7 @@ export default function BillingAdminClient({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
-              {downloadingType === 'company_billing' ? 'Generating…' : 'Export CSV'}
+              {downloadingType === 'company_billing' ? 'Generating…' : 'Export Excel'}
             </button>
           </div>
 
@@ -1482,8 +1482,8 @@ export default function BillingAdminClient({
                   .join(' + ') || '€0.00'
 
                 // Hours the COMPANY is invoiced for, under the same union gate the
-                // CSV route applies (api/admin/billing/export/route.ts:210):
-                // billableToTeacher OR billable48hr. Teacher pay and company billing
+                // export route applies (the billableToTeacher OR billable48hr gate
+                // in api/admin/billing/export/route.ts). Teacher pay and company billing
                 // are different rules — a 24-48hr cancellation by a 48hr-policy
                 // student is billed to the company (companyAmount above, priced in
                 // the orange panel below) while the teacher is unpaid. Gating these
