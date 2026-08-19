@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { getCancellationLabel } from '@/lib/lessons/statusLabel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ interface TraceLesson {
   scheduled_at:     string;
   duration_minutes: number;
   lesson_status:    string;
+  cancelled_by:     string | null;
+  rescheduled_by:   string | null;
   teacher:          Teacher | null;
   student:          { id: string; full_name: string } | null;
   report:           { id: string; status: string; completed_at: string | null; flagged_at: string | null } | null;
@@ -114,20 +117,23 @@ function ReportStatusBadge({ status }: { status: string }) {
   );
 }
 
-function LessonStatusBadge({ status }: { status: string }) {
+function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: string; cancelled_by?: string | null; rescheduled_by?: string | null }) {
   const map: Record<string, { bg: string; text: string; label: string }> = {
-    upcoming:  { bg: '#EFF6FF', text: '#1D4ED8', label: 'Upcoming' },
+    scheduled: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Upcoming' },
     completed: { bg: '#DCFCE7', text: '#15803D', label: 'Completed' },
     cancelled: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled' },
     cancelled_by_student: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by student' },
     cancelled_by_teacher: { bg: '#F3F4F6', text: '#374151', label: 'Cancelled by teacher' },
-    no_show:   { bg: '#FFF8E8', text: '#B45309', label: 'No-Show' },
+    student_no_show: { bg: '#FFF7ED', text: '#C2410C', label: 'Student No-Show' },
+    teacher_no_show: { bg: '#FEF2F2', text: '#B91C1C', label: 'Teacher No-Show' },
+    missed:    { bg: '#FFF8E8', text: '#B45309', label: 'Missed' },
     flagged:   { bg: '#FFEEE6', text: '#FD5602', label: 'Flagged' },
   };
   const s = map[status] ?? { bg: '#F3F4F6', text: '#374151', label: status };
+  const label = getCancellationLabel({ status, cancelled_by, rescheduled_by }, 'admin') ?? s.label;
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: s.bg, color: s.text }}>
-      {s.label}
+      {label}
     </span>
   );
 }
@@ -561,7 +567,7 @@ function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
                     <td className="py-3 px-3 font-medium text-gray-800">{l.teacher?.full_name ?? '—'}</td>
                     <td className="py-3 px-3 text-gray-700">{l.student?.full_name ?? '—'}</td>
                     <td className="py-3 px-3 text-gray-600">{l.duration_minutes} min</td>
-                    <td className="py-3 px-3"><LessonStatusBadge status={l.lesson_status} /></td>
+                    <td className="py-3 px-3"><LessonStatusBadge status={l.lesson_status} cancelled_by={l.cancelled_by} rescheduled_by={l.rescheduled_by} /></td>
                     <td className="py-3 px-3">
                       {l.report ? <ReportStatusBadge status={l.report.status} /> : <span className="text-xs text-gray-400 italic">No report</span>}
                     </td>
