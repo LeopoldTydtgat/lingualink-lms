@@ -7,12 +7,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
-  CEFR_MAX_VALUE,
+  computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
   type LevelData,
 } from '@/lib/levels/levelData';
+import LevelTracks from '@/components/shared/LevelTracks';
 
 interface Report {
   id:                 string;
@@ -83,57 +82,6 @@ async function errorText(res: Response, fallback: string) {
 //   clear      - positively established as not paid
 //   unverified - the answer could not be established; NEVER shown as "not paid"
 type InvoiceCheck = 'loading' | 'paid' | 'clear' | 'unverified';
-
-// Hand-rolled SVG radar, deliberately NOT recharts - only its data, its scale
-// and its labels come from the shared module, so it stays in step with the two
-// student charts without pulling a charting library into the admin bundle.
-// Skills the teacher left ungraded are DROPPED (they used to be plotted at the
-// centre, which read as a failing grade); the caller names them underneath.
-function RadarChart({ levelData }: { levelData: LevelData }) {
-  const size = 280; const cx = size / 2; const cy = size / 2;
-  const maxRadius = 90;
-  const points = toRadarData(levelData);
-  const n = points.length;
-
-  // The caller gates on hasUsableLevelData, so n >= 1 here; this only keeps the
-  // angle maths below from dividing by zero if that ever stops being true.
-  if (n === 0) return null;
-
-  function angle(i: number) { return (Math.PI * 2 * i) / n - Math.PI / 2; }
-  function axisPoint(i: number, fraction: number) {
-    const r = maxRadius * fraction;
-    return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) };
-  }
-
-  const gridPolygons = [0.2, 0.4, 0.6, 0.8, 1].map((f) =>
-    points.map((_, i) => { const p = axisPoint(i, f); return `${p.x},${p.y}`; }).join(' ')
-  );
-  // Fixed A1..C2 radial domain, matching both recharts surfaces.
-  const dataPoints  = points.map((s, i) => axisPoint(i, s.value / CEFR_MAX_VALUE));
-  const dataPolygon = dataPoints.map((p) => `${p.x},${p.y}`).join(' ');
-  const labelPoints = points.map((_, i) => {
-    const r = maxRadius + 20;
-    return { x: cx + r * Math.cos(angle(i)), y: cy + r * Math.sin(angle(i)) };
-  });
-
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ overflow: 'visible' }}>
-      {gridPolygons.map((pts, gi) => <polygon key={gi} points={pts} fill="none" stroke="#E5E7EB" strokeWidth="1" />)}
-      {points.map((_, i) => { const end = axisPoint(i, 1); return <line key={i} x1={cx} y1={cy} x2={end.x} y2={end.y} stroke="#E5E7EB" strokeWidth="1" />; })}
-      <polygon points={dataPolygon} fill="#FF8303" fillOpacity={0.25} stroke="#FF8303" strokeWidth="2" />
-      {dataPoints.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={4} fill="#FF8303" />)}
-      {points.map((s, i) => {
-        const lp = labelPoints[i];
-        return (
-          <g key={s.key}>
-            <text x={lp.x} y={lp.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fontFamily="Inter, sans-serif" fill="#374151" fontWeight="500">{s.skill}</text>
-            <text x={lp.x} y={lp.y + 12} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontFamily="Inter, sans-serif" fill="#FF8303" fontWeight="600">{s.level}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
 
 export default function ReportDetailClient({ report, assignments, adminTimezone }: Props) {
   const router = useRouter();
@@ -214,8 +162,12 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
   // strings drew a collapsed all-zero radar here while the two student surfaces
   // showed their empty state for the same report.
   const hasLevelData = hasUsableLevelData(report.level_data);
-  const assessedSkills = toRadarData(report.level_data);
-  const unassessedSkills = listUnassessedSkillLabels(report.level_data);
+
+  // Derived headline: the equal-weight average of all seven skills, or null
+  // when the assessment is partial. Same function the teacher report form and
+  // the teacher student-detail page use, so no two surfaces can show a
+  // different overall level for the same report.
+  const levelOverall = computeOverallLevel(report.level_data);
 
   return (
     <div className="p-6">
@@ -327,23 +279,26 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
       {hasLevelData && (
         <div className="card-elevated p-5 mt-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">Student Level Assessment</h2>
-          <div className="flex flex-col items-center">
-            <RadarChart levelData={report.level_data!} />
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs">
-              {assessedSkills.map((s) => (
-                <div key={s.key} className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: '#FF8303' }} />
-                  <span className="text-gray-500">{s.skill}:</span>
-                  <span className="font-medium" style={{ color: '#FF8303' }}>{s.level}</span>
-                </div>
-              ))}
-            </div>
-            {unassessedSkills.length > 0 && (
-              <p className="mt-3 text-xs text-gray-500">
-                Not yet assessed: {unassessedSkills.join(', ')}
+          {levelOverall && (
+            <div className="flex flex-col items-center" style={{ marginBottom: '20px' }}>
+              <p
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#9ca3af',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  margin: 0,
+                }}
+              >
+                Overall Level
               </p>
-            )}
-          </div>
+              <p style={{ fontSize: '40px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                {levelOverall}
+              </p>
+            </div>
+          )}
+          <LevelTracks levelData={report.level_data} />
         </div>
       )}
 
