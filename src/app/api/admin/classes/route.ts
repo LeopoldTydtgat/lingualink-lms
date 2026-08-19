@@ -94,6 +94,14 @@ export async function GET(request: NextRequest) {
   // booking stays deliberately exempt from the per-student duration rule, so
   // this is display metadata on a row that already exists, never a gate. The
   // POST handler below does not read it.
+  // The reports embed carries only id + status: the list's Report column links
+  // straight at /admin/reports/<report id>, so it needs the id, and a lesson with
+  // no report row must render a placeholder rather than a link that cannot resolve.
+  // reports.lesson_id is UNIQUE (reports_lesson_id_key), so this is a to-one
+  // relationship; the client still flattens it with the Array.isArray() check every
+  // nested join in this project goes through. RLS on reports ("Admins can view all
+  // reports") filters it to null for a staff caller who is not an admin, which the
+  // same placeholder covers.
   let query = supabase
     .from('lessons')
     .select(`
@@ -119,6 +127,10 @@ export async function GET(request: NextRequest) {
         full_name,
         photo_url,
         allowed_durations
+      ),
+      reports (
+        id,
+        status
       )
     `, { count: 'exact' })
 

@@ -33,6 +33,17 @@ interface Lesson {
   // and nothing checks it on either side of the wire - so asserting number[] here
   // would be a claim the route does not make. checkAllowedDuration narrows it.
   student: { id: string; full_name: string; photo_url: string | null; allowed_durations: unknown } | null
+  // The report paired with this lesson, embedded by the GET route. reports.lesson_id
+  // is UNIQUE, so PostgREST reads it as a to-one relationship and sends an object -
+  // but the array shape is typed here too, because the flatten below is the project
+  // rule for every Supabase nested join and must accept both. Absent (older cached
+  // response), null (no row, or RLS filtered it) and [] all mean "no report".
+  reports?: LessonReport | LessonReport[] | null
+}
+
+interface LessonReport {
+  id: string
+  status: string
 }
 
 interface Props {
@@ -105,6 +116,16 @@ const DEFAULT_STORED_FILTERS: StoredFilters = {
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 function isDayKeyOrEmpty(value: string): boolean {
   return value === '' || DAY_KEY_RE.test(value)
+}
+
+// Flattens the embedded report to a single row or null. Array.isArray() first, per
+// the locked rule for Supabase nested joins: the shape depends on how PostgREST reads
+// the relationship, and neither side of this wire is validated. An empty array is the
+// same answer as a missing one - no report.
+function flattenReport(reports: Lesson['reports']): LessonReport | null {
+  if (!reports) return null
+  if (Array.isArray(reports)) return reports[0] ?? null
+  return reports
 }
 
 // Maps raw DB status values to a display label and colour
@@ -610,6 +631,7 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
               lesson.duration_minutes,
               lesson.student?.allowed_durations
             )
+            const report = flattenReport(lesson.reports)
             return (
               <div
                 key={lesson.id}
@@ -731,15 +753,24 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
                   </div>
                 )}
 
-                {/* Report link — stop propagation so clicking it doesn't open class detail */}
+                {/* Report link — stop propagation so clicking it doesn't open class detail.
+                    Points at the report's own detail page. The old ?lesson_id= form went to
+                    the reports LIST, which ignores that param, so every click landed on an
+                    unfiltered list; the id is on the row now, so link straight at it. With no
+                    report row there is nothing to open, so the cell shows a muted placeholder
+                    rather than a link that resolves to the wrong page. */}
                 <div onClick={(e) => e.stopPropagation()}>
-                  <Link
-                    href={`/admin/reports?lesson_id=${lesson.id}`}
-                    prefetch={false}
-                    style={{ fontSize: '13px', color: '#FF8303', textDecoration: 'none', fontWeight: 500 }}
-                  >
-                    View
-                  </Link>
+                  {report ? (
+                    <Link
+                      href={`/admin/reports/${report.id}`}
+                      prefetch={false}
+                      style={{ fontSize: '13px', color: '#FF8303', textDecoration: 'none', fontWeight: 500 }}
+                    >
+                      View
+                    </Link>
+                  ) : (
+                    <span style={{ fontSize: '13px', color: '#9CA3AF' }}>—</span>
+                  )}
                 </div>
               </div>
             )
