@@ -159,8 +159,8 @@ export default function ReportDetailClient({ report, assignments, adminTimezone 
   }
 
   // Shared predicate. This used to accept any non-null value, so a row of empty
-  // strings drew a collapsed all-zero radar here while the two student surfaces
-  // showed their empty state for the same report.
+  // strings rendered here as a collapsed, all-zero assessment while the two
+  // student surfaces showed their empty state for the same report.
   const hasLevelData = hasUsableLevelData(report.level_data);
 
   // Derived headline: the equal-weight average of all seven skills, or null

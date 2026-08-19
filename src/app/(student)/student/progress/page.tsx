@@ -62,7 +62,7 @@ export default async function ProgressPage() {
 
   const studentLessonIds = (studentLessonIdRows ?? []).map((l) => l.id as string)
 
-  // Pick the level assessment that drives the radar chart.
+  // Pick the level assessment that drives the overall level shown to the student.
   //
   // public.reports has RLS policies for teachers and admins only - there is no
   // student SELECT policy, and that is deliberate: a student policy would expose
@@ -104,7 +104,7 @@ export default async function ProgressPage() {
       .limit(20)
 
     if (reportsError) {
-      // Fail soft: the page still renders, the radar chart just shows its
+      // Fail soft: the page still renders, the level assessment just shows its
       // "no assessment yet" state instead of 500-ing the whole progress view.
       console.error('[student/progress] reports fetch failed:', reportsError)
     } else {
