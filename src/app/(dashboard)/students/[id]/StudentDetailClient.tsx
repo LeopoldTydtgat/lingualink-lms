@@ -5,6 +5,13 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { isCancelledStatus } from '@/lib/billing/billability'
+import {
+  computeOverallLevel,
+  hasUsableLevelData,
+  listUnassessedSkillLabels,
+  toRadarData,
+} from '@/lib/levels/levelData'
+import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
 
 type Student = {
   id: string
@@ -255,6 +262,18 @@ export default function StudentDetailClient({
     reports.map(r => [r.lesson_id, r])
   )
 
+  // The most recent completed report on this training that actually carries a
+  // usable level assessment. NOT simply reports[0]: the array is ordered by
+  // completed_at descending, and a completed no-show report stores level_data
+  // null, so taking the newest row would blank the student's level the moment a
+  // no-show is filed. Same predicate the student Progress page uses to choose
+  // its row, so teacher and student can never display different levels.
+  // Plain derivation, no hook - see the constraint on GeneralInfoTab.
+  const latestLevelReport = reports.find(r => hasUsableLevelData(r.level_data)) ?? null
+  const levelRadarData = toRadarData(latestLevelReport?.level_data ?? null)
+  const levelUnassessed = listUnassessedSkillLabels(latestLevelReport?.level_data ?? null)
+  const levelOverall = computeOverallLevel(latestLevelReport?.level_data ?? null)
+
   // ── TAB: General Info ──────────────────────────────────────────
   function GeneralInfoTab() {
     return (
@@ -339,6 +358,50 @@ export default function StudentDetailClient({
                 <p className="font-medium text-gray-900">{student?.language_preference ?? '—'}</p>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <div style={{ width: '3px', height: '16px', backgroundColor: '#FF8303', borderRadius: '2px', flexShrink: 0 }} />
+            <h3 className="text-base font-semibold text-gray-900">Student Level</h3>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm p-4" style={{ border: '1px solid #f3f4f6' }}>
+            {latestLevelReport ? (
+              <>
+                <p className="text-xs text-gray-400 mb-4">
+                  From the class report of {formatInstantDate(latestLevelReport.completed_at, viewerTz)}
+                </p>
+                {levelOverall && (
+                  <div className="flex flex-col items-center" style={{ marginBottom: '20px' }}>
+                    <p
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        color: '#9ca3af',
+                        letterSpacing: '0.05em',
+                        textTransform: 'uppercase',
+                        margin: 0,
+                      }}
+                    >
+                      Overall Level
+                    </p>
+                    <p style={{ fontSize: '40px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                      {levelOverall}
+                    </p>
+                  </div>
+                )}
+                <LevelAssessmentChart radarData={levelRadarData} unassessedSkills={levelUnassessed} />
+                <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
+                  Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-center" style={{ color: '#9ca3af' }}>
+                No level assessment yet. It will appear here once a class report with
+                a level assessment has been submitted.
+              </p>
+            )}
           </div>
         </div>
 
