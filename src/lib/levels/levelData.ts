@@ -143,3 +143,34 @@ export function listUnassessedSkillLabels(levelData: unknown): string[] {
     (key) => SKILL_LABELS[key]
   )
 }
+
+/**
+ * The derived overall CEFR level: the equal-weight average of ALL SEVEN skills,
+ * rounded to the nearest whole level, ties rounding DOWN. Client decision,
+ * settled 19 Aug 2026 against the Cambridge English Scale model (equal skill
+ * weighting, no per-skill minimum) - do not reopen the rule.
+ *
+ * Returns null unless every canonical skill carries a usable CEFR value:
+ * a headline computed from a partial grading would overstate the level, and
+ * the radar plus its "not assessed" line already present partial data
+ * honestly. Legacy reports with partial grading therefore show no headline.
+ *
+ * Ties-down note: with 7 skills the sum is an integer and sum/7 can never
+ * land on exactly .5, so the tie branch is unreachable today. It is
+ * implemented anyway (Math.ceil(avg - 0.5), which rounds an exact .5 down
+ * where Math.round would round it up) so a future change to SKILL_KEYS
+ * cannot silently flip the rule.
+ */
+export function computeOverallLevel(levelData: unknown): CefrLevel | null {
+  let sum = 0
+  for (const key of SKILL_KEYS) {
+    const level = readSkill(levelData, key)
+    if (level === null) return null
+    sum += CEFR_TO_NUM[level]
+  }
+  const avg = sum / SKILL_KEYS.length
+  const rounded = Math.ceil(avg - 0.5)
+  // Each skill is 1..CEFR_MAX_VALUE, so avg and therefore rounded are always
+  // within [1, CEFR_MAX_VALUE]; the index below cannot go out of bounds.
+  return CEFR_LEVELS[rounded - 1]
+}

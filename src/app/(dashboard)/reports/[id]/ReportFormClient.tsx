@@ -8,7 +8,7 @@ import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
-import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS } from '@/lib/levels/levelData'
+import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS, computeOverallLevel, listUnassessedSkillLabels } from '@/lib/levels/levelData'
 
 // --- Types ---
 
@@ -299,6 +299,10 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   // report what the invoice will actually carry, not an unsaved selection.
   const invoiceInfo = invoiceNotice(report.status, report.did_class_happen)
 
+  // Derived headline level, live as the teacher grades. null until all seven
+  // skills are set - see computeOverallLevel for the rounding rule.
+  const overallLevel = computeOverallLevel(levelData)
+
   const selectedMaterialSheet =
     materialSheets.find(sheet => sheet.id === selectedMaterialSheetId) ?? null
 
@@ -341,6 +345,18 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
       setSubmitAttempted(true)
       feedbackSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       return
+    }
+
+    // All seven skills are mandatory when the class took place. Same gate as
+    // SubmitReportSchema.superRefine - client half gives the friendly message,
+    // server half makes it non-bypassable. No-show reports never reach this
+    // (level_data is sent null on that path).
+    if (didClassHappen) {
+      const unassessed = listUnassessedSkillLabels(levelData)
+      if (unassessed.length > 0) {
+        setError(`Please grade every skill before submitting. Missing: ${unassessed.join(', ')}.`)
+        return
+      }
     }
 
     setSaving(true)
@@ -674,28 +690,51 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
               )}
             </div>
 
-            <div className="flex flex-col">
-              {SKILLS.map((skill, idx) => (
+            <div className="flex flex-col md:flex-row md:items-stretch gap-6">
+              <div className="flex flex-col flex-1">
+                {SKILLS.map((skill, idx) => (
+                  <div
+                    key={skill.key}
+                    className="flex items-center gap-4"
+                    style={{
+                      paddingTop: '10px',
+                      paddingBottom: '10px',
+                      borderBottom: idx === SKILLS.length - 1 ? 'none' : '1px solid #f8f9fa',
+                    }}
+                  >
+                    <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
+                    <LevelTrack
+                      value={levelData[skill.key]}
+                      onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
+                      editable={isEditable}
+                    />
+                    {!isEditable && !levelData[skill.key] && (
+                      <span className="text-xs text-gray-400">Not assessed</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {(isEditable || overallLevel) && (
                 <div
-                  key={skill.key}
-                  className="flex items-center gap-4"
-                  style={{
-                    paddingTop: '10px',
-                    paddingBottom: '10px',
-                    borderBottom: idx === SKILLS.length - 1 ? 'none' : '1px solid #f8f9fa',
-                  }}
+                  className="flex flex-col items-center justify-center flex-shrink-0"
+                  style={{ width: '200px', borderLeft: '1px solid #f3f4f6', paddingLeft: '24px' }}
                 >
-                  <p className="w-40 flex-shrink-0 text-sm font-medium text-gray-700">{skill.label}</p>
-                  <LevelTrack
-                    value={levelData[skill.key]}
-                    onChange={isEditable ? level => setSkillLevel(skill.key, level) : undefined}
-                    editable={isEditable}
-                  />
-                  {!isEditable && !levelData[skill.key] && (
-                    <span className="text-xs text-gray-400">Not assessed</span>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                    Overall Level
+                  </p>
+                  {overallLevel ? (
+                    <>
+                      <p style={{ fontSize: '40px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: 0 }}>
+                        {overallLevel}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center">
+                      Grade all seven skills to see the overall level
+                    </p>
                   )}
                 </div>
-              ))}
+              )}
             </div>
           </section>
         </>
