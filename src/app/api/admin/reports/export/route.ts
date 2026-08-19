@@ -3,9 +3,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAdmin } from '@/lib/auth/requireAdmin';
-import { getExportTimezone, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime';
+import { getExportTimezone, tzLabel, formatInstantInTz, zonedDayRangeToUtcBounds } from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
-import ExcelJS from 'exceljs';
+import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook';
+import { buildFilterLines } from '@/lib/exports/filterLines';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
 import { getBillability } from '@/lib/billing/billability';
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates';
@@ -45,7 +46,6 @@ function firstOf<T>(v: T | T[] | null | undefined): T | null {
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const COLUMN_COUNT = 22;
 
 export async function GET(request: NextRequest) {
   try {
@@ -303,13 +303,19 @@ export async function GET(request: NextRequest) {
     else if (clientType === 'private') rows = rows.filter((r) => !r._isCompany);
 
     // --- Workbook ---
-    const workbook = new ExcelJS.Workbook();
-    const ws = workbook.addWorksheet('Class Reports');
-
-    ws.columns = [
+    // Layout (title block, branded header row, banding, freeze panes, autofilter,
+    // print setup) comes from the shared writer in @/lib/exports/workbook — the
+    // same one the six /api/admin/exports/[type] sheets use. The columns, their
+    // order, headers and widths, and the row set are unchanged from the
+    // hand-rolled ExcelJS version this replaced.
+    //
+    // No totals row on purpose: this sheet has no Currency column, so a total
+    // over "Amount Owed to Teacher" would silently sum across currencies the
+    // moment any teacher is non-EUR.
+    const columns: ExportColumn[] = [
       { header: `Class Date (${exportTzLabel})`, key: 'classDate', width: 16 },
       { header: `Class Time (${exportTzLabel})`, key: 'classTime', width: 12 },
-      { header: 'Duration (mins)', key: 'duration', width: 14 },
+      { header: 'Duration (mins)', key: 'duration', width: 14, format: 'integer' },
       { header: 'Teacher', key: 'teacher', width: 22 },
       { header: 'Student', key: 'student', width: 22 },
       { header: 'Client Type', key: 'clientType', width: 20 },
@@ -322,8 +328,8 @@ export async function GET(request: NextRequest) {
       { header: `Student Joined At (${exportTzLabel})`, key: 'studentJoinedAt', width: 24 },
       { header: 'Review Submitted', key: 'reviewSubmitted', width: 16 },
       { header: 'Teacher Billable', key: 'teacherBillable', width: 16 },
-      { header: 'Hourly Rate', key: 'hourlyRate', width: 12 },
-      { header: 'Amount Owed to Teacher', key: 'amountOwed', width: 22 },
+      { header: 'Hourly Rate', key: 'hourlyRate', width: 12, format: 'decimal2' },
+      { header: 'Amount Owed to Teacher', key: 'amountOwed', width: 22, format: 'decimal2' },
       { header: `Cancelled At (${exportTzLabel})`, key: 'cancelledAt', width: 24 },
       { header: 'Cancellation Window', key: 'cancellationWindow', width: 18 },
       { header: 'Cancellation Policy Applied', key: 'policyApplied', width: 24 },
@@ -331,53 +337,40 @@ export async function GET(request: NextRequest) {
       { header: 'Class ID', key: 'classId', width: 38 },
     ];
 
-    // Header row bold + frozen.
-    ws.getRow(1).font = { bold: true };
-    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    // Applied-filter lines for the workbook header block. The shared helper
+    // resolves the teacher/student ids to names through the cookie client; the
+    // two JS-side filters below have no id to resolve, so they are appended here
+    // rather than pushed into the shared helper. There is no company filter on
+    // this export.
+    const filterLines = await buildFilterLines(supabase, {
+      fromDate: dateFrom,
+      toDate: dateTo,
+      teacherId,
+      studentId,
+      companyId: null,
+    });
+    if (outcomeFilter) filterLines.push(`Class Outcome: ${outcomeFilter}`);
+    if (clientType) filterLines.push(`Client Type: ${clientType === 'company' ? 'Company' : 'Private'}`);
 
-    // Numeric formatting (no currency symbol).
-    ws.getColumn('hourlyRate').numFmt = '0.00';
-    ws.getColumn('amountOwed').numFmt = '0.00';
-
-    // Feedback column: no wrap.
-    ws.getColumn('feedback').alignment = { wrapText: false };
-
-    for (const r of rows) {
-      const row = ws.addRow({
-        classDate: r.classDate,
-        classTime: r.classTime,
-        duration: r.duration,
-        teacher: r.teacher,
-        student: r.student,
-        clientType: r.clientType,
-        outcome: r.outcome,
-        reportSubmitted: r.reportSubmitted,
-        reportSubmittedAt: r.reportSubmittedAt,
-        flagged: r.flagged,
-        feedback: r.feedback,
-        teacherJoinedAt: r.teacherJoinedAt,
-        studentJoinedAt: r.studentJoinedAt,
-        reviewSubmitted: r.reviewSubmitted,
-        teacherBillable: r.teacherBillable,
-        hourlyRate: r.hourlyRate,
-        amountOwed: r.amountOwed,
-        cancelledAt: r.cancelledAt,
-        cancellationWindow: r.cancellationWindow,
-        policyApplied: r.policyApplied,
-        billableUnderPolicy: r.billableUnderPolicy,
-        classId: r.classId,
-      });
-
-      // Whole-row fill matching the portal report colours.
-      let fillArgb: string | null = null;
-      if (r._reportStatus === 'flagged') fillArgb = 'FFFEF2F2';
-      else if (r._reportStatus === 'pending') fillArgb = 'FFFFFBEB';
-      if (fillArgb) {
-        for (let c = 1; c <= COLUMN_COUNT; c++) {
-          row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
-        }
-      }
-    }
+    const buffer = await buildExportWorkbook({
+      title: 'Class Reports',
+      columns,
+      rows,
+      generatedAtLabel: formatInstantInTz(new Date(), exportTz),
+      timezoneLabel: exportTzLabel,
+      filterLines,
+      sheetName: 'Class Reports',
+      freezeColumns: 2,
+      // Whole-row fill matching the portal report colours. This is the signal the
+      // writer's alternate-row banding cannot carry, so it overrides the banding
+      // on flagged/pending rows only — every other row keeps the normal banding.
+      rowFill: (row) =>
+        row._reportStatus === 'flagged'
+          ? 'FFFEF2F2'
+          : row._reportStatus === 'pending'
+          ? 'FFFFFBEB'
+          : null,
+    });
 
     // --- Audit log: this route writes the first export_log rows. ---
     // Isolated so a thrown/rejected insert can never turn an already-built download into a 500.
@@ -400,8 +393,7 @@ export async function GET(request: NextRequest) {
     }
 
     // --- Return workbook ---
-    const buffer = await workbook.xlsx.writeBuffer();
-    return new NextResponse(Buffer.from(buffer as ArrayBuffer), {
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

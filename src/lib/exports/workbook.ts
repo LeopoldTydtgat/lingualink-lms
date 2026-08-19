@@ -40,6 +40,11 @@ export interface BuildWorkbookOptions {
   sheetName: string                   // <= 31 chars, no [ ] : * ? / \
   totalsRow?: Record<string, unknown> // optional; keyed by column key
   freezeColumns?: number              // default 0
+  // Optional per-row state colour. Called once per data row; a non-null ARGB
+  // string paints every cell of that row INSTEAD of the alternate-row banding,
+  // null leaves the row on the normal banding. Used where the sheet has to carry
+  // a signal the banding cannot (e.g. flagged / pending report rows).
+  rowFill?: (row: Record<string, unknown>, index: number) => string | null
 }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -164,13 +169,16 @@ export async function buildExportWorkbook(opts: BuildWorkbookOptions): Promise<B
     rows.forEach((row, idx) => {
       const excelRow = ws.getRow(ROW_FIRST_DATA + idx)
       const banded = (idx + 1) % 2 === 0 // every SECOND data row
+      // Resolved once per row, not once per cell.
+      const stateFill = opts.rowFill ? opts.rowFill(row, idx) : null
       columns.forEach((c, i) => {
         const cell = excelRow.getCell(i + 1)
         const value = row[c.key]
         cell.value = (value === undefined ? null : value) as ExcelJS.CellValue
         cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: c.wrap ?? false }
         cell.border = { bottom: thin(BORDER_SOFT) }
-        if (banded) cell.fill = solidFill(BAND_FILL)
+        if (stateFill) cell.fill = solidFill(stateFill)
+        else if (banded) cell.fill = solidFill(BAND_FILL)
       })
     })
   }
