@@ -6,11 +6,8 @@ import { requireTz } from '@/lib/time/requireTz'
 import {
   computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
   type LevelData,
 } from '@/lib/levels/levelData'
-import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
 
 // ----- Types -----
 
@@ -202,14 +199,7 @@ export default function ProgressClient({
   const totalMinutesLearned = completedLessons.reduce((sum, l) => sum + (l.duration_minutes ?? 0), 0)
   const avgPerWeek = avgClassesPerWeek(completedLessons)
 
-  // ----- Radar chart data -----
-  // All three chart surfaces share these helpers: same presence predicate, same
-  // canonical skill order, same 1..CEFR_MAX_VALUE scale, and unassessed skills
-  // dropped from the chart rather than plotted at zero. They are named
-  // underneath instead.
   const hasLevels = hasUsableLevelData(latestLevelData)
-  const radarData = toRadarData(latestLevelData)
-  const unassessedSkills = listUnassessedSkillLabels(latestLevelData)
 
   // Derived headline level: the equal-weight average of all seven skills, or
   // null when the assessment is partial. Same function the teacher report form
@@ -287,14 +277,6 @@ export default function ProgressClient({
 
           {hasLevels ? (
             <>
-            {/* Chart and the "not yet assessed" line are one shared component,
-                rendered in a single full-width column. The chart is a
-                fixed-size hand-rolled SVG ported from the admin report detail:
-                each skill's CEFR level prints on the chart under its axis
-                label, so the per-skill scorecard that used to sit below is
-                gone. This used to be a `grid lg:grid-cols-2` with the chart
-                inline, which handed the chart only half the card width from lg
-                up, and kept a second, drifting copy of the chart config. */}
             {overallLevel && (
               <div
                 className="flex flex-col items-center"
@@ -317,7 +299,6 @@ export default function ProgressClient({
                 </p>
               </div>
             )}
-            <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
 
             {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
             <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
