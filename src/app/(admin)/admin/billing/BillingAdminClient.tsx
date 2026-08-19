@@ -814,7 +814,11 @@ export default function BillingAdminClient({
     setExportError(null)
     try {
       const csv = buildStudentBillingCSV()
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      // Without a UTF-8 BOM, Excel on Windows opens the file in the ANSI code page and
+      // mojibakes accented characters; the BOM is what tells Excel the file is UTF-8.
+      // The server-route (XLSX) exports don't need this - XLSX carries its encoding
+      // inside the container.
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
