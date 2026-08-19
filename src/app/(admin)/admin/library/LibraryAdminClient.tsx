@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
 import DifficultyBars from '@/components/study/DifficultyBars'
-import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal } from 'lucide-react'
+import { fileTypeLabel } from '@/lib/study/fileTypeLabel'
+import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal, FileText } from 'lucide-react'
 import SheetFormModal from './SheetFormModal'
 import AssignSheetModal from './AssignSheetModal'
 import ActivitiesModal from './ActivitiesModal'
@@ -34,7 +35,10 @@ export type Attachment = {
 export type StudySheet = {
   id: string
   title: string
-  category: string | null // 'Vocabulary' | 'Grammar'; null for teacher private resources
+  // Stored lowercase: 'vocabulary' | 'grammar' | 'listening' | 'reading'. NULL on
+  // teaching material and on teacher private resources — the column is
+  // nullable and its CHECK passes on NULL.
+  category: string | null
   level: string | null    // A1, A2 ... C2; null for teacher private resources
   difficulty: number      // 1 | 2 | 3
   content: SheetContent
@@ -46,6 +50,10 @@ export type StudySheet = {
   // caller-shaped row carries them, and an absent value reads as "none".
   links?: unknown[] | null
   reading_text?: string | null
+  // study_sheets.audience — 'student' (a study sheet) or 'staff' (teaching
+  // material). Optional here so no existing object literal typed as StudySheet
+  // has to change; isMaterial() below reads it in the fail-safe direction.
+  audience?: string | null
   created_at: string
   updated_at: string
 }
@@ -55,6 +63,10 @@ type StudentOption = {
   full_name: string
   email: string
 }
+
+// The list mixes student-facing study sheets with staff teaching material
+// (files/PDFs). '' shows both.
+type SheetTypeFilter = '' | 'sheet' | 'material'
 
 // -- Helpers --
 
@@ -79,6 +91,39 @@ function rolesPillStyle(roles: string[]): { backgroundColor: string; color: stri
 
 function activityCount(sheet: StudySheet, counts: Record<string, number>): number {
   return counts[sheet.id] ?? 0
+}
+
+// study_sheets.audience is NOT NULL and defaults to 'staff', and both write
+// routes coerce anything that is not exactly 'student' to 'staff'. So only an
+// explicit 'student' is a study sheet; every other value — including one missing
+// from an older-shaped row — reads as staff teaching material. That is the
+// fail-safe direction: an unlabelled row is never treated as student-facing.
+function isMaterial(sheet: StudySheet): boolean {
+  return sheet.audience !== 'student'
+}
+
+// The sheet's files, each paired with its ORIGINAL index in
+// study_sheets.attachments. /api/library-file/[sheetId]/[index] resolves the
+// attachment POSITIONALLY (attachments[idx] in that route), so this must not
+// reindex: dropping a malformed entry and renumbering the rest would hand the
+// admin a link that opens the wrong file.
+function sheetFiles(sheet: StudySheet): { att: Attachment; idx: number }[] {
+  const raw: unknown[] = Array.isArray(sheet.attachments) ? sheet.attachments : []
+  const out: { att: Attachment; idx: number }[] = []
+  raw.forEach((entry, idx) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+    const att = entry as Attachment
+    if (typeof att.name !== 'string' || att.name.length === 0) return
+    out.push({ att, idx })
+  })
+  return out
+}
+
+// fileTypeLabel reads the mime string directly, and a malformed attachment row
+// can carry none. Coerced to '' here (which the label's own fallback turns into
+// 'FILE') rather than reaching .includes() as undefined and throwing mid-render.
+function attLabel(att: Attachment): string {
+  return fileTypeLabel(typeof att.type === 'string' ? att.type : '')
 }
 
 // A sheet is empty (non-assignable) only when it has zero content words, zero
@@ -156,6 +201,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
   // -- Filters --
   const [search, setSearch] = useState('')
+  const [filterType, setFilterType] = useState<SheetTypeFilter>('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterDifficulty, setFilterDifficulty] = useState('')
@@ -269,9 +315,23 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [openMenuId])
 
+  // Files & PDFs hides the Category and Difficulty selects (neither means
+  // anything on a file), so it must CLEAR them in the same step. A filter still
+  // being applied while its control is off screen silently removes rows with no
+  // visible reason — which is the defect this filter exists to fix.
+  const selectFilterType = (next: SheetTypeFilter) => {
+    setFilterType(next)
+    if (next === 'material') {
+      setFilterCategory('')
+      setFilterDifficulty('')
+    }
+  }
+
   // -- Filtered list --
   const filtered = sheets.filter(s => {
     if (search && !s.title.toLowerCase().includes(search.toLowerCase())) return false
+    if (filterType === 'material' && !isMaterial(s)) return false
+    if (filterType === 'sheet' && isMaterial(s)) return false
     if (filterCategory && s.category !== filterCategory) return false
     if (filterLevel && s.level !== filterLevel) return false
     if (filterDifficulty && s.difficulty !== parseInt(filterDifficulty)) return false
@@ -473,15 +533,29 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           />
         </div>
         <select
-          value={filterCategory}
-          onChange={e => setFilterCategory(e.target.value)}
+          value={filterType}
+          onChange={e => selectFilterType(e.target.value as SheetTypeFilter)}
           className="px-3 py-2 rounded-md text-sm border"
           style={selectStyle}
         >
-          <option value="">All Categories</option>
-          <option value="vocabulary">Vocabulary</option>
-          <option value="grammar">Grammar</option>
+          <option value="">All types</option>
+          <option value="sheet">Study sheets</option>
+          <option value="material">Files &amp; PDFs</option>
         </select>
+        {filterType !== 'material' && (
+          <select
+            value={filterCategory}
+            onChange={e => setFilterCategory(e.target.value)}
+            className="px-3 py-2 rounded-md text-sm border"
+            style={selectStyle}
+          >
+            <option value="">All Categories</option>
+            <option value="vocabulary">Vocabulary</option>
+            <option value="grammar">Grammar</option>
+            <option value="listening">Listening</option>
+            <option value="reading">Reading</option>
+          </select>
+        )}
         <select
           value={filterLevel}
           onChange={e => setFilterLevel(e.target.value)}
@@ -491,17 +565,19 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <option value="">All Levels</option>
           {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        <select
-          value={filterDifficulty}
-          onChange={e => setFilterDifficulty(e.target.value)}
-          className="px-3 py-2 rounded-md text-sm border"
-          style={selectStyle}
-        >
-          <option value="">All Difficulties</option>
-          <option value="1">Easy</option>
-          <option value="2">Medium</option>
-          <option value="3">Hard</option>
-        </select>
+        {filterType !== 'material' && (
+          <select
+            value={filterDifficulty}
+            onChange={e => setFilterDifficulty(e.target.value)}
+            className="px-3 py-2 rounded-md text-sm border"
+            style={selectStyle}
+          >
+            <option value="">All Difficulties</option>
+            <option value="1">Easy</option>
+            <option value="2">Medium</option>
+            <option value="3">Hard</option>
+          </select>
+        )}
         <select
           value={filterRoles}
           onChange={e => setFilterRoles(e.target.value)}
@@ -513,9 +589,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <option value="exam">Teacher+Exam Only</option>
           <option value="admin">Admin Only</option>
         </select>
-        {(search || filterCategory || filterLevel || filterDifficulty || filterRoles) && (
+        {(search || filterType || filterCategory || filterLevel || filterDifficulty || filterRoles) && (
           <button
-            onClick={() => { setSearch(''); setFilterCategory(''); setFilterLevel(''); setFilterDifficulty(''); setFilterRoles('') }}
+            onClick={() => { setSearch(''); setFilterType(''); setFilterCategory(''); setFilterLevel(''); setFilterDifficulty(''); setFilterRoles('') }}
             className="text-sm font-medium"
             style={{ color: '#FF8303' }}
           >
@@ -523,7 +599,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           </button>
         )}
         <span className="ml-auto text-sm text-gray-400">
-          {filtered.length} {filtered.length === 1 ? 'sheet' : 'sheets'}
+          {filtered.length} {filtered.length === 1 ? 'item' : 'items'}
         </span>
       </div>
 
@@ -605,7 +681,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-sm text-red-600 font-medium">
-                Delete {selectedIds.size} sheets? This cannot be undone.
+                Delete {selectedIds.size} items? This cannot be undone.
               </span>
               <button
                 onClick={handleBulkDelete}
@@ -652,7 +728,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-xl px-6 py-12 text-center text-sm shadow-sm" style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}>
-          {sheets.length === 0 ? 'No sheets yet. Click Add Sheet to create the first one.' : 'No sheets match the current filters.'}
+          {sheets.length === 0 ? 'Nothing in the library yet. Click Add Sheet to create the first item.' : 'No items match the current filters.'}
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
@@ -674,6 +750,8 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
           <div>
             {filtered.map((sheet, idx) => {
               const empty = isSheetEmpty(sheet, actCounts)
+              const material = isMaterial(sheet)
+              const files = sheetFiles(sheet)
               return (
                 <div
                   key={sheet.id}
@@ -695,16 +773,30 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     style={{ accentColor: '#FF8303' }}
                   />
 
-                  {/* Icon tile + title + intro */}
+                  {/* Icon tile + title + kind badge + intro */}
                   <div className="flex items-center gap-3 min-w-0">
                     <span
                       className="flex items-center justify-center rounded-lg flex-shrink-0"
-                      style={{ width: '40px', height: '40px', backgroundColor: '#FFF3E0' }}
+                      style={{ width: '40px', height: '40px', backgroundColor: material ? '#f3f4f6' : '#FFF3E0' }}
                     >
-                      <BookOpen className="w-5 h-5" style={{ color: '#FF8303' }} />
+                      {material
+                        ? <FileText className="w-5 h-5" style={{ color: '#4b5563' }} />
+                        : <BookOpen className="w-5 h-5" style={{ color: '#FF8303' }} />}
                     </span>
                     <div className="min-w-0">
                       <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
+                      {/* What this row IS, at a glance: a study sheet, or the file type
+                          of the material's first file ('File' when it carries none). */}
+                      <span
+                        className="inline-block mt-0.5 px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={material
+                          ? { backgroundColor: '#f3f4f6', color: '#4b5563' }
+                          : { backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                      >
+                        {material
+                          ? (files.length > 0 ? attLabel(files[0].att) : 'File')
+                          : 'Study sheet'}
+                      </span>
                       {sheet.intro_text && (
                         <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
                       )}
@@ -729,8 +821,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     )}
                   </div>
 
-                  {/* Difficulty */}
-                  <DifficultyBars count={sheet.difficulty} />
+                  {/* Difficulty — meaningless on a file. The empty span still
+                      occupies the grid cell, so the columns stay aligned. */}
+                  {material ? <span /> : <DifficultyBars count={sheet.difficulty} />}
 
                   {/* Access */}
                   <div>
@@ -752,21 +845,53 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
 
                   {/* Actions */}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <button
-                      onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
-                      disabled={empty}
-                      title={empty ? 'No content yet' : undefined}
-                      className="text-xs font-medium px-2.5 py-1 rounded-md"
-                      style={
-                        empty
-                          ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
-                          : { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }
-                      }
-                      onMouseEnter={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFE4C4' }}
-                      onMouseLeave={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFF0E0' }}
-                    >
-                      Assign
-                    </button>
+                    {material ? (
+                      // No Assign button at all on a file row: /api/admin/library/assign
+                      // rejects any sheet whose audience is not 'student' with a 400, so
+                      // the button could only ever fail. A read-only link per file
+                      // instead — the index is the ORIGINAL position in attachments,
+                      // which is what /api/library-file/[sheetId]/[index] resolves.
+                      files.length === 0 ? (
+                        <span
+                          className="text-xs font-medium px-2.5 py-1 rounded-md"
+                          style={{ backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6' }}
+                        >
+                          No file
+                        </span>
+                      ) : (
+                        files.map(({ att, idx: fileIdx }) => (
+                          <a
+                            key={fileIdx}
+                            href={`/api/library-file/${sheet.id}/${fileIdx}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={att.name}
+                            className="text-xs font-medium px-2.5 py-1 rounded-md"
+                            style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }}
+                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#FFE4C4' }}
+                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#FFF0E0' }}
+                          >
+                            {attLabel(att)}
+                          </a>
+                        ))
+                      )
+                    ) : (
+                      <button
+                        onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
+                        disabled={empty}
+                        title={empty ? 'No content yet' : undefined}
+                        className="text-xs font-medium px-2.5 py-1 rounded-md"
+                        style={
+                          empty
+                            ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
+                            : { backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }
+                        }
+                        onMouseEnter={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFE4C4' }}
+                        onMouseLeave={e => { if (!empty) e.currentTarget.style.backgroundColor = '#FFF0E0' }}
+                      >
+                        Assign
+                      </button>
+                    )}
 
                     <div className="relative" ref={openMenuId === sheet.id ? menuRef : null}>
                       <button
@@ -794,15 +919,20 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                             minWidth: '150px',
                           }}
                         >
-                          <button
-                            onClick={() => { setActivitiesSheet(sheet); setOpenMenuId(null) }}
-                            className="block w-full text-left px-4 py-2 text-sm"
-                            style={{ color: '#4b5563' }}
-                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
-                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
-                          >
-                            Activities
-                          </button>
+                          {/* Activities only matter for an assignable student sheet,
+                              and the assign route blocks staff sheets outright. Edit
+                              and Delete stay on every row. */}
+                          {!material && (
+                            <button
+                              onClick={() => { setActivitiesSheet(sheet); setOpenMenuId(null) }}
+                              className="block w-full text-left px-4 py-2 text-sm"
+                              style={{ color: '#4b5563' }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f9fafb' }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'transparent' }}
+                            >
+                              Activities
+                            </button>
+                          )}
                           <button
                             onClick={() => { setEditingSheet(sheet); setShowForm(true); setOpenMenuId(null) }}
                             className="block w-full text-left px-4 py-2 text-sm"
@@ -843,10 +973,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
             width: '440px', maxWidth: '90vw',
           }}>
             <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#111827', marginTop: 0 }}>
-              Delete Study Sheet?
+              Delete this item?
             </h3>
             <p style={{ fontSize: '14px', color: '#6B7280' }}>
-              Are you sure you want to delete this study sheet? Its files, activities, assignments, and any student attempt history go with it. This cannot be undone.
+              Are you sure you want to delete this item? Its files, activities, assignments, and any student attempt history go with it. This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '8px' }}>
               <button

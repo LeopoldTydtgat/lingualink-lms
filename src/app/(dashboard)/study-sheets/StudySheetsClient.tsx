@@ -14,6 +14,7 @@ import {
   Users,
   BookOpen,
   Languages,
+  FileText,
   ChevronRight,
   Plus,
   MoreVertical,
@@ -21,6 +22,7 @@ import {
   CalendarDays,
   ClipboardCheck,
 } from 'lucide-react'
+import { fileTypeLabel } from '@/lib/study/fileTypeLabel'
 import CreateResourceModal from './CreateResourceModal'
 import AssignWorksheetModal from './AssignWorksheetModal'
 
@@ -34,6 +36,10 @@ type StudySheet = {
   created_at: string
   audience: string
   owner_id: string | null
+  // Untyped jsonb straight off study_sheets.attachments: deliberately `unknown`
+  // rather than an attachment array, because nothing guarantees its shape and
+  // every read below re-validates it (see sheetFiles).
+  attachments: unknown
 }
 
 type SheetProgress = {
@@ -72,8 +78,40 @@ function formatDate(iso: string): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
-function categoryIcon(category: string | null) {
-  return category?.toLowerCase() === 'grammar' ? Languages : BookOpen
+// One attachment as far as this list is concerned: a display name, plus a MIME
+// string a malformed row may not carry at all.
+type SheetFile = { name: string; type?: unknown }
+
+// The sheet's files, each paired with its ORIGINAL index in
+// study_sheets.attachments. /api/library-file/[sheetId]/[index] resolves the
+// attachment POSITIONALLY (attachments[idx] in that route), so this must never
+// reindex: dropping a malformed entry and renumbering the rest would hand the
+// teacher a link that opens the wrong file.
+function sheetFiles(sheet: StudySheet): { att: SheetFile; idx: number }[] {
+  const raw: unknown[] = Array.isArray(sheet.attachments) ? sheet.attachments : []
+  const out: { att: SheetFile; idx: number }[] = []
+  raw.forEach((entry, idx) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return
+    const att = entry as SheetFile
+    if (typeof att.name !== 'string' || att.name.length === 0) return
+    out.push({ att, idx })
+  })
+  return out
+}
+
+// fileTypeLabel reads the mime string directly, and a malformed attachment row
+// can carry none. Coerced to '' here (which the label's own fallback turns into
+// 'FILE') rather than reaching .includes() as undefined and throwing mid-render.
+function attLabel(att: SheetFile): string {
+  return fileTypeLabel(typeof att.type === 'string' ? att.type : '')
+}
+
+// A row that carries a file IS a document, whatever its category says: the book
+// icon would misrepresent an uploaded PDF/DOCX as an authored study sheet.
+// Category only decides the icon when there is no file to show.
+function sheetIcon(sheet: StudySheet) {
+  if (sheetFiles(sheet).length > 0) return FileText
+  return sheet.category?.toLowerCase() === 'grammar' ? Languages : BookOpen
 }
 
 // Reused difficulty-bar logic (unchanged from the previous surface).
@@ -263,8 +301,17 @@ function TabButton({
 }
 
 function Badges({ sheet }: { sheet: StudySheet }) {
+  const files = sheetFiles(sheet)
   return (
     <div className="flex items-center gap-2 flex-wrap">
+      {files.length > 0 && (
+        <span
+          className="px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+        >
+          {attLabel(files[0].att)}
+        </span>
+      )}
       {sheet.category && (
         <span
           className="px-2 py-0.5 rounded-full text-xs font-medium capitalize"
@@ -281,14 +328,19 @@ function Badges({ sheet }: { sheet: StudySheet }) {
           {sheet.level}
         </span>
       )}
-      <DifficultyBars count={sheet.difficulty} />
+      {/* Difficulty is a rating someone authored onto a sheet, not a property of
+          an uploaded file: on a file-bearing row the bars would assert a level
+          nobody set, so they are withheld rather than shown at their default. */}
+      {files.length === 0 && <DifficultyBars count={sheet.difficulty} />}
     </div>
   )
 }
 
 function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
   const router = useRouter()
-  const Icon = categoryIcon(sheet.category)
+  const Icon = sheetIcon(sheet)
+  const files = sheetFiles(sheet)
+  const hasFiles = files.length > 0
   return (
     <div
       onClick={() => router.push(`/study-sheets/${sheet.id}`)}
@@ -298,11 +350,15 @@ function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
       onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
     >
       <div className="flex items-start justify-between mb-3">
+        {/* Tile palette follows the admin library (LibraryAdminClient.tsx): a
+            document gets the neutral grey pair, an authored sheet keeps orange.
+            Orange is the brand accent for content this school wrote; a file
+            someone uploaded is not that. */}
         <span
           className="flex items-center justify-center rounded-lg"
-          style={{ width: '40px', height: '40px', backgroundColor: '#FFF3E0' }}
+          style={{ width: '40px', height: '40px', backgroundColor: hasFiles ? '#f3f4f6' : '#FFF3E0' }}
         >
-          <Icon className="w-5 h-5" style={{ color: '#FF8303' }} />
+          <Icon className="w-5 h-5" style={{ color: hasFiles ? '#4b5563' : '#FF8303' }} />
         </span>
         <div className="flex items-center gap-1">
           {owned && <Lock className="w-4 h-4 mt-1" style={{ color: '#9ca3af' }} aria-label="Private to you" />}
@@ -313,6 +369,28 @@ function SheetCard({ sheet, owned }: { sheet: StudySheet; owned: boolean }) {
       <div className="mb-3">
         <Badges sheet={sheet} />
       </div>
+      {/* Read-only file links, one per attachment. The whole card is a click
+          target that router.push()es the detail route, so each link MUST stop
+          the click from bubbling - otherwise opening a file also navigates the
+          card underneath it. Same guard DuplicateMenu uses on its own handlers. */}
+      {hasFiles && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {files.map(({ att, idx }) => (
+            <a
+              key={idx}
+              href={`/api/library-file/${sheet.id}/${idx}`}
+              target="_blank"
+              rel="noreferrer"
+              title={att.name}
+              onClick={e => e.stopPropagation()}
+              className="text-xs font-medium px-2 py-1 rounded-md"
+              style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8' }}
+            >
+              {attLabel(att)}
+            </a>
+          ))}
+        </div>
+      )}
       <p className="text-xs" style={{ color: '#9ca3af' }}>{formatDate(sheet.created_at)}</p>
     </div>
   )
@@ -340,7 +418,7 @@ function WorksheetCard({
   students: AssignableStudent[]
 }) {
   const router = useRouter()
-  const Icon = categoryIcon(sheet.category)
+  const Icon = sheetIcon(sheet)
   const [showAssign, setShowAssign] = useState(false)
 
   const assignedCount = progress?.assignedCount ?? 0
@@ -494,39 +572,64 @@ function SheetTable({
       {rows.length === 0 ? (
         <div className="px-6 py-12 text-center text-sm" style={{ color: '#9ca3af' }}>{emptyMessage}</div>
       ) : (
-        rows.map(sheet => (
-          <div
-            key={sheet.id}
-            onClick={() => router.push(`/study-sheets/${sheet.id}`)}
-            className="grid grid-cols-[1fr_120px_80px_100px_72px] gap-4 px-6 py-4 transition-colors"
-            style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            <span className="font-medium text-sm flex items-center gap-1.5" style={{ color: '#111827' }}>
-              {ownedIds.has(sheet.id) && (
-                <Lock className="w-3.5 h-3.5 shrink-0" style={{ color: '#9ca3af' }} aria-label="Private to you" />
-              )}
-              {sheet.title}
-            </span>
-            <span className="text-sm capitalize" style={{ color: '#4b5563' }}>{sheet.category}</span>
-            <span className="text-sm">
-              {sheet.level && (
-                <span
-                  className="px-2 py-0.5 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
-                >
-                  {sheet.level}
-                </span>
-              )}
-            </span>
-            <span><DifficultyBars count={sheet.difficulty} /></span>
-            <span className="flex items-center justify-end gap-1 self-center">
-              <DuplicateMenu sheetId={sheet.id} />
-              <ChevronRight className="w-4 h-4" style={{ color: '#9ca3af' }} />
-            </span>
-          </div>
-        ))
+        rows.map(sheet => {
+          const files = sheetFiles(sheet)
+          return (
+            <div
+              key={sheet.id}
+              onClick={() => router.push(`/study-sheets/${sheet.id}`)}
+              className="grid grid-cols-[1fr_120px_80px_100px_72px] gap-4 px-6 py-4 transition-colors"
+              style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}
+              onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#f9fafb')}
+              onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              <span className="font-medium text-sm flex items-center gap-1.5" style={{ color: '#111827' }}>
+                {ownedIds.has(sheet.id) && (
+                  <Lock className="w-3.5 h-3.5 shrink-0" style={{ color: '#9ca3af' }} aria-label="Private to you" />
+                )}
+                {sheet.title}
+                {/* File type rides next to the title rather than as its own
+                    column: the grid template is fixed and a sixth track would
+                    reflow every row. */}
+                {files.length > 0 && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0"
+                    style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+                  >
+                    {attLabel(files[0].att)}
+                  </span>
+                )}
+              </span>
+              {/* Teaching material now carries a null category, which painted
+                  this cell blank. A muted dash reads as "none" rather than as a
+                  half-loaded row. */}
+              <span className="text-sm capitalize" style={{ color: sheet.category ? '#4b5563' : '#d1d5db' }}>
+                {sheet.category || '-'}
+              </span>
+              <span className="text-sm">
+                {sheet.level && (
+                  <span
+                    className="px-2 py-0.5 rounded-full text-xs font-medium"
+                    style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                  >
+                    {sheet.level}
+                  </span>
+                )}
+              </span>
+              {/* Withheld on a file-bearing row for the reason Badges gives:
+                  difficulty is authored onto a sheet, not a property of an
+                  uploaded file. The two surfaces must agree. The empty span
+                  still occupies the grid cell so the columns stay aligned. */}
+              {files.length > 0
+                ? <span />
+                : <span><DifficultyBars count={sheet.difficulty} /></span>}
+              <span className="flex items-center justify-end gap-1 self-center">
+                <DuplicateMenu sheetId={sheet.id} />
+                <ChevronRight className="w-4 h-4" style={{ color: '#9ca3af' }} />
+              </span>
+            </div>
+          )
+        })
       )}
     </div>
   )
