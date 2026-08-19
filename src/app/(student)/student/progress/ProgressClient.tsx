@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { Activity, History, Pencil, type LucideIcon } from 'lucide-react'
 import { requireTz } from '@/lib/time/requireTz'
 import {
+  computeOverallLevel,
   hasUsableLevelData,
   listUnassessedSkillLabels,
   toRadarData,
@@ -210,6 +211,13 @@ export default function ProgressClient({
   const radarData = toRadarData(latestLevelData)
   const unassessedSkills = listUnassessedSkillLabels(latestLevelData)
 
+  // Derived headline level: the equal-weight average of all seven skills, or
+  // null when the assessment is partial. Same function the teacher report form
+  // uses, so the student never sees a different number from the one the teacher
+  // saw when filing. Legacy partial assessments render the chart with no
+  // headline rather than an average that would overstate the level.
+  const overallLevel = computeOverallLevel(latestLevelData)
+
   // ----- Exercises -----
   const pending = Math.max(0, totalAssigned - totalCompleted)
   const exercisePct = totalAssigned === 0 ? 0 : Math.round((totalCompleted / totalAssigned) * 100)
@@ -287,6 +295,28 @@ export default function ProgressClient({
                 gone. This used to be a `grid lg:grid-cols-2` with the chart
                 inline, which handed the chart only half the card width from lg
                 up, and kept a second, drifting copy of the chart config. */}
+            {overallLevel && (
+              <div
+                className="flex flex-col items-center"
+                style={{ marginBottom: '20px' }}
+              >
+                <p
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#9ca3af',
+                    letterSpacing: '0.05em',
+                    textTransform: 'uppercase',
+                    margin: 0,
+                  }}
+                >
+                  Overall Level
+                </p>
+                <p style={{ fontSize: '44px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                  {overallLevel}
+                </p>
+              </div>
+            )}
             <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
 
             {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
