@@ -292,7 +292,7 @@ export default function ExportsPageClient() {
       a.href = url
       const disposition = res.headers.get('Content-Disposition')
       const match = disposition?.match(/filename="(.+)"/)
-      a.download = match?.[1] ?? `${exportDef.type}-export.csv`
+      a.download = match?.[1] ?? `${exportDef.type}-export.xlsx`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -315,7 +315,7 @@ export default function ExportsPageClient() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Data Exports</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Download CSV reports for analysis in Excel or Google Sheets. Use the filters to narrow by date, teacher, or student.
+            Download formatted Excel reports, ready to read or send on. Use the filters to narrow by date, teacher, or student.
           </p>
         </div>
       </div>
@@ -346,7 +346,7 @@ export default function ExportsPageClient() {
                     cursor: isLoading ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {isLoading ? 'Generating…' : '⬇ Download CSV'}
+                  {isLoading ? 'Generating…' : '⬇ Download Excel'}
                 </button>
               </div>
 

@@ -6,34 +6,13 @@ import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates
 import { getDayKeyInTz, getMonthKeyInTz } from '@/lib/billing/monthRange'
 import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { buildFilterLines } from '@/lib/exports/filterLines'
+import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook'
 import { NextRequest, NextResponse } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 
-// ─── CSV helper ───────────────────────────────────────────────────────────────
-
-function escapeCSV(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  let str = String(value)
-  // Neutralise spreadsheet formula injection: leading = + @ tab CR,
-  // or leading - that is not a plain number (negative amounts stay intact)
-  if (/^[=+@\t\r]/.test(str) || (str.startsWith('-') && !/^-\d+(\.\d+)?$/.test(str))) {
-    str = "'" + str
-  }
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
-}
-
-function toCSV(rows: Record<string, unknown>[]): string {
-  if (rows.length === 0) return ''
-  const headers = Object.keys(rows[0])
-  const lines = [
-    headers.map(escapeCSV).join(','),
-    ...rows.map(row => headers.map(h => escapeCSV(row[h])).join(',')),
-  ]
-  return lines.join('\r\n')
-}
+// ExcelJS is Node-only (Buffer, zlib) — this route must not run on Edge.
+export const runtime = 'nodejs'
 
 // Date-only helper — used for `date`-typed columns (training start/end) that are
 // NOT instants and must stay exactly as stored. Instant (timestamptz) columns are
@@ -74,22 +53,61 @@ export async function GET(
   const fromTs = fromDate ? `${fromDate}T00:00:00.000Z` : null
   const toTs   = toDate   ? `${toDate}T23:59:59.999Z`   : null
 
-  let csvContent = ''
-  let filename = 'export.csv'
+  let rows: Record<string, unknown>[] = []
+  let columns: ExportColumn[] = []
+  let title = ''
+  let sheetName = ''
+  let totals: Record<string, unknown> | undefined
+  let freezeColumns = 0
+  let filename = 'export.xlsx'
 
   try {
     switch (type) {
 
       // ── 1. All Classes Report ──────────────────────────────────────────────
       case 'all-classes': {
-        filename = `lingualink-all-classes-${Date.now()}.csv`
+        filename = `lingualink-all-classes-${Date.now()}.xlsx`
+        title = 'All Classes Report'
+        sheetName = 'All Classes'
+        freezeColumns = 2 // Date + Time stay visible when scrolling right
+
+        const dateHeader = `Date (${exportTzLabel})`
+        const timeHeader = `Time (${exportTzLabel})`
+
+        columns = [
+          { header: dateHeader, key: dateHeader, width: 14 },
+          { header: timeHeader, key: timeHeader, width: 14 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
+          { header: 'Status', key: 'Status', width: 22 },
+          { header: 'Report Status', key: 'Report Status', width: 22 },
+          { header: 'Billable to Teacher', key: 'Billable to Teacher', width: 20 },
+          { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
+          // Proof columns: what the system actually recorded, for dispute resolution.
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          { header: 'Class ID', key: 'Class ID', width: 38 },
+          { header: 'Booked At', key: 'Booked At', width: 18 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
+        ]
 
         let query = supabase
           .from('lessons')
           .select(`
             id, scheduled_at, duration_minutes, status,
             cancelled_at, cancellation_reason, cancelled_by, rescheduled_by,
-            teacher_id, student_id, training_id
+            teacher_id, student_id, training_id,
+            created_at, rescheduled_at, teams_join_url
           `)
           .order('scheduled_at', { ascending: false })
 
@@ -105,14 +123,22 @@ export async function GET(
         const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))]
         const studentIds = [...new Set((lessons ?? []).map((l: any) => l.student_id).filter(Boolean))]
 
-        const [teacherRes, studentRes, reportRes] = await Promise.all([
+        // lesson_join_clicks is deny-all RLS with `revoke all ... from anon,
+        // authenticated` (migration 20260707120000, lines 40-41), so the anon-key
+        // `supabase` client returns 42501 on it — the join-proof columns must read
+        // through the service-role client, the same way reports/export/route.ts
+        // reaches this table. requireAdmin() above has already gated access.
+        const joinClickClient = createAdminClient()
+        const [teacherRes, studentRes, reportRes, joinClickRes] = await Promise.all([
           supabase.from('profiles').select('id, full_name').in('id', teacherIds),
           supabase.from('students').select('id, full_name, company_id').in('id', studentIds),
-          supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
+          supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type, deadline_at, completed_at, flagged_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
+          joinClickClient.from('lesson_join_clicks').select('lesson_id, user_type, clicked_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
         ])
         if (teacherRes.error) throw teacherRes.error
         if (studentRes.error) throw studentRes.error
         if (reportRes.error) throw reportRes.error
+        if (joinClickRes.error) throw joinClickRes.error
 
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
@@ -131,12 +157,26 @@ export async function GET(
         const reportMap: Record<string, any> = {}
         reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
 
+        // lesson_id -> every recorded join click for it. A lesson with no clicks
+        // resolves to an empty array below, never undefined.
+        const joinClickMap: Record<string, { user_type: string; clicked_at: string }[]> = {}
+        joinClickRes.data?.forEach((c: any) => {
+          if (!joinClickMap[c.lesson_id]) joinClickMap[c.lesson_id] = []
+          joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
+        })
+
+        // Null-safe wrapper around the instant formatter this branch already uses
+        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
+        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        const fmtInstant = (value: string | null | undefined): string =>
+          value ? formatInstantInTz(value, exportTz) : ''
+
         // Filter by company if requested
         const filtered = companyId
           ? (lessons ?? []).filter((l: any) => studentMap[l.student_id]?.companyId === companyId)
           : (lessons ?? [])
 
-        const rows = filtered.map((l: any) => {
+        rows = filtered.map((l: any) => {
           const report = reportMap[l.id]
           const student = studentMap[l.student_id]
           const billable = getBillability({
@@ -151,7 +191,7 @@ export async function GET(
           }).billableToTeacher
 
           // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
-          // helper, mirroring the reports export so both admin CSVs read identically.
+          // helper, mirroring the reports export so both admin exports read identically.
           // Non-cancel labels are export-specific and match reports/export/route.ts verbatim.
           const st = l.status as string
           const cancelLabel = getCancellationLabel(
@@ -167,9 +207,38 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          // Earliest join click per user_type. Logic DUPLICATED from
+          // api/admin/reports/export/route.ts:252-268, where it is a local closure
+          // and not exported; adapted to the flat array built above because this
+          // route queries lesson_join_clicks directly rather than via a nested join.
+          const clicks = joinClickMap[l.id] ?? []
+          const earliest = (userType: string): string | null => {
+            const times = clicks
+              .filter((c) => c.user_type === userType)
+              .map((c) => c.clicked_at as string)
+              .filter(Boolean)
+            if (!times.length) return null
+            return times.reduce((min: string, t: string) =>
+              new Date(t).getTime() < new Date(min).getTime() ? t : min
+            )
+          }
+          const teacherJoinedAt = earliest('teacher')
+          const studentJoinedAt = earliest('student')
+
+          // Cancellation window: absolute-instant gap between schedule and
+          // cancellation, so it is timezone-independent. DISPLAY ONLY — no money
+          // column is derived from it and getBillability above is untouched.
+          let cancellationWindow = ''
+          if (l.cancelled_at) {
+            const windowHours = (new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime()) / 3600000
+            if (windowHours < 24) cancellationWindow = '<24hr'
+            else if (windowHours < 48) cancellationWindow = '24-48hr'
+            else cancellationWindow = '>48hr'
+          }
+
           return {
-            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
-            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
+            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Teacher': teacherMap[l.teacher_id] ?? '',
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
@@ -178,22 +247,51 @@ export async function GET(
             'Report Status': report?.status ?? 'no report',
             'Billable to Teacher': billable ? 'Yes' : 'No',
             'Cancellation Reason': l.cancellation_reason ?? '',
+            'Class ID': l.id,
+            'Booked At': fmtInstant(l.created_at),
+            'Cancelled At': fmtInstant(l.cancelled_at),
+            // RAW recorded value (live values are role words such as 'student'),
+            // deliberately NOT passed through getCancellationLabel and not derived
+            // from status — this column has to prove what was stored.
+            'Cancelled By': l.cancelled_by ?? '',
+            'Cancellation Window': cancellationWindow,
+            'Rescheduled At': fmtInstant(l.rescheduled_at),
+            'Teacher Joined At': fmtInstant(teacherJoinedAt),
+            'Student Joined At': fmtInstant(studentJoinedAt),
+            'Teams Link Created': typeof l.teams_join_url === 'string' && l.teams_join_url.length > 0 ? 'Yes' : 'No',
+            'Report Deadline': fmtInstant(report?.deadline_at),
+            'Report Submitted At': fmtInstant(report?.completed_at),
+            'Report Flagged At': fmtInstant(report?.flagged_at),
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 2. Teacher Earnings Summary ────────────────────────────────────────
       case 'teacher-earnings': {
-        filename = `lingualink-teacher-earnings-${Date.now()}.csv`
+        filename = `lingualink-teacher-earnings-${Date.now()}.xlsx`
+        title = 'Teacher Earnings Summary'
+        sheetName = 'Teacher Earnings'
+        freezeColumns = 1 // Teacher stays visible
+
+        columns = [
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Month', key: 'Month', width: 12 },
+          { header: 'Classes Taken', key: 'Classes Taken', width: 14, format: 'integer' },
+          { header: 'Student No-Shows', key: 'Student No-Shows', width: 18, format: 'integer' },
+          { header: 'Total Hours', key: 'Total Hours', width: 14, format: 'decimal2' },
+          { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
+          { header: 'Total Owed', key: 'Total Owed', width: 14, format: 'money2' },
+          { header: 'Currency', key: 'Currency', width: 10 },
+          { header: 'Invoice Status', key: 'Invoice Status', width: 18 },
+        ]
 
         // fromDate/toDate feed TWO consumers with different strictness: Date.parse
         // for the coarse UTC bound (lenient — it accepts 'YYYY-MM' and 'YYYY') and a
         // 10-char lexical day-key compare below (strict). A value that is valid to
         // the first and not the second passes the DB bound then rejects every day
-        // key, silently emitting an EMPTY earnings CSV. Reject it loudly instead —
+        // key, silently emitting an EMPTY earnings sheet. Reject it loudly instead —
         // the admin UI's <input type="date"> always sends YYYY-MM-DD.
         const DAY_PARAM = /^\d{4}-\d{2}-\d{2}$/
         if ((fromDate && !DAY_PARAM.test(fromDate)) || (toDate && !DAY_PARAM.test(toDate))) {
@@ -302,7 +400,7 @@ export async function GET(
 
           // NEW271: Month buckets in the TEACHER's own timezone (matches NEW268 D3 /
           // recomputeAmounts.ts invoice basis). Display columns render in the export tz,
-          // but the billing-period KEY is teacher-local so this CSV's Month/Total agree
+          // but the billing-period KEY is teacher-local so this sheet's Month/Total agree
           // with invoices.amount_eur and the invoice-status join keys correctly.
           // The from/to range scoping above now resolves in this same teacher-local
           // zone, so scoping and bucketing can no longer disagree at a boundary.
@@ -350,28 +448,60 @@ export async function GET(
           invoiceMap[`${inv.teacher_id}__${ym}`] = inv.status
         })
 
-        const rows = Object.entries(summary).map(([key, s]) => ({
+        const earningRows = Object.entries(summary).map(([key, s]) => ({
           'Teacher': s.teacher,
           'Month': s.month,
           'Classes Taken': s.classesTaken,
           'Student No-Shows': s.studentNoShows,
-          'Total Hours': (s.totalMinutes / 60).toFixed(2),
+          'Total Hours': Number((s.totalMinutes / 60).toFixed(2)),
           // Decision B: one rate if every lesson in the teacher-month resolved to the
           // same rate, else "varies" (amounts above are per-lesson snapshot-correct).
-          'Hourly Rate': s.rates.size === 0 ? '0.00' : s.rates.size === 1 ? [...s.rates][0].toFixed(2) : 'varies',
-          'Total Owed': s.billableAmount.toFixed(2),
+          // 'varies' is deliberately a STRING in an otherwise numeric column.
+          'Hourly Rate': s.rates.size === 0 ? 0 : s.rates.size === 1 ? [...s.rates][0] : 'varies',
+          'Total Owed': Number(s.billableAmount.toFixed(2)),
           'Currency': s.currency,
           'Invoice Status': invoiceMap[key] ?? 'not uploaded',
         }))
 
-        rows.sort((a, b) => a['Teacher'].localeCompare(b['Teacher']) || a['Month'].localeCompare(b['Month']))
-        csvContent = toCSV(rows)
+        earningRows.sort((a, b) => a['Teacher'].localeCompare(b['Teacher']) || a['Month'].localeCompare(b['Month']))
+        rows = earningRows
+
+        if (earningRows.length > 0) {
+          // Currency guard: money may only be summed within ONE currency. Counts and
+          // hours are currency-independent and always sum.
+          const currencies = [...new Set(earningRows.map(r => r['Currency']))]
+          const owedSum = earningRows.reduce((sum, r) => sum + r['Total Owed'], 0)
+          totals = {
+            'Teacher': 'TOTAL',
+            'Classes Taken': earningRows.reduce((sum, r) => sum + r['Classes Taken'], 0),
+            'Student No-Shows': earningRows.reduce((sum, r) => sum + r['Student No-Shows'], 0),
+            'Total Hours': Number(earningRows.reduce((sum, r) => sum + r['Total Hours'], 0).toFixed(2)),
+            'Total Owed': currencies.length === 1 ? Number(owedSum.toFixed(2)) : 'Mixed currencies - see rows',
+            ...(currencies.length === 1 ? { 'Currency': currencies[0] } : {}),
+          }
+        }
+
         break
       }
 
       // ── 3. Student Hours Usage ─────────────────────────────────────────────
       case 'student-hours': {
-        filename = `lingualink-student-hours-${Date.now()}.csv`
+        filename = `lingualink-student-hours-${Date.now()}.xlsx`
+        title = 'Student Hours Usage'
+        sheetName = 'Student Hours'
+        freezeColumns = 1 // Student stays visible
+
+        columns = [
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Package', key: 'Package', width: 28 },
+          { header: 'Total Hours', key: 'Total Hours', width: 14, format: 'decimal2' },
+          { header: 'Hours Used', key: 'Hours Used', width: 14, format: 'decimal2' },
+          { header: 'Hours Remaining', key: 'Hours Remaining', width: 16, format: 'decimal2' },
+          { header: 'Start Date', key: 'Start Date', width: 14 },
+          { header: 'End Date', key: 'End Date', width: 14 },
+          { header: 'Status', key: 'Status', width: 22 },
+        ]
 
         // Service-role read — the route is requireAdmin-gated above.
         const adminClient = createAdminClient()
@@ -407,29 +537,66 @@ export async function GET(
           ? (trainings ?? []).filter((t: any) => sMap[t.student_id]?.companyId === companyId)
           : (trainings ?? [])
 
-        const rows = filtered.map((t: any) => {
+        rows = filtered.map((t: any) => {
           const student = sMap[t.student_id]
           const remaining = Number(t.total_hours) - Number(t.hours_consumed)
           return {
             'Student': student?.name ?? '',
             'Company': student?.companyId ? cMap[student.companyId] ?? '' : 'Private',
             'Package': t.package_name ?? t.package_type ?? '',
-            'Total Hours': Number(t.total_hours).toFixed(2),
-            'Hours Used': Number(t.hours_consumed).toFixed(2),
-            'Hours Remaining': remaining.toFixed(2),
+            'Total Hours': Number(Number(t.total_hours).toFixed(2)),
+            'Hours Used': Number(Number(t.hours_consumed).toFixed(2)),
+            'Hours Remaining': Number(remaining.toFixed(2)),
             'Start Date': formatDate(t.start_date),
             'End Date': formatDate(t.end_date),
             'Status': t.status,
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 4. Company Billing Report ──────────────────────────────────────────
       case 'company-billing': {
-        filename = `lingualink-company-billing-${Date.now()}.csv`
+        filename = `lingualink-company-billing-${Date.now()}.xlsx`
+        title = 'Company Billing Report'
+        sheetName = 'Company Billing'
+        freezeColumns = 1 // Company stays visible
+
+        const dateHeader = `Date (${exportTzLabel})`
+        const timeHeader = `Time (${exportTzLabel})`
+
+        columns = [
+          { header: 'Company', key: 'Company', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: dateHeader, key: dateHeader, width: 14 },
+          { header: timeHeader, key: timeHeader, width: 14 },
+          { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
+          { header: 'Status', key: 'Status', width: 22 },
+          { header: 'Billable (standard)', key: 'Billable (standard)', width: 20 },
+          { header: 'Billable cancellation (48hr policy)', key: 'Billable cancellation (48hr policy)', width: 36 },
+          { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
+          { header: 'Currency', key: 'Currency', width: 10 },
+          { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
+          { header: 'Amount Owed to Teacher', key: 'Amount Owed to Teacher', width: 24, format: 'money2' },
+          // Proof columns: what the system actually recorded, for dispute resolution.
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          // Deliberately absent from the totals block — they render blank there.
+          { header: 'Class ID', key: 'Class ID', width: 38 },
+          { header: 'Booked At', key: 'Booked At', width: 18 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
+          { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
+        ]
 
         // cancellation_policy has a column-level REVOKE on `authenticated` — must use
         // the admin client. Role check above has already gated access here.
@@ -446,7 +613,8 @@ export async function GET(
         if (sErr) throw sErr
 
         const studentIds = (students ?? []).map((s: any) => s.id)
-        if (studentIds.length === 0) { csvContent = toCSV([]); break }
+        // No B2B students in scope — emit the empty workbook (title block + headers).
+        if (studentIds.length === 0) break
 
         const cIds = [...new Set((students ?? []).map((s: any) => s.company_id).filter(Boolean))] as string[]
         const cRes = await supabase.from('companies').select('id, name').in('id', cIds)
@@ -456,7 +624,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id, cancellation_reason, rescheduled_at, created_at, teams_join_url')
           .in('student_id', studentIds)
           .order('scheduled_at', { ascending: false })
 
@@ -466,16 +634,46 @@ export async function GET(
         const { data: lessons, error: lErr } = await lessonsQuery
         if (lErr) throw lErr
 
+        // Proof-column reads, both through the `adminClient` already open above.
+        // lesson_join_clicks is deny-all RLS with `revoke all ... from anon,
+        // authenticated` (migration 20260707120000), so the anon-key `supabase`
+        // client returns 42501 on it and would 500 the whole export. requireAdmin()
+        // at the top of this handler has already gated access.
+        const lessonIds = (lessons ?? []).map((l: any) => l.id)
+        const [reportRes, joinClickRes] = await Promise.all([
+          adminClient.from('reports').select('lesson_id, deadline_at, completed_at, flagged_at').in('lesson_id', lessonIds),
+          adminClient.from('lesson_join_clicks').select('lesson_id, user_type, clicked_at').in('lesson_id', lessonIds),
+        ])
+        if (reportRes.error) throw reportRes.error
+        if (joinClickRes.error) throw joinClickRes.error
+
+        const reportMap: Record<string, any> = {}
+        reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
+
+        // lesson_id -> every recorded join click for it. A lesson with no clicks
+        // resolves to an empty array below, never undefined.
+        const joinClickMap: Record<string, { user_type: string; clicked_at: string }[]> = {}
+        joinClickRes.data?.forEach((c: any) => {
+          if (!joinClickMap[c.lesson_id]) joinClickMap[c.lesson_id] = []
+          joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
+        })
+
+        // Null-safe wrapper around the instant formatter this branch already uses
+        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
+        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        const fmtInstant = (value: string | null | undefined): string =>
+          value ? formatInstantInTz(value, exportTz) : ''
+
         // hourly_rate has a column-level REVOKE on `authenticated` — fetch the
         // teacher rate+currency via the admin client (role-gated above) so the
         // company-owed Amount can be computed from getBillability's single source.
         const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))] as string[]
         const teacherRes = teacherIds.length > 0
-          ? await adminClient.from('profiles').select('id, hourly_rate, currency').in('id', teacherIds)
+          ? await adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', teacherIds)
           : { data: [] }
         if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
-        const teacherMap: Record<string, { rate: number; currency: string }> = {}
-        teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
+        const teacherMap: Record<string, { name: string; rate: number; currency: string }> = {}
+        teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { name: p.full_name ?? '', rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
 
         // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
         // teacherMap rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
@@ -484,7 +682,7 @@ export async function GET(
         const sMap: Record<string, any> = {}
         students?.forEach((s: any) => { sMap[s.id] = s })
 
-        const rows = (lessons ?? []).map((l: any) => {
+        const billingRows = (lessons ?? []).map((l: any) => {
           const student = sMap[l.student_id]
 
           // company-standard billing intentionally tracks billableToTeacher; the 48hr B2B split is billable48hr — single source of truth, do not reintroduce inline arithmetic.
@@ -502,7 +700,7 @@ export async function GET(
           const billable48 = bill.billable48hr
 
           // Cancellation-family wording (incl. reschedule-leg attribution) from the shared
-          // helper, mirroring the all-classes export so both admin CSVs read identically.
+          // helper, mirroring the all-classes export so both admin exports read identically.
           // Display-only: getBillability above still keys off the raw l.status.
           const st = l.status as string
           const cancelLabel = getCancellationLabel(
@@ -518,27 +716,120 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          const report = reportMap[l.id]
+
+          // Earliest join click per user_type. Logic DUPLICATED from the
+          // all-classes branch above (which in turn duplicates the local closure in
+          // api/admin/reports/export/route.ts) — it is not exported from
+          // anywhere, and the duplication is deliberate so the sheets stay
+          // independently readable.
+          const clicks = joinClickMap[l.id] ?? []
+          const earliest = (userType: string): string | null => {
+            const times = clicks
+              .filter((c) => c.user_type === userType)
+              .map((c) => c.clicked_at as string)
+              .filter(Boolean)
+            if (!times.length) return null
+            return times.reduce((min: string, t: string) =>
+              new Date(t).getTime() < new Date(min).getTime() ? t : min
+            )
+          }
+          const teacherJoinedAt = earliest('teacher')
+          const studentJoinedAt = earliest('student')
+
+          // Cancellation window: absolute-instant gap between schedule and
+          // cancellation, so it is timezone-independent. Boundaries copied verbatim
+          // from the all-classes branch and api/admin/reports/export/route.ts:206 so
+          // an identical lesson classifies identically on all three sheets. DISPLAY
+          // ONLY — no money column is derived from it and getBillability
+          // above is untouched.
+          let cancellationWindow = ''
+          if (l.cancelled_at) {
+            const windowHours = (new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime()) / 3600000
+            if (windowHours < 24) cancellationWindow = '<24hr'
+            else if (windowHours < 48) cancellationWindow = '24-48hr'
+            else cancellationWindow = '>48hr'
+          }
+
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
-            [`Date (${exportTzLabel})`]: formatDateInTz(l.scheduled_at, exportTz),
-            [`Time (${exportTzLabel})`]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            'Teacher': teacherMap[l.teacher_id]?.name ?? '',
+            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
+            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
             'Duration (min)': l.duration_minutes,
             'Status': statusLabel,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
             'Billable cancellation (48hr policy)': billable48 ? 'Yes' : 'No',
             'Amount': bill.companyAmount,
             'Currency': teacherMap[l.teacher_id]?.currency ?? 'EUR',
+            // Historical per-lesson snapshot rate (live profiles.hourly_rate is the
+            // fallback only) — the live rate would retro-restate closed months.
+            'Hourly Rate': resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
+            // Teacher pay. Deliberately NOT 'Amount' above, which is bill.companyAmount.
+            'Amount Owed to Teacher': bill.amount,
+            'Class ID': l.id,
+            'Booked At': fmtInstant(l.created_at),
+            'Cancelled At': fmtInstant(l.cancelled_at),
+            // RAW recorded value (live values are role words such as 'student'),
+            // deliberately NOT passed through getCancellationLabel, not title-cased
+            // and not derived from status — this column has to prove what
+            // was stored. The 'Status' column above keeps the prose label; both are
+            // intended, side by side.
+            'Cancelled By': l.cancelled_by ?? '',
+            'Cancellation Window': cancellationWindow,
+            'Cancellation Reason': l.cancellation_reason ?? '',
+            'Rescheduled At': fmtInstant(l.rescheduled_at),
+            'Teacher Joined At': fmtInstant(teacherJoinedAt),
+            'Student Joined At': fmtInstant(studentJoinedAt),
+            'Teams Link Created': typeof l.teams_join_url === 'string' && l.teams_join_url.length > 0 ? 'Yes' : 'No',
+            'Report Deadline': fmtInstant(report?.deadline_at),
+            'Report Submitted At': fmtInstant(report?.completed_at),
+            'Report Flagged At': fmtInstant(report?.flagged_at),
           }
         })
 
-        csvContent = toCSV(rows)
+        rows = billingRows
+
+        if (billingRows.length > 0) {
+          // Currency guard: money may only be summed within ONE currency.
+          const currencies = [...new Set(billingRows.map((r: any) => r['Currency'] as string))]
+          const amountSum = billingRows.reduce((sum: number, r: any) => sum + Number(r['Amount'] ?? 0), 0)
+          // Teacher pay is denominated in the same teacher currency as Amount, so the
+          // single `currencies` guard above governs both sums. No second guard.
+          const teacherPaySum = billingRows.reduce((sum: number, r: any) => sum + Number(r['Amount Owed to Teacher'] ?? 0), 0)
+          totals = {
+            'Company': 'TOTAL',
+            'Amount': currencies.length === 1 ? Number(amountSum.toFixed(2)) : 'Mixed currencies - see rows',
+            ...(currencies.length === 1 ? { 'Currency': currencies[0] } : {}),
+            'Amount Owed to Teacher': currencies.length === 1 ? Number(teacherPaySum.toFixed(2)) : 'Mixed currencies - see rows',
+          }
+        }
+
         break
       }
 
       // ── 5. Student Progress Report ─────────────────────────────────────────
       case 'student-progress': {
-        filename = `lingualink-student-progress-${Date.now()}.csv`
+        filename = `lingualink-student-progress-${Date.now()}.xlsx`
+        title = 'Student Progress Report'
+        sheetName = 'Student Progress'
+        freezeColumns = 1 // Student stays visible
+
+        const classDateHeader = `Class Date (${exportTzLabel})`
+
+        columns = [
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: classDateHeader, key: classDateHeader, width: 20 },
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Grammar', key: 'Grammar', width: 14 },
+          { header: 'Expression', key: 'Expression', width: 14 },
+          { header: 'Comprehension', key: 'Comprehension', width: 16 },
+          { header: 'Vocabulary', key: 'Vocabulary', width: 14 },
+          { header: 'Accent', key: 'Accent', width: 12 },
+          { header: 'Overall Spoken Level', key: 'Overall Spoken Level', width: 22 },
+          { header: 'Overall Written Level', key: 'Overall Written Level', width: 22 },
+        ]
 
         let reportsQuery = supabase
           .from('reports')
@@ -584,7 +875,7 @@ export async function GET(
         const studentMap: Record<string, string> = {}
         studentRes2.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
-        const rows: Record<string, unknown>[] = []
+        rows = []
 
         for (const report of reports ?? []) {
           const lesson = lessonMap[report.lesson_id]
@@ -596,7 +887,7 @@ export async function GET(
 
           rows.push({
             'Student': studentMap[lesson.studentId] ?? '',
-            [`Class Date (${exportTzLabel})`]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
             'Teacher': teacherMap[report.teacher_id] ?? '',
             'Grammar': ld.grammar ?? '',
             'Expression': ld.expression ?? '',
@@ -608,13 +899,29 @@ export async function GET(
           })
         }
 
-        csvContent = toCSV(rows)
         break
       }
 
       // ── 6. Pending Reports Log ─────────────────────────────────────────────
       case 'pending-reports': {
-        filename = `lingualink-pending-reports-${Date.now()}.csv`
+        filename = `lingualink-pending-reports-${Date.now()}.xlsx`
+        title = 'Pending Reports Log'
+        sheetName = 'Pending Reports'
+        freezeColumns = 1 // Teacher stays visible
+
+        const classDateHeader = `Class Date (${exportTzLabel})`
+        const deadlineHeader = `Deadline (${exportTzLabel})`
+        const flaggedAtHeader = `Flagged At (${exportTzLabel})`
+
+        columns = [
+          { header: 'Teacher', key: 'Teacher', width: 24 },
+          { header: 'Student', key: 'Student', width: 24 },
+          { header: classDateHeader, key: classDateHeader, width: 20 },
+          { header: 'Hours Since Class', key: 'Hours Since Class', width: 18, format: 'decimal1' },
+          { header: 'Report Status', key: 'Report Status', width: 22 },
+          { header: deadlineHeader, key: deadlineHeader, width: 20 },
+          { header: flaggedAtHeader, key: flaggedAtHeader, width: 20 },
+        ]
 
         let query = supabase
           .from('reports')
@@ -659,27 +966,28 @@ export async function GET(
 
         const now = Date.now()
 
-        const rows = (reports ?? []).map((r: any) => {
+        rows = (reports ?? []).map((r: any) => {
           const lesson = lessonMap[r.lesson_id]
           const classEndTime = lesson
             ? new Date(lesson.scheduledAt).getTime()
             : null
+          // Number, not a string — sorts and filters in Excel. No lesson row leaves
+          // the cell EMPTY (never 0, which would read as "reported on time").
           const hoursSinceClass = classEndTime
-            ? ((now - classEndTime) / (1000 * 60 * 60)).toFixed(1)
+            ? Number(((now - classEndTime) / (1000 * 60 * 60)).toFixed(1))
             : ''
 
           return {
             'Teacher': teacherMap[r.teacher_id] ?? '',
             'Student': lesson ? studentMap[lesson.studentId] ?? '' : '',
-            [`Class Date (${exportTzLabel})`]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
             'Hours Since Class': hoursSinceClass,
             'Report Status': r.status,
-            [`Deadline (${exportTzLabel})`]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
-            [`Flagged At (${exportTzLabel})`]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
+            [deadlineHeader]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
+            [flaggedAtHeader]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
           }
         })
 
-        csvContent = toCSV(rows)
         break
       }
 
@@ -692,10 +1000,24 @@ export async function GET(
     return NextResponse.json({ error: err.message ?? 'Export failed' }, { status: 500 })
   }
 
-  return new NextResponse(csvContent, {
+  const filterLines = await buildFilterLines(supabase, { fromDate, toDate, teacherId, studentId, companyId })
+
+  const buffer = await buildExportWorkbook({
+    title,
+    columns,
+    rows,
+    generatedAtLabel: formatInstantInTz(new Date(), exportTz),
+    timezoneLabel: exportTzLabel,
+    filterLines,
+    sheetName,
+    totalsRow: totals,
+    freezeColumns,
+  })
+
+  return new NextResponse(buffer, {
     status: 200,
     headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
   })

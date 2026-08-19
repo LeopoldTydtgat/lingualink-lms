@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
       scheduled_at,
       duration_minutes,
       status,
+      cancelled_by,
+      rescheduled_by,
       teacher_id,
       student_id,
       profiles!lessons_teacher_id_fkey (
@@ -70,6 +72,8 @@ export async function GET(request: NextRequest) {
       scheduled_at:     lesson.scheduled_at,
       duration_minutes: lesson.duration_minutes,
       lesson_status:    lesson.status,
+      cancelled_by:     lesson.cancelled_by ?? null,
+      rescheduled_by:   lesson.rescheduled_by ?? null,
       teacher: teacher ? { id: teacher.id, full_name: teacher.full_name, photo_url: teacher.photo_url } : null,
       student: student ? { id: student.id,  full_name: student.full_name } : null,
       report:  report  ? { id: report.id, status: report.status, did_class_happen: report.did_class_happen, completed_at: report.completed_at, flagged_at: report.flagged_at } : null,
