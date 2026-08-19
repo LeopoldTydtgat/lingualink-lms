@@ -114,6 +114,13 @@ function formatSubmittedAt(iso: string, timezone: string): string {
 // Level" for an input row, where a chart axis needs the short "Spoken".
 const SKILLS = SKILL_KEYS.map((key) => ({ key, label: SKILL_FORM_LABELS[key] }))
 
+// Character ceilings for the three free-text fields on this form. These MUST
+// match SubmitReportSchema in src/lib/validation/schemas.ts: the schema is the
+// server-side gate, and a form that lets a teacher type past it fails the save
+// with a raw zod message after they have already written the text.
+const FEEDBACK_MAX_CHARS = 5000
+const DETAILS_MAX_CHARS = 2000
+
 const CEFR_DESCRIPTIONS: Record<string, string> = {
   A1: 'Can understand and use very basic expressions. Introduces themselves and asks/answers simple questions.',
   A2: 'Can understand sentences on familiar topics. Communicates in simple routine tasks.',
@@ -511,14 +518,17 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                   disabled={!isEditable}
                   value={impersonationNote}
                   onChange={e => setImpersonationNote(e.target.value)}
-                  rows={3}
+                  rows={4}
+                  maxLength={DETAILS_MAX_CHARS}
                   placeholder="Who attended this class instead? Please provide as much detail as possible..."
+                  style={{ minHeight: '110px' }}
                   className={[
                     'w-full border border-amber-300 rounded-xl px-4 py-3 text-sm',
-                    'focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none',
+                    'focus:outline-none focus:ring-2 focus:ring-amber-400 resize-y',
                     !isEditable ? 'bg-gray-50 text-gray-500' : 'bg-white',
                   ].join(' ')}
                 />
+                <p className="text-xs text-gray-400 text-right mt-1">{impersonationNote.length} / {DETAILS_MAX_CHARS}</p>
               </div>
             )}
           </div>
@@ -540,12 +550,13 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
                   disabled={!isEditable}
                   value={feedbackText}
                   onChange={e => setFeedbackText(e.target.value)}
-                  rows={5}
-                  maxLength={1000}
+                  rows={10}
+                  maxLength={FEEDBACK_MAX_CHARS}
                   placeholder="Summarise what was covered, how the student performed, and what to focus on next time..."
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+                  style={{ minHeight: '200px' }}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-y"
                 />
-                <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / 1000</p>
+                <p className="text-xs text-gray-400 text-right mt-1">{feedbackText.length} / {FEEDBACK_MAX_CHARS}</p>
               </>
             ) : (
               <p className="whitespace-pre-wrap text-sm text-gray-700">{feedbackText}</p>
@@ -748,14 +759,19 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
             <p className="text-xs text-gray-500 mb-3">Required — please document what happened.</p>
           )}
           {isEditable ? (
-            <textarea
-              disabled={!isEditable}
-              value={additionalDetails}
-              onChange={e => setAdditionalDetails(e.target.value)}
-              rows={3}
-              placeholder="Any additional notes..."
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
-            />
+            <>
+              <textarea
+                disabled={!isEditable}
+                value={additionalDetails}
+                onChange={e => setAdditionalDetails(e.target.value)}
+                rows={6}
+                maxLength={DETAILS_MAX_CHARS}
+                placeholder="Any additional notes..."
+                style={{ minHeight: '140px' }}
+                className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-y"
+              />
+              <p className="text-xs text-gray-400 text-right mt-1">{additionalDetails.length} / {DETAILS_MAX_CHARS}</p>
+            </>
           ) : (
             <p className="whitespace-pre-wrap text-sm text-gray-700">{additionalDetails || '—'}</p>
           )}

@@ -449,7 +449,11 @@ export const SubmitReportSchema = z
   .object({
     did_class_happen: z.boolean(),
     no_show_type: z.enum(['student', 'teacher']).nullable(),
-    feedback_text: z.string().max(1000).nullable(),
+    // 5000 mirrors FEEDBACK_MAX_CHARS in the report form. reports.feedback_text
+    // is an unbounded text column with no CHECK, so this schema is the only cap.
+    // Raising it here without raising the form's maxLength (or the reverse) puts
+    // the two out of step and the teacher loses a valid recap at submit.
+    feedback_text: z.string().max(5000).nullable(),
     additional_details: z.string().max(2000).nullable(),
     level_data: z.record(z.string(), z.string()).nullable(),
     student_confirmed: z.boolean().nullable(),
