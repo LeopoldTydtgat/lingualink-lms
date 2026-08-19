@@ -410,9 +410,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
                         </td>
                         <td className="py-3 px-3">
                           <div className="flex items-center gap-2">
-                            {(r.status === 'completed' || r.status === 'flagged') && (
-                              <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
-                            )}
+                            <Link href={`/admin/reports/${r.id}`} prefetch={false} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>View</Link>
                             {(r.status === 'flagged' || r.status === 'completed') && (
                               <button onClick={() => openReopen(r.id)} className="text-xs font-medium hover:underline" style={{ color: '#FF8303' }}>Reopen</button>
                             )}
