@@ -115,6 +115,7 @@ export default async function ActivityPage({ params, searchParams }: Props) {
     return (
       <WritingTaskPlayerClient
         activityId={activity.id}
+        sheetId={activity.sheet_id}
         assignmentId={assignmentId}
         title={activity.title}
         prompt={parsedWriting.data.prompt}
@@ -158,6 +159,7 @@ export default async function ActivityPage({ params, searchParams }: Props) {
   return (
     <ActivityPlayerClient
       activityId={activity.id}
+      sheetId={activity.sheet_id}
       assignmentId={assignmentId}
       title={activity.title}
       questions={parsedContent.data.questions}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ interface LatestAttempt {
 
 interface Props {
   activityId: string
+  sheetId: string
   assignmentId: string | null
   title: string | null
   prompt: string
@@ -41,12 +43,21 @@ interface Props {
 
 export default function WritingTaskPlayerClient({
   activityId,
+  sheetId,
   assignmentId,
   title,
   prompt,
   latestAttempt,
 }: Props) {
   const router = useRouter()
+
+  // An explicit destination, not history: a fresh tab or a refresh must still
+  // lead back to the sheet. The assignment param has to survive the round trip
+  // or the sheet falls back to practice context and drops its status pills and
+  // the mark-as-done control.
+  const backHref = assignmentId
+    ? `/student/study/${sheetId}?assignment=${assignmentId}`
+    : `/student/study/${sheetId}`
 
   // The attempt currently on show. Seeded from the server, then replaced locally
   // on a successful submit so the view updates immediately — router.refresh()
@@ -109,13 +120,14 @@ export default function WritingTaskPlayerClient({
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
-      <button
-        onClick={() => router.back()}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors"
+      <Link
+        href={backHref}
+        prefetch={false}
+        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-5 transition-colors w-fit"
       >
         <ArrowLeft size={16} />
-        Back
-      </button>
+        Back to sheet
+      </Link>
 
       <h1 className="text-2xl font-bold text-gray-900 mb-5">{title ?? 'Writing task'}</h1>
 
@@ -204,13 +216,24 @@ export default function WritingTaskPlayerClient({
             </div>
           )}
 
-          <button
-            onClick={startNewResponse}
-            className="px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: ORANGE }}
-          >
-            Write a new response
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={startNewResponse}
+              className="px-6 py-3 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
+              style={{ backgroundColor: '#ffffff', border: '1px solid #E0DFDC', color: ORANGE }}
+            >
+              Write a new response
+            </button>
+            {/* The exit — without it a submitted task is a dead end. */}
+            <Link
+              href={backHref}
+              prefetch={false}
+              className="inline-flex items-center px-6 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ backgroundColor: ORANGE }}
+            >
+              Back to Sheet
+            </Link>
+          </div>
         </>
       ) : null}
     </div>
