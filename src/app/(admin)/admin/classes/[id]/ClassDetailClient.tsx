@@ -337,7 +337,7 @@ export default function ClassDetailClient({ lesson, adminTimezone }: Props) {
                 Status: <strong style={{ textTransform: 'capitalize' }}>{lesson.report.status}</strong>
               </p>
             </div>
-            <Link href={`/admin/reports?lesson_id=${lesson.id}`} prefetch={false}>
+            <Link href={`/admin/reports/${lesson.report.id}`} prefetch={false}>
               <button style={{
                 padding: '8px 16px', borderRadius: '7px', border: 'none',
                 backgroundColor: '#FF8303', color: 'white', fontSize: '13px',
