@@ -580,6 +580,22 @@ export async function GET(
           { header: 'Currency', key: 'Currency', width: 10 },
           { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
           { header: 'Amount Owed to Teacher', key: 'Amount Owed to Teacher', width: 24, format: 'money2' },
+          // Proof columns: what the system actually recorded, for dispute resolution.
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          // Deliberately absent from the totals block — they render blank there.
+          { header: 'Class ID', key: 'Class ID', width: 38 },
+          { header: 'Booked At', key: 'Booked At', width: 18 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
+          { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
         ]
 
         // cancellation_policy has a column-level REVOKE on `authenticated` — must use
@@ -608,7 +624,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id, cancellation_reason, rescheduled_at, created_at, teams_join_url')
           .in('student_id', studentIds)
           .order('scheduled_at', { ascending: false })
 
@@ -617,6 +633,36 @@ export async function GET(
 
         const { data: lessons, error: lErr } = await lessonsQuery
         if (lErr) throw lErr
+
+        // Proof-column reads, both through the `adminClient` already open above.
+        // lesson_join_clicks is deny-all RLS with `revoke all ... from anon,
+        // authenticated` (migration 20260707120000), so the anon-key `supabase`
+        // client returns 42501 on it and would 500 the whole export. requireAdmin()
+        // at the top of this handler has already gated access.
+        const lessonIds = (lessons ?? []).map((l: any) => l.id)
+        const [reportRes, joinClickRes] = await Promise.all([
+          adminClient.from('reports').select('lesson_id, deadline_at, completed_at, flagged_at').in('lesson_id', lessonIds),
+          adminClient.from('lesson_join_clicks').select('lesson_id, user_type, clicked_at').in('lesson_id', lessonIds),
+        ])
+        if (reportRes.error) throw reportRes.error
+        if (joinClickRes.error) throw joinClickRes.error
+
+        const reportMap: Record<string, any> = {}
+        reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
+
+        // lesson_id -> every recorded join click for it. A lesson with no clicks
+        // resolves to an empty array below, never undefined.
+        const joinClickMap: Record<string, { user_type: string; clicked_at: string }[]> = {}
+        joinClickRes.data?.forEach((c: any) => {
+          if (!joinClickMap[c.lesson_id]) joinClickMap[c.lesson_id] = []
+          joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
+        })
+
+        // Null-safe wrapper around the instant formatter this branch already uses
+        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
+        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        const fmtInstant = (value: string | null | undefined): string =>
+          value ? formatInstantInTz(value, exportTz) : ''
 
         // hourly_rate has a column-level REVOKE on `authenticated` — fetch the
         // teacher rate+currency via the admin client (role-gated above) so the
@@ -670,6 +716,41 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          const report = reportMap[l.id]
+
+          // Earliest join click per user_type. Logic DUPLICATED from the
+          // all-classes branch above (which in turn duplicates the local closure in
+          // api/admin/reports/export/route.ts) — it is not exported from
+          // anywhere, and the duplication is deliberate so the sheets stay
+          // independently readable.
+          const clicks = joinClickMap[l.id] ?? []
+          const earliest = (userType: string): string | null => {
+            const times = clicks
+              .filter((c) => c.user_type === userType)
+              .map((c) => c.clicked_at as string)
+              .filter(Boolean)
+            if (!times.length) return null
+            return times.reduce((min: string, t: string) =>
+              new Date(t).getTime() < new Date(min).getTime() ? t : min
+            )
+          }
+          const teacherJoinedAt = earliest('teacher')
+          const studentJoinedAt = earliest('student')
+
+          // Cancellation window: absolute-instant gap between schedule and
+          // cancellation, so it is timezone-independent. Boundaries copied verbatim
+          // from the all-classes branch and api/admin/reports/export/route.ts:206 so
+          // an identical lesson classifies identically on all three sheets. DISPLAY
+          // ONLY — no money column is derived from it and getBillability
+          // above is untouched.
+          let cancellationWindow = ''
+          if (l.cancelled_at) {
+            const windowHours = (new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime()) / 3600000
+            if (windowHours < 24) cancellationWindow = '<24hr'
+            else if (windowHours < 48) cancellationWindow = '24-48hr'
+            else cancellationWindow = '>48hr'
+          }
+
           return {
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
@@ -687,6 +768,24 @@ export async function GET(
             'Hourly Rate': resolveLessonRate(rateMap, l.id, teacherMap[l.teacher_id]?.rate ?? 0),
             // Teacher pay. Deliberately NOT 'Amount' above, which is bill.companyAmount.
             'Amount Owed to Teacher': bill.amount,
+            'Class ID': l.id,
+            'Booked At': fmtInstant(l.created_at),
+            'Cancelled At': fmtInstant(l.cancelled_at),
+            // RAW recorded value (live values are role words such as 'student'),
+            // deliberately NOT passed through getCancellationLabel, not title-cased
+            // and not derived from status — this column has to prove what
+            // was stored. The 'Status' column above keeps the prose label; both are
+            // intended, side by side.
+            'Cancelled By': l.cancelled_by ?? '',
+            'Cancellation Window': cancellationWindow,
+            'Cancellation Reason': l.cancellation_reason ?? '',
+            'Rescheduled At': fmtInstant(l.rescheduled_at),
+            'Teacher Joined At': fmtInstant(teacherJoinedAt),
+            'Student Joined At': fmtInstant(studentJoinedAt),
+            'Teams Link Created': typeof l.teams_join_url === 'string' && l.teams_join_url.length > 0 ? 'Yes' : 'No',
+            'Report Deadline': fmtInstant(report?.deadline_at),
+            'Report Submitted At': fmtInstant(report?.completed_at),
+            'Report Flagged At': fmtInstant(report?.flagged_at),
           }
         })
 
