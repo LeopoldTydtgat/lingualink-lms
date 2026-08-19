@@ -4,9 +4,8 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
+  computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
 } from '@/lib/levels/levelData';
 import {
   MessageSquareText,
@@ -18,7 +17,6 @@ import {
 import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer';
 import PastClassStatusTag from '@/components/student/PastClassStatusTag';
 import StarRating from '@/components/student/StarRating';
-import LevelAssessmentChart from '@/components/student/LevelAssessmentChart';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -172,12 +170,14 @@ export default function PastClassDetailClient({
   // that read as a failing grade rather than as "not graded". They are named
   // underneath instead.
   const levelData = lesson.report?.level_data ?? null;
-  const radarData = toRadarData(levelData);
-  const unassessedSkills = listUnassessedSkillLabels(levelData);
 
   // A null report, jsonb null, {} and empty-string values all yield false here,
   // so the radar is never rendered from unusable level_data.
   const hasLevelData = hasUsableLevelData(levelData);
+
+  // The student sees the overall level only - the per-skill breakdown is a
+  // teacher and admin view. Null when the assessment is partial.
+  const overallLevel = computeOverallLevel(levelData);
 
   const hasSheets = assignments.some((a) => a.study_sheet);
 
@@ -299,7 +299,30 @@ export default function PastClassDetailClient({
           <div className="mb-4">
             <CardHeader icon={Activity} label="YOUR LEVEL AT THIS CLASS" />
           </div>
-          <LevelAssessmentChart radarData={radarData} unassessedSkills={unassessedSkills} />
+          {overallLevel ? (
+            <div className="flex flex-col items-center">
+              <p
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#9ca3af',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  margin: 0,
+                }}
+              >
+                Overall Level
+              </p>
+              <p style={{ fontSize: '44px', fontWeight: 700, color: '#FF8303', lineHeight: 1.1, margin: '4px 0 0 0' }}>
+                {overallLevel}
+              </p>
+            </div>
+          ) : (
+            <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+              Your teacher graded some skills for this class but not all of them, so
+              there is no overall level to show.
+            </p>
+          )}
         </div>
       ) : awaitingReport ? (
         /* Ended class, report not filed yet: keep the section visible with an

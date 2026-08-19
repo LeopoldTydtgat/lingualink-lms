@@ -300,14 +300,14 @@ export default function ProgressClient({
               </div>
             )}
 
-            {/* CEFR scale hint - page-side copy, not part of the shared chart. */}
+            {/* CEFR scale hint: gives the headline level above its context. */}
             <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
               Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
             </p>
             </>
           ) : (
             <p className="text-center text-sm" style={{ color: '#9ca3af' }}>
-              Your level chart will appear here after your teacher submits your first assessment.
+              Your level will appear here after your teacher submits your first assessment.
             </p>
           )}
         </Card>
