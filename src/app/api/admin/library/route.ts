@@ -71,15 +71,50 @@ export async function POST(request: Request) {
 
   const { id, title, category, level, difficulty, intro_text, content, allowed_roles, is_active, attachments, audience, links, reading_text } = body
 
-  if (!title || !category) {
-    return NextResponse.json({ error: 'title and category are required' }, { status: 400 })
+  // Audience is an access boundary: only 'student' or 'staff'. Absent/invalid
+  // coerces to the fail-safe 'staff' so an unlabelled sheet never reaches
+  // students. Resolved ONCE here and used by both the validation below and the
+  // insert further down — two copies of this coercion could drift, and the
+  // validation would then gate on a different audience than the one stored.
+  const resolvedAudience = audience === 'student' ? 'student' : 'staff'
+
+  // study_sheets.category is nullable and its CHECK passes on NULL, so a
+  // category-free row is legal. undefined, null and '' all mean "none supplied".
+  const hasCategory = category !== undefined && category !== null && category !== ''
+
+  // study_sheets.difficulty is NOT NULL DEFAULT 1, so an absent value must OMIT
+  // the key and let the column default apply — writing NULL would violate the
+  // constraint and fail the whole create.
+  const hasDifficulty = difficulty !== undefined && difficulty !== null
+
+  if (typeof title !== 'string' || title.trim().length === 0) {
+    return NextResponse.json({ error: 'title is required' }, { status: 400 })
   }
 
-  // Category is required above, so there is no "absent" case to allow through
-  // here — only a value that is not one of the four the column accepts.
-  if (typeof category !== 'string' || !CATEGORIES.includes(category)) {
+  // Only a student-facing sheet needs a category. Teaching material (audience
+  // 'staff') has no meaningful one and stores NULL rather than a placeholder.
+  if (resolvedAudience === 'student' && !hasCategory) {
+    return NextResponse.json(
+      { error: 'category is required for a student-facing study sheet' },
+      { status: 400 }
+    )
+  }
+
+  // Membership is checked only for a category that was actually supplied: an
+  // absent one is now legal, an unsupported one still never is.
+  if (hasCategory && (typeof category !== 'string' || !CATEGORIES.includes(category))) {
     return NextResponse.json(
       { error: `category must be one of: ${CATEGORIES.join(', ')}` },
+      { status: 400 }
+    )
+  }
+
+  if (
+    hasDifficulty &&
+    (typeof difficulty !== 'number' || !Number.isInteger(difficulty) || difficulty < 1 || difficulty > 5)
+  ) {
+    return NextResponse.json(
+      { error: 'difficulty must be a whole number from 1 to 5' },
       { status: 400 }
     )
   }
@@ -98,18 +133,20 @@ export async function POST(request: Request) {
 
   const insert: Record<string, unknown> = {
     title,
-    category,
     level: level || '',
-    difficulty: difficulty ?? null,
     intro_text: intro_text ?? null,
     content: storedContent,
     allowed_roles: allowed_roles ?? ['teacher', 'teacher_exam'],
-    // Audience is an access boundary: only 'student' or 'staff'. Absent/invalid
-    // coerces to the fail-safe 'staff' so an unlabelled sheet never reaches students.
-    audience: audience === 'student' ? 'student' : 'staff',
+    audience: resolvedAudience,
     is_active: is_active ?? true,
     attachments: Array.isArray(attachments) ? attachments : [],
   }
+
+  // Absent means absent: category stays NULL and difficulty falls to the column
+  // default. Neither is written from a placeholder — '' would fail the category
+  // CHECK, and a guessed difficulty is a claim the admin never made.
+  if (hasCategory) insert.category = category
+  if (hasDifficulty) insert.difficulty = difficulty
 
   // links / reading_text are written ONLY when the client actually sent them.
   // Both columns carry their own defaults ('[]' and NULL), so an absent key must

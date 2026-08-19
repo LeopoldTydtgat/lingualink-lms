@@ -546,21 +546,14 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
           // '' is a legitimate "clear it" instruction; the route stores it as NULL.
           payload.reading_text = readingText.trim()
         }
-      } else if (!isEdit) {
-        // Teaching Material hides Category, Level, Difficulty and the Vocabulary
-        // tab, so those values were never shown to the admin and must not be
-        // written from their defaults. PATCH copies only the keys present in the
-        // body, so omitting them leaves the stored values untouched — which is
-        // what a hidden input should do.
-        //
-        // Create cannot omit all of them: POST rejects a missing category outright
-        // ("title and category are required"), and study_sheets.difficulty is
-        // NOT NULL (baseline_schema.sql:1054) while POST inserts an explicit NULL
-        // for an absent one. Both would fail the create, so those two are still
-        // sent here. level and content are omitted either way — POST supplies its
-        // own '' and empty-words defaults for them.
-        payload.category = category
-        payload.difficulty = difficulty ?? 1
+      } else {
+        // Teaching Material still hides Category and Difficulty, and neither is
+        // written from a hidden input any more: POST no longer requires a
+        // category for staff material (the column stays NULL), and an omitted
+        // difficulty falls to the study_sheets.difficulty column default. Level
+        // IS shown on the Metadata tab for teaching material, so it is the one
+        // field written here — in create and edit mode alike.
+        payload.level = level
       }
 
       // Edit mode: single PATCH; files were uploaded inline on selection.
@@ -775,7 +768,9 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-lg font-bold text-gray-900">
-            {isEdit ? 'Edit Study Sheet' : 'New Study Sheet'}
+            {type === 'study_sheet'
+              ? (isEdit ? 'Edit Study Sheet' : 'New Study Sheet')
+              : (isEdit ? 'Edit Teaching Material' : 'New Teaching Material')}
           </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
         </div>
@@ -876,6 +871,23 @@ export default function SheetFormModal({ sheet, onClose, onSaved }: Props) {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900"
                 />
               </div>
+
+              {type === 'teaching_material' && (
+                <div>
+                  {/* Optional, and deliberately not validated: only a student-facing
+                      sheet is required to carry a level, so an unset level here is a
+                      valid saved state and must never block Save. */}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Level (optional)</label>
+                  <select
+                    value={level}
+                    onChange={e => setLevel(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700"
+                  >
+                    <option value="">No level</option>
+                    {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+              )}
 
               {type === 'study_sheet' && (
                 <>
