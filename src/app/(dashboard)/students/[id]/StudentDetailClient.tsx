@@ -8,10 +8,8 @@ import { isCancelledStatus } from '@/lib/billing/billability'
 import {
   computeOverallLevel,
   hasUsableLevelData,
-  listUnassessedSkillLabels,
-  toRadarData,
 } from '@/lib/levels/levelData'
-import LevelAssessmentChart from '@/components/student/LevelAssessmentChart'
+import LevelTracks from '@/components/shared/LevelTracks'
 
 type Student = {
   id: string
@@ -270,8 +268,6 @@ export default function StudentDetailClient({
   // its row, so teacher and student can never display different levels.
   // Plain derivation, no hook - see the constraint on GeneralInfoTab.
   const latestLevelReport = reports.find(r => hasUsableLevelData(r.level_data)) ?? null
-  const levelRadarData = toRadarData(latestLevelReport?.level_data ?? null)
-  const levelUnassessed = listUnassessedSkillLabels(latestLevelReport?.level_data ?? null)
   const levelOverall = computeOverallLevel(latestLevelReport?.level_data ?? null)
 
   // ── TAB: General Info ──────────────────────────────────────────
@@ -391,7 +387,7 @@ export default function StudentDetailClient({
                     </p>
                   </div>
                 )}
-                <LevelAssessmentChart radarData={levelRadarData} unassessedSkills={levelUnassessed} />
+                <LevelTracks levelData={latestLevelReport.level_data} />
                 <p className="text-xs text-center mt-4" style={{ color: '#9ca3af' }}>
                   Scale: A1 &#8594; A2 &#8594; B1 &#8594; B2 &#8594; C1 &#8594; C2
                 </p>
