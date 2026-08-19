@@ -85,6 +85,20 @@ export async function GET(
           { header: 'Report Status', key: 'Report Status', width: 22 },
           { header: 'Billable to Teacher', key: 'Billable to Teacher', width: 20 },
           { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
+          // Proof columns: what the system actually recorded, for dispute resolution.
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          { header: 'Class ID', key: 'Class ID', width: 38 },
+          { header: 'Booked At', key: 'Booked At', width: 18 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
         ]
 
         let query = supabase
@@ -92,7 +106,8 @@ export async function GET(
           .select(`
             id, scheduled_at, duration_minutes, status,
             cancelled_at, cancellation_reason, cancelled_by, rescheduled_by,
-            teacher_id, student_id, training_id
+            teacher_id, student_id, training_id,
+            created_at, rescheduled_at, teams_join_url
           `)
           .order('scheduled_at', { ascending: false })
 
@@ -108,14 +123,22 @@ export async function GET(
         const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))]
         const studentIds = [...new Set((lessons ?? []).map((l: any) => l.student_id).filter(Boolean))]
 
-        const [teacherRes, studentRes, reportRes] = await Promise.all([
+        // lesson_join_clicks is deny-all RLS with `revoke all ... from anon,
+        // authenticated` (migration 20260707120000, lines 40-41), so the anon-key
+        // `supabase` client returns 42501 on it — the join-proof columns must read
+        // through the service-role client, the same way reports/export/route.ts
+        // reaches this table. requireAdmin() above has already gated access.
+        const joinClickClient = createAdminClient()
+        const [teacherRes, studentRes, reportRes, joinClickRes] = await Promise.all([
           supabase.from('profiles').select('id, full_name').in('id', teacherIds),
           supabase.from('students').select('id, full_name, company_id').in('id', studentIds),
-          supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
+          supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type, deadline_at, completed_at, flagged_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
+          joinClickClient.from('lesson_join_clicks').select('lesson_id, user_type, clicked_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
         ])
         if (teacherRes.error) throw teacherRes.error
         if (studentRes.error) throw studentRes.error
         if (reportRes.error) throw reportRes.error
+        if (joinClickRes.error) throw joinClickRes.error
 
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
@@ -133,6 +156,20 @@ export async function GET(
 
         const reportMap: Record<string, any> = {}
         reportRes.data?.forEach((r: any) => { reportMap[r.lesson_id] = r })
+
+        // lesson_id -> every recorded join click for it. A lesson with no clicks
+        // resolves to an empty array below, never undefined.
+        const joinClickMap: Record<string, { user_type: string; clicked_at: string }[]> = {}
+        joinClickRes.data?.forEach((c: any) => {
+          if (!joinClickMap[c.lesson_id]) joinClickMap[c.lesson_id] = []
+          joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
+        })
+
+        // Null-safe wrapper around the instant formatter this branch already uses
+        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
+        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        const fmtInstant = (value: string | null | undefined): string =>
+          value ? formatInstantInTz(value, exportTz) : ''
 
         // Filter by company if requested
         const filtered = companyId
@@ -170,6 +207,35 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          // Earliest join click per user_type. Logic DUPLICATED from
+          // api/admin/reports/export/route.ts:252-268, where it is a local closure
+          // and not exported; adapted to the flat array built above because this
+          // route queries lesson_join_clicks directly rather than via a nested join.
+          const clicks = joinClickMap[l.id] ?? []
+          const earliest = (userType: string): string | null => {
+            const times = clicks
+              .filter((c) => c.user_type === userType)
+              .map((c) => c.clicked_at as string)
+              .filter(Boolean)
+            if (!times.length) return null
+            return times.reduce((min: string, t: string) =>
+              new Date(t).getTime() < new Date(min).getTime() ? t : min
+            )
+          }
+          const teacherJoinedAt = earliest('teacher')
+          const studentJoinedAt = earliest('student')
+
+          // Cancellation window: absolute-instant gap between schedule and
+          // cancellation, so it is timezone-independent. DISPLAY ONLY — no money
+          // column is derived from it and getBillability above is untouched.
+          let cancellationWindow = ''
+          if (l.cancelled_at) {
+            const windowHours = (new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime()) / 3600000
+            if (windowHours < 24) cancellationWindow = '<24hr'
+            else if (windowHours < 48) cancellationWindow = '24-48hr'
+            else cancellationWindow = '>48hr'
+          }
+
           return {
             [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
             [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
@@ -181,6 +247,21 @@ export async function GET(
             'Report Status': report?.status ?? 'no report',
             'Billable to Teacher': billable ? 'Yes' : 'No',
             'Cancellation Reason': l.cancellation_reason ?? '',
+            'Class ID': l.id,
+            'Booked At': fmtInstant(l.created_at),
+            'Cancelled At': fmtInstant(l.cancelled_at),
+            // RAW recorded value (live values are role words such as 'student'),
+            // deliberately NOT passed through getCancellationLabel and not derived
+            // from status — this column has to prove what was stored.
+            'Cancelled By': l.cancelled_by ?? '',
+            'Cancellation Window': cancellationWindow,
+            'Rescheduled At': fmtInstant(l.rescheduled_at),
+            'Teacher Joined At': fmtInstant(teacherJoinedAt),
+            'Student Joined At': fmtInstant(studentJoinedAt),
+            'Teams Link Created': typeof l.teams_join_url === 'string' && l.teams_join_url.length > 0 ? 'Yes' : 'No',
+            'Report Deadline': fmtInstant(report?.deadline_at),
+            'Report Submitted At': fmtInstant(report?.completed_at),
+            'Report Flagged At': fmtInstant(report?.flagged_at),
           }
         })
 
