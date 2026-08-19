@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { formatInstantInTz } from '@/lib/exportTime'
+import { DateRangeFilter } from '../_components/DateRangeFilter'
 
 interface Teacher {
   id: string
@@ -343,47 +344,19 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
           </select>
         </div>
 
-        {/* Date from */}
-        <div style={{ flex: '1 1 140px' }}>
-          <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '4px' }}>
-            From
-          </label>
-          <input
-            type="date"
-            value={filterDateFrom}
-            onChange={(e) => setFilterDateFrom(e.target.value)}
-            style={{
-              width: '100%',
-              border: '1px solid #D1D5DB',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontSize: '14px',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {/* Date to */}
-        <div style={{ flex: '1 1 140px' }}>
-          <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '4px' }}>
-            To
-          </label>
-          <input
-            type="date"
-            value={filterDateTo}
-            onChange={(e) => setFilterDateTo(e.target.value)}
-            style={{
-              width: '100%',
-              border: '1px solid #D1D5DB',
-              borderRadius: '6px',
-              padding: '8px 10px',
-              fontSize: '14px',
-              outline: 'none',
-              boxSizing: 'border-box',
-            }}
-          />
-        </div>
+        {/* Date range. From/To plus the timezone-correct quick-range presets;
+            a preset reports both halves in one onChange, so one click is one fetch. */}
+        <DateRangeFilter
+          from={filterDateFrom}
+          to={filterDateTo}
+          onChange={(f, t) => {
+            setFilterDateFrom(f)
+            setFilterDateTo(t)
+            // A preset applied while on a later page must not send that page number against the new range.
+            setPage(1)
+          }}
+          tz={adminTz}
+        />
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: '8px' }}>
