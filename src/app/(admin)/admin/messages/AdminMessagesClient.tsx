@@ -262,41 +262,66 @@ export default function AdminMessagesClient({
       })
     }
 
-    const channel = supabase
-      .channel(`admin-thread-${selectedConv.teacherSideId}-${selectedConv.studentId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
-        handleInsert
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
-        handleInsert
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
-        handleInsert
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
-        handleUpdate
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
-        handleUpdate
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
-        handleUpdate
-      )
-      .subscribe()
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
 
-    return () => { supabase.removeChannel(channel) }
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel(`admin-thread-${selectedConv.teacherSideId}-${selectedConv.studentId}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
+          handleInsert
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
+          handleInsert
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
+          handleInsert
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.teacherSideId}` },
+          handleUpdate
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${selectedConv.studentId}` },
+          handleUpdate
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages', filter: 'sender_type=eq.admin' },
+          handleUpdate
+        )
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
   }, [selectedConv, supabase])
 
   const filteredConversations = conversations.filter(conv =>

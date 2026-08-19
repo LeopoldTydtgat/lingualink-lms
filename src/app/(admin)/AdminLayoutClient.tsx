@@ -274,61 +274,84 @@ export default function AdminLayoutClient({
       }, 300)
     }
 
-    let channel = supabase.channel('admin-nav-unread')
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
 
-    // Staff have no Messages nav item and getUnreadAdminMessagesCount is
-    // admin-scoped, so the two `messages` listeners are admin-only. The
-    // `support_messages` listeners below run for everyone — staff see the
-    // Support badge.
-    if (!isStaffView) {
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      let channel = supabase.channel('admin-nav-unread')
+
+      // Staff have no Messages nav item and getUnreadAdminMessagesCount is
+      // admin-scoped, so the two `messages` listeners are admin-only. The
+      // `support_messages` listeners below run for everyone — staff see the
+      // Support badge.
+      if (!isStaffView) {
+        channel = channel
+          .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+          }, (payload) => {
+            if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
+              refetchUnreadMessages()
+            }
+          })
+          .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+          }, (payload) => {
+            if (
+              payload.new.sender_type !== 'admin' &&
+              (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
+            ) {
+              setLiveUnreadMessages(prev => prev + 1)
+            }
+          })
+      }
+
       channel = channel
         .on('postgres_changes', {
           event: 'UPDATE',
           schema: 'public',
-          table: 'messages',
+          table: 'support_messages',
         }, (payload) => {
-          if (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student') {
-            refetchUnreadMessages()
+          if (payload.new.read_at && !payload.old.read_at) {
+            setLiveUnreadSupport(prev => Math.max(0, prev - 1))
           }
         })
         .on('postgres_changes', {
           event: 'INSERT',
           schema: 'public',
-          table: 'messages',
+          table: 'support_messages',
         }, (payload) => {
-          if (
-            payload.new.sender_type !== 'admin' &&
-            (payload.new.sender_type === 'student' || payload.new.receiver_type === 'student')
-          ) {
-            setLiveUnreadMessages(prev => prev + 1)
+          if (payload.new.sender_role === 'user') {
+            setLiveUnreadSupport(prev => prev + 1)
           }
         })
+
+      channel.subscribe()
+
+      activeChannel = channel
     }
 
-    channel = channel
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_messages',
-      }, (payload) => {
-        if (payload.new.read_at && !payload.old.read_at) {
-          setLiveUnreadSupport(prev => Math.max(0, prev - 1))
-        }
-      })
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages',
-      }, (payload) => {
-        if (payload.new.sender_role === 'user') {
-          setLiveUnreadSupport(prev => prev + 1)
-        }
-      })
-
-    channel.subscribe()
+    void establish()
 
     return () => {
-      supabase.removeChannel(channel)
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
       if (messagesRefetchTimerRef.current) clearTimeout(messagesRefetchTimerRef.current)
     }
   }, [isStaffView])

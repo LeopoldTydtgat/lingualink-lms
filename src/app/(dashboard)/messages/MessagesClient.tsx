@@ -248,94 +248,119 @@ export default function MessagesClient({
   useEffect(() => {
     if (!selectedContact) return
 
-    const channel = supabase
-      .channel(`inbox-${currentUser.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `receiver_id=eq.${currentUser.id}`,
-        },
-        async (payload) => {
-          const newMsg = payload.new as Message
-          if (newMsg.sender_id === selectedContact.id) {
-            setMessages(prev => [...prev, newMsg])
-            await markMessagesAsRead(selectedContact.id)
-          }
-        }
-      )
-      .on(
-        // When the other person reads our messages, their client calls markMessagesAsRead
-        // which updates read_at. We listen for UPDATEs to reflect the double tick. The
-        // same events also carry our own edits (content + edited_at) from another
-        // session, so patch those too — read_at never regresses to null here because an
-        // edit UPDATE on an unread message arrives with read_at still null.
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `sender_id=eq.${currentUser.id}`,
-        },
-        (payload) => {
-          const updated = payload.new as Message
-          if (updated.read_at) {
-            pendingReadsRef.current.set(updated.id, updated.read_at)
-          }
-          // Return prev UNCHANGED (same array reference) when no message matches -
-          // an UPDATE for another thread must not re-fire the scroll-to-bottom
-          // effect, which keys on the messages array identity.
-          setMessages(prev => {
-            if (!prev.some(m => m.id === updated.id)) return prev
-            return prev.map(m => m.id === updated.id
-              ? {
-                  ...m,
-                  read_at: updated.read_at ?? m.read_at,
-                  content: updated.content ?? m.content,
-                  edited_at: updated.edited_at ?? m.edited_at,
-                }
-              : m)
-          })
-        }
-      )
-      .on(
-        // When the contact edits a message they sent to us, patch its content and
-        // edited_at live. Guarded on edited_at so our own markMessagesAsRead UPDATEs
-        // (which also match receiver_id = us) pass through untouched.
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `receiver_id=eq.${currentUser.id}`,
-        },
-        (payload) => {
-          const updated = payload.new as Message
-          if (!updated.edited_at) return
-          // Same no-match guard as the sender-side handler above: an edit in a
-          // thread other than the open one must not re-fire the scroll-to-bottom
-          // effect. The contacts patch below stays unconditional - a non-open
-          // thread's preview still needs the edit, and it has no scroll effect.
-          setMessages(prev => {
-            if (!prev.some(m => m.id === updated.id)) return prev
-            return prev.map(m => m.id === updated.id
-              ? { ...m, content: updated.content ?? m.content, edited_at: updated.edited_at }
-              : m)
-          })
-          // Keep the contact list's preview in step when the edited message is the
-          // one shown there (same shape as the own-save patch in handleSaveEdit).
-          setContacts(prev =>
-            prev.map(c => c.latestMessage?.id === updated.id
-              ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content ?? c.latestMessage.content } }
-              : c)
-          )
-        }
-      )
-      .subscribe()
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
 
-    return () => { supabase.removeChannel(channel) }
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel(`inbox-${currentUser.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `receiver_id=eq.${currentUser.id}`,
+          },
+          async (payload) => {
+            const newMsg = payload.new as Message
+            if (newMsg.sender_id === selectedContact.id) {
+              setMessages(prev => [...prev, newMsg])
+              await markMessagesAsRead(selectedContact.id)
+            }
+          }
+        )
+        .on(
+          // When the other person reads our messages, their client calls markMessagesAsRead
+          // which updates read_at. We listen for UPDATEs to reflect the double tick. The
+          // same events also carry our own edits (content + edited_at) from another
+          // session, so patch those too — read_at never regresses to null here because an
+          // edit UPDATE on an unread message arrives with read_at still null.
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `sender_id=eq.${currentUser.id}`,
+          },
+          (payload) => {
+            const updated = payload.new as Message
+            if (updated.read_at) {
+              pendingReadsRef.current.set(updated.id, updated.read_at)
+            }
+            // Return prev UNCHANGED (same array reference) when no message matches -
+            // an UPDATE for another thread must not re-fire the scroll-to-bottom
+            // effect, which keys on the messages array identity.
+            setMessages(prev => {
+              if (!prev.some(m => m.id === updated.id)) return prev
+              return prev.map(m => m.id === updated.id
+                ? {
+                    ...m,
+                    read_at: updated.read_at ?? m.read_at,
+                    content: updated.content ?? m.content,
+                    edited_at: updated.edited_at ?? m.edited_at,
+                  }
+                : m)
+            })
+          }
+        )
+        .on(
+          // When the contact edits a message they sent to us, patch its content and
+          // edited_at live. Guarded on edited_at so our own markMessagesAsRead UPDATEs
+          // (which also match receiver_id = us) pass through untouched.
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'messages',
+            filter: `receiver_id=eq.${currentUser.id}`,
+          },
+          (payload) => {
+            const updated = payload.new as Message
+            if (!updated.edited_at) return
+            // Same no-match guard as the sender-side handler above: an edit in a
+            // thread other than the open one must not re-fire the scroll-to-bottom
+            // effect. The contacts patch below stays unconditional - a non-open
+            // thread's preview still needs the edit, and it has no scroll effect.
+            setMessages(prev => {
+              if (!prev.some(m => m.id === updated.id)) return prev
+              return prev.map(m => m.id === updated.id
+                ? { ...m, content: updated.content ?? m.content, edited_at: updated.edited_at }
+                : m)
+            })
+            // Keep the contact list's preview in step when the edited message is the
+            // one shown there (same shape as the own-save patch in handleSaveEdit).
+            setContacts(prev =>
+              prev.map(c => c.latestMessage?.id === updated.id
+                ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content ?? c.latestMessage.content } }
+                : c)
+            )
+          }
+        )
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
   }, [selectedContact, currentUser.id, supabase])
 
   const handleSend = async () => {

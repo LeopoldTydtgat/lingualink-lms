@@ -280,71 +280,96 @@ export default function ChatWidget({
 
   // Real-time: new messages on this participant's thread
   useEffect(() => {
-    const channel = supabase
-      .channel(`support-${participantAuthId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'support_messages',
-          filter: `participant_auth_id=eq.${participantAuthId}`,
-        },
-        (payload) => {
-          const msg = payload.new as SupportMessage
-          setMessages(prev => {
-            if (prev.some(m => m.id === msg.id)) return prev
-            return [...prev, msg]
-          })
-          // NEW300: an admin reply arriving live must be marked read so its tick flips for the
-          // admin — but only if the user is actually looking at the Messages tab. On the FAQ
-          // tab, leave it unread and bump the badge instead.
-          if (msg.sender_role === 'admin') {
-            if (isOpen && activeTab === 'messages') {
-              markAdminMessagesRead()
-            } else {
-              setUnreadCount(c => c + 1)
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
+
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel(`support-${participantAuthId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'support_messages',
+            filter: `participant_auth_id=eq.${participantAuthId}`,
+          },
+          (payload) => {
+            const msg = payload.new as SupportMessage
+            setMessages(prev => {
+              if (prev.some(m => m.id === msg.id)) return prev
+              return [...prev, msg]
+            })
+            // NEW300: an admin reply arriving live must be marked read so its tick flips for the
+            // admin — but only if the user is actually looking at the Messages tab. On the FAQ
+            // tab, leave it unread and bump the badge instead.
+            if (msg.sender_role === 'admin') {
+              if (isOpen && activeTab === 'messages') {
+                markAdminMessagesRead()
+              } else {
+                setUnreadCount(c => c + 1)
+              }
             }
           }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'support_messages',
-          filter: `participant_auth_id=eq.${participantAuthId}`,
-        },
-        (payload) => {
-          const updated = payload.new as SupportMessage
-          // Update read_at on the matching message so ticks flip live. Buffer the read_at first
-          // (NEW300) so a temp→real swap in handleSend can carry it over instead of losing it.
-          // The same events also carry edits (content + edited_at) from either side, so patch
-          // those too — read_at never regresses to null here because an edit UPDATE on an
-          // unread message arrives with read_at still null.
-          if (updated.read_at) {
-            pendingReadsRef.current.set(updated.id, updated.read_at)
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'support_messages',
+            filter: `participant_auth_id=eq.${participantAuthId}`,
+          },
+          (payload) => {
+            const updated = payload.new as SupportMessage
+            // Update read_at on the matching message so ticks flip live. Buffer the read_at first
+            // (NEW300) so a temp→real swap in handleSend can carry it over instead of losing it.
+            // The same events also carry edits (content + edited_at) from either side, so patch
+            // those too — read_at never regresses to null here because an edit UPDATE on an
+            // unread message arrives with read_at still null.
+            if (updated.read_at) {
+              pendingReadsRef.current.set(updated.id, updated.read_at)
+            }
+            // Return prev UNCHANGED (same array reference) when no message matches
+            // (e.g. the temp row hasn't been swapped for the real id yet - the
+            // buffered read above still covers that) so an unrelated UPDATE doesn't
+            // re-fire the scroll-to-bottom effect, which keys on array identity.
+            setMessages(prev => {
+              if (!prev.some(m => m.id === updated.id)) return prev
+              return prev.map(m => m.id === updated.id
+                ? {
+                    ...m,
+                    read_at: updated.read_at ?? m.read_at,
+                    content: updated.content ?? m.content,
+                    edited_at: updated.edited_at ?? m.edited_at,
+                  }
+                : m)
+            })
           }
-          // Return prev UNCHANGED (same array reference) when no message matches
-          // (e.g. the temp row hasn't been swapped for the real id yet - the
-          // buffered read above still covers that) so an unrelated UPDATE doesn't
-          // re-fire the scroll-to-bottom effect, which keys on array identity.
-          setMessages(prev => {
-            if (!prev.some(m => m.id === updated.id)) return prev
-            return prev.map(m => m.id === updated.id
-              ? {
-                  ...m,
-                  read_at: updated.read_at ?? m.read_at,
-                  content: updated.content ?? m.content,
-                  edited_at: updated.edited_at ?? m.edited_at,
-                }
-              : m)
-          })
-        }
-      )
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+        )
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
   }, [isOpen, participantAuthId, supabase, activeTab, markAdminMessagesRead])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -290,79 +290,104 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   // Real-time for open conversation
   useEffect(() => {
     if (!selectedConv) return
-    const channel = supabase
-      .channel(`admin-support-${selectedConv.participantAuthId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages',
-        filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
-      }, (payload) => {
-        const msg = payload.new as SupportMessage
-        setMessages(prev => {
-          if (prev.some(m => m.id === msg.id)) return prev
-          // NEW304: this Realtime echo can arrive before handleSend's own fetch response
-          // swaps the temp row for the real one. If it's the admin's own in-flight send,
-          // replace the pending temp row in place instead of appending a duplicate - the
-          // later fetch-response swap then finds no matching tempId and is a harmless no-op.
-          if (msg.sender_role === 'admin' && pendingSendIdRef.current) {
-            const tempIdx = prev.findIndex(m => m.id === pendingSendIdRef.current)
-            if (tempIdx !== -1) {
-              pendingSendIdRef.current = null
-              return [...prev.slice(0, tempIdx), msg, ...prev.slice(tempIdx + 1)]
-            }
-          }
-          return [...prev, msg]
-        })
-        // NEW300: a user message arriving live in the open conversation must be marked read so
-        // its tick flips for the user. The subscription filter already scopes this to selectedConv.
-        if (msg.sender_role === 'user') {
-          markUserMessagesRead(selectedConv)
-        }
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'support_messages',
-        filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
-      }, (payload) => {
-        const updated = payload.new as SupportMessage
-        // Buffer the read_at first (NEW300) so a temp→real swap in handleSend can carry it over
-        // instead of losing it, then flip the tick live. The same events also carry edits
-        // (content + edited_at) from either side, so patch those too — read_at never regresses
-        // to null here because an edit UPDATE on an unread message arrives with read_at null.
-        if (updated.read_at) {
-          pendingReadsRef.current.set(updated.id, updated.read_at)
-        }
-        // Return prev UNCHANGED (same array reference) when no message matches
-        // (e.g. the temp row hasn't been swapped for the real id yet - the
-        // buffered read above still covers that) so an unrelated UPDATE doesn't
-        // re-fire the scroll-to-bottom effect, which keys on array identity.
-        setMessages(prev => {
-          if (!prev.some(m => m.id === updated.id)) return prev
-          return prev.map(m => m.id === updated.id
-            ? {
-                ...m,
-                read_at: updated.read_at ?? m.read_at,
-                content: updated.content ?? m.content,
-                edited_at: updated.edited_at ?? m.edited_at,
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
+
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel(`admin-support-${selectedConv.participantAuthId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'support_messages',
+          filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
+        }, (payload) => {
+          const msg = payload.new as SupportMessage
+          setMessages(prev => {
+            if (prev.some(m => m.id === msg.id)) return prev
+            // NEW304: this Realtime echo can arrive before handleSend's own fetch response
+            // swaps the temp row for the real one. If it's the admin's own in-flight send,
+            // replace the pending temp row in place instead of appending a duplicate - the
+            // later fetch-response swap then finds no matching tempId and is a harmless no-op.
+            if (msg.sender_role === 'admin' && pendingSendIdRef.current) {
+              const tempIdx = prev.findIndex(m => m.id === pendingSendIdRef.current)
+              if (tempIdx !== -1) {
+                pendingSendIdRef.current = null
+                return [...prev.slice(0, tempIdx), msg, ...prev.slice(tempIdx + 1)]
               }
-            : m)
+            }
+            return [...prev, msg]
+          })
+          // NEW300: a user message arriving live in the open conversation must be marked read so
+          // its tick flips for the user. The subscription filter already scopes this to selectedConv.
+          if (msg.sender_role === 'user') {
+            markUserMessagesRead(selectedConv)
+          }
         })
-        // Keep the conversation list's preview in step when the edited message is
-        // the one shown there. Gated on edited_at so plain read-receipt UPDATEs
-        // don't churn the list; covers the admin's own edits too (this channel
-        // echoes them), so handleSaveMessageEdit needs no separate list patch.
-        if (updated.edited_at) {
-          setConversations(prev =>
-            prev.map(c => c.latestMessage.id === updated.id
-              ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content ?? c.latestMessage.content } }
-              : c)
-          )
-        }
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'support_messages',
+          filter: `participant_auth_id=eq.${selectedConv.participantAuthId}`,
+        }, (payload) => {
+          const updated = payload.new as SupportMessage
+          // Buffer the read_at first (NEW300) so a temp→real swap in handleSend can carry it over
+          // instead of losing it, then flip the tick live. The same events also carry edits
+          // (content + edited_at) from either side, so patch those too — read_at never regresses
+          // to null here because an edit UPDATE on an unread message arrives with read_at null.
+          if (updated.read_at) {
+            pendingReadsRef.current.set(updated.id, updated.read_at)
+          }
+          // Return prev UNCHANGED (same array reference) when no message matches
+          // (e.g. the temp row hasn't been swapped for the real id yet - the
+          // buffered read above still covers that) so an unrelated UPDATE doesn't
+          // re-fire the scroll-to-bottom effect, which keys on array identity.
+          setMessages(prev => {
+            if (!prev.some(m => m.id === updated.id)) return prev
+            return prev.map(m => m.id === updated.id
+              ? {
+                  ...m,
+                  read_at: updated.read_at ?? m.read_at,
+                  content: updated.content ?? m.content,
+                  edited_at: updated.edited_at ?? m.edited_at,
+                }
+              : m)
+          })
+          // Keep the conversation list's preview in step when the edited message is
+          // the one shown there. Gated on edited_at so plain read-receipt UPDATEs
+          // don't churn the list; covers the admin's own edits too (this channel
+          // echoes them), so handleSaveMessageEdit needs no separate list patch.
+          if (updated.edited_at) {
+            setConversations(prev =>
+              prev.map(c => c.latestMessage.id === updated.id
+                ? { ...c, latestMessage: { ...c.latestMessage, content: updated.content ?? c.latestMessage.content } }
+                : c)
+            )
+          }
+        })
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
   }, [selectedConv, supabase, markUserMessagesRead])
 
   // NEW303: component-lifetime subscription that keeps the conversation LIST live for every
@@ -371,78 +396,103 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
   // change. The open-conversation channel above is left untouched (it drives the thread view
   // and read receipts); this one only maintains the list preview / ordering / unread badges.
   useEffect(() => {
-    const channel = supabase
-      .channel('admin-support-list')
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'support_messages',
-      }, async (payload) => {
-        const msg = payload.new as {
-          id: string
-          participant_id: string
-          participant_type: 'teacher' | 'student'
-          participant_auth_id: string
-          sender_role: 'user' | 'admin'
-          content: string
-          created_at: string
-        }
-        const isOpen = selectedConvRef.current?.participantId === msg.participant_id
-        const latestMessage = { id: msg.id, content: msg.content, created_at: msg.created_at, sender_role: msg.sender_role }
+    let disposed = false
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null
 
-        if (conversationsRef.current.some(c => c.participantId === msg.participant_id)) {
-          // Existing conversation: refresh its preview + unread, then float it to the top
-          // (the incoming message is the newest, so move-to-top == re-sort by created_at desc).
-          // A user message bumps unread only when the thread isn't currently open — the open
-          // thread is marked read live by the open-conversation subscription; admin's own
-          // sends never count as unread.
+    const establish = async () => {
+      // Await auth so the shared realtime socket JWT is seeded before
+      // subscribe() - anon-role subscriptions fail filter validation (P0001).
+      let uid: string | null = null
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (!error) uid = data.user?.id ?? null
+      } catch {
+        // Network/auth failure — treated exactly like a null user below.
+        uid = null
+      }
+      if (!uid) return
+      if (disposed) return
+
+      const channel = supabase
+        .channel('admin-support-list')
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'support_messages',
+        }, async (payload) => {
+          const msg = payload.new as {
+            id: string
+            participant_id: string
+            participant_type: 'teacher' | 'student'
+            participant_auth_id: string
+            sender_role: 'user' | 'admin'
+            content: string
+            created_at: string
+          }
+          const isOpen = selectedConvRef.current?.participantId === msg.participant_id
+          const latestMessage = { id: msg.id, content: msg.content, created_at: msg.created_at, sender_role: msg.sender_role }
+
+          if (conversationsRef.current.some(c => c.participantId === msg.participant_id)) {
+            // Existing conversation: refresh its preview + unread, then float it to the top
+            // (the incoming message is the newest, so move-to-top == re-sort by created_at desc).
+            // A user message bumps unread only when the thread isn't currently open — the open
+            // thread is marked read live by the open-conversation subscription; admin's own
+            // sends never count as unread.
+            setConversations(prev => {
+              const idx = prev.findIndex(c => c.participantId === msg.participant_id)
+              if (idx === -1) return prev
+              const bump = msg.sender_role === 'user' && !isOpen
+              const updated: Conversation = {
+                ...prev[idx],
+                latestMessage,
+                unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+              }
+              return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+            })
+            return
+          }
+
+          // First-time sender: no conversation row exists yet, so resolve the participant's
+          // name/photo server-side, then prepend. A second message for the SAME brand-new
+          // participant can race this await (both handlers saw no row before either committed),
+          // so re-check inside the updater: if a row now exists, MERGE into it (refresh preview,
+          // bump unread, move to top — same logic as the existing-conversation branch) rather
+          // than returning prev unchanged, which would silently drop this message's unread/preview.
+          const result = await getSupportParticipant(msg.participant_id, msg.participant_type)
+          if ('error' in result) return
           setConversations(prev => {
             const idx = prev.findIndex(c => c.participantId === msg.participant_id)
-            if (idx === -1) return prev
-            const bump = msg.sender_role === 'user' && !isOpen
-            const updated: Conversation = {
-              ...prev[idx],
-              latestMessage,
-              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+            if (idx !== -1) {
+              const bump = msg.sender_role === 'user' && !isOpen
+              const updated: Conversation = {
+                ...prev[idx],
+                latestMessage,
+                unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
+              }
+              return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
             }
-            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
+            const newConv: Conversation = {
+              participantId: msg.participant_id,
+              participantType: msg.participant_type,
+              participantAuthId: msg.participant_auth_id,
+              participantName: result.name,
+              participantPhotoUrl: result.photoUrl,
+              latestMessage,
+              unreadCount: msg.sender_role === 'user' ? 1 : 0,
+            }
+            return [newConv, ...prev]
           })
-          return
-        }
-
-        // First-time sender: no conversation row exists yet, so resolve the participant's
-        // name/photo server-side, then prepend. A second message for the SAME brand-new
-        // participant can race this await (both handlers saw no row before either committed),
-        // so re-check inside the updater: if a row now exists, MERGE into it (refresh preview,
-        // bump unread, move to top — same logic as the existing-conversation branch) rather
-        // than returning prev unchanged, which would silently drop this message's unread/preview.
-        const result = await getSupportParticipant(msg.participant_id, msg.participant_type)
-        if ('error' in result) return
-        setConversations(prev => {
-          const idx = prev.findIndex(c => c.participantId === msg.participant_id)
-          if (idx !== -1) {
-            const bump = msg.sender_role === 'user' && !isOpen
-            const updated: Conversation = {
-              ...prev[idx],
-              latestMessage,
-              unreadCount: bump ? prev[idx].unreadCount + 1 : prev[idx].unreadCount,
-            }
-            return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)]
-          }
-          const newConv: Conversation = {
-            participantId: msg.participant_id,
-            participantType: msg.participant_type,
-            participantAuthId: msg.participant_auth_id,
-            participantName: result.name,
-            participantPhotoUrl: result.photoUrl,
-            latestMessage,
-            unreadCount: msg.sender_role === 'user' ? 1 : 0,
-          }
-          return [newConv, ...prev]
         })
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+        .subscribe()
+
+      activeChannel = channel
+    }
+
+    void establish()
+    return () => {
+      disposed = true
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
   }, [supabase])
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
