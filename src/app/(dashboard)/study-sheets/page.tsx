@@ -45,7 +45,7 @@ export default async function StudySheetsPage() {
   // Existing user-scoped sheet fetch - unchanged.
   const { data: studySheets } = await supabase
     .from('study_sheets')
-    .select('id, title, category, level, difficulty, is_active, created_at, audience, owner_id')
+    .select('id, title, category, level, difficulty, is_active, created_at, audience, owner_id, attachments')
     .eq('is_active', true)
     .order('created_at', { ascending: false })
 
