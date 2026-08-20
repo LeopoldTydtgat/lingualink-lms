@@ -266,6 +266,7 @@ export default async function StudentDetailPage({
   const lessonsCapped = flatLessons.length === 1000
 
   // Fetch hours log for this student (admin only — staff view skips it)
+  // Explicit limit, never unbounded: PostgREST silently caps an unbounded query at its max-rows setting, and a silent cap is the bug being removed here.
   const { data: hoursLog } = isStaffView
     ? { data: null }
     : await supabase
@@ -273,6 +274,12 @@ export default async function StudentDetailPage({
         .select('*')
         .eq('student_id', id)
         .order('created_at', { ascending: false })
+        .limit(1000)
+
+  // The read came back exactly at its cap, so older ledger entries almost certainly
+  // exist beyond it. The Hours tab says so rather than presenting a truncated log as
+  // the student's whole ledger. Same shape as lessonsCapped.
+  const hoursLogCapped = (hoursLog ?? []).length === 1000
 
   // ── "At a glance" panel metadata (ADMIN ONLY) ──────────────────────────
   // Staff get null and the panel never renders for them: it mixes admin-only
@@ -388,6 +395,9 @@ export default async function StudentDetailPage({
       // admin_adjustment, class_booking and reschedule rows (live vocabulary,
       // verified 20 Aug), which are not refunds - widening the test would count
       // corrections and bookings as money given back.
+      // CAP: on a capped read this count is measured over the newest 1000 ledger
+      // rows, not the whole history - the Hours tab's own hoursLogCapped
+      // disclosure covers it, same judgement as the lesson counts above.
       refunds: (hoursLog ?? []).filter(
         (e: { type: string }) =>
           e.type === 'cancellation_refund' || e.type === 'teacher_no_show_refund'
@@ -765,6 +775,7 @@ export default async function StudentDetailPage({
       lessons={flatLessons}
       lessonsCapped={lessonsCapped}
       hoursLog={hoursLog || []}
+      hoursLogCapped={hoursLogCapped}
       reports={reports}
       reportsCapped={reportsCapped}
       reviews={flatReviews}

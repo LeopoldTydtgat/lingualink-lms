@@ -204,6 +204,12 @@ type Props = {
    */
   lessonsCapped: boolean
   hoursLog: HoursLogEntry[]
+  /**
+   * True when the hours_log read came back exactly at its 1000-row cap, so older
+   * ledger entries exist beyond what this tab holds. Surfaced as a disclosure line —
+   * see lessonsCapped.
+   */
+  hoursLogCapped: boolean
   reports: Report[]
   /** Same cap disclosure for the reports read — see lessonsCapped. */
   reportsCapped: boolean
@@ -782,6 +788,7 @@ export default function StudentDetailClient({
   lessons,
   lessonsCapped,
   hoursLog,
+  hoursLogCapped,
   reports,
   reportsCapped,
   reviews,
@@ -1972,6 +1979,9 @@ export default function StudentDetailClient({
       {/* ── Hours Log ── */}
       {activeTab === 'hours' && (
         <div className="space-y-4">
+          {hoursLogCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 entries.</p>
+          )}
           {/* Add / Remove buttons. Both post a training_id to the hours route,
               which requires a uuid — with no active training the click could
               only ever end in a raw Zod message, so the controls are disabled
