@@ -181,8 +181,11 @@ export function teacherClassReminderEmailContent(
       { label: 'Student', value: studentName },
     ])}
     ${teamsJoinUrl ? `
+      <div style="margin-top:16px;">
+        ${buildButton(teamsJoinUrl, 'Join Class')}
+      </div>
       <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
-        Join your class on Teams:<br>
+        Or copy this link into your browser:<br>
         <a href="${teamsJoinUrl}" style="color:#FF8303;word-break:break-all;">${teamsJoinUrl}</a>
       </p>
     ` : ''}
@@ -441,8 +444,11 @@ export function studentClassReminderEmailContent(
       { label: 'Duration', value: `${durationMinutes} minutes` },
     ])}
     ${teamsJoinUrl ? `
+      <div style="margin-top:16px;">
+        ${buildButton(teamsJoinUrl, 'Join Class')}
+      </div>
       <p style="margin-top:16px;font-size:14px;color:#374151;line-height:1.5;">
-        Join your class on Teams:<br>
+        Or copy this link into your browser:<br>
         <a href="${teamsJoinUrl}" style="color:#FF8303;word-break:break-all;">${teamsJoinUrl}</a>
       </p>
     ` : ''}
