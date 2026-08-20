@@ -76,6 +76,42 @@ export type MaterialSheetOption = {
   attachments: MaterialAttachment[]
 }
 
+/**
+ * When this account last authenticated, as three distinct states. 'never' and
+ * 'unavailable' are deliberately NOT collapsed: 'never' is a fact about an account
+ * that exists and has never been signed in to, while 'unavailable' means the lookup
+ * could not run at all (no linked auth user, or the auth read failed). Rendering the
+ * second as the first would state something the page cannot prove.
+ */
+export type AtAGlanceLastSignIn =
+  | { state: 'known'; at: string }
+  | { state: 'never' }
+  | { state: 'unavailable' }
+
+/**
+ * ADMIN-ONLY summary for the Overview panel. Every field is computed on the SERVER
+ * at render — this component renders the values and never recomputes one.
+ *
+ * The five lesson counts are derived from the same 1000-capped lessons read that
+ * feeds the Classes tab, so they inherit that cap and the disclosure already on it.
+ */
+export type AtAGlance = {
+  /** students.created_at. */
+  signedUpAt: string | null
+  lastSignIn: AtAGlanceLastSignIn
+  /** status 'scheduled' AND still in the future at server render time. */
+  upcoming: number
+  /** 'completed' or 'missed' — 'missed' is a blown report window, not an absence. */
+  attended: number
+  studentNoShows: number
+  /** Cancel-family statuses, reschedule legs excluded. */
+  cancelled: number
+  /** Subset of `cancelled` with a known cancelled_at inside the 24h notice window. */
+  cancelledUnder24h: number
+  /** hours_log rows of type 'cancellation_refund' or 'teacher_no_show_refund'. */
+  refunds: number
+}
+
 // ── Domain types ─────────────────────────────────────────────────────────────
 
 type Teacher = { id: string; full_name: string }
@@ -96,6 +132,7 @@ type Lesson = {
   scheduled_at: string
   duration_minutes: number
   status: string
+  cancelled_at: string | null
   cancelled_by: string | null
   rescheduled_by: string | null
   teacher_name: string
@@ -195,6 +232,19 @@ type Props = {
    * an empty picker would otherwise read as "there is none".
    */
   materialSheetsLoadFailed: boolean
+  /**
+   * ADMIN-ONLY Overview summary, null for a staff viewer. Null IS the render gate:
+   * the server decides who gets a panel, and null is that decision arriving here.
+   * It mixes admin-only account metadata (sign-up date, last sign-in) with a count
+   * off the hours ledger, none of which the staff branch of the server component
+   * reads in the first place.
+   *
+   * Every value was computed on the SERVER at render and is rendered verbatim: no
+   * count is recomputed and no clock is read in this component, because a clock read
+   * during a client render produces different markup on the server pass and the first
+   * browser pass — the hydration rule the rest of this file follows.
+   */
+  atAGlance: AtAGlance | null
   /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
   isStaffView?: boolean
   /** IANA zone of the viewing admin/staff account. Every rendered instant is projected through it. */
@@ -367,6 +417,62 @@ function InfoRow({ label, value, adminOnly }: {
       </span>
       <span className="text-sm text-gray-800">{value || '—'}</span>
     </div>
+  )
+}
+
+/**
+ * One "At a glance" tile. Renders a value the SERVER computed and nothing else — no
+ * count, no date arithmetic and no clock read happens in here.
+ *
+ * A tile with an onClick is a real <button> that switches tabs; a tile without one is
+ * a plain div, never a disabled button. "Signed up", "Last sign-in" and "Cancelled
+ * <24h" have nowhere to lead, and a dead button invites the click anyway.
+ *
+ * Numbers render large and text (a date, "Never signed in") one step smaller so it
+ * fits a quarter-width tile without wrapping. Both class strings are written out in
+ * full — Tailwind v4 never sees a constructed class name.
+ */
+function GlanceTile({
+  label,
+  value,
+  caption,
+  onClick,
+}: {
+  label: string
+  value: string | number
+  caption?: string
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <p className="text-xs font-medium" style={{ color: '#4b5563' }}>{label}</p>
+      <p
+        className={
+          typeof value === 'number'
+            ? 'text-2xl font-semibold text-gray-900 mt-1'
+            : 'text-base font-semibold text-gray-900 mt-1'
+        }
+      >
+        {value}
+      </p>
+      {caption && (
+        <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
+      )}
+    </>
+  )
+
+  if (!onClick) {
+    return <div className="rounded-xl border border-gray-100 bg-white p-4">{body}</div>
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-xl border border-gray-100 bg-white p-4 text-left cursor-pointer transition-colors hover:bg-gray-50"
+    >
+      {body}
+    </button>
   )
 }
 
@@ -687,6 +793,7 @@ export default function StudentDetailClient({
   materialHomeworkLoadFailed,
   materialSheets,
   materialSheetsLoadFailed,
+  atAGlance,
   isStaffView = false,
   adminTz,
   adminTzRaw,
@@ -1424,296 +1531,349 @@ export default function StudentDetailClient({
 
       {/* ── Overview ── */}
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-2 gap-6">
-          {/* Personal info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Personal Information</h2>
-            <InfoRow label="Full Name" value={fullName} />
-            <InfoRow label="Email" value={student.email as string} />
-            <InfoRow label="Phone" value={student.phone as string} />
-            {!isStaffView && <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />}
-            <InfoRow label="Timezone" value={student.timezone as string} />
-            <InfoRow label="Language Preference" value={student.language_preference as string} />
-            {!isStaffView && <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />}
-            {!isStaffView && <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />}
-          </div>
-
-          {/* Learning info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Learning Info</h2>
-            <InfoRow label="Native Language" value={student.native_language as string} />
-            <InfoRow label="Learning Language" value={student.learning_language as string} />
-            <InfoRow label="Current Fluency Level" value={student.current_fluency_level as string} />
-            <InfoRow label="Learning Goals" value={student.learning_goals as string} />
-            <InfoRow label="Interests" value={student.interests as string} />
-          </div>
-
-          {/* Training info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Training</h2>
-            {activeTrain ? (
-              <>
-                <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
-                <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
-                <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
-                <InfoRow
-                  label="Hours Remaining"
-                  value={hoursRemaining !== null
-                    ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
-                    : null}
+        <div className="space-y-6">
+          {/* At a glance — ADMIN ONLY. Gated on the prop being non-null rather than
+              on !isStaffView: the server is what decides a staff viewer gets no panel,
+              and null is that decision arriving here. Every number and both dates were
+              computed on the server at render; nothing below reads a clock or recounts
+              anything, which is what keeps the SSR markup and the first browser render
+              identical. */}
+          {atAGlance && (
+            <div className="card-elevated p-5">
+              <h2 className="font-semibold text-gray-800 mb-4">At a glance</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <GlanceTile
+                  label="Signed up"
+                  value={
+                    atAGlance.signedUpAt
+                      ? new Date(atAGlance.signedUpAt).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          timeZone: adminTz,
+                        })
+                      : '—'
+                  }
                 />
-                <InfoRow label="End Date" value={activeTrain.end_date ?? null} />
-                <InfoRow label="Status" value={activeTrain.status ?? null} />
-              </>
-            ) : (
-              <p className="text-sm text-gray-400">
-                No active training.
-                {!isStaffView && ' Use the Create Training card below to start one.'}
-              </p>
-            )}
-          </div>
-
-          {/* Assigned teachers */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Assigned Teachers</h2>
-            {assignedTeachers.length === 0 ? (
-              <p className="text-sm text-gray-400">No teachers assigned.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {assignedTeachers.map((t) => (
-                  <span
-                    key={t.id}
-                    className="px-3 py-1 rounded-full text-sm font-medium bg-orange-50 text-orange-700"
-                  >
-                    {t.full_name}
-                  </span>
-                ))}
+                <GlanceTile
+                  label="Last sign-in"
+                  value={
+                    atAGlance.lastSignIn.state === 'known'
+                      ? new Date(atAGlance.lastSignIn.at).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          timeZone: adminTz,
+                        })
+                      : atAGlance.lastSignIn.state === 'never'
+                      ? 'Never signed in'
+                      : 'Unavailable'
+                  }
+                  caption="Stamped at sign-in, not on every visit."
+                />
+                {/* The four class tiles switch to the Classes tab and do nothing else.
+                    They deliberately set NO filter state: filtered click-through is a
+                    separate change, and a tile that quietly rewrote the persisted
+                    Classes date range would also change what the NEXT student's tab
+                    shows, because that range is shared across students for the session. */}
+                <GlanceTile label="Upcoming" value={atAGlance.upcoming} onClick={() => setActiveTab('classes')} />
+                <GlanceTile label="Attended" value={atAGlance.attended} onClick={() => setActiveTab('classes')} />
+                <GlanceTile label="Student no-shows" value={atAGlance.studentNoShows} onClick={() => setActiveTab('classes')} />
+                <GlanceTile label="Cancelled" value={atAGlance.cancelled} onClick={() => setActiveTab('classes')} />
+                {/* Not clickable: the Classes tab has no notice-window filter to land on. */}
+                <GlanceTile label="Cancelled <24h" value={atAGlance.cancelledUnder24h} />
+                <GlanceTile label="Refunds" value={atAGlance.refunds} onClick={() => setActiveTab('hours')} />
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Create Training — rendered ONLY when the student has no training
-              with status === 'active' (hasActiveTraining, strict). A second
-              active training is refused by create_training_atomic and by the
-              one_active_training_per_student partial unique index, so the form
-              must never sit next to a live one. Admin only: staff get no
-              mutation entry points on this page. */}
-          {!isStaffView && !hasActiveTraining && (
-          <div className="col-span-2 card-elevated p-5 space-y-4">
-            <div>
-              <h2 className="font-semibold text-gray-800">Create Training</h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                A training holds the package, the hours balance and the assigned teachers.
-                Hours can only be added once one exists.
-              </p>
+          <div className="grid grid-cols-2 gap-6">
+            {/* Personal info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Personal Information</h2>
+              <InfoRow label="Full Name" value={fullName} />
+              <InfoRow label="Email" value={student.email as string} />
+              <InfoRow label="Phone" value={student.phone as string} />
+              {!isStaffView && <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />}
+              <InfoRow label="Timezone" value={student.timezone as string} />
+              <InfoRow label="Language Preference" value={student.language_preference as string} />
+              {!isStaffView && <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />}
+              {!isStaffView && <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />}
             </div>
 
-            {teacherOptionsLoadFailed && (
-              <div
-                className="text-xs rounded-lg px-3 py-2"
-                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
-              >
-                <p className="font-medium">
-                  The teacher list could not be loaded, so it may be incomplete. Reload the page before assigning teachers.
+            {/* Learning info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Learning Info</h2>
+              <InfoRow label="Native Language" value={student.native_language as string} />
+              <InfoRow label="Learning Language" value={student.learning_language as string} />
+              <InfoRow label="Current Fluency Level" value={student.current_fluency_level as string} />
+              <InfoRow label="Learning Goals" value={student.learning_goals as string} />
+              <InfoRow label="Interests" value={student.interests as string} />
+            </div>
+
+            {/* Training info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Training</h2>
+              {activeTrain ? (
+                <>
+                  <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
+                  <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
+                  <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
+                  <InfoRow
+                    label="Hours Remaining"
+                    value={hoursRemaining !== null
+                      ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
+                      : null}
+                  />
+                  <InfoRow label="End Date" value={activeTrain.end_date ?? null} />
+                  <InfoRow label="Status" value={activeTrain.status ?? null} />
+                </>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  No active training.
+                  {!isStaffView && ' Use the Create Training card below to start one.'}
+                </p>
+              )}
+            </div>
+
+            {/* Assigned teachers */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Assigned Teachers</h2>
+              {assignedTeachers.length === 0 ? (
+                <p className="text-sm text-gray-400">No teachers assigned.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {assignedTeachers.map((t) => (
+                    <span
+                      key={t.id}
+                      className="px-3 py-1 rounded-full text-sm font-medium bg-orange-50 text-orange-700"
+                    >
+                      {t.full_name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Create Training — rendered ONLY when the student has no training
+                with status === 'active' (hasActiveTraining, strict). A second
+                active training is refused by create_training_atomic and by the
+                one_active_training_per_student partial unique index, so the form
+                must never sit next to a live one. Admin only: staff get no
+                mutation entry points on this page. */}
+            {!isStaffView && !hasActiveTraining && (
+            <div className="col-span-2 card-elevated p-5 space-y-4">
+              <div>
+                <h2 className="font-semibold text-gray-800">Create Training</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  A training holds the package, the hours balance and the assigned teachers.
+                  Hours can only be added once one exists.
                 </p>
               </div>
-            )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Package Name
-                <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
-              </label>
-              <input
-                className={inputClass}
-                value={trainingPackage}
-                onChange={(e) => setTrainingPackage(e.target.value)}
-                placeholder="e.g. Standard 20hrs, Intensive B2"
-              />
-            </div>
+              {teacherOptionsLoadFailed && (
+                <div
+                  className="text-xs rounded-lg px-3 py-2"
+                  style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+                >
+                  <p className="font-medium">
+                    The teacher list could not be loaded, so it may be incomplete. Reload the page before assigning teachers.
+                  </p>
+                </div>
+              )}
 
-            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Total Hours
+                  Package Name
                   <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
                 </label>
                 <input
-                  type="number" min="0.5" step="0.5"
                   className={inputClass}
-                  value={trainingHours}
-                  onChange={(e) => setTrainingHours(e.target.value)}
-                  placeholder="e.g. 20"
+                  value={trainingPackage}
+                  onChange={(e) => setTrainingPackage(e.target.value)}
+                  placeholder="e.g. Standard 20hrs, Intensive B2"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date
-                  <span className="ml-1 text-gray-400 font-normal">(optional)</span>
-                </label>
-                <DatePartInput
-                  value={trainingEndDate}
-                  onChange={(v) => setTrainingEndDate(v)}
-                />
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Assigned Teacher(s)
-              </label>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {teacherOptions.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggleTrainingTeacher(t.id)}
-                    className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
-                    style={
-                      trainingTeacherIds.includes(t.id)
-                        ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
-                    }
-                  >
-                    {t.full_name}
-                  </button>
-                ))}
-              </div>
-              {teacherOptions.length === 0 && !teacherOptionsLoadFailed && (
-                <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
-              )}
-              {/* Zero teachers is a legal selection — the training is created
-                  either way — but it is never what the admin meant to leave
-                  behind, so say what it costs the student. */}
-              {trainingTeacherIds.length === 0 && (
-                <p className="text-xs mt-2" style={{ color: '#B45309' }}>
-                  No teachers assigned — the student will not be able to book classes.
-                  Teachers can be added later from the Edit page.
-                </p>
-              )}
-            </div>
-
-            {trainingError && (
-              <div className="px-4 py-3 rounded-lg text-sm"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {trainingError}
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                onClick={handleCreateTraining}
-                disabled={trainingSaving}
-                className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                style={{ backgroundColor: '#FF8303' }}
-              >
-                {trainingSaving ? 'Creating...' : 'Create Training'}
-              </button>
-            </div>
-          </div>
-          )}
-
-          {/* Teacher notes */}
-          <div className="card-elevated p-5 space-y-2">
-            <h2 className="font-semibold text-gray-800">Teacher Notes</h2>
-            <p className="text-sm text-gray-600">
-              {(student.teacher_notes as string) || 'No teacher notes.'}
-            </p>
-            <p className="text-xs text-gray-400">Visible to assigned teachers. Not visible to student.</p>
-          </div>
-
-          {/* Admin notes */}
-          {!isStaffView && (
-          <div className="rounded-xl border p-5 space-y-2"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔒 Admin Notes — Not visible to teacher or student
-            </h2>
-            <p className="text-sm" style={{ color: '#78350f' }}>
-              {(student.admin_notes as string) || 'No admin notes.'}
-            </p>
-          </div>
-          )}
-
-          {/* Password override — admin only, full width */}
-          {!isStaffView && (
-          <div className="col-span-2 rounded-xl border p-5 space-y-3"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔑 Set New Password — Admin only
-            </h2>
-            <p className="text-xs" style={{ color: '#78350f' }}>
-              Overrides the student&apos;s current password immediately. The student is not notified.
-            </p>
-
-            {passwordError && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {passwordError}
-              </div>
-            )}
-            {passwordSuccess && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
-                Password updated successfully.
-              </div>
-            )}
-
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
-                  New Password
-                </label>
-                <div className="relative">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Total Hours
+                    <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
+                  </label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
-                    placeholder="Min. 8 characters"
-                    className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
-                    style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                    type="number" min="0.5" step="0.5"
+                    className={inputClass}
+                    value={trainingHours}
+                    onChange={(e) => setTrainingHours(e.target.value)}
+                    placeholder="e.g. 20"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                    <span className="ml-1 text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <DatePartInput
+                    value={trainingEndDate}
+                    onChange={(v) => setTrainingEndDate(v)}
+                  />
                 </div>
               </div>
-              <button
-                onClick={handleSetPassword}
-                disabled={passwordSaving || !newPassword}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
-                style={{ backgroundColor: '#92400e' }}
-              >
-                {passwordSaving ? 'Saving...' : 'Set Password'}
-              </button>
-            </div>
-          </div>
-          )}
 
-          {/* Open tasks linked to this student. TasksMini renders its own header, so this
-              wrapper supplies only the card — card-elevated p-5 is this file's neutral
-              overview-card class, with col-span-2 (not the teacher page's col-span-3)
-              because this overview grid is grid-cols-2. linkedId is students.id, which is
-              what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
-              TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
-              students rows, and the tasks route resolves those ids back against `students`.
-              Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
-              which requireStaff() explicitly excludes tasks from, so for a staff viewer this
-              panel could only render a permission error and an Add Task button they cannot use. */}
-          {!isStaffView && (
-          <div className="col-span-2 card-elevated p-5">
-            <TasksMini
-              linkedType="student"
-              linkedId={id}
-              linkedName={fullName}
-              adminTz={adminTz}
-            />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Assigned Teacher(s)
+                </label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {teacherOptions.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTrainingTeacher(t.id)}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                      style={
+                        trainingTeacherIds.includes(t.id)
+                          ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                          : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                      }
+                    >
+                      {t.full_name}
+                    </button>
+                  ))}
+                </div>
+                {teacherOptions.length === 0 && !teacherOptionsLoadFailed && (
+                  <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
+                )}
+                {/* Zero teachers is a legal selection — the training is created
+                    either way — but it is never what the admin meant to leave
+                    behind, so say what it costs the student. */}
+                {trainingTeacherIds.length === 0 && (
+                  <p className="text-xs mt-2" style={{ color: '#B45309' }}>
+                    No teachers assigned — the student will not be able to book classes.
+                    Teachers can be added later from the Edit page.
+                  </p>
+                )}
+              </div>
+
+              {trainingError && (
+                <div className="px-4 py-3 rounded-lg text-sm"
+                  style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                  {trainingError}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  onClick={handleCreateTraining}
+                  disabled={trainingSaving}
+                  className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#FF8303' }}
+                >
+                  {trainingSaving ? 'Creating...' : 'Create Training'}
+                </button>
+              </div>
+            </div>
+            )}
+
+            {/* Teacher notes */}
+            <div className="card-elevated p-5 space-y-2">
+              <h2 className="font-semibold text-gray-800">Teacher Notes</h2>
+              <p className="text-sm text-gray-600">
+                {(student.teacher_notes as string) || 'No teacher notes.'}
+              </p>
+              <p className="text-xs text-gray-400">Visible to assigned teachers. Not visible to student.</p>
+            </div>
+
+            {/* Admin notes */}
+            {!isStaffView && (
+            <div className="rounded-xl border p-5 space-y-2"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔒 Admin Notes — Not visible to teacher or student
+              </h2>
+              <p className="text-sm" style={{ color: '#78350f' }}>
+                {(student.admin_notes as string) || 'No admin notes.'}
+              </p>
+            </div>
+            )}
+
+            {/* Password override — admin only, full width */}
+            {!isStaffView && (
+            <div className="col-span-2 rounded-xl border p-5 space-y-3"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔑 Set New Password — Admin only
+              </h2>
+              <p className="text-xs" style={{ color: '#78350f' }}>
+                Overrides the student&apos;s current password immediately. The student is not notified.
+              </p>
+
+              {passwordError && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                  {passwordError}
+                </div>
+              )}
+              {passwordSuccess && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
+                  Password updated successfully.
+                </div>
+              )}
+
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
+                      placeholder="Min. 8 characters"
+                      className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
+                      style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={handleSetPassword}
+                  disabled={passwordSaving || !newPassword}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
+                  style={{ backgroundColor: '#92400e' }}
+                >
+                  {passwordSaving ? 'Saving...' : 'Set Password'}
+                </button>
+              </div>
+            </div>
+            )}
+
+            {/* Open tasks linked to this student. TasksMini renders its own header, so this
+                wrapper supplies only the card — card-elevated p-5 is this file's neutral
+                overview-card class, with col-span-2 (not the teacher page's col-span-3)
+                because this overview grid is grid-cols-2. linkedId is students.id, which is
+                what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
+                TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
+                students rows, and the tasks route resolves those ids back against `students`.
+                Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
+                which requireStaff() explicitly excludes tasks from, so for a staff viewer this
+                panel could only render a permission error and an Add Task button they cannot use. */}
+            {!isStaffView && (
+            <div className="col-span-2 card-elevated p-5">
+              <TasksMini
+                linkedType="student"
+                linkedId={id}
+                linkedName={fullName}
+                adminTz={adminTz}
+              />
+            </div>
+            )}
           </div>
-          )}
         </div>
       )}
 

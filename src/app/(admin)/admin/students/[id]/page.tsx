@@ -3,10 +3,13 @@ import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { requireStaff } from '@/lib/auth/requireStaff'
+import { isCancelledStatus } from '@/lib/billing/billability'
 import StudentDetailClient from './StudentDetailClient'
 import type {
   AdminConversation,
   Assignment,
+  AtAGlance,
+  AtAGlanceLastSignIn,
   MaterialHomework,
   MaterialSheetOption,
 } from './StudentDetailClient'
@@ -232,6 +235,7 @@ export default async function StudentDetailPage({
       scheduled_at,
       duration_minutes,
       status,
+      cancelled_at,
       cancelled_by,
       rescheduled_by,
       profiles:teacher_id (
@@ -248,6 +252,7 @@ export default async function StudentDetailPage({
     scheduled_at: l.scheduled_at,
     duration_minutes: l.duration_minutes,
     status: l.status,
+    cancelled_at: l.cancelled_at ?? null,
     cancelled_by: l.cancelled_by ?? null,
     rescheduled_by: l.rescheduled_by ?? null,
     teacher_name: Array.isArray(l.profiles)
@@ -268,6 +273,127 @@ export default async function StudentDetailPage({
         .select('*')
         .eq('student_id', id)
         .order('created_at', { ascending: false })
+
+  // ── "At a glance" panel metadata (ADMIN ONLY) ──────────────────────────
+  // Staff get null and the panel never renders for them: it mixes admin-only
+  // account metadata (sign-up date, last sign-in) with a count taken off the
+  // hours ledger, and the staff branch of the student query above is not allowed
+  // to read either.
+  //
+  // Placed here rather than immediately after flatLessons because `refunds` is
+  // counted off hoursLog, which is read just above. Every value below comes from
+  // an array THIS PAGE ALREADY FETCHED — flatLessons and hoursLog — so the panel
+  // adds no lesson query and no report query of its own.
+  //
+  // CAP: the five lesson-derived counts (upcoming, attended, studentNoShows,
+  // cancelled, cancelledUnder24h) share the 1000-row cap of the lessons read
+  // above. On a capped read they describe the most recent 1000 classes, not the
+  // student's whole history — the existing lessonsCapped disclosure on the
+  // Classes tab, which is exactly where the four clickable class tiles land, is
+  // the statement of that, so no second disclosure is added here.
+  let atAGlance: AtAGlance | null = null
+
+  if (!isStaffView) {
+    // Last sign-in. auth.admin.* takes the auth.users UUID, which for a student
+    // is students.auth_user_id (the indirection) — NEVER the students table PK.
+    // Handed the PK it would look up a user that does not exist.
+    let lastSignIn: AtAGlanceLastSignIn = { state: 'unavailable' }
+    const authUserId = student.auth_user_id as string | null | undefined
+
+    if (authUserId) {
+      // BOUNDED, and it must stay that way: this is panel metadata, and metadata
+      // must never take down the student record. Both a returned error and a
+      // thrown network failure land on 'unavailable' — the same judgement the
+      // timezone read at the top of this file makes.
+      try {
+        const { data: authData, error: authError } =
+          await supabase.auth.admin.getUserById(authUserId)
+
+        if (authError || !authData?.user) {
+          // A missing auth user is NOT 'never': the account could not be read at
+          // all, so nothing can be claimed about whether it has ever signed in.
+          console.error(
+            `[admin student detail] last sign-in lookup failed (student ${id}):`,
+            authError ?? 'auth lookup returned no user'
+          )
+          lastSignIn = { state: 'unavailable' }
+        } else if (typeof authData.user.last_sign_in_at === 'string') {
+          lastSignIn = { state: 'known', at: authData.user.last_sign_in_at }
+        } else {
+          // The auth user exists and has never completed a sign-in.
+          lastSignIn = { state: 'never' }
+        }
+      } catch (err) {
+        console.error(
+          `[admin student detail] last sign-in lookup threw (student ${id}):`,
+          err
+        )
+        lastSignIn = { state: 'unavailable' }
+      }
+    }
+    // else: no auth user linked — the invite was never completed, or the auth row
+    // was deleted (students.auth_user_id is ON DELETE SET NULL). There is no
+    // account that could have signed in, and 'never' would be a claim about one
+    // that does not exist, so the initial 'unavailable' stands.
+
+    // ONE request-time instant, read once and shared by every comparison below,
+    // so two tiles can never disagree about "now". new Date().getTime() rather
+    // than Date.now(): the react-hooks/purity rule mis-fires on Date.now() in
+    // async Server Components — the same remedy, for the same reason, as
+    // (dashboard)/upcoming-classes/page.tsx:17 and
+    // (dashboard)/students/[id]/page.tsx:359. The clock is read HERE, on the
+    // server, and never in the client component: a clock read during a client
+    // render desyncs the SSR markup from the first browser render.
+    const nowMs = new Date().getTime()
+
+    // Reschedule legs are excluded: a reschedule is a date change, not a
+    // cancellation. The dead old leg carries a cancel-family status while the new
+    // booking carries the class, so counting it would report one cancellation per
+    // time change. Same rule, same shape, as the first branch of getBillability.
+    // The cancel family itself comes from isCancelledStatus (i.e. billability's
+    // CANCELLED_STATUSES), never from a status list hand-rolled here.
+    const cancellations = flatLessons.filter(
+      (l) =>
+        isCancelledStatus(l.status) &&
+        !(l.rescheduled_by === 'student' || l.rescheduled_by === 'admin')
+    )
+
+    atAGlance = {
+      signedUpAt: (student.created_at as string | null) ?? null,
+      lastSignIn,
+      upcoming: flatLessons.filter(
+        (l) => l.status === 'scheduled' && new Date(l.scheduled_at).getTime() > nowMs
+      ).length,
+      // 'missed' means the class HAPPENED and the teacher blew the report window
+      // — the student attended. It zeroes teacher pay; it does not undo the
+      // class, so it belongs here and not with the cancellations.
+      attended: flatLessons.filter(
+        (l) => l.status === 'completed' || l.status === 'missed'
+      ).length,
+      studentNoShows: flatLessons.filter((l) => l.status === 'student_no_show').length,
+      cancelled: cancellations.length,
+      // A subset of `cancelled`, never of all lessons. A null cancelled_at cannot
+      // be measured against the notice window, so it is NOT counted: "we do not
+      // know when this was cancelled" must never render as "inside 24 hours". A
+      // cancelled_at after the class start yields a negative difference and IS
+      // counted, which is correct — that is zero notice, not more than 24 hours.
+      cancelledUnder24h: cancellations.filter((l) => {
+        if (!l.cancelled_at) return false
+        return (
+          new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() <
+          24 * 60 * 60 * 1000
+        )
+      }).length,
+      // These two ledger types and no others. The ledger also carries
+      // admin_adjustment, class_booking and reschedule rows (live vocabulary,
+      // verified 20 Aug), which are not refunds - widening the test would count
+      // corrections and bookings as money given back.
+      refunds: (hoursLog ?? []).filter(
+        (e: { type: string }) =>
+          e.type === 'cancellation_refund' || e.type === 'teacher_no_show_refund'
+      ).length,
+    }
+  }
 
   // Fetch reports for this student through the EMBEDDED lesson, not through the
   // (capped) lesson list above: filtering by the fetched lesson ids inherited the
@@ -650,6 +776,7 @@ export default async function StudentDetailPage({
       materialHomeworkLoadFailed={materialHomeworkLoadFailed}
       materialSheets={materialSheets}
       materialSheetsLoadFailed={materialSheetsLoadFailed}
+      atAGlance={atAGlance}
       isStaffView={isStaffView}
       adminTz={adminTz}
       adminTzRaw={adminTzRaw}
