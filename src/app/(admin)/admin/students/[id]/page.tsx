@@ -223,7 +223,8 @@ export default async function StudentDetailPage({
     }
   }
 
-  // Fetch lessons for this student (most recent 50)
+  // Fetch lessons for this student (most recent 1000)
+  // Explicit limit, never unbounded: PostgREST silently caps an unbounded query at its max-rows setting, and a silent cap is the bug being removed here.
   const { data: lessons } = await supabase
     .from('lessons')
     .select(`
@@ -239,7 +240,7 @@ export default async function StudentDetailPage({
     `)
     .eq('student_id', id)
     .order('scheduled_at', { ascending: false })
-    .limit(50)
+    .limit(1000)
 
   // Flatten teacher name on each lesson
   const flatLessons = (lessons || []).map((l) => ({
@@ -254,6 +255,11 @@ export default async function StudentDetailPage({
       : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
   }))
 
+  // The read came back exactly at its cap, so older classes almost certainly exist
+  // beyond it. The Classes tab says so rather than presenting a truncated list as
+  // the student's whole history.
+  const lessonsCapped = flatLessons.length === 1000
+
   // Fetch hours log for this student (admin only — staff view skips it)
   const { data: hoursLog } = isStaffView
     ? { data: null }
@@ -263,9 +269,14 @@ export default async function StudentDetailPage({
         .eq('student_id', id)
         .order('created_at', { ascending: false })
 
-  // Fetch reports via lesson IDs belonging to this student
+  // Fetch reports for this student through the EMBEDDED lesson, not through the
+  // (capped) lesson list above: filtering by the fetched lesson ids inherited the
+  // lessons cap, so a report on the student's 1001st-most-recent class silently
+  // vanished from this tab. lessons!inner is what makes the embedded filter drop
+  // parent rows — on a plain embed it would only null the embed. student_id is
+  // deliberately NOT added to the embedded column list: PostgREST does not require
+  // a filtered column to be selected.
   // (staff see these read-only in the Reports tab)
-  const lessonIds = flatLessons.map((l) => l.id)
   let reports: {
     id: string
     happened: boolean | null
@@ -277,52 +288,53 @@ export default async function StudentDetailPage({
     teacher_name: string | null
   }[] = []
 
-  if (lessonIds.length > 0) {
-    const { data: rawReports, error: reportsError } = await supabase
-      .from('reports')
-      .select(`
+  const { data: rawReports, error: reportsError } = await supabase
+    .from('reports')
+    .select(`
+      id,
+      did_class_happen,
+      feedback_text,
+      status,
+      created_at,
+      lesson_id,
+      lessons!inner (
         id,
-        did_class_happen,
-        feedback_text,
-        status,
-        created_at,
-        lesson_id,
-        lessons!inner (
-          id,
-          scheduled_at,
-          profiles:teacher_id (
-            full_name
-          )
+        scheduled_at,
+        profiles:teacher_id (
+          full_name
         )
-      `)
-      .in('lesson_id', lessonIds)
-      .order('created_at', { ascending: false })
-      .limit(50)
+      )
+    `)
+    .eq('lessons.student_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1000)
 
-    // Bound and logged, never thrown: a failed reports read leaves the Reports
-    // tab empty but must not take down the whole student record — every other
-    // tab on this page stays useful.
-    if (reportsError) {
-      console.error('[admin/students/[id]] reports query failed:', reportsError)
-    }
-
-    reports = (rawReports || []).map((r) => {
-      const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
-      const teacherProfile = lesson
-        ? Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
-        : null
-      return {
-        id: r.id,
-        happened: r.did_class_happen,
-        feedback: r.feedback_text,
-        status: r.status,
-        created_at: r.created_at,
-        class_id: r.lesson_id,
-        lesson_scheduled_at: lesson?.scheduled_at ?? null,
-        teacher_name: teacherProfile?.full_name ?? null,
-      }
-    })
+  // Bound and logged, never thrown: a failed reports read leaves the Reports
+  // tab empty but must not take down the whole student record — every other
+  // tab on this page stays useful.
+  if (reportsError) {
+    console.error('[admin/students/[id]] reports query failed:', reportsError)
   }
+
+  // Same cap disclosure as the lessons read above.
+  const reportsCapped = (rawReports ?? []).length === 1000
+
+  reports = (rawReports || []).map((r) => {
+    const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
+    const teacherProfile = lesson
+      ? Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
+      : null
+    return {
+      id: r.id,
+      happened: r.did_class_happen,
+      feedback: r.feedback_text,
+      status: r.status,
+      created_at: r.created_at,
+      class_id: r.lesson_id,
+      lesson_scheduled_at: lesson?.scheduled_at ?? null,
+      teacher_name: teacherProfile?.full_name ?? null,
+    }
+  })
 
   // Fetch reviews submitted by this student
   // (staff see these read-only in the Reviews tab)
@@ -625,8 +637,10 @@ export default async function StudentDetailPage({
       hoursRemaining={hoursRemaining}
       assignedTeachers={assignedTeachers}
       lessons={flatLessons}
+      lessonsCapped={lessonsCapped}
       hoursLog={hoursLog || []}
       reports={reports}
+      reportsCapped={reportsCapped}
       reviews={flatReviews}
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}

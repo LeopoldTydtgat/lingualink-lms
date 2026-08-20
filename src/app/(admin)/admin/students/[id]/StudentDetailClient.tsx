@@ -160,8 +160,16 @@ type Props = {
   hoursRemaining: number | null
   assignedTeachers: Teacher[]
   lessons: Lesson[]
+  /**
+   * True when the lessons read came back exactly at its 1000-row cap, so older
+   * classes exist beyond what this tab holds. Surfaced as a disclosure line: an
+   * unstated cap makes a truncated Classes list read as the student's whole history.
+   */
+  lessonsCapped: boolean
   hoursLog: HoursLogEntry[]
   reports: Report[]
+  /** Same cap disclosure for the reports read — see lessonsCapped. */
+  reportsCapped: boolean
   reviews: Review[]
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
@@ -617,8 +625,10 @@ export default function StudentDetailClient({
   hoursRemaining,
   assignedTeachers,
   lessons,
+  lessonsCapped,
   hoursLog,
   reports,
+  reportsCapped,
   reviews,
   conversations,
   purgeBlockedBy,
@@ -1556,48 +1566,53 @@ export default function StudentDetailClient({
 
       {/* ── Classes ── */}
       {activeTab === 'classes' && (
-        <div className="card-elevated overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lessons.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
+        <div className="space-y-2">
+          {lessonsCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 classes.</p>
+          )}
+          <div className="card-elevated overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
                 </tr>
-              ) : (
-                lessons.map((lesson) => (
-                  <tr key={lesson.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-800">{lesson.teacher_name}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                        timeZone: adminTz,
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {lesson.duration_minutes} min
-                      <DurationMarker
-                        status={lesson.status}
-                        durationMinutes={lesson.duration_minutes}
-                        allowed={student.allowed_durations}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
-                    </td>
+              </thead>
+              <tbody>
+                {lessons.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  lessons.map((lesson) => (
+                    <tr key={lesson.id} className="border-b border-gray-50">
+                      <td className="px-4 py-3 text-gray-800">{lesson.teacher_name}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {lesson.duration_minutes} min
+                        <DurationMarker
+                          status={lesson.status}
+                          durationMinutes={lesson.duration_minutes}
+                          allowed={student.allowed_durations}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1811,73 +1826,78 @@ export default function StudentDetailClient({
 
       {/* ── Reports ── */}
       {activeTab === 'reports' && (
-        <div className="card-elevated overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Class Date</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Class Taken</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Feedback</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-10 text-gray-400">No reports yet.</td>
+        <div className="space-y-2">
+          {reportsCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 reports.</p>
+          )}
+          <div className="card-elevated overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Class Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Class Taken</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Feedback</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
                 </tr>
-              ) : (
-                reports.map((report) => (
-                  <tr key={report.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-700">
-                      {report.lesson_scheduled_at
-                        ? new Date(report.lesson_scheduled_at).toLocaleDateString('en-GB', {
-                            day: '2-digit', month: 'short', year: 'numeric',
-                            timeZone: adminTz,
-                          })
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{report.teacher_name || '—'}</td>
-                    <td className="px-4 py-3">
-                      {/* Three states, not two: happened stays null until the
-                          report is filed. Falling through to the red 'No' read
-                          as "the class did not take place" when it only meant
-                          nothing had been reported yet — hence the explicit
-                          === true / === false comparisons. */}
-                      <span
-                        className="px-2 py-0.5 rounded-full text-xs font-medium"
-                        style={
-                          report.happened === true
-                            ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-                            : report.happened === false
-                            ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
-                            : { backgroundColor: '#E0DFDC', color: '#000000' }
-                        }
-                      >
-                        {report.happened === true
-                          ? 'Yes'
-                          : report.happened === false
-                          ? 'No'
-                          : report.status === 'flagged'
-                          ? 'Missed'
-                          : 'Awaiting report'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
-                      {report.feedback || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {new Date(report.created_at).toLocaleDateString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        timeZone: adminTz,
-                      })}
-                    </td>
+              </thead>
+              <tbody>
+                {reports.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center py-10 text-gray-400">No reports yet.</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  reports.map((report) => (
+                    <tr key={report.id} className="border-b border-gray-50">
+                      <td className="px-4 py-3 text-gray-700">
+                        {report.lesson_scheduled_at
+                          ? new Date(report.lesson_scheduled_at).toLocaleDateString('en-GB', {
+                              day: '2-digit', month: 'short', year: 'numeric',
+                              timeZone: adminTz,
+                            })
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{report.teacher_name || '—'}</td>
+                      <td className="px-4 py-3">
+                        {/* Three states, not two: happened stays null until the
+                            report is filed. Falling through to the red 'No' read
+                            as "the class did not take place" when it only meant
+                            nothing had been reported yet — hence the explicit
+                            === true / === false comparisons. */}
+                        <span
+                          className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={
+                            report.happened === true
+                              ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                              : report.happened === false
+                              ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                              : { backgroundColor: '#E0DFDC', color: '#000000' }
+                          }
+                        >
+                          {report.happened === true
+                            ? 'Yes'
+                            : report.happened === false
+                            ? 'No'
+                            : report.status === 'flagged'
+                            ? 'Missed'
+                            : 'Awaiting report'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
+                        {report.feedback || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {new Date(report.created_at).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          timeZone: adminTz,
+                        })}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
