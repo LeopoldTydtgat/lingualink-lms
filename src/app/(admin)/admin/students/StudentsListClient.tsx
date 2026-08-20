@@ -439,10 +439,12 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
                     </div>
                   </td>
 
-                  {/* Company tag — Private badge if no company */}
+                  {/* Company. The name repeats on nearly every row at a single
+                      B2B client, so a coloured pill there is noise. Private is
+                      the exception and keeps its badge. */}
                   <td className="px-4 py-3">
                     {student.company_name ? (
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                      <span style={{ fontSize: '13px', color: '#374151' }}>
                         {student.company_name}
                       </span>
                     ) : (
