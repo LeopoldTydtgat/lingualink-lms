@@ -1641,8 +1641,9 @@ export default function StudentDetailClient({
                   label="Signed up"
                   value={
                     atAGlance.signedUpAt
-                      ? new Date(atAGlance.signedUpAt).toLocaleDateString('en-GB', {
+                      ? new Date(atAGlance.signedUpAt).toLocaleString('en-GB', {
                           day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
                           timeZone: adminTz,
                         })
                       : '—'
@@ -1652,8 +1653,9 @@ export default function StudentDetailClient({
                   label="Last sign-in"
                   value={
                     atAGlance.lastSignIn.state === 'known'
-                      ? new Date(atAGlance.lastSignIn.at).toLocaleDateString('en-GB', {
+                      ? new Date(atAGlance.lastSignIn.at).toLocaleString('en-GB', {
                           day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
                           timeZone: adminTz,
                         })
                       : atAGlance.lastSignIn.state === 'never'
@@ -1678,6 +1680,20 @@ export default function StudentDetailClient({
                 <GlanceTile label="Cancelled" value={atAGlance.cancelled} onClick={() => { setClassesStatusFilter('cancelled'); setActiveTab('classes') }} />
                 <GlanceTile label="Cancelled <24h" value={atAGlance.cancelledUnder24h} onClick={() => { setClassesStatusFilter('cancelled_under_24h'); setActiveTab('classes') }} />
                 <GlanceTile label="Refunds" value={atAGlance.refunds} onClick={() => setActiveTab('hours')} />
+                {/* These three read the same activeTrain/hoursRemaining the Training card
+                    below renders, including its deliberate newest-any-status fallback, so
+                    the panel and the card can never show different hours. Values are
+                    strings, so they render via GlanceTile's string branch. */}
+                <GlanceTile label="Hours purchased" value={activeTrain ? `${activeTrain.total_hours}h` : '—'} />
+                <GlanceTile label="Hours used" value={activeTrain ? `${activeTrain.hours_consumed}h` : '—'} />
+                <GlanceTile
+                  label="Hours remaining"
+                  value={
+                    hoursRemaining !== null
+                      ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
+                      : '—'
+                  }
+                />
               </div>
             </div>
           )}
