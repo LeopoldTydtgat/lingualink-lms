@@ -69,6 +69,20 @@ function matchesTab(s: Student, tab: TabId): boolean {
   return s.status !== 'former'
 }
 
+// Search covers every column the admin can actually see on this row. Typing a
+// company or teacher name that is visible on screen and getting an empty table
+// reads as broken data, so name and email alone are not enough. `q` is expected
+// already lowercased and trimmed by the caller.
+function matchesSearch(s: Student, q: string): boolean {
+  if (q === '') return true
+  return (
+    (s.full_name ?? '').toLowerCase().includes(q) ||
+    s.email.toLowerCase().includes(q) ||
+    (s.company_name ?? '').toLowerCase().includes(q) ||
+    s.teachers.some((t) => (t.full_name ?? '').toLowerCase().includes(q))
+  )
+}
+
 function matchesTypeFilter(s: Student, typeFilter: string): boolean {
   return (
     typeFilter === 'All' ||
@@ -221,15 +235,13 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
   const [typeFilter, setTypeFilter] = useState('All') // All / Private / B2B
   const [tab, setTab] = useState<TabId>(initialLowHoursOnly ? 'low_hours' : 'all')
 
-  const filtered = students.filter((s) => {
-    const matchesSearch =
-      (s.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      s.email.toLowerCase().includes(search.toLowerCase())
+  // Trimmed once here so a pasted trailing space cannot silently empty the
+  // table, and so the empty-state message quotes the same text that was matched.
+  const query = search.trim().toLowerCase()
 
-    const matchesType = matchesTypeFilter(s, typeFilter)
-
-    return matchesSearch && matchesType && matchesTab(s, tab)
-  })
+  const filtered = students.filter(
+    (s) => matchesSearch(s, query) && matchesTypeFilter(s, typeFilter) && matchesTab(s, tab)
+  )
 
   // Counts follow the Type filter but ignore the search text, so typing never
   // makes a tab look empty.
@@ -242,8 +254,8 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
     archived: typeMatched.filter((s) => matchesTab(s, 'archived')).length,
   }
 
-  const emptyMessage = search
-    ? `No students match "${search}".`
+  const emptyMessage = query
+    ? `No students match "${query}".`
     : tab === 'low_hours'
     ? 'No students are low on hours.'
     : tab === 'on_hold'
@@ -331,7 +343,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
       <div className="flex flex-wrap gap-3 mb-6">
         <input
           type="text"
-          placeholder="Search by name or email..."
+          placeholder="Search by name, email, company or teacher..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 min-w-48 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-orange-400"
