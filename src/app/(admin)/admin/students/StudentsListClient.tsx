@@ -277,12 +277,12 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
           placeholder="Search by name or email..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-48 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+          className="flex-1 min-w-48 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-orange-400"
         />
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-orange-400 bg-white"
         >
           <option value="All">All Types</option>
           <option value="Private">Private</option>
@@ -332,6 +332,17 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
                   key={student.id}
                   className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
                   onClick={() => router.push(`/admin/students/${student.id}`)}
+                  // Keyboard parity with the click handler. No role="button" — that
+                  // would strip the row out of the table semantics screen readers use.
+                  tabIndex={0}
+                  aria-label={`Open ${student.full_name ?? 'student'}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      // Space would otherwise scroll the page.
+                      if (e.key === ' ') e.preventDefault()
+                      router.push(`/admin/students/${student.id}`)
+                    }
+                  }}
                   style={{ cursor: 'pointer' }}
                 >
                   {/* Photo + name as link */}
@@ -351,9 +362,12 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
                           {(student.full_name ?? '?').charAt(0).toUpperCase()}
                         </div>
                       )}
+                      {/* Kept for the hover affordance and open-in-new-tab, but taken out
+                          of the tab order: the row is already the tab stop for this href. */}
                       <Link
                         href={`/admin/students/${student.id}`}
                         prefetch={false}
+                        tabIndex={-1}
                         className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
                       >
                         {student.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>}
