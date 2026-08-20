@@ -11,8 +11,11 @@ import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
 import { DatePartInput } from '../../_components/DatePartInput'
+import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../../_components/DateRangeFilter'
 import AssignMaterialHomeworkModal from './AssignMaterialHomeworkModal'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
+import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -188,6 +191,15 @@ type Props = {
   isStaffView?: boolean
   /** IANA zone of the viewing admin/staff account. Every rendered instant is projected through it. */
   adminTz: string
+  /**
+   * The SAME profiles.timezone column, kept raw: null when the viewing account has no
+   * zone set. Presets-only - it feeds the Hours Log quick-range buttons, which go dead
+   * on null rather than resolving "this month" in UTC and naming the wrong calendar
+   * month. adminTz above keeps the 'UTC' display fallback and is NOT interchangeable
+   * with this one: a fallback that is survivable for formatting is not survivable for
+   * deciding which day "today" is.
+   */
+  adminTzRaw: string | null
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messages' | 'reviews'
@@ -450,6 +462,50 @@ function MsgAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }
   )
 }
 
+// ─── Hours Log date filter ───────────────────────────────
+
+// Deliberately SHARED across students, not keyed per student. The month-end workflow
+// is "set Last month once, then walk student to student", so carrying the choice from
+// one record to the next is the point rather than a leak - and a stored preset is
+// recomputed against now on restore, so it can never carry a stale month with it.
+// sessionStorage keeps the whole thing scoped to one browsing session.
+const HOURS_FILTERS_STORAGE_KEY = 'll-admin-student-hours-filters'
+
+/**
+ * What the Hours Log tab remembers for the rest of the browsing session.
+ *
+ * EITHER a preset id OR concrete day keys, never both:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "Last month" must still mean last month
+ *                       after midnight on the 1st; storing its dates would pin the
+ *                       filter to a month that has since passed.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+type HoursStoredFilters = {
+  preset: DateRangePreset | null
+  from: string
+  to: string
+}
+
+const DEFAULT_HOURS_STORED_FILTERS: HoursStoredFilters = {
+  preset: null,
+  from: '',
+  to: '',
+}
+
+// An instant's calendar day in `timezone` as a 'YYYY-MM-DD' key, built on the
+// zonedParts probe above. Rows are bucketed in the SAME zone the Date column renders
+// them in (adminTz), so a row displayed as 01 Aug can never be excluded from an August
+// filter by a zone mismatch - one Intl read decides both what is shown and what is
+// matched. No ISO round trip anywhere: an ISO UTC string names the UTC day, which is a
+// different day for any zone whose offset pushes the instant across midnight.
+function zonedDayKey(dateStr: string, timezone: string): string {
+  const p = zonedParts(new Date(dateStr), timezone)
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
+}
+
 // ─── Read-only message thread ─────────────────────────────────────────────────
 
 function MessageThread({
@@ -574,6 +630,7 @@ export default function StudentDetailClient({
   materialSheetsLoadFailed,
   isStaffView = false,
   adminTz,
+  adminTzRaw,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -585,6 +642,102 @@ export default function StudentDetailClient({
   const [hoursNotes, setHoursNotes] = useState('')
   const [hoursSaving, setHoursSaving] = useState(false)
   const [hoursError, setHoursError] = useState<string | null>(null)
+
+  // Hours log date filter. Declared at the TOP LEVEL of this component and
+  // unconditionally: the tabs below are inline conditional JSX, so anything declared
+  // inside one of them would be a hook sitting behind a condition.
+  const [hoursFrom, setHoursFrom] = useState('')
+  const [hoursTo, setHoursTo] = useState('')
+
+  // The record handed to sessionStorage. Rebuilt every render - these two values are
+  // its only inputs - and matchDateRangePreset is the same call that decides which
+  // quick-range button DateRangeFilter highlights, so what the row shows as active and
+  // what gets stored are one decision. A hand-typed range that happens to equal a
+  // preset is therefore stored AS that preset, which is exactly what the row is
+  // telling the admin it is.
+  const hoursPreset = matchDateRangePreset(hoursFrom, hoursTo, adminTzRaw, new Date())
+  const persistedHoursFilters: HoursStoredFilters = {
+    preset: hoursPreset,
+    from: hoursPreset ? '' : hoursFrom,
+    to: hoursPreset ? '' : hoursTo,
+  }
+
+  /**
+   * Shape validation for a decoded stored record. Returning null rejects the WHOLE
+   * record and the tab opens unfiltered: a record written by a different build of this
+   * page, or edited by hand, cannot be trusted field by field, and a half-applied
+   * filter is worse than no filter.
+   */
+  function parseStoredHoursFilters(raw: unknown): HoursStoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const record = raw as Record<string, unknown>
+
+    const from = record.from
+    const to = record.to
+    if (typeof from !== 'string' || typeof to !== 'string') return null
+
+    let preset: DateRangePreset | null
+    if (record.preset === null) preset = null
+    else if (isDateRangePreset(record.preset)) preset = record.preset
+    else return null
+
+    return {
+      preset,
+      // Enforces the invariant on the way IN as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to: preset ? '' : to,
+    }
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect
+   * - never during render, so the clock read below cannot desync server and client
+   * markup.
+   */
+  function applyStoredHoursFilters(stored: HoursStoredFilters) {
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab returned to later in the day, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" - the same reason
+      // DateRangeFilter disables the preset buttons on a null zone. The range restores
+      // EMPTY rather than guessing UTC, and the hook then rewrites storage to match
+      // what is actually on screen.
+      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null
+      setHoursFrom(range?.from ?? '')
+      setHoursTo(range?.to ?? '')
+    } else {
+      setHoursFrom(stored.from)
+      setHoursTo(stored.to)
+    }
+  }
+
+  // `clear` is deliberately not taken off the return: the hook REMOVES the key by
+  // itself the moment the record matches the default, which is the exact end state the
+  // Clear button produces. skipRestore is false because no URL filter params reach this
+  // tab - there is no deep link a restored range could quietly widen or narrow.
+  useFilterPersistence<HoursStoredFilters>({
+    storageKey: HOURS_FILTERS_STORAGE_KEY,
+    value: persistedHoursFilters,
+    defaultValue: DEFAULT_HOURS_STORED_FILTERS,
+    skipRestore: false,
+    parse: parseStoredHoursFilters,
+    apply: applyStoredHoursFilters,
+  })
+
+  // Derived per render, never held in state - stored, it would drift out of step the
+  // moment either date input changed. Bucketed in adminTz (the DISPLAY zone), not
+  // adminTzRaw: the Date column below renders in adminTz, and the filter must agree
+  // with what the admin can actually see. Both bounds are inclusive, and lexical
+  // comparison is exact on fixed-width 'YYYY-MM-DD' keys.
+  const filteredHoursLog = (hoursFrom || hoursTo)
+    ? hoursLog.filter((e) => {
+        const key = zonedDayKey(e.created_at, adminTz)
+        return (!hoursFrom || key >= hoursFrom) && (!hoursTo || key <= hoursTo)
+      })
+    : hoursLog
 
   // Create Training form state — only reachable when hasActiveTraining is false
   const [trainingPackage, setTrainingPackage] = useState('')
@@ -1568,6 +1721,36 @@ export default function StudentDetailClient({
             </div>
           )}
 
+          {/* Date range filter over the log below. Purely client-side: the whole log
+              for this student already arrived in the page props, so this narrows what
+              is on screen without a refetch. The range survives navigation for the rest
+              of the session (sessionStorage), because the month-end workflow is one
+              range applied across many students. */}
+          <div className="card-elevated p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <DateRangeFilter
+                from={hoursFrom}
+                to={hoursTo}
+                onChange={(f, t) => { setHoursFrom(f); setHoursTo(t) }}
+                tz={adminTzRaw}
+              />
+              {(hoursFrom || hoursTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setHoursFrom(''); setHoursTo('') }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {(hoursFrom || hoursTo) && (
+              <p className="text-xs text-gray-500 mt-2">
+                Showing {filteredHoursLog.length} of {hoursLog.length} transactions
+              </p>
+            )}
+          </div>
+
           {/* Hours log table */}
           <div className="card-elevated overflow-hidden">
             <table className="w-full text-sm">
@@ -1582,14 +1765,24 @@ export default function StudentDetailClient({
                 </tr>
               </thead>
               <tbody>
+                {/* Two distinct empty states. Collapsing them into one would tell an
+                    admin who has filtered to an empty month that this student has no
+                    hours history at all, when the history is simply outside the range
+                    they chose. */}
                 {hoursLog.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-10 text-gray-400">
                       No hours transactions yet.
                     </td>
                   </tr>
+                ) : filteredHoursLog.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-gray-400">
+                      No transactions in the selected date range.
+                    </td>
+                  </tr>
                 ) : (
-                  hoursLog.map((entry) => (
+                  filteredHoursLog.map((entry) => (
                     <tr key={entry.id} className="border-b border-gray-50">
                       <td className="px-4 py-3">
                         <HoursTypeBadge type={entry.type} />

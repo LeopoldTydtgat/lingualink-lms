@@ -54,6 +54,17 @@ export default async function StudentDetailPage({
 
   const adminTz = viewerProfile?.timezone ?? 'UTC'
 
+  // TWO values out of one column, deliberately not interchangeable. adminTzRaw keeps
+  // the raw null because it feeds the DateRangeFilter quick-range presets on the Hours
+  // Log tab, where "which day is today" has no honest answer without a zone: resolving
+  // "this month" in UTC would name the wrong calendar month for a viewer sitting either
+  // side of it, and a filter silently set to the wrong month is worse than one that
+  // offers no presets at all. The presets go dead on null instead of guessing - the
+  // same judgement reports/page.tsx makes for its own DateRangeFilter. adminTz keeps
+  // its UTC fallback for DISPLAY FORMATTING only, where Intl needs a string and a
+  // readable timestamp beats no timestamp.
+  const adminTzRaw: string | null = viewerProfile?.timezone ?? null
+
   // Fetch student with company and active training + assigned teachers.
   // Staff must never receive the full row — explicit column list excluding
   // admin-only fields (admin_notes, cancellation_policy, customer_number,
@@ -627,6 +638,7 @@ export default async function StudentDetailPage({
       materialSheetsLoadFailed={materialSheetsLoadFailed}
       isStaffView={isStaffView}
       adminTz={adminTz}
+      adminTzRaw={adminTzRaw}
     />
   )
 }
