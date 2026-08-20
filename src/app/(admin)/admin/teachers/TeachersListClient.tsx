@@ -274,6 +274,17 @@ export default function TeachersListClient({ teachers, loadError = false }: Prop
                   key={teacher.id}
                   className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
                   onClick={() => router.push(`/admin/teachers/${teacher.id}`)}
+                  // Keyboard parity with the click handler. No role="button" - that
+                  // would strip the row out of the table semantics screen readers use.
+                  tabIndex={0}
+                  aria-label={`Open ${teacher.full_name ?? 'teacher'}`}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      // Space would otherwise scroll the page.
+                      if (e.key === ' ') e.preventDefault()
+                      router.push(`/admin/teachers/${teacher.id}`)
+                    }
+                  }}
                   style={{ cursor: 'pointer' }}
                 >
                   {/* Photo + name as link */}
@@ -293,9 +304,12 @@ export default function TeachersListClient({ teachers, loadError = false }: Prop
                           {(teacher.full_name ?? '?').charAt(0).toUpperCase()}
                         </div>
                       )}
+                      {/* Kept for the hover affordance and open-in-new-tab, but taken out
+                          of the tab order: the row is already the tab stop for this href. */}
                       <Link
                         href={`/admin/teachers/${teacher.id}`}
                         prefetch={false}
+                        tabIndex={-1}
                         className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
                       >
                         {teacher.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>}
