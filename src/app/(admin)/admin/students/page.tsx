@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import StudentsListClient from './StudentsListClient'
 
@@ -17,17 +16,9 @@ export default async function StudentsPage({
   const { filter } = await searchParams
   const initialLowHoursOnly = filter === 'low_hours'
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
+  // Service-role client, matching students/[id]/page.tsx. The admin gate above
+  // has already run; RLS is not what authorises this page.
+  const supabase = createAdminClient()
 
   // Fetch all students with their company, active training, and assigned teachers
   const { data: students, error } = await supabase
@@ -66,6 +57,10 @@ export default async function StudentsPage({
   if (error) {
     console.error('Error fetching students:', error)
   }
+
+  // A failed read must not render as an empty list — the client shows an error
+  // state instead of "No students yet."
+  const loadError = Boolean(error)
 
   // Flatten nested Supabase arrays and compute derived values
   const studentsFlattened = (students || []).map((s) => {
@@ -123,6 +118,7 @@ export default async function StudentsPage({
     <StudentsListClient
       students={studentsFlattened}
       initialLowHoursOnly={initialLowHoursOnly}
+      loadError={loadError}
     />
   )
 }

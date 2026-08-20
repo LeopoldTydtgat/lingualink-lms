@@ -29,6 +29,9 @@ type Props = {
   students: Student[]
   // Seeded from ?filter=low_hours by the server page.
   initialLowHoursOnly?: boolean
+  // True when the server-side read failed. An empty table would read as
+  // "no students", so the list renders an error state instead.
+  loadError?: boolean
 }
 
 type TabId = 'all' | 'low_hours' | 'on_hold' | 'archived'
@@ -115,7 +118,7 @@ function HoursBadge({ hours }: { hours: number | null }) {
   )
 }
 
-export default function StudentsListClient({ students, initialLowHoursOnly = false }: Props) {
+export default function StudentsListClient({ students, initialLowHoursOnly = false, loadError = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState('All') // All / Private / B2B
@@ -219,7 +222,8 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
                     : { backgroundColor: '#f3f4f6', color: '#4b5563' }),
                 }}
               >
-                {counts[id]}
+                {/* A failed read means the count is unknown, not zero. */}
+                {loadError ? '—' : counts[id]}
               </span>
             </button>
           )
@@ -260,7 +264,23 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loadError ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  style={{
+                    padding: '32px',
+                    textAlign: 'center',
+                    borderLeft: '3px solid #FD5602',
+                    backgroundColor: '#FFEEE6',
+                    color: '#FD5602',
+                    fontSize: '14px',
+                  }}
+                >
+                  Couldn&apos;t load students. This is not an empty result - try refreshing.
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-gray-400">
                   {emptyMessage}
