@@ -234,7 +234,7 @@ export function teacherCancellationEmailContent(
     intro = `Your cancellation of the class with <strong style="color:#FF8303;">${studentName}</strong> is confirmed.`
   } else if (cancelledBy === 'student') {
     intro = studentCancelledUnder24h === true
-      ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student. Because the cancellation was made less than 24 hours before the class, it is still included in your invoice.`
+      ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student with less than 24 hours' notice.`
       : `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student with more than 24 hours' notice.`
   } else {
     intro = `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by admin.`
