@@ -79,6 +79,38 @@ function StatusBadge({ status }: { status: string | null }) {
   )
 }
 
+// Roles. Every account carries 'teacher', so a pill on that value repeats on
+// every row and reads as noise; it renders as plain text. The extras that
+// actually vary between people (Staff, Teacher+Exam) keep a pill so they stand
+// out. Falls back to the role column when account_types is null.
+function RoleList({ types }: { types: string[] }) {
+  const base = types.filter((t) => t === 'teacher')
+  const extras = types.filter((t) => t !== 'teacher')
+
+  if (types.length === 0) {
+    return <span className="text-gray-400">&mdash;</span>
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {base.length > 0 && (
+        <span style={{ fontSize: '13px', color: '#374151' }}>
+          {ROLE_LABEL.teacher}
+        </span>
+      )}
+      {extras.map((type) => (
+        <span
+          key={type}
+          className="px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{ backgroundColor: '#FFEEE6', color: '#FD5602' }}
+        >
+          {ROLE_LABEL[type] ?? type}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function TeachersListClient({ teachers, loadError = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
@@ -283,16 +315,7 @@ export default function TeachersListClient({ teachers, loadError = false }: Prop
                   </td>
 
                   <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {(teacher.account_types ?? [teacher.role]).map((type) => (
-                        <span
-                          key={type}
-                          className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700"
-                        >
-                          {ROLE_LABEL[type] ?? type}
-                        </span>
-                      ))}
-                    </div>
+                    <RoleList types={teacher.account_types ?? [teacher.role]} />
                   </td>
 
                   <td className="px-4 py-3 text-gray-600">
