@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ChevronRight } from 'lucide-react'
 import { EmailBounceBadge } from '@/components/EmailBounceBadge'
 
 type Teacher = {
@@ -43,10 +42,10 @@ const STATUS_LABEL: Record<string, string> = {
 const LOW_HOURS_THRESHOLD = 2
 
 function StatusBadge({ status }: { status: string | null }) {
-  if (status === 'current' || status === null) return null
-
   const colour =
-    status === 'former'
+    status === 'current'
+      ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+      : status === 'former'
       ? { backgroundColor: '#f3f4f6', color: '#6b7280' }
       : status === 'on_hold'
       ? { backgroundColor: '#FFF8E8', color: '#B45309' }
@@ -57,28 +56,31 @@ function StatusBadge({ status }: { status: string | null }) {
       className="px-2 py-0.5 rounded-full text-xs font-medium"
       style={colour}
     >
-      {STATUS_LABEL[status] ?? status}
+      {STATUS_LABEL[status ?? ''] ?? status ?? '—'}
     </span>
   )
 }
 
-function HoursDisplay({ hours }: { hours: number | null }) {
+function HoursBadge({ hours }: { hours: number | null }) {
   if (hours === null) {
-    return <span style={{ color: '#9ca3af' }}>—</span>
+    return <span className="text-gray-400 text-sm">—</span>
   }
 
-  const formatted = hours % 1 === 0 ? hours : hours.toFixed(1)
   const isLow = hours < LOW_HOURS_THRESHOLD
 
-  if (isLow) {
-    return (
-      <span className="font-medium" style={{ color: '#FD5602' }}>
-        {formatted}h left
-      </span>
-    )
-  }
-
-  return <span style={{ color: '#4b5563' }}>{formatted}h</span>
+  return (
+    <span
+      className="px-2 py-0.5 rounded-full text-xs font-medium"
+      style={
+        isLow
+          ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
+          : { backgroundColor: '#f3f4f6', color: '#374151' }
+      }
+    >
+      {hours % 1 === 0 ? hours : hours.toFixed(1)}h remaining
+      {isLow && ' ⚠️'}
+    </span>
+  )
 }
 
 export default function StudentsListClient({ students, initialLowHoursOnly = false }: Props) {
@@ -132,7 +134,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
         </div>
         <button
           onClick={() => router.push('/admin/students/new')}
-          className="btn-primary-hover px-4 py-2 rounded-lg text-sm font-medium text-white"
+          className="px-4 py-2 rounded-lg text-sm font-medium text-white"
           style={{ backgroundColor: '#FF8303' }}
         >
           + Add Student
@@ -178,7 +180,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
               : { backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: '#6b7280' }
           }
         >
-          Low Hours
+          ⚠️ Low Hours
         </button>
         {/* Show archived toggle */}
         <button
@@ -194,73 +196,111 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
         </button>
       </div>
 
-      {/* List */}
+      {/* Table */}
       <div className="card-elevated overflow-hidden">
-        {filtered.length === 0 ? (
-          <div className="text-center py-10" style={{ color: '#9ca3af' }}>
-            No students found.
-          </div>
-        ) : (
-          <div>
-            {filtered.map((student, index) => {
-              const lineTwoParts: string[] = [student.email]
-              if (student.company_name) lineTwoParts.push(student.company_name)
-              if (student.teachers.length > 0) {
-                lineTwoParts.push(student.teachers.map((t) => t.full_name).join(', '))
-              }
-
-              return (
-                <Link
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 bg-gray-50">
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Student</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Company</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Teachers</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Hours</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="text-center py-10 text-gray-400">
+                  No students found.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((student) => (
+                <tr
                   key={student.id}
-                  href={`/admin/students/${student.id}`}
-                  prefetch={false}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-                  style={
-                    index !== filtered.length - 1
-                      ? { borderBottom: '1px solid #E0DFDC' }
-                      : undefined
-                  }
+                  className="border-b border-gray-50 hover:bg-gray-50 transition-colors"
+                  onClick={() => router.push(`/admin/students/${student.id}`)}
+                  style={{ cursor: 'pointer' }}
                 >
-                  {student.photo_url ? (
-                    <img
-                      src={student.photo_url}
-                      alt={student.full_name ?? ''}
-                      className="h-9 w-9 rounded-full object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div
-                      className="h-9 w-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-                      style={{ backgroundColor: '#FF8303' }}
-                    >
-                      {(student.full_name ?? '?').charAt(0).toUpperCase()}
-                    </div>
-                  )}
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {student.full_name ? (
-                        <span className="font-medium text-gray-900">{student.full_name}</span>
+                  {/* Photo + name as link */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      {student.photo_url ? (
+                        <img
+                          src={student.photo_url}
+                          alt={student.full_name ?? ''}
+                          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+                        />
                       ) : (
-                        <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>
+                        <div
+                          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                          style={{ backgroundColor: '#FF8303' }}
+                        >
+                          {(student.full_name ?? '?').charAt(0).toUpperCase()}
+                        </div>
                       )}
-                      <StatusBadge status={student.status} />
+                      <Link
+                        href={`/admin/students/${student.id}`}
+                        prefetch={false}
+                        className="font-medium text-gray-900 hover:text-orange-500 transition-colors"
+                      >
+                        {student.full_name || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>No name set</span>}
+                      </Link>
+                    </div>
+                  </td>
+
+                  <td className="px-4 py-3 text-gray-600">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>{student.email}</span>
                       {student.email_bounced_at ? <EmailBounceBadge /> : null}
                     </div>
-                    <div className="text-sm truncate" style={{ color: '#4b5563' }}>
-                      {lineTwoParts.join(' · ')}
-                    </div>
-                  </div>
+                  </td>
 
-                  <div className="flex-shrink-0 text-sm text-right">
-                    <HoursDisplay hours={student.hours_remaining} />
-                  </div>
+                  {/* Company tag — Private badge if no company */}
+                  <td className="px-4 py-3">
+                    {student.company_name ? (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                        {student.company_name}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                        Private
+                      </span>
+                    )}
+                  </td>
 
-                  <ChevronRight size={16} style={{ color: '#9ca3af' }} />
-                </Link>
-              )
-            })}
-          </div>
-        )}
+                  {/* Assigned teachers */}
+                  <td className="px-4 py-3">
+                    {student.teachers.length === 0 ? (
+                      <span className="text-gray-400">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {student.teachers.map((t) => (
+                          <span
+                            key={t.id}
+                            className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-700"
+                          >
+                            {t.full_name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <HoursBadge hours={student.hours_remaining} />
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <StatusBadge status={student.status} />
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   )
