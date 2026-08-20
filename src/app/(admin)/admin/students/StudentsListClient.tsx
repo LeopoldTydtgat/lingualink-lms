@@ -31,7 +31,14 @@ type Props = {
   initialLowHoursOnly?: boolean
 }
 
-const STATUS_OPTIONS = ['All', 'current', 'former', 'on_hold']
+type TabId = 'all' | 'low_hours' | 'on_hold' | 'archived'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'all', label: 'All Students' },
+  { id: 'low_hours', label: 'Low Hours' },
+  { id: 'on_hold', label: 'On Hold' },
+  { id: 'archived', label: 'Archived' },
+]
 
 const STATUS_LABEL: Record<string, string> = {
   current: 'Current',
@@ -40,6 +47,31 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const LOW_HOURS_THRESHOLD = 2
+
+// Single implementation shared by the list filter and the tab counts, so a tab's
+// number can never disagree with the rows that tab shows.
+function matchesTab(s: Student, tab: TabId): boolean {
+  if (tab === 'archived') return s.status === 'former'
+  if (tab === 'on_hold') return s.status === 'on_hold'
+  if (tab === 'low_hours') {
+    return (
+      s.status !== 'former' &&
+      s.hours_remaining !== null &&
+      s.hours_remaining < LOW_HOURS_THRESHOLD
+    )
+  }
+  // 'all' is deliberately "not former" rather than "is current", so a row with a
+  // null or unrecognised status is still visible somewhere.
+  return s.status !== 'former'
+}
+
+function matchesTypeFilter(s: Student, typeFilter: string): boolean {
+  return (
+    typeFilter === 'All' ||
+    (typeFilter === 'Private' && s.is_private) ||
+    (typeFilter === 'B2B' && !s.is_private)
+  )
+}
 
 function StatusBadge({ status }: { status: string | null }) {
   const colour =
@@ -86,36 +118,39 @@ function HoursBadge({ hours }: { hours: number | null }) {
 export default function StudentsListClient({ students, initialLowHoursOnly = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('All')
   const [typeFilter, setTypeFilter] = useState('All') // All / Private / B2B
-  const [lowHoursOnly, setLowHoursOnly] = useState(initialLowHoursOnly)
-  const [showArchived, setShowArchived] = useState(false)
+  const [tab, setTab] = useState<TabId>(initialLowHoursOnly ? 'low_hours' : 'all')
 
   const filtered = students.filter((s) => {
     const matchesSearch =
       (s.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
       s.email.toLowerCase().includes(search.toLowerCase())
 
-    const matchesStatus =
-      statusFilter === 'All' || s.status === statusFilter
+    const matchesType = matchesTypeFilter(s, typeFilter)
 
-    const matchesType =
-      typeFilter === 'All' ||
-      (typeFilter === 'Private' && s.is_private) ||
-      (typeFilter === 'B2B' && !s.is_private)
-
-    const matchesLowHours =
-      !lowHoursOnly ||
-      (s.hours_remaining !== null && s.hours_remaining < LOW_HOURS_THRESHOLD)
-
-    const matchesArchived = showArchived || s.status !== 'former'
-
-    return matchesSearch && matchesStatus && matchesType && matchesLowHours && matchesArchived
+    return matchesSearch && matchesType && matchesTab(s, tab)
   })
 
-  const lowHoursCount = students.filter(
-    (s) => s.hours_remaining !== null && s.hours_remaining < LOW_HOURS_THRESHOLD
-  ).length
+  // Counts follow the Type filter but ignore the search text, so typing never
+  // makes a tab look empty.
+  const typeMatched = students.filter((s) => matchesTypeFilter(s, typeFilter))
+
+  const counts: Record<TabId, number> = {
+    all: typeMatched.filter((s) => matchesTab(s, 'all')).length,
+    low_hours: typeMatched.filter((s) => matchesTab(s, 'low_hours')).length,
+    on_hold: typeMatched.filter((s) => matchesTab(s, 'on_hold')).length,
+    archived: typeMatched.filter((s) => matchesTab(s, 'archived')).length,
+  }
+
+  const emptyMessage = search
+    ? `No students match "${search}".`
+    : tab === 'low_hours'
+    ? 'No students are low on hours.'
+    : tab === 'on_hold'
+    ? 'No students are on hold.'
+    : tab === 'archived'
+    ? 'No archived students.'
+    : 'No students yet.'
 
   return (
     <div className="p-6">
@@ -125,11 +160,6 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
           <h1 className="text-2xl font-bold text-gray-900">Students</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {students.length} student{students.length !== 1 ? 's' : ''} total
-            {lowHoursCount > 0 && (
-              <span className="ml-2 text-red-600 font-medium">
-                · {lowHoursCount} low on hours
-              </span>
-            )}
           </p>
         </div>
         <button
@@ -139,6 +169,61 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
         >
           + Add Student
         </button>
+      </div>
+
+      {/* Tab strip */}
+      <div
+        role="tablist"
+        style={{ display: 'flex', gap: '24px', borderBottom: '1px solid #E0DFDC', marginBottom: '20px' }}
+      >
+        {TABS.map(({ id, label }) => {
+          const isActive = tab === id
+          const highlightPill = id === 'low_hours' && counts[id] > 0
+
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setTab(id)}
+              style={{
+                padding: '10px 2px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '14px',
+                ...(isActive
+                  ? {
+                      color: '#111827',
+                      fontWeight: 600,
+                      borderBottom: '2px solid #FF8303',
+                      marginBottom: '-1px',
+                    }
+                  : {
+                      color: '#4b5563',
+                      fontWeight: 500,
+                      borderBottom: '2px solid transparent',
+                    }),
+              }}
+            >
+              {label}
+              <span
+                style={{
+                  marginLeft: '8px',
+                  padding: '1px 8px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  ...(highlightPill
+                    ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                    : { backgroundColor: '#f3f4f6', color: '#4b5563' }),
+                }}
+              >
+                {counts[id]}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Search and filters */}
@@ -151,17 +236,6 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
           className="flex-1 min-w-48 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
         />
         <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s === 'All' ? 'All Statuses' : STATUS_LABEL[s] ?? s}
-            </option>
-          ))}
-        </select>
-        <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
@@ -170,30 +244,6 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
           <option value="Private">Private</option>
           <option value="B2B">B2B</option>
         </select>
-        {/* Low hours quick filter */}
-        <button
-          onClick={() => setLowHoursOnly(!lowHoursOnly)}
-          className="px-3 py-2 rounded-lg text-sm font-medium border transition-colors"
-          style={
-            lowHoursOnly
-              ? { backgroundColor: '#fee2e2', borderColor: '#fca5a5', color: '#991b1b' }
-              : { backgroundColor: '#ffffff', borderColor: '#e5e7eb', color: '#6b7280' }
-          }
-        >
-          ⚠️ Low Hours
-        </button>
-        {/* Show archived toggle */}
-        <button
-          onClick={() => setShowArchived(!showArchived)}
-          className="px-3 py-2 rounded-lg text-sm font-medium border"
-          style={
-            showArchived
-              ? { backgroundColor: '#FF8303', color: '#ffffff', borderColor: '#FF8303' }
-              : { backgroundColor: '#ffffff', color: '#6b7280', borderColor: '#e5e7eb' }
-          }
-        >
-          Show Archived
-        </button>
       </div>
 
       {/* Table */}
@@ -213,7 +263,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-gray-400">
-                  No students found.
+                  {emptyMessage}
                 </td>
               </tr>
             ) : (
