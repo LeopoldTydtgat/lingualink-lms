@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,22 @@ function isOverdue(task: Task, timezone: string) {
 // Filter selects — reference select styling, sized to content rather than full width.
 const filterSelectClass = "border border-[#E0DFDC] rounded-lg px-3 py-1.5 text-[13px] text-gray-700 bg-white transition-colors focus:outline-none focus:border-[#FF8303] focus:ring-2 focus:ring-[#FF8303]/15"
 
+// ─── Filter persistence ──────────────────────────────────────────────────────
+
+const FILTERS_STORAGE_KEY = 'll-admin-tasks-filters'
+
+type StoredFilters = {
+  status: string
+  priority: string
+  linkedType: string
+}
+
+// 'open' IS this page's default state, deliberately not ''. The hook compares
+// against this record to decide when to remove the storage key, so the comparison
+// baseline must be the page's real defaults — an all-blank baseline would treat
+// the default view as "a filter worth remembering" and write storage on every visit.
+const DEFAULT_STORED_FILTERS: StoredFilters = { status: 'open', priority: '', linkedType: '' }
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TasksPageClient({ adminTz }: { adminTz: string }) {
@@ -111,6 +128,40 @@ export default function TasksPageClient({ adminTz }: { adminTz: string }) {
   const [filterStatus, setFilterStatus] = useState<string>('open')
   const [filterPriority, setFilterPriority] = useState<string>('')
   const [filterLinkedType, setFilterLinkedType] = useState<string>('')
+
+  const persistedFilters: StoredFilters = {
+    status: filterStatus,
+    priority: filterPriority,
+    linkedType: filterLinkedType,
+  }
+
+  function parseStoredFilters(raw: unknown): StoredFilters | null {
+    if (typeof raw !== 'object' || raw === null) return null
+    const { status, priority, linkedType } = raw as Record<string, unknown>
+    if (status !== '' && status !== 'open' && status !== 'completed') return null
+    if (priority !== '' && priority !== 'high' && priority !== 'medium' && priority !== 'low') return null
+    if (linkedType !== '' && linkedType !== 'teacher' && linkedType !== 'student') return null
+    return { status, priority, linkedType } as StoredFilters
+  }
+
+  function applyStoredFilters(stored: StoredFilters) {
+    setFilterStatus(stored.status)
+    setFilterPriority(stored.priority)
+    setFilterLinkedType(stored.linkedType)
+  }
+
+  useFilterPersistence<StoredFilters>({
+    storageKey: FILTERS_STORAGE_KEY,
+    value: persistedFilters,
+    defaultValue: DEFAULT_STORED_FILTERS,
+    // false because this page reads no URL params today — the dashboard's ?filter=
+    // deep links are silently ignored (existing TODO). If that deep-link wiring
+    // ever lands, this must flip to "URL params present", or a stored filter would
+    // quietly override the deep link.
+    skipRestore: false,
+    parse: parseStoredFilters,
+    apply: applyStoredFilters,
+  })
 
   // Action feedback
   const [completing, setCompleting] = useState<string | null>(null)

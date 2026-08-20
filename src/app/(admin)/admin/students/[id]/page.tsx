@@ -3,10 +3,14 @@ import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { requireStaff } from '@/lib/auth/requireStaff'
+import { isCancelledStatus } from '@/lib/billing/billability'
 import StudentDetailClient from './StudentDetailClient'
 import type {
   AdminConversation,
   Assignment,
+  AtAGlance,
+  AtAGlanceLastSignIn,
+  LessonBucket,
   MaterialHomework,
   MaterialSheetOption,
 } from './StudentDetailClient'
@@ -53,6 +57,17 @@ export default async function StudentDetailPage({
     .maybeSingle()
 
   const adminTz = viewerProfile?.timezone ?? 'UTC'
+
+  // TWO values out of one column, deliberately not interchangeable. adminTzRaw keeps
+  // the raw null because it feeds the DateRangeFilter quick-range presets on the Hours
+  // Log tab, where "which day is today" has no honest answer without a zone: resolving
+  // "this month" in UTC would name the wrong calendar month for a viewer sitting either
+  // side of it, and a filter silently set to the wrong month is worse than one that
+  // offers no presets at all. The presets go dead on null instead of guessing - the
+  // same judgement reports/page.tsx makes for its own DateRangeFilter. adminTz keeps
+  // its UTC fallback for DISPLAY FORMATTING only, where Intl needs a string and a
+  // readable timestamp beats no timestamp.
+  const adminTzRaw: string | null = viewerProfile?.timezone ?? null
 
   // Fetch student with company and active training + assigned teachers.
   // Staff must never receive the full row — explicit column list excluding
@@ -212,7 +227,8 @@ export default async function StudentDetailPage({
     }
   }
 
-  // Fetch lessons for this student (most recent 50)
+  // Fetch lessons for this student (most recent 1000)
+  // Explicit limit, never unbounded: PostgREST silently caps an unbounded query at its max-rows setting, and a silent cap is the bug being removed here.
   const { data: lessons } = await supabase
     .from('lessons')
     .select(`
@@ -220,6 +236,7 @@ export default async function StudentDetailPage({
       scheduled_at,
       duration_minutes,
       status,
+      cancelled_at,
       cancelled_by,
       rescheduled_by,
       profiles:teacher_id (
@@ -228,22 +245,91 @@ export default async function StudentDetailPage({
     `)
     .eq('student_id', id)
     .order('scheduled_at', { ascending: false })
-    .limit(50)
+    .limit(1000)
 
-  // Flatten teacher name on each lesson
-  const flatLessons = (lessons || []).map((l) => ({
-    id: l.id,
-    scheduled_at: l.scheduled_at,
-    duration_minutes: l.duration_minutes,
-    status: l.status,
-    cancelled_by: l.cancelled_by ?? null,
-    rescheduled_by: l.rescheduled_by ?? null,
-    teacher_name: Array.isArray(l.profiles)
-      ? (l.profiles[0] as { full_name: string } | undefined)?.full_name ?? '—'
-      : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
-  }))
+  // ONE request-time instant, read once and shared by every comparison that follows,
+  // so two tiles — and a tile and the list its click opens — can never disagree about
+  // "now". new Date().getTime() rather than Date.now(): the react-hooks/purity rule
+  // mis-fires on Date.now() in async Server Components — the same remedy, for the same
+  // reason, as (dashboard)/upcoming-classes/page.tsx:17 and
+  // (dashboard)/students/[id]/page.tsx:359. The clock is read HERE, on the server, and
+  // never in the client component: a clock read during a client render desyncs the SSR
+  // markup from the first browser render. It stamps the per-lesson buckets below as
+  // well as the "At a glance" counts, which are now a tally of those same stamps.
+  const nowMs = new Date().getTime()
+
+  // Flatten teacher name on each lesson, and stamp its classification.
+  //
+  // Classified ONCE, here, and never again: the Classes tab filters by looking the
+  // stamp up and the "At a glance" counts below tally the same stamps, so a tile's
+  // number and the row count behind its click are equal by construction rather than by
+  // two definitions being kept in step by hand.
+  //
+  // The five buckets are MUTUALLY EXCLUSIVE — 'scheduled', 'completed'/'missed',
+  // 'student_no_show' and the cancel family are disjoint status sets — and
+  // cancelledUnder24h is a SUB-FLAG of the 'cancelled' bucket, not a sixth bucket.
+  // 'other' is the deliberate catch-all: a past 'scheduled' class still awaiting its
+  // report, a teacher no-show, a reschedule leg, a legacy status. Those rows have no
+  // tile, and are reachable only under the tab's "All" pill.
+  //
+  //  - upcoming: status 'scheduled' AND still in the future at nowMs.
+  //  - attended: 'completed' or 'missed'. 'missed' means the class HAPPENED and the
+  //    teacher blew the report window — the student attended. It zeroes teacher pay;
+  //    it does not undo the class, so it belongs here and not with the cancellations.
+  //  - cancelled: reschedule legs are excluded, because a reschedule is a date change,
+  //    not a cancellation. The dead old leg carries a cancel-family status while the
+  //    new booking carries the class, so counting it would report one cancellation per
+  //    time change. Same rule, same shape, as the first branch of getBillability. The
+  //    cancel family itself comes from isCancelledStatus (i.e. billability's
+  //    CANCELLED_STATUSES), never from a status list hand-rolled here.
+  //  - cancelledUnder24h: a subset of 'cancelled', never of all lessons. A null
+  //    cancelled_at cannot be measured against the notice window, so it is NOT
+  //    flagged: "we do not know when this was cancelled" must never render as "inside
+  //    24 hours". A cancelled_at after the class start yields a negative difference and
+  //    IS flagged, which is correct — that is zero notice, not more than 24 hours.
+  const flatLessons = (lessons || []).map((l) => {
+    const scheduledMs = new Date(l.scheduled_at).getTime()
+
+    const bucket: LessonBucket =
+      l.status === 'scheduled' && scheduledMs > nowMs
+        ? 'upcoming'
+        : l.status === 'completed' || l.status === 'missed'
+        ? 'attended'
+        : l.status === 'student_no_show'
+        ? 'student_no_show'
+        : isCancelledStatus(l.status) &&
+          !(l.rescheduled_by === 'student' || l.rescheduled_by === 'admin')
+        ? 'cancelled'
+        : 'other'
+
+    const cancelledUnder24h =
+      bucket === 'cancelled' &&
+      l.cancelled_at != null &&
+      scheduledMs - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
+
+    return {
+      id: l.id,
+      scheduled_at: l.scheduled_at,
+      duration_minutes: l.duration_minutes,
+      status: l.status,
+      cancelled_at: l.cancelled_at ?? null,
+      cancelled_by: l.cancelled_by ?? null,
+      rescheduled_by: l.rescheduled_by ?? null,
+      teacher_name: Array.isArray(l.profiles)
+        ? (l.profiles[0] as { full_name: string } | undefined)?.full_name ?? '—'
+        : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
+      bucket,
+      cancelledUnder24h,
+    }
+  })
+
+  // The read came back exactly at its cap, so older classes almost certainly exist
+  // beyond it. The Classes tab says so rather than presenting a truncated list as
+  // the student's whole history.
+  const lessonsCapped = flatLessons.length === 1000
 
   // Fetch hours log for this student (admin only — staff view skips it)
+  // Explicit limit, never unbounded: PostgREST silently caps an unbounded query at its max-rows setting, and a silent cap is the bug being removed here.
   const { data: hoursLog } = isStaffView
     ? { data: null }
     : await supabase
@@ -251,10 +337,112 @@ export default async function StudentDetailPage({
         .select('*')
         .eq('student_id', id)
         .order('created_at', { ascending: false })
+        .limit(1000)
 
-  // Fetch reports via lesson IDs belonging to this student
+  // The read came back exactly at its cap, so older ledger entries almost certainly
+  // exist beyond it. The Hours tab says so rather than presenting a truncated log as
+  // the student's whole ledger. Same shape as lessonsCapped.
+  const hoursLogCapped = (hoursLog ?? []).length === 1000
+
+  // ── "At a glance" panel metadata (ADMIN ONLY) ──────────────────────────
+  // Staff get null and the panel never renders for them: it mixes admin-only
+  // account metadata (sign-up date, last sign-in) with a count taken off the
+  // hours ledger, and the staff branch of the student query above is not allowed
+  // to read either.
+  //
+  // Placed here rather than immediately after flatLessons because `refunds` is
+  // counted off hoursLog, which is read just above. Every value below comes from
+  // an array THIS PAGE ALREADY FETCHED — flatLessons and hoursLog — so the panel
+  // adds no lesson query and no report query of its own.
+  //
+  // CAP: the five lesson-derived counts (upcoming, attended, studentNoShows,
+  // cancelled, cancelledUnder24h) share the 1000-row cap of the lessons read
+  // above. On a capped read they describe the most recent 1000 classes, not the
+  // student's whole history — the existing lessonsCapped disclosure on the
+  // Classes tab, which is exactly where the four clickable class tiles land, is
+  // the statement of that, so no second disclosure is added here.
+  let atAGlance: AtAGlance | null = null
+
+  if (!isStaffView) {
+    // Last sign-in. auth.admin.* takes the auth.users UUID, which for a student
+    // is students.auth_user_id (the indirection) — NEVER the students table PK.
+    // Handed the PK it would look up a user that does not exist.
+    let lastSignIn: AtAGlanceLastSignIn = { state: 'unavailable' }
+    const authUserId = student.auth_user_id as string | null | undefined
+
+    if (authUserId) {
+      // BOUNDED, and it must stay that way: this is panel metadata, and metadata
+      // must never take down the student record. Both a returned error and a
+      // thrown network failure land on 'unavailable' — the same judgement the
+      // timezone read at the top of this file makes.
+      try {
+        const { data: authData, error: authError } =
+          await supabase.auth.admin.getUserById(authUserId)
+
+        if (authError || !authData?.user) {
+          // A missing auth user is NOT 'never': the account could not be read at
+          // all, so nothing can be claimed about whether it has ever signed in.
+          console.error(
+            `[admin student detail] last sign-in lookup failed (student ${id}):`,
+            authError ?? 'auth lookup returned no user'
+          )
+          lastSignIn = { state: 'unavailable' }
+        } else if (typeof authData.user.last_sign_in_at === 'string') {
+          lastSignIn = { state: 'known', at: authData.user.last_sign_in_at }
+        } else {
+          // The auth user exists and has never completed a sign-in.
+          lastSignIn = { state: 'never' }
+        }
+      } catch (err) {
+        console.error(
+          `[admin student detail] last sign-in lookup threw (student ${id}):`,
+          err
+        )
+        lastSignIn = { state: 'unavailable' }
+      }
+    }
+    // else: no auth user linked — the invite was never completed, or the auth row
+    // was deleted (students.auth_user_id is ON DELETE SET NULL). There is no
+    // account that could have signed in, and 'never' would be a claim about one
+    // that does not exist, so the initial 'unavailable' stands.
+
+    // The five lesson counts are a TALLY of the buckets stamped onto flatLessons
+    // above — no status set, no notice window and no clock is restated here. Every
+    // definition, and the single nowMs those definitions were resolved against,
+    // lives at the stamping site; this reads the result. The Classes tab filters by
+    // looking the same stamps up, so a tile's number and the number of rows its
+    // click reveals cannot drift apart.
+    atAGlance = {
+      signedUpAt: (student.created_at as string | null) ?? null,
+      lastSignIn,
+      upcoming: flatLessons.filter((l) => l.bucket === 'upcoming').length,
+      attended: flatLessons.filter((l) => l.bucket === 'attended').length,
+      studentNoShows: flatLessons.filter((l) => l.bucket === 'student_no_show').length,
+      cancelled: flatLessons.filter((l) => l.bucket === 'cancelled').length,
+      // A subset of `cancelled`, never of all lessons — the sub-flag, not a bucket.
+      cancelledUnder24h: flatLessons.filter((l) => l.cancelledUnder24h).length,
+      // These two ledger types and no others. The ledger also carries
+      // admin_adjustment, class_booking and reschedule rows (live vocabulary,
+      // verified 20 Aug), which are not refunds - widening the test would count
+      // corrections and bookings as money given back.
+      // CAP: on a capped read this count is measured over the newest 1000 ledger
+      // rows, not the whole history - the Hours tab's own hoursLogCapped
+      // disclosure covers it, same judgement as the lesson counts above.
+      refunds: (hoursLog ?? []).filter(
+        (e: { type: string }) =>
+          e.type === 'cancellation_refund' || e.type === 'teacher_no_show_refund'
+      ).length,
+    }
+  }
+
+  // Fetch reports for this student through the EMBEDDED lesson, not through the
+  // (capped) lesson list above: filtering by the fetched lesson ids inherited the
+  // lessons cap, so a report on the student's 1001st-most-recent class silently
+  // vanished from this tab. lessons!inner is what makes the embedded filter drop
+  // parent rows — on a plain embed it would only null the embed. student_id is
+  // deliberately NOT added to the embedded column list: PostgREST does not require
+  // a filtered column to be selected.
   // (staff see these read-only in the Reports tab)
-  const lessonIds = flatLessons.map((l) => l.id)
   let reports: {
     id: string
     happened: boolean | null
@@ -266,52 +454,53 @@ export default async function StudentDetailPage({
     teacher_name: string | null
   }[] = []
 
-  if (lessonIds.length > 0) {
-    const { data: rawReports, error: reportsError } = await supabase
-      .from('reports')
-      .select(`
+  const { data: rawReports, error: reportsError } = await supabase
+    .from('reports')
+    .select(`
+      id,
+      did_class_happen,
+      feedback_text,
+      status,
+      created_at,
+      lesson_id,
+      lessons!inner (
         id,
-        did_class_happen,
-        feedback_text,
-        status,
-        created_at,
-        lesson_id,
-        lessons!inner (
-          id,
-          scheduled_at,
-          profiles:teacher_id (
-            full_name
-          )
+        scheduled_at,
+        profiles:teacher_id (
+          full_name
         )
-      `)
-      .in('lesson_id', lessonIds)
-      .order('created_at', { ascending: false })
-      .limit(50)
+      )
+    `)
+    .eq('lessons.student_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1000)
 
-    // Bound and logged, never thrown: a failed reports read leaves the Reports
-    // tab empty but must not take down the whole student record — every other
-    // tab on this page stays useful.
-    if (reportsError) {
-      console.error('[admin/students/[id]] reports query failed:', reportsError)
-    }
-
-    reports = (rawReports || []).map((r) => {
-      const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
-      const teacherProfile = lesson
-        ? Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
-        : null
-      return {
-        id: r.id,
-        happened: r.did_class_happen,
-        feedback: r.feedback_text,
-        status: r.status,
-        created_at: r.created_at,
-        class_id: r.lesson_id,
-        lesson_scheduled_at: lesson?.scheduled_at ?? null,
-        teacher_name: teacherProfile?.full_name ?? null,
-      }
-    })
+  // Bound and logged, never thrown: a failed reports read leaves the Reports
+  // tab empty but must not take down the whole student record — every other
+  // tab on this page stays useful.
+  if (reportsError) {
+    console.error('[admin/students/[id]] reports query failed:', reportsError)
   }
+
+  // Same cap disclosure as the lessons read above.
+  const reportsCapped = (rawReports ?? []).length === 1000
+
+  reports = (rawReports || []).map((r) => {
+    const lesson = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons
+    const teacherProfile = lesson
+      ? Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
+      : null
+    return {
+      id: r.id,
+      happened: r.did_class_happen,
+      feedback: r.feedback_text,
+      status: r.status,
+      created_at: r.created_at,
+      class_id: r.lesson_id,
+      lesson_scheduled_at: lesson?.scheduled_at ?? null,
+      teacher_name: teacherProfile?.full_name ?? null,
+    }
+  })
 
   // Fetch reviews submitted by this student
   // (staff see these read-only in the Reviews tab)
@@ -614,8 +803,11 @@ export default async function StudentDetailPage({
       hoursRemaining={hoursRemaining}
       assignedTeachers={assignedTeachers}
       lessons={flatLessons}
+      lessonsCapped={lessonsCapped}
       hoursLog={hoursLog || []}
+      hoursLogCapped={hoursLogCapped}
       reports={reports}
+      reportsCapped={reportsCapped}
       reviews={flatReviews}
       conversations={conversations}
       purgeBlockedBy={purgeBlockedBy}
@@ -625,8 +817,10 @@ export default async function StudentDetailPage({
       materialHomeworkLoadFailed={materialHomeworkLoadFailed}
       materialSheets={materialSheets}
       materialSheetsLoadFailed={materialSheetsLoadFailed}
+      atAGlance={atAGlance}
       isStaffView={isStaffView}
       adminTz={adminTz}
+      adminTzRaw={adminTzRaw}
     />
   )
 }

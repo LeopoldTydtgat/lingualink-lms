@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const teacherId = searchParams.get('teacher_id')
   const studentId = searchParams.get('student_id')
-  const status = searchParams.get('status')        // upcoming|completed|cancelled|no_show
+  const status = searchParams.get('status')        // upcoming|completed|cancelled|no_show|missed
   const dateFrom = searchParams.get('date_from')   // yyyy-mm-dd calendar day, admin-local
   const dateTo = searchParams.get('date_to')       // yyyy-mm-dd calendar day, admin-local (inclusive)
   const search = searchParams.get('search')        // free text — matches teacher or student name
@@ -199,8 +199,8 @@ export async function GET(request: NextRequest) {
     query = query.in('status', CANCELLED_STATUSES)
   } else if (status === 'no_show') {
     query = query.in('status', NO_SHOW_STATUSES)
-  } else if (status === 'flagged') {
-    query = query.eq('status', 'flagged')
+  } else if (status === 'missed') {
+    query = query.eq('status', 'missed')
   }
 
   // Cancelled lessons sort by most recently cancelled first; legacy rows with null cancelled_at fall back to scheduled_at

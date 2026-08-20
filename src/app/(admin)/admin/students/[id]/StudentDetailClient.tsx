@@ -11,8 +11,11 @@ import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import TasksMini from '@/components/admin/TasksMini'
 import { DatePartInput } from '../../_components/DatePartInput'
+import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../../_components/DateRangeFilter'
 import AssignMaterialHomeworkModal from './AssignMaterialHomeworkModal'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
+import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets'
 
 // ─── Shared message types (exported so page.tsx can import) ──────────────────
 
@@ -73,6 +76,42 @@ export type MaterialSheetOption = {
   attachments: MaterialAttachment[]
 }
 
+/**
+ * When this account last authenticated, as three distinct states. 'never' and
+ * 'unavailable' are deliberately NOT collapsed: 'never' is a fact about an account
+ * that exists and has never been signed in to, while 'unavailable' means the lookup
+ * could not run at all (no linked auth user, or the auth read failed). Rendering the
+ * second as the first would state something the page cannot prove.
+ */
+export type AtAGlanceLastSignIn =
+  | { state: 'known'; at: string }
+  | { state: 'never' }
+  | { state: 'unavailable' }
+
+/**
+ * ADMIN-ONLY summary for the Overview panel. Every field is computed on the SERVER
+ * at render — this component renders the values and never recomputes one.
+ *
+ * The five lesson counts are derived from the same 1000-capped lessons read that
+ * feeds the Classes tab, so they inherit that cap and the disclosure already on it.
+ */
+export type AtAGlance = {
+  /** students.created_at. */
+  signedUpAt: string | null
+  lastSignIn: AtAGlanceLastSignIn
+  /** status 'scheduled' AND still in the future at server render time. */
+  upcoming: number
+  /** 'completed' or 'missed' — 'missed' is a blown report window, not an absence. */
+  attended: number
+  studentNoShows: number
+  /** Cancel-family statuses, reschedule legs excluded. */
+  cancelled: number
+  /** Subset of `cancelled` with a known cancelled_at inside the 24h notice window. */
+  cancelledUnder24h: number
+  /** hours_log rows of type 'cancellation_refund' or 'teacher_no_show_refund'. */
+  refunds: number
+}
+
 // ── Domain types ─────────────────────────────────────────────────────────────
 
 type Teacher = { id: string; full_name: string }
@@ -88,14 +127,49 @@ type Training = {
   created_at: string
 }
 
+/**
+ * The one classification of a class used by both the "At a glance" counts and the
+ * Classes tab status filter, stamped onto every lesson by the SERVER.
+ *
+ * Exported so page.tsx can import the union rather than restate it: the stamps and
+ * the filter must be the same five values, and two hand-kept copies of a union are
+ * exactly how they stop being.
+ *
+ * Mutually exclusive. 'other' is the deliberate catch-all — a past 'scheduled' class
+ * still awaiting its report, a teacher no-show, a reschedule leg, a legacy status.
+ * Those rows have no tile and are reachable only under the "All" pill.
+ */
+export type LessonBucket =
+  | 'upcoming'
+  | 'attended'
+  | 'student_no_show'
+  | 'cancelled'
+  | 'other'
+
 type Lesson = {
   id: string
   scheduled_at: string
   duration_minutes: number
   status: string
+  cancelled_at: string | null
   cancelled_by: string | null
   rescheduled_by: string | null
   teacher_name: string
+  /**
+   * SERVER-stamped classification — see LessonBucket. Resolved against the server's
+   * single request-time instant and never recomputed in this component: a clock read
+   * during a client render would desync the SSR markup from the first browser render,
+   * and a second definition of "upcoming" would let a tile and its filtered list
+   * disagree.
+   */
+  bucket: LessonBucket
+  /**
+   * SERVER-stamped sub-flag of `bucket === 'cancelled'`: cancelled with a KNOWN
+   * cancelled_at inside the 24h notice window. False for every other bucket, and false
+   * for a cancellation whose cancelled_at is null — see page.tsx for why an unknown
+   * cancellation time must not read as "inside 24 hours".
+   */
+  cancelledUnder24h: boolean
 }
 
 type HoursLogEntry = {
@@ -157,8 +231,22 @@ type Props = {
   hoursRemaining: number | null
   assignedTeachers: Teacher[]
   lessons: Lesson[]
+  /**
+   * True when the lessons read came back exactly at its 1000-row cap, so older
+   * classes exist beyond what this tab holds. Surfaced as a disclosure line: an
+   * unstated cap makes a truncated Classes list read as the student's whole history.
+   */
+  lessonsCapped: boolean
   hoursLog: HoursLogEntry[]
+  /**
+   * True when the hours_log read came back exactly at its 1000-row cap, so older
+   * ledger entries exist beyond what this tab holds. Surfaced as a disclosure line —
+   * see lessonsCapped.
+   */
+  hoursLogCapped: boolean
   reports: Report[]
+  /** Same cap disclosure for the reports read — see lessonsCapped. */
+  reportsCapped: boolean
   reviews: Review[]
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
@@ -184,10 +272,32 @@ type Props = {
    * an empty picker would otherwise read as "there is none".
    */
   materialSheetsLoadFailed: boolean
+  /**
+   * ADMIN-ONLY Overview summary, null for a staff viewer. Null IS the render gate:
+   * the server decides who gets a panel, and null is that decision arriving here.
+   * It mixes admin-only account metadata (sign-up date, last sign-in) with a count
+   * off the hours ledger, none of which the staff branch of the server component
+   * reads in the first place.
+   *
+   * Every value was computed on the SERVER at render and is rendered verbatim: no
+   * count is recomputed and no clock is read in this component, because a clock read
+   * during a client render produces different markup on the server pass and the first
+   * browser pass — the hydration rule the rest of this file follows.
+   */
+  atAGlance: AtAGlance | null
   /** Staff (non-admin) get a read-only Overview + Classes view with admin-only fields hidden. */
   isStaffView?: boolean
   /** IANA zone of the viewing admin/staff account. Every rendered instant is projected through it. */
   adminTz: string
+  /**
+   * The SAME profiles.timezone column, kept raw: null when the viewing account has no
+   * zone set. Presets-only - it feeds the Hours Log quick-range buttons, which go dead
+   * on null rather than resolving "this month" in UTC and naming the wrong calendar
+   * month. adminTz above keeps the 'UTC' display fallback and is NOT interchangeable
+   * with this one: a fallback that is survivable for formatting is not survivable for
+   * deciding which day "today" is.
+   */
+  adminTzRaw: string | null
 }
 
 type Tab = 'overview' | 'classes' | 'hours' | 'reports' | 'assignments' | 'messages' | 'reviews'
@@ -350,6 +460,62 @@ function InfoRow({ label, value, adminOnly }: {
   )
 }
 
+/**
+ * One "At a glance" tile. Renders a value the SERVER computed and nothing else — no
+ * count, no date arithmetic and no clock read happens in here.
+ *
+ * A tile with an onClick is a real <button> that switches tabs; a tile without one is
+ * a plain div, never a disabled button. "Signed up" and "Last sign-in" have nowhere to
+ * lead, and a dead button invites the click anyway.
+ *
+ * Numbers render large and text (a date, "Never signed in") one step smaller so it
+ * fits a quarter-width tile without wrapping. Both class strings are written out in
+ * full — Tailwind v4 never sees a constructed class name.
+ */
+function GlanceTile({
+  label,
+  value,
+  caption,
+  onClick,
+}: {
+  label: string
+  value: string | number
+  caption?: string
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <p className="text-xs font-medium" style={{ color: '#4b5563' }}>{label}</p>
+      <p
+        className={
+          typeof value === 'number'
+            ? 'text-2xl font-semibold text-gray-900 mt-1'
+            : 'text-base font-semibold text-gray-900 mt-1'
+        }
+      >
+        {value}
+      </p>
+      {caption && (
+        <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
+      )}
+    </>
+  )
+
+  if (!onClick) {
+    return <div className="rounded-xl border border-gray-100 bg-white p-4">{body}</div>
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-xl border border-gray-100 bg-white p-4 text-left cursor-pointer transition-colors hover:bg-gray-50"
+    >
+      {body}
+    </button>
+  )
+}
+
 function StarRating({ rating }: { rating: number }) {
   return (
     <div className="flex gap-0.5">
@@ -448,6 +614,127 @@ function MsgAvatar({ name, photoUrl }: { name: string; photoUrl: string | null }
       {name.charAt(0).toUpperCase()}
     </div>
   )
+}
+
+// ─── Hours Log date filter ───────────────────────────────
+
+// Deliberately SHARED across students, not keyed per student. The month-end workflow
+// is "set Last month once, then walk student to student", so carrying the choice from
+// one record to the next is the point rather than a leak - and a stored preset is
+// recomputed against now on restore, so it can never carry a stale month with it.
+// sessionStorage keeps the whole thing scoped to one browsing session.
+const HOURS_FILTERS_STORAGE_KEY = 'll-admin-student-hours-filters'
+
+/**
+ * What the Hours Log tab remembers for the rest of the browsing session.
+ *
+ * EITHER a preset id OR concrete day keys, never both:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "Last month" must still mean last month
+ *                       after midnight on the 1st; storing its dates would pin the
+ *                       filter to a month that has since passed.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+type HoursStoredFilters = {
+  preset: DateRangePreset | null
+  from: string
+  to: string
+}
+
+const DEFAULT_HOURS_STORED_FILTERS: HoursStoredFilters = {
+  preset: null,
+  from: '',
+  to: '',
+}
+
+// An instant's calendar day in `timezone` as a 'YYYY-MM-DD' key, built on the
+// zonedParts probe above. Rows are bucketed in the SAME zone the Date column renders
+// them in (adminTz), so a row displayed as 01 Aug can never be excluded from an August
+// filter by a zone mismatch - one Intl read decides both what is shown and what is
+// matched. No ISO round trip anywhere: an ISO UTC string names the UTC day, which is a
+// different day for any zone whose offset pushes the instant across midnight.
+function zonedDayKey(dateStr: string, timezone: string): string {
+  const p = zonedParts(new Date(dateStr), timezone)
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
+}
+
+// ─── Classes date filter ──────────────────────────
+
+// Shared across students under one key - the same deliberate convention as the Hours
+// Log filter above. The reconciliation workflow is "set a month once, then walk student
+// to student", so carrying the range from one record to the next is the point rather
+// than a leak, and a stored preset is recomputed against now on restore so it can never
+// carry a stale month with it. sessionStorage scopes the whole thing to one session.
+//
+// Its OWN key, not the Hours Log one: the two tabs narrow different row sets, and an
+// admin who filtered the Classes list has said nothing about which hours transactions
+// they want to see. The bucketing helper IS shared - zonedDayKey above serves both.
+const CLASSES_FILTERS_STORAGE_KEY = 'll-admin-student-classes-filters'
+
+/**
+ * What the Classes tab remembers for the rest of the browsing session.
+ *
+ * EITHER a preset id OR concrete day keys, never both - the same split the Hours Log
+ * record uses, for the same reason:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "This week" must still mean this week after
+ *                       midnight on Monday; storing its dates would pin the filter to
+ *                       a week that has since passed.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+type ClassesStoredFilters = {
+  preset: DateRangePreset | null
+  from: string
+  to: string
+}
+
+const DEFAULT_CLASSES_STORED_FILTERS: ClassesStoredFilters = {
+  preset: null,
+  from: '',
+  to: '',
+}
+
+/**
+ * The Classes tab status filter: 'all', plus one value per class tile in the "At a
+ * glance" panel. Four name a LessonBucket directly; 'cancelled_under_24h' tests the
+ * cancelledUnder24h sub-flag instead, because the notice window is a property OF a
+ * cancellation rather than a sixth bucket.
+ *
+ * Deliberately NOT part of ClassesStoredFilters above — see where the state is
+ * declared for why this one is not persisted.
+ */
+type ClassesStatusFilter =
+  | 'all'
+  | 'upcoming'
+  | 'attended'
+  | 'student_no_show'
+  | 'cancelled'
+  | 'cancelled_under_24h'
+
+// The pill row, in tile order. One list feeds the buttons, so a pill can neither go
+// missing nor outlive the union it filters by.
+const CLASSES_STATUS_OPTIONS: { value: ClassesStatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'attended', label: 'Attended' },
+  { value: 'student_no_show', label: 'Student no-shows' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'cancelled_under_24h', label: 'Cancelled <24h' },
+]
+
+// 'YYYY-MM-DD' or empty. Taken from the admin Classes list, which validates restored day
+// keys by SHAPE rather than accepting any string, and stricter than the typeof-only check
+// the Hours Log parse does today. A stored value goes straight back into a date input and
+// into a lexical >= / <= against real day keys, so a tampered or malformed record has to
+// restore as EMPTY: restored verbatim, an arbitrary string would leave the input blank
+// while silently excluding every row, showing no filter for the admin to clear.
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+function isDayKeyOrEmpty(value: string): boolean {
+  return value === '' || DAY_KEY_RE.test(value)
 }
 
 // ─── Read-only message thread ─────────────────────────────────────────────────
@@ -561,8 +848,11 @@ export default function StudentDetailClient({
   hoursRemaining,
   assignedTeachers,
   lessons,
+  lessonsCapped,
   hoursLog,
+  hoursLogCapped,
   reports,
+  reportsCapped,
   reviews,
   conversations,
   purgeBlockedBy,
@@ -572,8 +862,10 @@ export default function StudentDetailClient({
   materialHomeworkLoadFailed,
   materialSheets,
   materialSheetsLoadFailed,
+  atAGlance,
   isStaffView = false,
   adminTz,
+  adminTzRaw,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -585,6 +877,232 @@ export default function StudentDetailClient({
   const [hoursNotes, setHoursNotes] = useState('')
   const [hoursSaving, setHoursSaving] = useState(false)
   const [hoursError, setHoursError] = useState<string | null>(null)
+
+  // Hours log date filter. Declared at the TOP LEVEL of this component and
+  // unconditionally: the tabs below are inline conditional JSX, so anything declared
+  // inside one of them would be a hook sitting behind a condition.
+  const [hoursFrom, setHoursFrom] = useState('')
+  const [hoursTo, setHoursTo] = useState('')
+
+  // The record handed to sessionStorage. Rebuilt every render - these two values are
+  // its only inputs - and matchDateRangePreset is the same call that decides which
+  // quick-range button DateRangeFilter highlights, so what the row shows as active and
+  // what gets stored are one decision. A hand-typed range that happens to equal a
+  // preset is therefore stored AS that preset, which is exactly what the row is
+  // telling the admin it is.
+  const hoursPreset = matchDateRangePreset(hoursFrom, hoursTo, adminTzRaw, new Date())
+  const persistedHoursFilters: HoursStoredFilters = {
+    preset: hoursPreset,
+    from: hoursPreset ? '' : hoursFrom,
+    to: hoursPreset ? '' : hoursTo,
+  }
+
+  /**
+   * Shape validation for a decoded stored record. Returning null rejects the WHOLE
+   * record and the tab opens unfiltered: a record written by a different build of this
+   * page, or edited by hand, cannot be trusted field by field, and a half-applied
+   * filter is worse than no filter.
+   */
+  function parseStoredHoursFilters(raw: unknown): HoursStoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const record = raw as Record<string, unknown>
+
+    const from = record.from
+    const to = record.to
+    if (typeof from !== 'string' || typeof to !== 'string') return null
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
+
+    let preset: DateRangePreset | null
+    if (record.preset === null) preset = null
+    else if (isDateRangePreset(record.preset)) preset = record.preset
+    else return null
+
+    return {
+      preset,
+      // Enforces the invariant on the way IN as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to: preset ? '' : to,
+    }
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect
+   * - never during render, so the clock read below cannot desync server and client
+   * markup.
+   */
+  function applyStoredHoursFilters(stored: HoursStoredFilters) {
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab returned to later in the day, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" - the same reason
+      // DateRangeFilter disables the preset buttons on a null zone. The range restores
+      // EMPTY rather than guessing UTC, and the hook then rewrites storage to match
+      // what is actually on screen.
+      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null
+      setHoursFrom(range?.from ?? '')
+      setHoursTo(range?.to ?? '')
+    } else {
+      setHoursFrom(stored.from)
+      setHoursTo(stored.to)
+    }
+  }
+
+  // `clear` is deliberately not taken off the return: the hook REMOVES the key by
+  // itself the moment the record matches the default, which is the exact end state the
+  // Clear button produces. skipRestore is false because no URL filter params reach this
+  // tab - there is no deep link a restored range could quietly widen or narrow.
+  useFilterPersistence<HoursStoredFilters>({
+    storageKey: HOURS_FILTERS_STORAGE_KEY,
+    value: persistedHoursFilters,
+    defaultValue: DEFAULT_HOURS_STORED_FILTERS,
+    skipRestore: false,
+    parse: parseStoredHoursFilters,
+    apply: applyStoredHoursFilters,
+  })
+
+  // Derived per render, never held in state - stored, it would drift out of step the
+  // moment either date input changed. Bucketed in adminTz (the DISPLAY zone), not
+  // adminTzRaw: the Date column below renders in adminTz, and the filter must agree
+  // with what the admin can actually see. Both bounds are inclusive, and lexical
+  // comparison is exact on fixed-width 'YYYY-MM-DD' keys.
+  const filteredHoursLog = (hoursFrom || hoursTo)
+    ? hoursLog.filter((e) => {
+        const key = zonedDayKey(e.created_at, adminTz)
+        return (!hoursFrom || key >= hoursFrom) && (!hoursTo || key <= hoursTo)
+      })
+    : hoursLog
+
+  // Classes date filter. Declared at the TOP LEVEL of this component, next to the Hours
+  // Log pair above and unconditionally: the tabs below are inline conditional JSX, so
+  // anything declared inside one of them would be a hook sitting behind a condition.
+  const [classesFrom, setClassesFrom] = useState('')
+  const [classesTo, setClassesTo] = useState('')
+
+  // Classes status filter. Declared here beside the date pair, and deliberately NOT
+  // persisted: it is absent from ClassesStoredFilters, from persistedClassesFilters
+  // below, and from parseStoredClassesFilters - none of which this change touches.
+  //
+  // The date range is SHARED across students for the session on purpose (the month-end
+  // workflow is "set a month once, then walk student to student"). A status filter
+  // stored the same way would inherit that sharing, and then clicking the "Cancelled"
+  // tile on one student would silently leave the NEXT student's Classes tab showing
+  // only cancellations - a narrowing nobody asked for on a record they have not opened
+  // yet. It resets to 'all' on every mount, which is what an unfiltered tab means.
+  const [classesStatusFilter, setClassesStatusFilter] = useState<ClassesStatusFilter>('all')
+
+  // The record handed to sessionStorage. Rebuilt every render - these two values are
+  // its only inputs - and matchDateRangePreset is the same call that decides which
+  // quick-range button DateRangeFilter highlights, so what the row shows as active and
+  // what gets stored are one decision. A hand-typed range that happens to equal a
+  // preset is therefore stored AS that preset, which is exactly what the row is
+  // telling the admin it is.
+  const classesPreset = matchDateRangePreset(classesFrom, classesTo, adminTzRaw, new Date())
+  const persistedClassesFilters: ClassesStoredFilters = {
+    preset: classesPreset,
+    from: classesPreset ? '' : classesFrom,
+    to: classesPreset ? '' : classesTo,
+  }
+
+  /**
+   * Shape validation for a decoded stored record. Returning null rejects the WHOLE
+   * record and the tab opens unfiltered: a record written by a different build of this
+   * page, or edited by hand, cannot be trusted field by field, and a half-applied
+   * filter is worse than no filter.
+   *
+   * isDayKeyOrEmpty is the stricter guard the admin Classes list uses, not a bare
+   * typeof check. A string that is not a real day key survives typeof but is not a
+   * range: it would restore into date inputs that render blank for anything they cannot
+   * parse, and into the lexical comparison below, which would then exclude every class
+   * while the filter row showed nothing to clear.
+   */
+  function parseStoredClassesFilters(raw: unknown): ClassesStoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const record = raw as Record<string, unknown>
+
+    const from = record.from
+    const to = record.to
+    if (typeof from !== 'string' || typeof to !== 'string') return null
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
+
+    let preset: DateRangePreset | null
+    if (record.preset === null) preset = null
+    else if (isDateRangePreset(record.preset)) preset = record.preset
+    else return null
+
+    return {
+      preset,
+      // Enforces the invariant on the way IN as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to: preset ? '' : to,
+    }
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect
+   * - never during render, so the clock read below cannot desync server and client
+   * markup.
+   */
+  function applyStoredClassesFilters(stored: ClassesStoredFilters) {
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab returned to later in the day, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" - the same reason
+      // DateRangeFilter disables the preset buttons on a null zone. The range restores
+      // EMPTY rather than guessing UTC, and the hook then rewrites storage to match
+      // what is actually on screen.
+      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null
+      setClassesFrom(range?.from ?? '')
+      setClassesTo(range?.to ?? '')
+    } else {
+      setClassesFrom(stored.from)
+      setClassesTo(stored.to)
+    }
+  }
+
+  // `clear` is deliberately not taken off the return: the hook REMOVES the key by
+  // itself the moment the record matches the default, which is the exact end state the
+  // Clear button produces. skipRestore is false because no URL filter params reach this
+  // tab - there is no deep link a restored range could quietly widen or narrow.
+  useFilterPersistence<ClassesStoredFilters>({
+    storageKey: CLASSES_FILTERS_STORAGE_KEY,
+    value: persistedClassesFilters,
+    defaultValue: DEFAULT_CLASSES_STORED_FILTERS,
+    skipRestore: false,
+    parse: parseStoredClassesFilters,
+    apply: applyStoredClassesFilters,
+  })
+
+  // Derived per render, never held in state - stored, it would drift out of step the
+  // moment either input changed. Both predicates apply: status AND date range.
+  //
+  // Status is a pure LOOKUP of the server's stamp. No clock is read, no date
+  // arithmetic is done and no status set is restated here, which is what makes an "At
+  // a glance" tile's number and the row count its click reveals equal by construction:
+  // both sides count the same stamp, one on the server and one here. 'all' short-
+  // circuits so an unfiltered tab tests nothing.
+  //
+  // Dates are bucketed in adminTz (the DISPLAY zone), not adminTzRaw: the Date & Time
+  // column below renders in adminTz, and the filter must agree with what the admin can
+  // actually see. Both bounds are inclusive, and lexical comparison is exact on
+  // fixed-width 'YYYY-MM-DD' keys.
+  const filteredLessons = lessons.filter((l) => {
+    if (classesStatusFilter !== 'all') {
+      const statusMatch =
+        classesStatusFilter === 'cancelled_under_24h'
+          ? l.cancelledUnder24h
+          : l.bucket === classesStatusFilter
+      if (!statusMatch) return false
+    }
+    if (!classesFrom && !classesTo) return true
+    const key = zonedDayKey(l.scheduled_at, adminTz)
+    return (!classesFrom || key >= classesFrom) && (!classesTo || key <= classesTo)
+  })
 
   // Create Training form state — only reachable when hasActiveTraining is false
   const [trainingPackage, setTrainingPackage] = useState('')
@@ -1108,349 +1626,494 @@ export default function StudentDetailClient({
 
       {/* ── Overview ── */}
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-2 gap-6">
-          {/* Personal info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Personal Information</h2>
-            <InfoRow label="Full Name" value={fullName} />
-            <InfoRow label="Email" value={student.email as string} />
-            <InfoRow label="Phone" value={student.phone as string} />
-            {!isStaffView && <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />}
-            <InfoRow label="Timezone" value={student.timezone as string} />
-            <InfoRow label="Language Preference" value={student.language_preference as string} />
-            {!isStaffView && <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />}
-            {!isStaffView && <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />}
-          </div>
-
-          {/* Learning info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Learning Info</h2>
-            <InfoRow label="Native Language" value={student.native_language as string} />
-            <InfoRow label="Learning Language" value={student.learning_language as string} />
-            <InfoRow label="Current Fluency Level" value={student.current_fluency_level as string} />
-            <InfoRow label="Learning Goals" value={student.learning_goals as string} />
-            <InfoRow label="Interests" value={student.interests as string} />
-          </div>
-
-          {/* Training info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Training</h2>
-            {activeTrain ? (
-              <>
-                <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
-                <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
-                <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
-                <InfoRow
-                  label="Hours Remaining"
-                  value={hoursRemaining !== null
-                    ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
-                    : null}
+        <div className="space-y-6">
+          {/* At a glance — ADMIN ONLY. Gated on the prop being non-null rather than
+              on !isStaffView: the server is what decides a staff viewer gets no panel,
+              and null is that decision arriving here. Every number and both dates were
+              computed on the server at render; nothing below reads a clock or recounts
+              anything, which is what keeps the SSR markup and the first browser render
+              identical. */}
+          {atAGlance && (
+            <div className="card-elevated p-5">
+              <h2 className="font-semibold text-gray-800 mb-4">At a glance</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <GlanceTile
+                  label="Signed up"
+                  value={
+                    atAGlance.signedUpAt
+                      ? new Date(atAGlance.signedUpAt).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })
+                      : '—'
+                  }
                 />
-                <InfoRow label="End Date" value={activeTrain.end_date ?? null} />
-                <InfoRow label="Status" value={activeTrain.status ?? null} />
-              </>
-            ) : (
-              <p className="text-sm text-gray-400">
-                No active training.
-                {!isStaffView && ' Use the Create Training card below to start one.'}
-              </p>
-            )}
-          </div>
+                <GlanceTile
+                  label="Last sign-in"
+                  value={
+                    atAGlance.lastSignIn.state === 'known'
+                      ? new Date(atAGlance.lastSignIn.at).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })
+                      : atAGlance.lastSignIn.state === 'never'
+                      ? 'Never signed in'
+                      : 'Unavailable'
+                  }
+                  caption="Stamped at sign-in, not on every visit."
+                />
+                {/* The five class tiles switch to the Classes tab and set the matching
+                    status pill, so the list that opens holds exactly the rows the
+                    number counted — both sides read the same server-stamped bucket.
 
-          {/* Assigned teachers */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Assigned Teachers</h2>
-            {assignedTeachers.length === 0 ? (
-              <p className="text-sm text-gray-400">No teachers assigned.</p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {assignedTeachers.map((t) => (
-                  <span
-                    key={t.id}
-                    className="px-3 py-1 rounded-full text-sm font-medium bg-orange-50 text-orange-700"
-                  >
-                    {t.full_name}
-                  </span>
-                ))}
+                    They set the NON-persisted status filter and NOTHING else. In
+                    particular they still never write the Classes date range: that range
+                    is shared across students for the session (the month-end workflow),
+                    so a tile that rewrote it would also change what the NEXT student's
+                    tab shows. A range left over from that workflow does still narrow the
+                    landed list, which the "Showing X of Y" line above it states. */}
+                <GlanceTile label="Upcoming" value={atAGlance.upcoming} onClick={() => { setClassesStatusFilter('upcoming'); setActiveTab('classes') }} />
+                <GlanceTile label="Attended" value={atAGlance.attended} onClick={() => { setClassesStatusFilter('attended'); setActiveTab('classes') }} />
+                <GlanceTile label="Student no-shows" value={atAGlance.studentNoShows} onClick={() => { setClassesStatusFilter('student_no_show'); setActiveTab('classes') }} />
+                <GlanceTile label="Cancelled" value={atAGlance.cancelled} onClick={() => { setClassesStatusFilter('cancelled'); setActiveTab('classes') }} />
+                <GlanceTile label="Cancelled <24h" value={atAGlance.cancelledUnder24h} onClick={() => { setClassesStatusFilter('cancelled_under_24h'); setActiveTab('classes') }} />
+                <GlanceTile label="Refunds" value={atAGlance.refunds} onClick={() => setActiveTab('hours')} />
+                {/* These three read the same activeTrain/hoursRemaining the Training card
+                    below renders, including its deliberate newest-any-status fallback, so
+                    the panel and the card can never show different hours. Values are
+                    strings, so they render via GlanceTile's string branch. */}
+                <GlanceTile label="Hours purchased" value={activeTrain ? `${activeTrain.total_hours}h` : '—'} />
+                <GlanceTile label="Hours used" value={activeTrain ? `${activeTrain.hours_consumed}h` : '—'} />
+                <GlanceTile
+                  label="Hours remaining"
+                  value={
+                    hoursRemaining !== null
+                      ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
+                      : '—'
+                  }
+                />
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          {/* Create Training — rendered ONLY when the student has no training
-              with status === 'active' (hasActiveTraining, strict). A second
-              active training is refused by create_training_atomic and by the
-              one_active_training_per_student partial unique index, so the form
-              must never sit next to a live one. Admin only: staff get no
-              mutation entry points on this page. */}
-          {!isStaffView && !hasActiveTraining && (
-          <div className="col-span-2 card-elevated p-5 space-y-4">
-            <div>
-              <h2 className="font-semibold text-gray-800">Create Training</h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                A training holds the package, the hours balance and the assigned teachers.
-                Hours can only be added once one exists.
-              </p>
+          <div className="grid grid-cols-2 gap-6">
+            {/* Personal info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Personal Information</h2>
+              <InfoRow label="Full Name" value={fullName} />
+              <InfoRow label="Email" value={student.email as string} />
+              <InfoRow label="Phone" value={student.phone as string} />
+              {!isStaffView && <InfoRow label="Date of Birth" value={student.date_of_birth as string} adminOnly />}
+              <InfoRow label="Timezone" value={student.timezone as string} />
+              <InfoRow label="Language Preference" value={student.language_preference as string} />
+              {!isStaffView && <InfoRow label="Customer Number" value={student.customer_number as string} adminOnly />}
+              {!isStaffView && <InfoRow label="Cancellation Policy" value={student.cancellation_policy as string} adminOnly />}
             </div>
 
-            {teacherOptionsLoadFailed && (
-              <div
-                className="text-xs rounded-lg px-3 py-2"
-                style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
-              >
-                <p className="font-medium">
-                  The teacher list could not be loaded, so it may be incomplete. Reload the page before assigning teachers.
+            {/* Learning info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Learning Info</h2>
+              <InfoRow label="Native Language" value={student.native_language as string} />
+              <InfoRow label="Learning Language" value={student.learning_language as string} />
+              <InfoRow label="Current Fluency Level" value={student.current_fluency_level as string} />
+              <InfoRow label="Learning Goals" value={student.learning_goals as string} />
+              <InfoRow label="Interests" value={student.interests as string} />
+            </div>
+
+            {/* Training info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Training</h2>
+              {activeTrain ? (
+                <>
+                  <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
+                  <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
+                  <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
+                  <InfoRow
+                    label="Hours Remaining"
+                    value={hoursRemaining !== null
+                      ? `${hoursRemaining % 1 === 0 ? hoursRemaining : hoursRemaining.toFixed(1)}h`
+                      : null}
+                  />
+                  <InfoRow label="End Date" value={activeTrain.end_date ?? null} />
+                  <InfoRow label="Status" value={activeTrain.status ?? null} />
+                </>
+              ) : (
+                <p className="text-sm text-gray-400">
+                  No active training.
+                  {!isStaffView && ' Use the Create Training card below to start one.'}
+                </p>
+              )}
+            </div>
+
+            {/* Assigned teachers */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Assigned Teachers</h2>
+              {assignedTeachers.length === 0 ? (
+                <p className="text-sm text-gray-400">No teachers assigned.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {assignedTeachers.map((t) => (
+                    <span
+                      key={t.id}
+                      className="px-3 py-1 rounded-full text-sm font-medium bg-orange-50 text-orange-700"
+                    >
+                      {t.full_name}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Create Training — rendered ONLY when the student has no training
+                with status === 'active' (hasActiveTraining, strict). A second
+                active training is refused by create_training_atomic and by the
+                one_active_training_per_student partial unique index, so the form
+                must never sit next to a live one. Admin only: staff get no
+                mutation entry points on this page. */}
+            {!isStaffView && !hasActiveTraining && (
+            <div className="col-span-2 card-elevated p-5 space-y-4">
+              <div>
+                <h2 className="font-semibold text-gray-800">Create Training</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  A training holds the package, the hours balance and the assigned teachers.
+                  Hours can only be added once one exists.
                 </p>
               </div>
-            )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Package Name
-                <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
-              </label>
-              <input
-                className={inputClass}
-                value={trainingPackage}
-                onChange={(e) => setTrainingPackage(e.target.value)}
-                placeholder="e.g. Standard 20hrs, Intensive B2"
-              />
-            </div>
+              {teacherOptionsLoadFailed && (
+                <div
+                  className="text-xs rounded-lg px-3 py-2"
+                  style={{ backgroundColor: '#fefce8', borderColor: '#fde68a', border: '1px solid #fde68a', color: '#92400e' }}
+                >
+                  <p className="font-medium">
+                    The teacher list could not be loaded, so it may be incomplete. Reload the page before assigning teachers.
+                  </p>
+                </div>
+              )}
 
-            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Total Hours
+                  Package Name
                   <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
                 </label>
                 <input
-                  type="number" min="0.5" step="0.5"
                   className={inputClass}
-                  value={trainingHours}
-                  onChange={(e) => setTrainingHours(e.target.value)}
-                  placeholder="e.g. 20"
+                  value={trainingPackage}
+                  onChange={(e) => setTrainingPackage(e.target.value)}
+                  placeholder="e.g. Standard 20hrs, Intensive B2"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date
-                  <span className="ml-1 text-gray-400 font-normal">(optional)</span>
-                </label>
-                <DatePartInput
-                  value={trainingEndDate}
-                  onChange={(v) => setTrainingEndDate(v)}
-                />
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Assigned Teacher(s)
-              </label>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {teacherOptions.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggleTrainingTeacher(t.id)}
-                    className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
-                    style={
-                      trainingTeacherIds.includes(t.id)
-                        ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
-                        : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
-                    }
-                  >
-                    {t.full_name}
-                  </button>
-                ))}
-              </div>
-              {teacherOptions.length === 0 && !teacherOptionsLoadFailed && (
-                <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
-              )}
-              {/* Zero teachers is a legal selection — the training is created
-                  either way — but it is never what the admin meant to leave
-                  behind, so say what it costs the student. */}
-              {trainingTeacherIds.length === 0 && (
-                <p className="text-xs mt-2" style={{ color: '#B45309' }}>
-                  No teachers assigned — the student will not be able to book classes.
-                  Teachers can be added later from the Edit page.
-                </p>
-              )}
-            </div>
-
-            {trainingError && (
-              <div className="px-4 py-3 rounded-lg text-sm"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {trainingError}
-              </div>
-            )}
-
-            <div className="flex justify-end">
-              <button
-                onClick={handleCreateTraining}
-                disabled={trainingSaving}
-                className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                style={{ backgroundColor: '#FF8303' }}
-              >
-                {trainingSaving ? 'Creating...' : 'Create Training'}
-              </button>
-            </div>
-          </div>
-          )}
-
-          {/* Teacher notes */}
-          <div className="card-elevated p-5 space-y-2">
-            <h2 className="font-semibold text-gray-800">Teacher Notes</h2>
-            <p className="text-sm text-gray-600">
-              {(student.teacher_notes as string) || 'No teacher notes.'}
-            </p>
-            <p className="text-xs text-gray-400">Visible to assigned teachers. Not visible to student.</p>
-          </div>
-
-          {/* Admin notes */}
-          {!isStaffView && (
-          <div className="rounded-xl border p-5 space-y-2"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔒 Admin Notes — Not visible to teacher or student
-            </h2>
-            <p className="text-sm" style={{ color: '#78350f' }}>
-              {(student.admin_notes as string) || 'No admin notes.'}
-            </p>
-          </div>
-          )}
-
-          {/* Password override — admin only, full width */}
-          {!isStaffView && (
-          <div className="col-span-2 rounded-xl border p-5 space-y-3"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔑 Set New Password — Admin only
-            </h2>
-            <p className="text-xs" style={{ color: '#78350f' }}>
-              Overrides the student&apos;s current password immediately. The student is not notified.
-            </p>
-
-            {passwordError && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {passwordError}
-              </div>
-            )}
-            {passwordSuccess && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
-                Password updated successfully.
-              </div>
-            )}
-
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
-                  New Password
-                </label>
-                <div className="relative">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Total Hours
+                    <span className="ml-1 font-normal" style={{ color: '#FD5602' }}>(required)</span>
+                  </label>
                   <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
-                    placeholder="Min. 8 characters"
-                    className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
-                    style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                    type="number" min="0.5" step="0.5"
+                    className={inputClass}
+                    value={trainingHours}
+                    onChange={(e) => setTrainingHours(e.target.value)}
+                    placeholder="e.g. 20"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                    <span className="ml-1 text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <DatePartInput
+                    value={trainingEndDate}
+                    onChange={(v) => setTrainingEndDate(v)}
+                  />
                 </div>
               </div>
-              <button
-                onClick={handleSetPassword}
-                disabled={passwordSaving || !newPassword}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
-                style={{ backgroundColor: '#92400e' }}
-              >
-                {passwordSaving ? 'Saving...' : 'Set Password'}
-              </button>
-            </div>
-          </div>
-          )}
 
-          {/* Open tasks linked to this student. TasksMini renders its own header, so this
-              wrapper supplies only the card — card-elevated p-5 is this file's neutral
-              overview-card class, with col-span-2 (not the teacher page's col-span-3)
-              because this overview grid is grid-cols-2. linkedId is students.id, which is
-              what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
-              TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
-              students rows, and the tasks route resolves those ids back against `students`.
-              Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
-              which requireStaff() explicitly excludes tasks from, so for a staff viewer this
-              panel could only render a permission error and an Add Task button they cannot use. */}
-          {!isStaffView && (
-          <div className="col-span-2 card-elevated p-5">
-            <TasksMini
-              linkedType="student"
-              linkedId={id}
-              linkedName={fullName}
-              adminTz={adminTz}
-            />
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Assigned Teacher(s)
+                </label>
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {teacherOptions.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => toggleTrainingTeacher(t.id)}
+                      className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                      style={
+                        trainingTeacherIds.includes(t.id)
+                          ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                          : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                      }
+                    >
+                      {t.full_name}
+                    </button>
+                  ))}
+                </div>
+                {teacherOptions.length === 0 && !teacherOptionsLoadFailed && (
+                  <p className="text-xs text-gray-400 mt-1">No active teachers found.</p>
+                )}
+                {/* Zero teachers is a legal selection — the training is created
+                    either way — but it is never what the admin meant to leave
+                    behind, so say what it costs the student. */}
+                {trainingTeacherIds.length === 0 && (
+                  <p className="text-xs mt-2" style={{ color: '#B45309' }}>
+                    No teachers assigned — the student will not be able to book classes.
+                    Teachers can be added later from the Edit page.
+                  </p>
+                )}
+              </div>
+
+              {trainingError && (
+                <div className="px-4 py-3 rounded-lg text-sm"
+                  style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                  {trainingError}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <button
+                  onClick={handleCreateTraining}
+                  disabled={trainingSaving}
+                  className="px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: '#FF8303' }}
+                >
+                  {trainingSaving ? 'Creating...' : 'Create Training'}
+                </button>
+              </div>
+            </div>
+            )}
+
+            {/* Teacher notes */}
+            <div className="card-elevated p-5 space-y-2">
+              <h2 className="font-semibold text-gray-800">Teacher Notes</h2>
+              <p className="text-sm text-gray-600">
+                {(student.teacher_notes as string) || 'No teacher notes.'}
+              </p>
+              <p className="text-xs text-gray-400">Visible to assigned teachers. Not visible to student.</p>
+            </div>
+
+            {/* Admin notes */}
+            {!isStaffView && (
+            <div className="rounded-xl border p-5 space-y-2"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔒 Admin Notes — Not visible to teacher or student
+              </h2>
+              <p className="text-sm" style={{ color: '#78350f' }}>
+                {(student.admin_notes as string) || 'No admin notes.'}
+              </p>
+            </div>
+            )}
+
+            {/* Password override — admin only, full width */}
+            {!isStaffView && (
+            <div className="col-span-2 rounded-xl border p-5 space-y-3"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔑 Set New Password — Admin only
+              </h2>
+              <p className="text-xs" style={{ color: '#78350f' }}>
+                Overrides the student&apos;s current password immediately. The student is not notified.
+              </p>
+
+              {passwordError && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                  {passwordError}
+                </div>
+              )}
+              {passwordSuccess && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
+                  Password updated successfully.
+                </div>
+              )}
+
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
+                      placeholder="Min. 8 characters"
+                      className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
+                      style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={handleSetPassword}
+                  disabled={passwordSaving || !newPassword}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
+                  style={{ backgroundColor: '#92400e' }}
+                >
+                  {passwordSaving ? 'Saving...' : 'Set Password'}
+                </button>
+              </div>
+            </div>
+            )}
+
+            {/* Open tasks linked to this student. TasksMini renders its own header, so this
+                wrapper supplies only the card — card-elevated p-5 is this file's neutral
+                overview-card class, with col-span-2 (not the teacher page's col-span-3)
+                because this overview grid is grid-cols-2. linkedId is students.id, which is
+                what admin_tasks.linked_entity_id holds for linked_entity_type 'student': the
+                TaskForm student dropdown is fed by /api/admin/students?minimal=true, i.e.
+                students rows, and the tasks route resolves those ids back against `students`.
+                Admin-gated like the two panels above it — /api/admin/tasks is requireAdmin(),
+                which requireStaff() explicitly excludes tasks from, so for a staff viewer this
+                panel could only render a permission error and an Add Task button they cannot use. */}
+            {!isStaffView && (
+            <div className="col-span-2 card-elevated p-5">
+              <TasksMini
+                linkedType="student"
+                linkedId={id}
+                linkedName={fullName}
+                adminTz={adminTz}
+              />
+            </div>
+            )}
           </div>
-          )}
         </div>
       )}
 
       {/* ── Classes ── */}
       {activeTab === 'classes' && (
-        <div className="card-elevated overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lessons.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
+        <div className="space-y-2">
+          {lessonsCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 classes.</p>
+          )}
+          {/* Date range AND status filters over the list below. Purely client-side:
+              this student's classes already arrived in the page props, so both narrow
+              what is on screen without a refetch. The RANGE survives navigation for the
+              rest of the session (sessionStorage), because the month-end workflow is
+              one range applied across many students; the STATUS pill does not, and
+              resets to All on every mount — see where its state is declared. */}
+          <div className="card-elevated p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <DateRangeFilter
+                from={classesFrom}
+                to={classesTo}
+                onChange={(f, t) => { setClassesFrom(f); setClassesTo(t) }}
+                tz={adminTzRaw}
+              />
+              {(classesFrom || classesTo || classesStatusFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => { setClassesFrom(''); setClassesTo(''); setClassesStatusFilter('all') }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {/* Status pills. Selected state is carried by inline style props and
+                nothing else — Tailwind v4 never sees a dynamically constructed colour
+                class — reusing the toggle styling of the Assigned Teacher(s) picker in
+                the Create Training form above. */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {CLASSES_STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setClassesStatusFilter(opt.value)}
+                  aria-pressed={classesStatusFilter === opt.value}
+                  className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                  style={
+                    classesStatusFilter === opt.value
+                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                  }
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {(classesFrom || classesTo || classesStatusFilter !== 'all') && (
+              <p className="text-xs text-gray-500 mt-2">
+                Showing {filteredLessons.length} of {lessons.length} classes
+              </p>
+            )}
+          </div>
+
+          <div className="card-elevated overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
                 </tr>
-              ) : (
-                lessons.map((lesson) => (
-                  <tr key={lesson.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-800">{lesson.teacher_name}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                        timeZone: adminTz,
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {lesson.duration_minutes} min
-                      <DurationMarker
-                        status={lesson.status}
-                        durationMinutes={lesson.duration_minutes}
-                        allowed={student.allowed_durations}
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
+              </thead>
+              <tbody>
+                {/* Two distinct empty states. Collapsing them into one would tell an
+                    admin who has filtered to an empty month that this student has never
+                    had a class, when their classes are simply outside the range they
+                    chose. The second wording names no single filter, because either the
+                    range, the status pill, or both together can produce it. */}
+                {lessons.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
+                  </tr>
+                ) : filteredLessons.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-gray-400">
+                      No classes matching the current filters.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  filteredLessons.map((lesson) => (
+                    <tr key={lesson.id} className="border-b border-gray-50">
+                      <td className="px-4 py-3 text-gray-800">{lesson.teacher_name}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {lesson.duration_minutes} min
+                        <DurationMarker
+                          status={lesson.status}
+                          durationMinutes={lesson.duration_minutes}
+                          allowed={student.allowed_durations}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* ── Hours Log ── */}
       {activeTab === 'hours' && (
         <div className="space-y-4">
+          {hoursLogCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 entries.</p>
+          )}
           {/* Add / Remove buttons. Both post a training_id to the hours route,
               which requires a uuid — with no active training the click could
               only ever end in a raw Zod message, so the controls are disabled
@@ -1568,6 +2231,36 @@ export default function StudentDetailClient({
             </div>
           )}
 
+          {/* Date range filter over the log below. Purely client-side: the whole log
+              for this student already arrived in the page props, so this narrows what
+              is on screen without a refetch. The range survives navigation for the rest
+              of the session (sessionStorage), because the month-end workflow is one
+              range applied across many students. */}
+          <div className="card-elevated p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <DateRangeFilter
+                from={hoursFrom}
+                to={hoursTo}
+                onChange={(f, t) => { setHoursFrom(f); setHoursTo(t) }}
+                tz={adminTzRaw}
+              />
+              {(hoursFrom || hoursTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setHoursFrom(''); setHoursTo('') }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {(hoursFrom || hoursTo) && (
+              <p className="text-xs text-gray-500 mt-2">
+                Showing {filteredHoursLog.length} of {hoursLog.length} transactions
+              </p>
+            )}
+          </div>
+
           {/* Hours log table */}
           <div className="card-elevated overflow-hidden">
             <table className="w-full text-sm">
@@ -1582,14 +2275,24 @@ export default function StudentDetailClient({
                 </tr>
               </thead>
               <tbody>
+                {/* Two distinct empty states. Collapsing them into one would tell an
+                    admin who has filtered to an empty month that this student has no
+                    hours history at all, when the history is simply outside the range
+                    they chose. */}
                 {hoursLog.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="text-center py-10 text-gray-400">
                       No hours transactions yet.
                     </td>
                   </tr>
+                ) : filteredHoursLog.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="text-center py-10 text-gray-400">
+                      No transactions in the selected date range.
+                    </td>
+                  </tr>
                 ) : (
-                  hoursLog.map((entry) => (
+                  filteredHoursLog.map((entry) => (
                     <tr key={entry.id} className="border-b border-gray-50">
                       <td className="px-4 py-3">
                         <HoursTypeBadge type={entry.type} />
@@ -1618,73 +2321,78 @@ export default function StudentDetailClient({
 
       {/* ── Reports ── */}
       {activeTab === 'reports' && (
-        <div className="card-elevated overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Class Date</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Class Taken</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Feedback</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="text-center py-10 text-gray-400">No reports yet.</td>
+        <div className="space-y-2">
+          {reportsCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 reports.</p>
+          )}
+          <div className="card-elevated overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Class Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Teacher</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Class Taken</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Feedback</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Submitted</th>
                 </tr>
-              ) : (
-                reports.map((report) => (
-                  <tr key={report.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-700">
-                      {report.lesson_scheduled_at
-                        ? new Date(report.lesson_scheduled_at).toLocaleDateString('en-GB', {
-                            day: '2-digit', month: 'short', year: 'numeric',
-                            timeZone: adminTz,
-                          })
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{report.teacher_name || '—'}</td>
-                    <td className="px-4 py-3">
-                      {/* Three states, not two: happened stays null until the
-                          report is filed. Falling through to the red 'No' read
-                          as "the class did not take place" when it only meant
-                          nothing had been reported yet — hence the explicit
-                          === true / === false comparisons. */}
-                      <span
-                        className="px-2 py-0.5 rounded-full text-xs font-medium"
-                        style={
-                          report.happened === true
-                            ? { backgroundColor: '#DCFCE7', color: '#15803D' }
-                            : report.happened === false
-                            ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
-                            : { backgroundColor: '#E0DFDC', color: '#000000' }
-                        }
-                      >
-                        {report.happened === true
-                          ? 'Yes'
-                          : report.happened === false
-                          ? 'No'
-                          : report.status === 'flagged'
-                          ? 'Missed'
-                          : 'Awaiting report'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
-                      {report.feedback || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {new Date(report.created_at).toLocaleDateString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        timeZone: adminTz,
-                      })}
-                    </td>
+              </thead>
+              <tbody>
+                {reports.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center py-10 text-gray-400">No reports yet.</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  reports.map((report) => (
+                    <tr key={report.id} className="border-b border-gray-50">
+                      <td className="px-4 py-3 text-gray-700">
+                        {report.lesson_scheduled_at
+                          ? new Date(report.lesson_scheduled_at).toLocaleDateString('en-GB', {
+                              day: '2-digit', month: 'short', year: 'numeric',
+                              timeZone: adminTz,
+                            })
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{report.teacher_name || '—'}</td>
+                      <td className="px-4 py-3">
+                        {/* Three states, not two: happened stays null until the
+                            report is filed. Falling through to the red 'No' read
+                            as "the class did not take place" when it only meant
+                            nothing had been reported yet — hence the explicit
+                            === true / === false comparisons. */}
+                        <span
+                          className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={
+                            report.happened === true
+                              ? { backgroundColor: '#DCFCE7', color: '#15803D' }
+                              : report.happened === false
+                              ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
+                              : { backgroundColor: '#E0DFDC', color: '#000000' }
+                          }
+                        >
+                          {report.happened === true
+                            ? 'Yes'
+                            : report.happened === false
+                            ? 'No'
+                            : report.status === 'flagged'
+                            ? 'Missed'
+                            : 'Awaiting report'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate">
+                        {report.feedback || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {new Date(report.created_at).toLocaleDateString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          timeZone: adminTz,
+                        })}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,5 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import StudentsListClient from './StudentsListClient'
 
@@ -17,17 +16,9 @@ export default async function StudentsPage({
   const { filter } = await searchParams
   const initialLowHoursOnly = filter === 'low_hours'
 
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {},
-      },
-    }
-  )
+  // Service-role client, matching students/[id]/page.tsx. The admin gate above
+  // has already run; RLS is not what authorises this page.
+  const supabase = createAdminClient()
 
   // Fetch all students with their company, active training, and assigned teachers
   const { data: students, error } = await supabase
@@ -67,6 +58,10 @@ export default async function StudentsPage({
     console.error('Error fetching students:', error)
   }
 
+  // A failed read must not render as an empty list — the client shows an error
+  // state instead of "No students yet."
+  const loadError = Boolean(error)
+
   // Flatten nested Supabase arrays and compute derived values
   const studentsFlattened = (students || []).map((s) => {
     // Flatten company (Supabase returns joins as arrays)
@@ -84,6 +79,9 @@ export default async function StudentsPage({
     const hoursRemaining = activeTrain
       ? Number(activeTrain.total_hours) - Number(activeTrain.hours_consumed)
       : null
+
+    // Package size, so the list can show remaining hours against the total.
+    const totalHours = activeTrain ? Number(activeTrain.total_hours) : null
 
     // Collect assigned teachers from training_teachers join rows
     const teachers: { id: string; full_name: string }[] = []
@@ -115,6 +113,7 @@ export default async function StudentsPage({
       email_bounced_at: s.email_bounced_at ?? null,
       email_bounce_reason: s.email_bounce_reason ?? null,
       hours_remaining: hoursRemaining,
+      total_hours: totalHours,
       teachers,
     }
   })
@@ -123,6 +122,7 @@ export default async function StudentsPage({
     <StudentsListClient
       students={studentsFlattened}
       initialLowHoursOnly={initialLowHoursOnly}
+      loadError={loadError}
     />
   )
 }

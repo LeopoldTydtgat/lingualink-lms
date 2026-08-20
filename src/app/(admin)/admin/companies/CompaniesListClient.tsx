@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Building2, Plus, Search } from 'lucide-react'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
 
 type Company = {
   id: string
@@ -27,10 +28,43 @@ const TYPE_LABELS: Record<string, string> = {
   partner: 'Partner',
 }
 
+// ─── Filter persistence ──────────────────────────────────────────────────────
+
+const FILTERS_STORAGE_KEY = 'll-admin-companies-filters'
+
+type StoredFilters = { status: string }
+
+const DEFAULT_STORED_FILTERS: StoredFilters = { status: 'all' }
+
 export default function CompaniesListClient({ companies }: { companies: Company[] }) {
   const router = useRouter()
+  // Search is deliberately not persisted — same judgement as the Classes list, which
+  // persists teacher/status/dates but never the search term: a restored stale search
+  // quietly hiding companies days later is the exact failure this feature exists to avoid.
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+
+  const persistedFilters: StoredFilters = { status: statusFilter }
+
+  function parseStoredFilters(raw: unknown): StoredFilters | null {
+    if (typeof raw !== 'object' || raw === null) return null
+    const { status } = raw as Record<string, unknown>
+    if (status !== 'all' && status !== 'active' && status !== 'former') return null
+    return { status } as StoredFilters
+  }
+
+  function applyStoredFilters(stored: StoredFilters) {
+    setStatusFilter(stored.status)
+  }
+
+  useFilterPersistence<StoredFilters>({
+    storageKey: FILTERS_STORAGE_KEY,
+    value: persistedFilters,
+    defaultValue: DEFAULT_STORED_FILTERS,
+    skipRestore: false, // this page reads no URL params
+    parse: parseStoredFilters,
+    apply: applyStoredFilters,
+  })
 
   const filtered = companies.filter((c) => {
     const matchSearch =
