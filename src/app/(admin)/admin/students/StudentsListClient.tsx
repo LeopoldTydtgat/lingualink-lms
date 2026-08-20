@@ -162,7 +162,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Students</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {students.length} student{students.length !== 1 ? 's' : ''} total
+            {loadError ? 'Students unavailable' : `${students.length} student${students.length !== 1 ? 's' : ''} total`}
           </p>
         </div>
         <button
