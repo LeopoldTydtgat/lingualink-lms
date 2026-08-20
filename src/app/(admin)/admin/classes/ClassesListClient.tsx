@@ -72,7 +72,7 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'no_show', label: 'No-Show' },
-  { value: 'flagged', label: 'Flagged' },
+  { value: 'missed', label: 'Missed (no report)' },
 ]
 
 // Page-scoped, so the sibling admin lists can each keep their own record later.
@@ -145,8 +145,11 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
       return { label: 'Student No-Show', bg: '#FFF7ED', color: '#C2410C' }
     case 'teacher_no_show':
       return { label: 'Teacher No-Show', bg: '#FEF2F2', color: '#B91C1C' }
-    case 'flagged':
-      return { label: 'Flagged', bg: '#FEF9C3', color: '#A16207' }
+    // The class happened but the teacher blew the 12h report window, so pay is
+    // forfeited. A real, live status - without this case it fell through to
+    // `default` and rendered the raw lowercase string.
+    case 'missed':
+      return { label: 'Missed - no report', bg: '#FEF9C3', color: '#A16207' }
     default:
       return { label: status, bg: '#F3F4F6', color: '#374151' }
   }
