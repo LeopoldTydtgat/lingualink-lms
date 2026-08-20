@@ -514,6 +514,55 @@ function zonedDayKey(dateStr: string, timezone: string): string {
   return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
 }
 
+// ─── Classes date filter ──────────────────────────
+
+// Shared across students under one key - the same deliberate convention as the Hours
+// Log filter above. The reconciliation workflow is "set a month once, then walk student
+// to student", so carrying the range from one record to the next is the point rather
+// than a leak, and a stored preset is recomputed against now on restore so it can never
+// carry a stale month with it. sessionStorage scopes the whole thing to one session.
+//
+// Its OWN key, not the Hours Log one: the two tabs narrow different row sets, and an
+// admin who filtered the Classes list has said nothing about which hours transactions
+// they want to see. The bucketing helper IS shared - zonedDayKey above serves both.
+const CLASSES_FILTERS_STORAGE_KEY = 'll-admin-student-classes-filters'
+
+/**
+ * What the Classes tab remembers for the rest of the browsing session.
+ *
+ * EITHER a preset id OR concrete day keys, never both - the same split the Hours Log
+ * record uses, for the same reason:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "This week" must still mean this week after
+ *                       midnight on Monday; storing its dates would pin the filter to
+ *                       a week that has since passed.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+type ClassesStoredFilters = {
+  preset: DateRangePreset | null
+  from: string
+  to: string
+}
+
+const DEFAULT_CLASSES_STORED_FILTERS: ClassesStoredFilters = {
+  preset: null,
+  from: '',
+  to: '',
+}
+
+// 'YYYY-MM-DD' or empty. Taken from the admin Classes list, which validates restored day
+// keys by SHAPE rather than accepting any string, and stricter than the typeof-only check
+// the Hours Log parse does today. A stored value goes straight back into a date input and
+// into a lexical >= / <= against real day keys, so a tampered or malformed record has to
+// restore as EMPTY: restored verbatim, an arbitrary string would leave the input blank
+// while silently excluding every row, showing no filter for the admin to clear.
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+function isDayKeyOrEmpty(value: string): boolean {
+  return value === '' || DAY_KEY_RE.test(value)
+}
+
 // ─── Read-only message thread ─────────────────────────────────────────────────
 
 function MessageThread({
@@ -748,6 +797,109 @@ export default function StudentDetailClient({
         return (!hoursFrom || key >= hoursFrom) && (!hoursTo || key <= hoursTo)
       })
     : hoursLog
+
+  // Classes date filter. Declared at the TOP LEVEL of this component, next to the Hours
+  // Log pair above and unconditionally: the tabs below are inline conditional JSX, so
+  // anything declared inside one of them would be a hook sitting behind a condition.
+  const [classesFrom, setClassesFrom] = useState('')
+  const [classesTo, setClassesTo] = useState('')
+
+  // The record handed to sessionStorage. Rebuilt every render - these two values are
+  // its only inputs - and matchDateRangePreset is the same call that decides which
+  // quick-range button DateRangeFilter highlights, so what the row shows as active and
+  // what gets stored are one decision. A hand-typed range that happens to equal a
+  // preset is therefore stored AS that preset, which is exactly what the row is
+  // telling the admin it is.
+  const classesPreset = matchDateRangePreset(classesFrom, classesTo, adminTzRaw, new Date())
+  const persistedClassesFilters: ClassesStoredFilters = {
+    preset: classesPreset,
+    from: classesPreset ? '' : classesFrom,
+    to: classesPreset ? '' : classesTo,
+  }
+
+  /**
+   * Shape validation for a decoded stored record. Returning null rejects the WHOLE
+   * record and the tab opens unfiltered: a record written by a different build of this
+   * page, or edited by hand, cannot be trusted field by field, and a half-applied
+   * filter is worse than no filter.
+   *
+   * isDayKeyOrEmpty is the stricter guard the admin Classes list uses, not a bare
+   * typeof check. A string that is not a real day key survives typeof but is not a
+   * range: it would restore into date inputs that render blank for anything they cannot
+   * parse, and into the lexical comparison below, which would then exclude every class
+   * while the filter row showed nothing to clear.
+   */
+  function parseStoredClassesFilters(raw: unknown): ClassesStoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+    const record = raw as Record<string, unknown>
+
+    const from = record.from
+    const to = record.to
+    if (typeof from !== 'string' || typeof to !== 'string') return null
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
+
+    let preset: DateRangePreset | null
+    if (record.preset === null) preset = null
+    else if (isDateRangePreset(record.preset)) preset = record.preset
+    else return null
+
+    return {
+      preset,
+      // Enforces the invariant on the way IN as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to: preset ? '' : to,
+    }
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect
+   * - never during render, so the clock read below cannot desync server and client
+   * markup.
+   */
+  function applyStoredClassesFilters(stored: ClassesStoredFilters) {
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab returned to later in the day, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" - the same reason
+      // DateRangeFilter disables the preset buttons on a null zone. The range restores
+      // EMPTY rather than guessing UTC, and the hook then rewrites storage to match
+      // what is actually on screen.
+      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null
+      setClassesFrom(range?.from ?? '')
+      setClassesTo(range?.to ?? '')
+    } else {
+      setClassesFrom(stored.from)
+      setClassesTo(stored.to)
+    }
+  }
+
+  // `clear` is deliberately not taken off the return: the hook REMOVES the key by
+  // itself the moment the record matches the default, which is the exact end state the
+  // Clear button produces. skipRestore is false because no URL filter params reach this
+  // tab - there is no deep link a restored range could quietly widen or narrow.
+  useFilterPersistence<ClassesStoredFilters>({
+    storageKey: CLASSES_FILTERS_STORAGE_KEY,
+    value: persistedClassesFilters,
+    defaultValue: DEFAULT_CLASSES_STORED_FILTERS,
+    skipRestore: false,
+    parse: parseStoredClassesFilters,
+    apply: applyStoredClassesFilters,
+  })
+
+  // Derived per render, never held in state - stored, it would drift out of step the
+  // moment either date input changed. Bucketed in adminTz (the DISPLAY zone), not
+  // adminTzRaw: the Date & Time column below renders in adminTz, and the filter must
+  // agree with what the admin can actually see. Both bounds are inclusive, and lexical
+  // comparison is exact on fixed-width 'YYYY-MM-DD' keys.
+  const filteredLessons = (classesFrom || classesTo)
+    ? lessons.filter((l) => {
+        const key = zonedDayKey(l.scheduled_at, adminTz)
+        return (!classesFrom || key >= classesFrom) && (!classesTo || key <= classesTo)
+      })
+    : lessons
 
   // Create Training form state — only reachable when hasActiveTraining is false
   const [trainingPackage, setTrainingPackage] = useState('')
@@ -1570,6 +1722,36 @@ export default function StudentDetailClient({
           {lessonsCapped && (
             <p className="text-sm text-gray-400">Showing the most recent 1000 classes.</p>
           )}
+          {/* Date range filter over the list below. Purely client-side: this
+              student's classes already arrived in the page props, so this narrows what
+              is on screen without a refetch. The range survives navigation for the rest
+              of the session (sessionStorage), because the month-end workflow is one
+              range applied across many students. */}
+          <div className="card-elevated p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <DateRangeFilter
+                from={classesFrom}
+                to={classesTo}
+                onChange={(f, t) => { setClassesFrom(f); setClassesTo(t) }}
+                tz={adminTzRaw}
+              />
+              {(classesFrom || classesTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setClassesFrom(''); setClassesTo('') }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {(classesFrom || classesTo) && (
+              <p className="text-xs text-gray-500 mt-2">
+                Showing {filteredLessons.length} of {lessons.length} classes
+              </p>
+            )}
+          </div>
+
           <div className="card-elevated overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -1581,12 +1763,22 @@ export default function StudentDetailClient({
                 </tr>
               </thead>
               <tbody>
+                {/* Two distinct empty states. Collapsing them into one would tell an
+                    admin who has filtered to an empty month that this student has never
+                    had a class, when their classes are simply outside the range they
+                    chose. */}
                 {lessons.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
                   </tr>
+                ) : filteredLessons.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-gray-400">
+                      No classes in the selected date range.
+                    </td>
+                  </tr>
                 ) : (
-                  lessons.map((lesson) => (
+                  filteredLessons.map((lesson) => (
                     <tr key={lesson.id} className="border-b border-gray-50">
                       <td className="px-4 py-3 text-gray-800">{lesson.teacher_name}</td>
                       <td className="px-4 py-3 text-gray-600">
