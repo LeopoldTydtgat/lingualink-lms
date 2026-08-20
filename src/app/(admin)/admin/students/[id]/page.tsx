@@ -10,6 +10,7 @@ import type {
   Assignment,
   AtAGlance,
   AtAGlanceLastSignIn,
+  LessonBucket,
   MaterialHomework,
   MaterialSheetOption,
 } from './StudentDetailClient'
@@ -246,19 +247,81 @@ export default async function StudentDetailPage({
     .order('scheduled_at', { ascending: false })
     .limit(1000)
 
-  // Flatten teacher name on each lesson
-  const flatLessons = (lessons || []).map((l) => ({
-    id: l.id,
-    scheduled_at: l.scheduled_at,
-    duration_minutes: l.duration_minutes,
-    status: l.status,
-    cancelled_at: l.cancelled_at ?? null,
-    cancelled_by: l.cancelled_by ?? null,
-    rescheduled_by: l.rescheduled_by ?? null,
-    teacher_name: Array.isArray(l.profiles)
-      ? (l.profiles[0] as { full_name: string } | undefined)?.full_name ?? '—'
-      : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
-  }))
+  // ONE request-time instant, read once and shared by every comparison that follows,
+  // so two tiles — and a tile and the list its click opens — can never disagree about
+  // "now". new Date().getTime() rather than Date.now(): the react-hooks/purity rule
+  // mis-fires on Date.now() in async Server Components — the same remedy, for the same
+  // reason, as (dashboard)/upcoming-classes/page.tsx:17 and
+  // (dashboard)/students/[id]/page.tsx:359. The clock is read HERE, on the server, and
+  // never in the client component: a clock read during a client render desyncs the SSR
+  // markup from the first browser render. It stamps the per-lesson buckets below as
+  // well as the "At a glance" counts, which are now a tally of those same stamps.
+  const nowMs = new Date().getTime()
+
+  // Flatten teacher name on each lesson, and stamp its classification.
+  //
+  // Classified ONCE, here, and never again: the Classes tab filters by looking the
+  // stamp up and the "At a glance" counts below tally the same stamps, so a tile's
+  // number and the row count behind its click are equal by construction rather than by
+  // two definitions being kept in step by hand.
+  //
+  // The five buckets are MUTUALLY EXCLUSIVE — 'scheduled', 'completed'/'missed',
+  // 'student_no_show' and the cancel family are disjoint status sets — and
+  // cancelledUnder24h is a SUB-FLAG of the 'cancelled' bucket, not a sixth bucket.
+  // 'other' is the deliberate catch-all: a past 'scheduled' class still awaiting its
+  // report, a teacher no-show, a reschedule leg, a legacy status. Those rows have no
+  // tile, and are reachable only under the tab's "All" pill.
+  //
+  //  - upcoming: status 'scheduled' AND still in the future at nowMs.
+  //  - attended: 'completed' or 'missed'. 'missed' means the class HAPPENED and the
+  //    teacher blew the report window — the student attended. It zeroes teacher pay;
+  //    it does not undo the class, so it belongs here and not with the cancellations.
+  //  - cancelled: reschedule legs are excluded, because a reschedule is a date change,
+  //    not a cancellation. The dead old leg carries a cancel-family status while the
+  //    new booking carries the class, so counting it would report one cancellation per
+  //    time change. Same rule, same shape, as the first branch of getBillability. The
+  //    cancel family itself comes from isCancelledStatus (i.e. billability's
+  //    CANCELLED_STATUSES), never from a status list hand-rolled here.
+  //  - cancelledUnder24h: a subset of 'cancelled', never of all lessons. A null
+  //    cancelled_at cannot be measured against the notice window, so it is NOT
+  //    flagged: "we do not know when this was cancelled" must never render as "inside
+  //    24 hours". A cancelled_at after the class start yields a negative difference and
+  //    IS flagged, which is correct — that is zero notice, not more than 24 hours.
+  const flatLessons = (lessons || []).map((l) => {
+    const scheduledMs = new Date(l.scheduled_at).getTime()
+
+    const bucket: LessonBucket =
+      l.status === 'scheduled' && scheduledMs > nowMs
+        ? 'upcoming'
+        : l.status === 'completed' || l.status === 'missed'
+        ? 'attended'
+        : l.status === 'student_no_show'
+        ? 'student_no_show'
+        : isCancelledStatus(l.status) &&
+          !(l.rescheduled_by === 'student' || l.rescheduled_by === 'admin')
+        ? 'cancelled'
+        : 'other'
+
+    const cancelledUnder24h =
+      bucket === 'cancelled' &&
+      l.cancelled_at != null &&
+      scheduledMs - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
+
+    return {
+      id: l.id,
+      scheduled_at: l.scheduled_at,
+      duration_minutes: l.duration_minutes,
+      status: l.status,
+      cancelled_at: l.cancelled_at ?? null,
+      cancelled_by: l.cancelled_by ?? null,
+      rescheduled_by: l.rescheduled_by ?? null,
+      teacher_name: Array.isArray(l.profiles)
+        ? (l.profiles[0] as { full_name: string } | undefined)?.full_name ?? '—'
+        : (l.profiles as { full_name: string } | null)?.full_name ?? '—',
+      bucket,
+      cancelledUnder24h,
+    }
+  })
 
   // The read came back exactly at its cap, so older classes almost certainly exist
   // beyond it. The Classes tab says so rather than presenting a truncated list as
@@ -343,54 +406,21 @@ export default async function StudentDetailPage({
     // account that could have signed in, and 'never' would be a claim about one
     // that does not exist, so the initial 'unavailable' stands.
 
-    // ONE request-time instant, read once and shared by every comparison below,
-    // so two tiles can never disagree about "now". new Date().getTime() rather
-    // than Date.now(): the react-hooks/purity rule mis-fires on Date.now() in
-    // async Server Components — the same remedy, for the same reason, as
-    // (dashboard)/upcoming-classes/page.tsx:17 and
-    // (dashboard)/students/[id]/page.tsx:359. The clock is read HERE, on the
-    // server, and never in the client component: a clock read during a client
-    // render desyncs the SSR markup from the first browser render.
-    const nowMs = new Date().getTime()
-
-    // Reschedule legs are excluded: a reschedule is a date change, not a
-    // cancellation. The dead old leg carries a cancel-family status while the new
-    // booking carries the class, so counting it would report one cancellation per
-    // time change. Same rule, same shape, as the first branch of getBillability.
-    // The cancel family itself comes from isCancelledStatus (i.e. billability's
-    // CANCELLED_STATUSES), never from a status list hand-rolled here.
-    const cancellations = flatLessons.filter(
-      (l) =>
-        isCancelledStatus(l.status) &&
-        !(l.rescheduled_by === 'student' || l.rescheduled_by === 'admin')
-    )
-
+    // The five lesson counts are a TALLY of the buckets stamped onto flatLessons
+    // above — no status set, no notice window and no clock is restated here. Every
+    // definition, and the single nowMs those definitions were resolved against,
+    // lives at the stamping site; this reads the result. The Classes tab filters by
+    // looking the same stamps up, so a tile's number and the number of rows its
+    // click reveals cannot drift apart.
     atAGlance = {
       signedUpAt: (student.created_at as string | null) ?? null,
       lastSignIn,
-      upcoming: flatLessons.filter(
-        (l) => l.status === 'scheduled' && new Date(l.scheduled_at).getTime() > nowMs
-      ).length,
-      // 'missed' means the class HAPPENED and the teacher blew the report window
-      // — the student attended. It zeroes teacher pay; it does not undo the
-      // class, so it belongs here and not with the cancellations.
-      attended: flatLessons.filter(
-        (l) => l.status === 'completed' || l.status === 'missed'
-      ).length,
-      studentNoShows: flatLessons.filter((l) => l.status === 'student_no_show').length,
-      cancelled: cancellations.length,
-      // A subset of `cancelled`, never of all lessons. A null cancelled_at cannot
-      // be measured against the notice window, so it is NOT counted: "we do not
-      // know when this was cancelled" must never render as "inside 24 hours". A
-      // cancelled_at after the class start yields a negative difference and IS
-      // counted, which is correct — that is zero notice, not more than 24 hours.
-      cancelledUnder24h: cancellations.filter((l) => {
-        if (!l.cancelled_at) return false
-        return (
-          new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() <
-          24 * 60 * 60 * 1000
-        )
-      }).length,
+      upcoming: flatLessons.filter((l) => l.bucket === 'upcoming').length,
+      attended: flatLessons.filter((l) => l.bucket === 'attended').length,
+      studentNoShows: flatLessons.filter((l) => l.bucket === 'student_no_show').length,
+      cancelled: flatLessons.filter((l) => l.bucket === 'cancelled').length,
+      // A subset of `cancelled`, never of all lessons — the sub-flag, not a bucket.
+      cancelledUnder24h: flatLessons.filter((l) => l.cancelledUnder24h).length,
       // These two ledger types and no others. The ledger also carries
       // admin_adjustment, class_booking and reschedule rows (live vocabulary,
       // verified 20 Aug), which are not refunds - widening the test would count

@@ -127,6 +127,25 @@ type Training = {
   created_at: string
 }
 
+/**
+ * The one classification of a class used by both the "At a glance" counts and the
+ * Classes tab status filter, stamped onto every lesson by the SERVER.
+ *
+ * Exported so page.tsx can import the union rather than restate it: the stamps and
+ * the filter must be the same five values, and two hand-kept copies of a union are
+ * exactly how they stop being.
+ *
+ * Mutually exclusive. 'other' is the deliberate catch-all — a past 'scheduled' class
+ * still awaiting its report, a teacher no-show, a reschedule leg, a legacy status.
+ * Those rows have no tile and are reachable only under the "All" pill.
+ */
+export type LessonBucket =
+  | 'upcoming'
+  | 'attended'
+  | 'student_no_show'
+  | 'cancelled'
+  | 'other'
+
 type Lesson = {
   id: string
   scheduled_at: string
@@ -136,6 +155,21 @@ type Lesson = {
   cancelled_by: string | null
   rescheduled_by: string | null
   teacher_name: string
+  /**
+   * SERVER-stamped classification — see LessonBucket. Resolved against the server's
+   * single request-time instant and never recomputed in this component: a clock read
+   * during a client render would desync the SSR markup from the first browser render,
+   * and a second definition of "upcoming" would let a tile and its filtered list
+   * disagree.
+   */
+  bucket: LessonBucket
+  /**
+   * SERVER-stamped sub-flag of `bucket === 'cancelled'`: cancelled with a KNOWN
+   * cancelled_at inside the 24h notice window. False for every other bucket, and false
+   * for a cancellation whose cancelled_at is null — see page.tsx for why an unknown
+   * cancellation time must not read as "inside 24 hours".
+   */
+  cancelledUnder24h: boolean
 }
 
 type HoursLogEntry = {
@@ -431,8 +465,8 @@ function InfoRow({ label, value, adminOnly }: {
  * count, no date arithmetic and no clock read happens in here.
  *
  * A tile with an onClick is a real <button> that switches tabs; a tile without one is
- * a plain div, never a disabled button. "Signed up", "Last sign-in" and "Cancelled
- * <24h" have nowhere to lead, and a dead button invites the click anyway.
+ * a plain div, never a disabled button. "Signed up" and "Last sign-in" have nowhere to
+ * lead, and a dead button invites the click anyway.
  *
  * Numbers render large and text (a date, "Never signed in") one step smaller so it
  * fits a quarter-width tile without wrapping. Both class strings are written out in
@@ -663,6 +697,34 @@ const DEFAULT_CLASSES_STORED_FILTERS: ClassesStoredFilters = {
   from: '',
   to: '',
 }
+
+/**
+ * The Classes tab status filter: 'all', plus one value per class tile in the "At a
+ * glance" panel. Four name a LessonBucket directly; 'cancelled_under_24h' tests the
+ * cancelledUnder24h sub-flag instead, because the notice window is a property OF a
+ * cancellation rather than a sixth bucket.
+ *
+ * Deliberately NOT part of ClassesStoredFilters above — see where the state is
+ * declared for why this one is not persisted.
+ */
+type ClassesStatusFilter =
+  | 'all'
+  | 'upcoming'
+  | 'attended'
+  | 'student_no_show'
+  | 'cancelled'
+  | 'cancelled_under_24h'
+
+// The pill row, in tile order. One list feeds the buttons, so a pill can neither go
+// missing nor outlive the union it filters by.
+const CLASSES_STATUS_OPTIONS: { value: ClassesStatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'attended', label: 'Attended' },
+  { value: 'student_no_show', label: 'Student no-shows' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'cancelled_under_24h', label: 'Cancelled <24h' },
+]
 
 // 'YYYY-MM-DD' or empty. Taken from the admin Classes list, which validates restored day
 // keys by SHAPE rather than accepting any string, and stricter than the typeof-only check
@@ -919,6 +981,18 @@ export default function StudentDetailClient({
   const [classesFrom, setClassesFrom] = useState('')
   const [classesTo, setClassesTo] = useState('')
 
+  // Classes status filter. Declared here beside the date pair, and deliberately NOT
+  // persisted: it is absent from ClassesStoredFilters, from persistedClassesFilters
+  // below, and from parseStoredClassesFilters - none of which this change touches.
+  //
+  // The date range is SHARED across students for the session on purpose (the month-end
+  // workflow is "set a month once, then walk student to student"). A status filter
+  // stored the same way would inherit that sharing, and then clicking the "Cancelled"
+  // tile on one student would silently leave the NEXT student's Classes tab showing
+  // only cancellations - a narrowing nobody asked for on a record they have not opened
+  // yet. It resets to 'all' on every mount, which is what an unfiltered tab means.
+  const [classesStatusFilter, setClassesStatusFilter] = useState<ClassesStatusFilter>('all')
+
   // The record handed to sessionStorage. Rebuilt every render - these two values are
   // its only inputs - and matchDateRangePreset is the same call that decides which
   // quick-range button DateRangeFilter highlights, so what the row shows as active and
@@ -1005,16 +1079,30 @@ export default function StudentDetailClient({
   })
 
   // Derived per render, never held in state - stored, it would drift out of step the
-  // moment either date input changed. Bucketed in adminTz (the DISPLAY zone), not
-  // adminTzRaw: the Date & Time column below renders in adminTz, and the filter must
-  // agree with what the admin can actually see. Both bounds are inclusive, and lexical
-  // comparison is exact on fixed-width 'YYYY-MM-DD' keys.
-  const filteredLessons = (classesFrom || classesTo)
-    ? lessons.filter((l) => {
-        const key = zonedDayKey(l.scheduled_at, adminTz)
-        return (!classesFrom || key >= classesFrom) && (!classesTo || key <= classesTo)
-      })
-    : lessons
+  // moment either input changed. Both predicates apply: status AND date range.
+  //
+  // Status is a pure LOOKUP of the server's stamp. No clock is read, no date
+  // arithmetic is done and no status set is restated here, which is what makes an "At
+  // a glance" tile's number and the row count its click reveals equal by construction:
+  // both sides count the same stamp, one on the server and one here. 'all' short-
+  // circuits so an unfiltered tab tests nothing.
+  //
+  // Dates are bucketed in adminTz (the DISPLAY zone), not adminTzRaw: the Date & Time
+  // column below renders in adminTz, and the filter must agree with what the admin can
+  // actually see. Both bounds are inclusive, and lexical comparison is exact on
+  // fixed-width 'YYYY-MM-DD' keys.
+  const filteredLessons = lessons.filter((l) => {
+    if (classesStatusFilter !== 'all') {
+      const statusMatch =
+        classesStatusFilter === 'cancelled_under_24h'
+          ? l.cancelledUnder24h
+          : l.bucket === classesStatusFilter
+      if (!statusMatch) return false
+    }
+    if (!classesFrom && !classesTo) return true
+    const key = zonedDayKey(l.scheduled_at, adminTz)
+    return (!classesFrom || key >= classesFrom) && (!classesTo || key <= classesTo)
+  })
 
   // Create Training form state — only reachable when hasActiveTraining is false
   const [trainingPackage, setTrainingPackage] = useState('')
@@ -1574,17 +1662,21 @@ export default function StudentDetailClient({
                   }
                   caption="Stamped at sign-in, not on every visit."
                 />
-                {/* The four class tiles switch to the Classes tab and do nothing else.
-                    They deliberately set NO filter state: filtered click-through is a
-                    separate change, and a tile that quietly rewrote the persisted
-                    Classes date range would also change what the NEXT student's tab
-                    shows, because that range is shared across students for the session. */}
-                <GlanceTile label="Upcoming" value={atAGlance.upcoming} onClick={() => setActiveTab('classes')} />
-                <GlanceTile label="Attended" value={atAGlance.attended} onClick={() => setActiveTab('classes')} />
-                <GlanceTile label="Student no-shows" value={atAGlance.studentNoShows} onClick={() => setActiveTab('classes')} />
-                <GlanceTile label="Cancelled" value={atAGlance.cancelled} onClick={() => setActiveTab('classes')} />
-                {/* Not clickable: the Classes tab has no notice-window filter to land on. */}
-                <GlanceTile label="Cancelled <24h" value={atAGlance.cancelledUnder24h} />
+                {/* The five class tiles switch to the Classes tab and set the matching
+                    status pill, so the list that opens holds exactly the rows the
+                    number counted — both sides read the same server-stamped bucket.
+
+                    They set the NON-persisted status filter and NOTHING else. In
+                    particular they still never write the Classes date range: that range
+                    is shared across students for the session (the month-end workflow),
+                    so a tile that rewrote it would also change what the NEXT student's
+                    tab shows. A range left over from that workflow does still narrow the
+                    landed list, which the "Showing X of Y" line above it states. */}
+                <GlanceTile label="Upcoming" value={atAGlance.upcoming} onClick={() => { setClassesStatusFilter('upcoming'); setActiveTab('classes') }} />
+                <GlanceTile label="Attended" value={atAGlance.attended} onClick={() => { setClassesStatusFilter('attended'); setActiveTab('classes') }} />
+                <GlanceTile label="Student no-shows" value={atAGlance.studentNoShows} onClick={() => { setClassesStatusFilter('student_no_show'); setActiveTab('classes') }} />
+                <GlanceTile label="Cancelled" value={atAGlance.cancelled} onClick={() => { setClassesStatusFilter('cancelled'); setActiveTab('classes') }} />
+                <GlanceTile label="Cancelled <24h" value={atAGlance.cancelledUnder24h} onClick={() => { setClassesStatusFilter('cancelled_under_24h'); setActiveTab('classes') }} />
                 <GlanceTile label="Refunds" value={atAGlance.refunds} onClick={() => setActiveTab('hours')} />
               </div>
             </div>
@@ -1890,11 +1982,12 @@ export default function StudentDetailClient({
           {lessonsCapped && (
             <p className="text-sm text-gray-400">Showing the most recent 1000 classes.</p>
           )}
-          {/* Date range filter over the list below. Purely client-side: this
-              student's classes already arrived in the page props, so this narrows what
-              is on screen without a refetch. The range survives navigation for the rest
-              of the session (sessionStorage), because the month-end workflow is one
-              range applied across many students. */}
+          {/* Date range AND status filters over the list below. Purely client-side:
+              this student's classes already arrived in the page props, so both narrow
+              what is on screen without a refetch. The RANGE survives navigation for the
+              rest of the session (sessionStorage), because the month-end workflow is
+              one range applied across many students; the STATUS pill does not, and
+              resets to All on every mount — see where its state is declared. */}
           <div className="card-elevated p-4">
             <div className="flex flex-wrap items-end gap-3">
               <DateRangeFilter
@@ -1903,17 +1996,39 @@ export default function StudentDetailClient({
                 onChange={(f, t) => { setClassesFrom(f); setClassesTo(t) }}
                 tz={adminTzRaw}
               />
-              {(classesFrom || classesTo) && (
+              {(classesFrom || classesTo || classesStatusFilter !== 'all') && (
                 <button
                   type="button"
-                  onClick={() => { setClassesFrom(''); setClassesTo('') }}
+                  onClick={() => { setClassesFrom(''); setClassesTo(''); setClassesStatusFilter('all') }}
                   className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50"
                 >
                   Clear
                 </button>
               )}
             </div>
-            {(classesFrom || classesTo) && (
+            {/* Status pills. Selected state is carried by inline style props and
+                nothing else — Tailwind v4 never sees a dynamically constructed colour
+                class — reusing the toggle styling of the Assigned Teacher(s) picker in
+                the Create Training form above. */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {CLASSES_STATUS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setClassesStatusFilter(opt.value)}
+                  aria-pressed={classesStatusFilter === opt.value}
+                  className="px-3 py-1.5 rounded-full text-sm font-medium border transition-colors"
+                  style={
+                    classesStatusFilter === opt.value
+                      ? { backgroundColor: '#FFF0E0', color: '#FF8303', borderColor: '#FF8303' }
+                      : { backgroundColor: 'white', color: '#4b5563', borderColor: '#E0DFDC' }
+                  }
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {(classesFrom || classesTo || classesStatusFilter !== 'all') && (
               <p className="text-xs text-gray-500 mt-2">
                 Showing {filteredLessons.length} of {lessons.length} classes
               </p>
@@ -1934,7 +2049,8 @@ export default function StudentDetailClient({
                 {/* Two distinct empty states. Collapsing them into one would tell an
                     admin who has filtered to an empty month that this student has never
                     had a class, when their classes are simply outside the range they
-                    chose. */}
+                    chose. The second wording names no single filter, because either the
+                    range, the status pill, or both together can produce it. */}
                 {lessons.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="text-center py-10 text-gray-400">No classes yet.</td>
@@ -1942,7 +2058,7 @@ export default function StudentDetailClient({
                 ) : filteredLessons.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="text-center py-10 text-gray-400">
-                      No classes in the selected date range.
+                      No classes matching the current filters.
                     </td>
                   </tr>
                 ) : (
