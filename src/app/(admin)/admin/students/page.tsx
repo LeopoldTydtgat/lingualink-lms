@@ -80,6 +80,9 @@ export default async function StudentsPage({
       ? Number(activeTrain.total_hours) - Number(activeTrain.hours_consumed)
       : null
 
+    // Package size, so the list can show remaining hours against the total.
+    const totalHours = activeTrain ? Number(activeTrain.total_hours) : null
+
     // Collect assigned teachers from training_teachers join rows
     const teachers: { id: string; full_name: string }[] = []
     if (activeTrain) {
@@ -110,6 +113,7 @@ export default async function StudentsPage({
       email_bounced_at: s.email_bounced_at ?? null,
       email_bounce_reason: s.email_bounce_reason ?? null,
       hours_remaining: hoursRemaining,
+      total_hours: totalHours,
       teachers,
     }
   })

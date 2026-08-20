@@ -22,6 +22,7 @@ type Student = {
   email_bounced_at: string | null
   email_bounce_reason: string | null
   hours_remaining: number | null
+  total_hours: number | null
   teachers: Teacher[]
 }
 
@@ -96,25 +97,64 @@ function StatusBadge({ status }: { status: string | null }) {
   )
 }
 
-function HoursBadge({ hours }: { hours: number | null }) {
+function HoursBadge({ hours, total }: { hours: number | null; total: number | null }) {
   if (hours === null) {
     return <span className="text-gray-400 text-sm">—</span>
   }
 
+  // Integer when whole, one decimal otherwise — shared by both numbers.
+  const fmt = (n: number) => (n % 1 === 0 ? String(n) : n.toFixed(1))
+
   const isLow = hours < LOW_HOURS_THRESHOLD
 
+  // Only a positive, finite package size gives the bar a denominator. Anything
+  // else (null, 0, negative, NaN) renders the remaining line alone.
+  const barTotal =
+    total !== null && Number.isFinite(total) && total > 0 && Number.isFinite(hours)
+      ? total
+      : null
+
+  // Clamped deliberately: hours_consumed can exceed total after an admin
+  // adjustment, and a negative or >100 width would break the track.
+  const pct = barTotal !== null ? Math.max(0, Math.min(100, (hours / barTotal) * 100)) : 0
+
   return (
-    <span
-      className="px-2 py-0.5 rounded-full text-xs font-medium"
-      style={
-        isLow
-          ? { backgroundColor: '#FFEEE6', color: '#FD5602' }
-          : { backgroundColor: '#f3f4f6', color: '#374151' }
-      }
-    >
-      {hours % 1 === 0 ? hours : hours.toFixed(1)}h remaining
-      {isLow && ' ⚠️'}
-    </span>
+    <div style={{ maxWidth: '140px' }}>
+      <div
+        style={{
+          fontSize: '13px',
+          fontWeight: 500,
+          color: isLow ? '#FD5602' : '#374151',
+        }}
+      >
+        {fmt(hours)}h remaining
+      </div>
+      {barTotal !== null && (
+        <>
+          <div
+            style={{
+              height: '6px',
+              borderRadius: '3px',
+              backgroundColor: '#E0DFDC',
+              marginTop: '4px',
+              width: '100%',
+            }}
+          >
+            <div
+              style={{
+                height: '6px',
+                borderRadius: '3px',
+                width: `${pct}%`,
+                backgroundColor: isLow ? '#FD5602' : '#FF8303',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
+            of {fmt(barTotal)}h
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -360,7 +400,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
                   </td>
 
                   <td className="px-4 py-3">
-                    <HoursBadge hours={student.hours_remaining} />
+                    <HoursBadge hours={student.hours_remaining} total={student.total_hours} />
                   </td>
 
                   <td className="px-4 py-3">
