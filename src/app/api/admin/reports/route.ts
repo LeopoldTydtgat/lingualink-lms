@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth/requireAdmin';
+import { localMidnightToUtc } from '@/lib/billing/monthRange';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
@@ -9,6 +10,16 @@ export async function GET(request: NextRequest) {
 
   const user = await requireAdmin();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // requireAdmin() returns the auth User, and profiles.id IS the auth uuid for staff -
+  // the same lookup the admin classes GET does to resolve its date edges.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('timezone')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const adminTz: string | null = profile?.timezone ?? null;
 
   const { searchParams } = new URL(request.url);
 
@@ -21,12 +32,26 @@ export async function GET(request: NextRequest) {
   const limit       = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 100) : 50;
   const status      = searchParams.get('status');
   const teacherId   = searchParams.get('teacher_id');
-  const dateFrom    = searchParams.get('date_from');
-  const dateTo      = searchParams.get('date_to');
+  const dateFrom    = searchParams.get('date_from');   // yyyy-mm-dd calendar day, admin-local
+  const dateTo      = searchParams.get('date_to');     // yyyy-mm-dd calendar day, admin-local (inclusive)
   const classStatus = searchParams.get('class_status');
 
   const from = (page - 1) * limit;
   const to   = from + limit - 1;
+
+  // A malformed date param is IGNORED (no filter applied) and never reaches PostgREST -
+  // the same day-key guard the admin classes GET applies.
+  const isDateKey = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const applyDateFrom = !!dateFrom && isDateKey(dateFrom);
+  const applyDateTo   = !!dateTo   && isDateKey(dateTo);
+
+  // The date filters below select on the EMBEDDED lessons.scheduled_at, and filtering an
+  // embedded column on a PLAIN embed only nulls the embed - the parent report row still
+  // comes back, so the filter would exclude nothing. !inner is what makes the filter
+  // actually drop rows. reports.lesson_id is NOT NULL and admin RLS reads all lessons, so
+  // !inner drops nothing else. Applied only when a date filter is live; with no date
+  // filter the select string stays byte-identical to the plain-embed version.
+  const lessonsEmbed = applyDateFrom || applyDateTo ? 'lessons!inner' : 'lessons';
 
   let query = supabase
     .from('reports')
@@ -42,7 +67,7 @@ export async function GET(request: NextRequest) {
       completed_at,
       deadline_at,
       created_at,
-      lessons (
+      ${lessonsEmbed} (
         id,
         scheduled_at,
         duration_minutes,
@@ -60,8 +85,42 @@ export async function GET(request: NextRequest) {
 
   if (status)    query = query.eq('status', status);
   if (teacherId) query = query.eq('teacher_id', teacherId);
-  if (dateFrom)  query = query.gte('created_at', `${dateFrom}T00:00:00`);
-  if (dateTo)    query = query.lte('created_at', `${dateTo}T23:59:59`);
+
+  // The date filters name calendar DAYS in the admin's own timezone and select on the
+  // CLASS date - the joined lessons.scheduled_at that the list renders in its "Class Date"
+  // column - not reports.created_at, which records when the report row was written. The
+  // previous created_at filter compared offset-less naive timestamps, so it bucketed by
+  // booking time in whatever zone Postgres resolved them to, never by class day.
+  // scheduled_at is a UTC instant, so each edge resolves through localMidnightToUtc - the
+  // same helper the admin classes GET filter uses - into a half-open
+  // [from-midnight, midnight-after-to) instant pair, so the To-day is fully included.
+  // Fail-safe: with no timezone on the profile there is no local day to resolve, so the
+  // bare-string comparison stands unchanged rather than guessing UTC - the same
+  // no-timezone fallback the classes route uses.
+  if (applyDateFrom) {
+    if (adminTz) {
+      const [y, m, d] = dateFrom!.split('-').map(Number);
+      query = query.gte('lessons.scheduled_at', localMidnightToUtc(y, m, d, adminTz));
+    } else {
+      query = query.gte('lessons.scheduled_at', dateFrom!);
+    }
+  }
+
+  if (applyDateTo) {
+    if (adminTz) {
+      const [y, m, d] = dateTo!.split('-').map(Number);
+      // Next calendar day via the Date constructor's own month/year rollover - the same
+      // approach getDayRangeInTz uses to find its exclusive end edge.
+      const next = new Date(Date.UTC(y, m - 1, d + 1));
+      query = query.lt(
+        'lessons.scheduled_at',
+        localMidnightToUtc(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), adminTz)
+      );
+    } else {
+      query = query.lte('lessons.scheduled_at', dateTo!);
+    }
+  }
+
   if (classStatus) {
     if (classStatus === 'taken')                query = query.eq('did_class_happen', true);
     else if (classStatus === 'student_no_show') query = query.eq('no_show_type', 'student');
