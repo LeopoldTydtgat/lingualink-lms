@@ -34,11 +34,15 @@ export default async function TeachersPage() {
     console.error('Error fetching teachers:', error)
   }
 
+  // A failed read must not render as an empty list - the client shows an error
+  // state instead of "No teachers found."
+  const loadError = Boolean(error)
+
   // Flatten the nested lessons count that Supabase returns as an array
   const teachersWithCount = (teachers || []).map((t) => ({
     ...t,
     lesson_count: Array.isArray(t.lessons) ? t.lessons[0]?.count ?? 0 : 0,
   }))
 
-  return <TeachersListClient teachers={teachersWithCount} />
+  return <TeachersListClient teachers={teachersWithCount} loadError={loadError} />
 }

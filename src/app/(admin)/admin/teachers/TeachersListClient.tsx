@@ -22,6 +22,9 @@ type Teacher = {
 
 type Props = {
   teachers: Teacher[]
+  // True when the server-side read failed. An empty table would read as
+  // "no teachers", so the list renders an error state instead.
+  loadError?: boolean
 }
 
 const STATUS_OPTIONS = ['All', 'current', 'former', 'on_hold']
@@ -58,7 +61,7 @@ function StatusBadge({ status }: { status: string | null }) {
   )
 }
 
-export default function TeachersListClient({ teachers }: Props) {
+export default function TeachersListClient({ teachers, loadError = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
@@ -83,9 +86,11 @@ export default function TeachersListClient({ teachers }: Props) {
   // The header count reports the VISIBLE rows, not the unfiltered fetch, and
   // names the archived share only when archived rows are actually on screen.
   const archivedVisible = filtered.filter((t) => t.status === 'former').length
-  const countLabel =
-    `${filtered.length} teacher${filtered.length !== 1 ? 's' : ''}` +
-    (archivedVisible > 0 ? ` \u00B7 ${archivedVisible} archived` : '')
+  // A failed read means the number is unknown, not zero.
+  const countLabel = loadError
+    ? 'Teachers unavailable'
+    : `${filtered.length} teacher${filtered.length !== 1 ? 's' : ''}` +
+      (archivedVisible > 0 ? ` \u00B7 ${archivedVisible} archived` : '')
 
   return (
     <div className="p-6">
@@ -158,7 +163,23 @@ export default function TeachersListClient({ teachers }: Props) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loadError ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  style={{
+                    padding: '32px',
+                    textAlign: 'center',
+                    borderLeft: '3px solid #FD5602',
+                    backgroundColor: '#FFEEE6',
+                    color: '#FD5602',
+                    fontSize: '14px',
+                  }}
+                >
+                  Couldn&apos;t load teachers. This is not an empty result - try refreshing.
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-gray-400">
                   No teachers found.
