@@ -30,6 +30,59 @@ export type AdminConversation = {
   messages: AdminMessage[]
 }
 
+// ─── "At a glance" types (exported so page.tsx can import) ───────────────────
+
+/**
+ * When this account last authenticated, as three distinct states. 'never' and
+ * 'unavailable' are deliberately NOT collapsed: 'never' is a fact about an account
+ * that exists and has never been signed in to, while 'unavailable' means the lookup
+ * could not run at all (the auth read failed or threw). Rendering the second as the
+ * first would state something the page cannot prove.
+ *
+ * Declared here rather than imported from the admin STUDENT detail client, which
+ * carries an identical union: those are two separate route folders, and a
+ * cross-page import would tie this page's types to the other page's refactors.
+ */
+export type TeacherAtAGlanceLastSignIn =
+  | { state: 'known'; at: string }
+  | { state: 'never' }
+  | { state: 'unavailable' }
+
+/**
+ * ADMIN-ONLY summary for the Overview tab. Every field is computed on the SERVER at
+ * render — this component renders those values and never recounts, re-derives or
+ * re-times one, which is what keeps the SSR markup and the first browser render
+ * identical.
+ *
+ * The three counts each come from their own `count: 'exact', head: true` query and
+ * NOT from the `lessons` prop: that list is capped at 50 rows, so anything tallied
+ * off it would freeze at 50 the moment a teacher passes 50 classes.
+ */
+export type TeacherAtAGlance = {
+  /** profiles.created_at. */
+  signedUpAt: string | null
+  lastSignIn: TeacherAtAGlanceLastSignIn
+  /**
+   * Lessons with status 'completed' or 'missed'. 'missed' means the class happened
+   * and the report deadline was blown — it zeroes teacher PAY, it does not undo the
+   * teaching, so it counts here. null means the count query FAILED: the tile renders
+   * '—' and never 0, because 0 would claim a clean record nobody read.
+   */
+  classesTaught: number | null
+  /** null = count query failed; renders '—', never 0. */
+  studentNoShows: number | null
+  /** null = count query failed; renders '—', never 0. */
+  teacherNoShows: number | null
+  /**
+   * Billable minutes / 60 for the current month in the TEACHER's timezone, summed
+   * through getBillability exactly as recomputeInvoiceAmountsForTeacher sums money
+   * over the same rows. null when the teacher has no timezone (billing months are
+   * teacher-local, so there is nothing honest to show) or the query failed — the
+   * tile renders "Unavailable".
+   */
+  hoursThisMonth: number | null
+}
+
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
 const ROLE_LABEL: Record<string, string> = {
@@ -94,6 +147,7 @@ type Props = {
   conversations: AdminConversation[]
   purgeBlockedBy: string[]
   adminTz: string
+  teacherAtAGlance: TeacherAtAGlance
 }
 
 type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
@@ -174,6 +228,70 @@ function InfoRow({ label, value, adminOnly }: {
       </span>
       <span className="text-sm text-gray-800">{value || '—'}</span>
     </div>
+  )
+}
+
+/**
+ * One "At a glance" tile. Renders a value the SERVER computed and nothing else — no
+ * count, no date arithmetic and no clock read happens in here.
+ *
+ * A tile with an onClick is a real <button> that switches tabs; a tile without one is
+ * a plain div, never a disabled button. "Signed up" and "Last sign-in" have nowhere to
+ * lead, and a dead button invites the click anyway.
+ *
+ * Numbers render large and text (a date, "Never signed in") one step smaller so it
+ * fits a quarter-width tile without wrapping. Both class strings are written out in
+ * full — Tailwind v4 never sees a constructed class name.
+ *
+ * DELIBERATE COPY of the identical component in the admin STUDENT detail client, not
+ * an import: the admin pages currently share no component directory, and consolidating
+ * the two is tracked with the avatar-component item. Kept byte-identical so that
+ * consolidation stays a straight de-dup. The onClick variant is therefore carried over
+ * but is UNUSED on this page — all six tiles here are plain. The Classes tab on this
+ * page has no status filter to land on, and a click that goes nowhere is worse than a
+ * tile that never offered one.
+ */
+function GlanceTile({
+  label,
+  value,
+  caption,
+  onClick,
+}: {
+  label: string
+  value: string | number
+  caption?: string
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <p className="text-xs font-medium" style={{ color: '#4b5563' }}>{label}</p>
+      <p
+        className={
+          typeof value === 'number'
+            ? 'text-2xl font-semibold text-gray-900 mt-1'
+            : 'text-base font-semibold text-gray-900 mt-1'
+        }
+      >
+        {value}
+      </p>
+      {caption && (
+        <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
+      )}
+    </>
+  )
+
+  if (!onClick) {
+    return <div className="rounded-xl border border-gray-100 bg-white p-4">{body}</div>
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-xl border border-gray-100 bg-white p-4 text-left cursor-pointer transition-colors hover:bg-gray-50"
+    >
+      {body}
+    </button>
   )
 }
 
@@ -366,7 +484,7 @@ function MessageThread({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy, adminTz }: Props) {
+export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy, adminTz, teacherAtAGlance }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
@@ -619,147 +737,212 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Overview tab */}
       {activeTab === 'overview' && (
-        <div className="grid grid-cols-3 gap-6">
-          {/* Personal info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Personal Information</h2>
-            <InfoRow label="Full Name" value={teacher.full_name as string} />
-            <InfoRow label="Email" value={teacher.email as string} />
-            <InfoRow label="Phone" value={teacher.phone as string} />
-            <InfoRow label="Nationality" value={teacher.nationality as string} />
-            <InfoRow label="Gender" value={teacher.gender as string} />
-            <InfoRow label="Timezone" value={teacher.timezone as string} />
-            <InfoRow label="Street Address" value={teacher.street_address as string} />
-            <InfoRow label="Area Code" value={teacher.area_code as string} />
-            <InfoRow label="City" value={teacher.city as string} />
+        <div className="space-y-6">
+          {/* At a glance — every number and both dates were computed on the SERVER
+              at render. Nothing below reads a clock, recounts anything or re-derives a
+              total, which is what keeps the SSR markup and the first browser render
+              identical.
+
+              Rendered full width ABOVE the existing three-column grid; that grid, and
+              every card in it, is untouched. */}
+          <div className="card-elevated p-5">
+            <h2 className="font-semibold text-gray-800 mb-4">At a glance</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <GlanceTile
+                label="Signed up"
+                value={
+                  teacherAtAGlance.signedUpAt
+                    ? new Date(teacherAtAGlance.signedUpAt).toLocaleString('en-GB', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                        timeZone: adminTz,
+                      })
+                    : '—'
+                }
+              />
+              <GlanceTile
+                label="Last sign-in"
+                value={
+                  teacherAtAGlance.lastSignIn.state === 'known'
+                    ? new Date(teacherAtAGlance.lastSignIn.at).toLocaleString('en-GB', {
+                        day: '2-digit', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                        timeZone: adminTz,
+                      })
+                    : teacherAtAGlance.lastSignIn.state === 'never'
+                    ? 'Never signed in'
+                    : 'Unavailable'
+                }
+                caption="Stamped at sign-in, not on every visit."
+              />
+              {/* Each count came from its OWN head-count query, so none of the three
+                  inherits the 50-row cap on the list behind the Classes tab. null means
+                  that query FAILED and the tile shows '—' — never 0, which would report a
+                  clean record the page never actually read. */}
+              <GlanceTile
+                label="Classes taught"
+                value={teacherAtAGlance.classesTaught ?? '—'}
+                caption="Includes classes with a blown report deadline."
+              />
+              <GlanceTile label="Student no-shows" value={teacherAtAGlance.studentNoShows ?? '—'} />
+              <GlanceTile label="Teacher no-shows" value={teacherAtAGlance.teacherNoShows ?? '—'} />
+              {/* Summed on the server through getBillability over the teacher-local
+                  month. Rendered in the same shape as the student panel's hours strings,
+                  so it lands on GlanceTile's string branch. */}
+              <GlanceTile
+                label="Hours this month"
+                value={
+                  teacherAtAGlance.hoursThisMonth !== null
+                    ? `${teacherAtAGlance.hoursThisMonth % 1 === 0 ? teacherAtAGlance.hoursThisMonth : teacherAtAGlance.hoursThisMonth.toFixed(1)}h`
+                    : 'Unavailable'
+                }
+                caption="Billable, month to date."
+              />
+            </div>
           </div>
 
-          {/* Professional info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Professional</h2>
-            <InfoRow label="Teaching Languages"
-              value={(teacher.teaching_languages as string[] | null)?.join(', ')} />
-            <InfoRow label="Native Languages"
-              value={(teacher.native_languages as string[] | null)?.join(', ')} />
-            <InfoRow label="Specialties" value={teacher.specialties as string} />
-            <InfoRow label="Contract Start" value={teacher.contract_start as string} />
-            <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
-            <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
-            <InfoRow label="Hourly Rate"
-              value={teacher.hourly_rate != null ? `${currencySymbol}${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}` : null}
-              adminOnly />
-            <InfoRow label="VAT Required"
-              value={teacher.vat_required ? 'Yes' : 'No'}
-              adminOnly />
-          </div>
+          <div className="grid grid-cols-3 gap-6">
+            {/* Personal info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Personal Information</h2>
+              <InfoRow label="Full Name" value={teacher.full_name as string} />
+              <InfoRow label="Email" value={teacher.email as string} />
+              <InfoRow label="Phone" value={teacher.phone as string} />
+              <InfoRow label="Nationality" value={teacher.nationality as string} />
+              <InfoRow label="Gender" value={teacher.gender as string} />
+              <InfoRow label="Timezone" value={teacher.timezone as string} />
+              <InfoRow label="Street Address" value={teacher.street_address as string} />
+              <InfoRow label="Area Code" value={teacher.area_code as string} />
+              <InfoRow label="City" value={teacher.city as string} />
+            </div>
 
-          {/* Payment info */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Payment Details</h2>
-            <InfoRow label="Preferred Payment" value={teacher.preferred_payment_type === "bank" ? "Bank Transfer" : teacher.preferred_payment_type === "paypal" ? "PayPal" : teacher.preferred_payment_type as string} />
-            <InfoRow label="PayPal Email" value={teacher.paypal_email as string} />
-            <InfoRow label="IBAN" value={teacher.iban as string} />
-            <InfoRow label="SWIFT / BIC" value={teacher.bic as string} />
-            <InfoRow label="Tax Number" value={teacher.tax_number as string} />
-          </div>
+            {/* Professional info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Professional</h2>
+              <InfoRow label="Teaching Languages"
+                value={(teacher.teaching_languages as string[] | null)?.join(', ')} />
+              <InfoRow label="Native Languages"
+                value={(teacher.native_languages as string[] | null)?.join(', ')} />
+              <InfoRow label="Specialties" value={teacher.specialties as string} />
+              <InfoRow label="Contract Start" value={teacher.contract_start as string} />
+              <InfoRow label="Orientation Date" value={teacher.orientation_date as string} />
+              <InfoRow label="Observed Lesson Date" value={teacher.observed_lesson_date as string} />
+              <InfoRow label="Hourly Rate"
+                value={teacher.hourly_rate != null ? `${currencySymbol}${parseFloat(Number(teacher.hourly_rate).toFixed(2)).toString()}` : null}
+                adminOnly />
+              <InfoRow label="VAT Required"
+                value={teacher.vat_required ? 'Yes' : 'No'}
+                adminOnly />
+            </div>
 
-          {/* Follow-up */}
-          <div className="card-elevated p-5 space-y-4">
-            <h2 className="font-semibold text-gray-800">Follow-up</h2>
-            <InfoRow label="Follow-up Date"
-              value={teacher.follow_up_date as string} adminOnly />
-            <InfoRow label="Follow-up Reason"
-              value={teacher.follow_up_reason as string} adminOnly />
-          </div>
+            {/* Payment info */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Payment Details</h2>
+              <InfoRow label="Preferred Payment" value={teacher.preferred_payment_type === "bank" ? "Bank Transfer" : teacher.preferred_payment_type === "paypal" ? "PayPal" : teacher.preferred_payment_type as string} />
+              <InfoRow label="PayPal Email" value={teacher.paypal_email as string} />
+              <InfoRow label="IBAN" value={teacher.iban as string} />
+              <InfoRow label="SWIFT / BIC" value={teacher.bic as string} />
+              <InfoRow label="Tax Number" value={teacher.tax_number as string} />
+            </div>
 
-          {/* Admin notes — full width, amber background */}
-          <div className="col-span-3 rounded-xl border p-5 space-y-2"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔒 Admin Notes — Not visible to teacher
-            </h2>
-            <p className="text-sm" style={{ color: '#78350f' }}>
-              {(teacher.admin_notes as string) || 'No admin notes.'}
-            </p>
-          </div>
+            {/* Follow-up */}
+            <div className="card-elevated p-5 space-y-4">
+              <h2 className="font-semibold text-gray-800">Follow-up</h2>
+              <InfoRow label="Follow-up Date"
+                value={teacher.follow_up_date as string} adminOnly />
+              <InfoRow label="Follow-up Reason"
+                value={teacher.follow_up_reason as string} adminOnly />
+            </div>
 
-          {/* Password override — admin only */}
-          <div className="col-span-3 rounded-xl border p-5 space-y-3"
-            style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
-            <h2 className="font-semibold" style={{ color: '#92400e' }}>
-              🔑 Set New Password — Admin only
-            </h2>
-            <p className="text-xs" style={{ color: '#78350f' }}>
-              Overrides the teacher&apos;s current password immediately. The teacher is not notified.
-            </p>
+            {/* Admin notes — full width, amber background */}
+            <div className="col-span-3 rounded-xl border p-5 space-y-2"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔒 Admin Notes — Not visible to teacher
+              </h2>
+              <p className="text-sm" style={{ color: '#78350f' }}>
+                {(teacher.admin_notes as string) || 'No admin notes.'}
+              </p>
+            </div>
 
-            {passwordError && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
-                {passwordError}
-              </div>
-            )}
-            {passwordSuccess && (
-              <div className="text-sm rounded-lg px-4 py-2"
-                style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
-                Password updated successfully.
-              </div>
-            )}
+            {/* Password override — admin only */}
+            <div className="col-span-3 rounded-xl border p-5 space-y-3"
+              style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a' }}>
+              <h2 className="font-semibold" style={{ color: '#92400e' }}>
+                🔑 Set New Password — Admin only
+              </h2>
+              <p className="text-xs" style={{ color: '#78350f' }}>
+                Overrides the teacher&apos;s current password immediately. The teacher is not notified.
+              </p>
 
-            <div className="flex gap-3 items-end">
-              <div className="flex-1">
-                <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
-                  New Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={newPassword}
-                    onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
-                    placeholder="Min. 8 characters"
-                    className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
-                    style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+              {passwordError && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                  {passwordError}
                 </div>
+              )}
+              {passwordSuccess && (
+                <div className="text-sm rounded-lg px-4 py-2"
+                  style={{ backgroundColor: '#f0fdf4', color: '#166534' }}>
+                  Password updated successfully.
+                </div>
+              )}
+
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium mb-1" style={{ color: '#92400e' }}>
+                    New Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => { setNewPassword(e.target.value); setPasswordSuccess(false); setPasswordError(null) }}
+                      placeholder="Min. 8 characters"
+                      className="w-full border rounded-lg px-3 py-2 pr-10 text-sm focus:outline-none"
+                      style={{ borderColor: '#fde68a', backgroundColor: 'white' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                <button
+                  onClick={handleSetPassword}
+                  disabled={passwordSaving || !newPassword}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
+                  style={{ backgroundColor: '#92400e' }}
+                >
+                  {passwordSaving ? 'Saving...' : 'Set Password'}
+                </button>
               </div>
-              <button
-                onClick={handleSetPassword}
-                disabled={passwordSaving || !newPassword}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 flex-shrink-0"
-                style={{ backgroundColor: '#92400e' }}
-              >
-                {passwordSaving ? 'Saving...' : 'Set Password'}
-              </button>
             </div>
-          </div>
 
-          {/* Bio */}
-          {!!(teacher.bio as string) && (
-            <div className="col-span-3 card-elevated p-5 space-y-2">
-              <h2 className="font-semibold text-gray-800">Bio</h2>
-              <p className="text-sm text-gray-600">{teacher.bio as string}</p>
+            {/* Bio */}
+            {!!(teacher.bio as string) && (
+              <div className="col-span-3 card-elevated p-5 space-y-2">
+                <h2 className="font-semibold text-gray-800">Bio</h2>
+                <p className="text-sm text-gray-600">{teacher.bio as string}</p>
+              </div>
+            )}
+
+            {/* Open tasks linked to this teacher. TasksMini renders its own header,
+                so this wrapper supplies only the full-width card the other overview
+                sections use. linkedId is profiles.id, which is what tasks.linked_entity_id
+                holds for linked_entity_type 'teacher' (the TaskForm teacher dropdown is
+                fed by /api/admin/teachers?minimal=true, i.e. profiles rows). */}
+            <div className="col-span-3 card-elevated p-5">
+              <TasksMini
+                linkedType="teacher"
+                linkedId={id}
+                linkedName={fullName}
+                adminTz={adminTz}
+              />
             </div>
-          )}
-
-          {/* Open tasks linked to this teacher. TasksMini renders its own header,
-              so this wrapper supplies only the full-width card the other overview
-              sections use. linkedId is profiles.id, which is what tasks.linked_entity_id
-              holds for linked_entity_type 'teacher' (the TaskForm teacher dropdown is
-              fed by /api/admin/teachers?minimal=true, i.e. profiles rows). */}
-          <div className="col-span-3 card-elevated p-5">
-            <TasksMini
-              linkedType="teacher"
-              linkedId={id}
-              linkedName={fullName}
-              adminTz={adminTz}
-            />
           </div>
         </div>
       )}
