@@ -56,8 +56,14 @@ export default async function AdminReportsPage({
   const adminTimezone = adminProfile?.timezone ?? 'UTC';
   const adminTzRaw: string | null = adminProfile?.timezone ?? null;
 
-  // Query 1: reports + lessons + teacher
-  const { data: reportsData } = await supabase
+  // Query 1: reports + lessons + teacher.
+  //
+  // MIRRORS the GET route's page-1 query for the SEEDED filter state
+  // (src/app/api/admin/reports/route.ts): same select, same created_at DESC order, same 50
+  // rows, same exact count, and the same .eq('status', ...) when ?filter= named one. That
+  // match is what lets the client skip its redundant mount fetch - the rows painted here
+  // are the rows that fetch would have returned.
+  let query = supabase
     .from('reports')
     .select(`
       id,
@@ -83,9 +89,18 @@ export default async function AdminReportsPage({
         full_name,
         photo_url
       )
-    `)
+    `, { count: 'exact' })
     .order('created_at', { ascending: false })
     .limit(50);
+
+  // Applied BEFORE the await, on the server. Seeding this list unfiltered and leaving the
+  // client's mount fetch to narrow it is what painted the wrong rows for one frame on a
+  // /admin/reports?filter=pending deep link.
+  if (initialStatusFilter) query = query.eq('status', initialStatusFilter);
+
+  const { data: reportsData, error: reportsError, count: reportsCount } = await query;
+
+  if (reportsError) console.error('Reports seed query error:', reportsError);
 
   // Collect student_ids
   const studentIds = [
@@ -146,6 +161,23 @@ export default async function AdminReportsPage({
   const initialFlaggedCount = flaggedTotal
     ?? (reportsData ?? []).filter((r) => r.status === 'flagged').length;
 
+  // null means "seed unusable - the client must run its mount fetch". This is the single
+  // flag that disables the client-side skip, so a failed seed still self-heals through the
+  // existing fetch path instead of rendering an empty list as truth. Computed HERE, below
+  // the counts, because the second arm reads their error state.
+  //
+  // That second arm protects the two fallbacks directly above. They are only honest over an
+  // UNFILTERED seed: with ?filter=flagged the seed holds flagged rows alone, so the pending
+  // fallback derives 0 from rows that could never contain a pending report - and with the
+  // mount fetch skipped, nothing would ever correct it. So a filtered seed plus a failed
+  // global count forces that fetch, and the route's own counts repair the badges. An
+  // unfiltered seed keeps the existing fallback exactly, and both counts succeeding leaves
+  // every load unchanged - the fallbacks are unused and the skip stands.
+  const initialTotal: number | null =
+    reportsError ? null
+    : initialStatusFilter && (pendingCountRes.error || flaggedCountRes.error) ? null
+    : (reportsCount ?? 0);
+
   const initialReports = (reportsData ?? []).map((r) => {
     const lesson  = Array.isArray(r.lessons)  ? r.lessons[0]  : r.lessons;
     const teacher = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
@@ -192,6 +224,7 @@ export default async function AdminReportsPage({
       adminTzRaw={adminTzRaw}
       initialPendingCount={initialPendingCount}
       initialFlaggedCount={initialFlaggedCount}
+      initialTotal={initialTotal}
       // Presence of a URL param, not the state it produced: an unrecognised ?filter=
       // value still yields an empty initialStatusFilter, and that empty result IS the
       // URL's answer - the client must honour it rather than restoring a remembered

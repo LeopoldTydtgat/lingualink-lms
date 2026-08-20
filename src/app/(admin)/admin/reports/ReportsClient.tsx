@@ -66,6 +66,10 @@ interface Props {
   // never a placeholder 0 (the server falls back to a derived number on a failed count).
   initialPendingCount: number;
   initialFlaggedCount: number;
+  // The server's exact row count for the SEEDED filter state - the same number the GET
+  // route's page-1 response reports for those filters. null when the seed query FAILED,
+  // which forces the mount fetch rather than trusting the rows that query produced.
+  initialTotal: number | null;
   // True when the URL carried ?filter= or ?reopen=. The URL then wins outright: no
   // restore from sessionStorage, and storage is overwritten from what the URL produced,
   // so a deep link is never quietly widened or narrowed by a remembered filter.
@@ -222,17 +226,44 @@ function isDayKeyOrEmpty(value: string): boolean {
   return value === '' || DAY_KEY_RE.test(value);
 }
 
+// The five list-filter params, built in ONE place. fetchReports sends them, and the mount
+// effect compares them against what the server already rendered to decide whether that
+// fetch is worth making at all. Those two must never disagree about what a given filter
+// state asks for - which is exactly what a second copy of this if-chain would eventually do,
+// the first time a filter is added to one of them and not the other.
+//
+// Names and order are the GET route's own (status, teacher_id, class_status, date_from,
+// date_to; each set only when non-empty). `page` is deliberately NOT here: it is appended
+// by the fetch and is not part of what identifies a view.
+function buildFilterParams(status: string, teacher: string, classStatus: string, from: string, to: string): string {
+  const params = new URLSearchParams();
+  if (status)      params.set('status',       status);
+  if (teacher)     params.set('teacher_id',   teacher);
+  if (classStatus) params.set('class_status', classStatus);
+  if (from)        params.set('date_from',    from);
+  if (to)          params.set('date_to',      to);
+  return params.toString();
+}
+
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, adminTzRaw, hasUrlFilters, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; adminTzRaw: string | null; hasUrlFilters: boolean; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, adminTzRaw, hasUrlFilters, initialTotal, seedFreshRef, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; adminTzRaw: string | null; hasUrlFilters: boolean; initialTotal: number | null; seedFreshRef: React.MutableRefObject<boolean>; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   // Separate from `loading`: a Load More fetch must leave the already-rendered table on
   // screen, so it never touches the full-list spinner.
   const [loadingMore,   setLoadingMore]   = useState(false);
-  // Server-reported row count for the CURRENT filters, from the last successful fetch.
-  // null means "not known yet", which keeps the Load More button off screen.
-  const [total,         setTotal]         = useState<number | null>(null);
+  // Separate from `loading` in the other direction: true while a page-1 fetch asking for
+  // the view ALREADY on screen is in flight (a retry of the same filters, the post-reopen
+  // reload, a return to this tab). The table stays rendered throughout - those rows are
+  // still the right rows, merely about to be replaced by fresher copies of themselves - so
+  // this flag exists to stop Load More racing that replacement, not to gate the render.
+  const [refreshing,    setRefreshing]    = useState(false);
+  // Server-reported row count for the CURRENT filters. Seeded from the server render's own
+  // exact count for the seeded filter state, so Load More is correct on the very first
+  // frame instead of appearing only once the mount fetch lands. null means "not known yet"
+  // (a failed seed, or a failed fetch), which keeps the Load More button off screen.
+  const [total,         setTotal]         = useState<number | null>(initialTotal);
   const [listError,     setListError]     = useState('');
   // Seeded from the ?reopen= deep link so the confirmation modal is already open on
   // mount; from there it is the same state the in-row Reopen button drives.
@@ -431,28 +462,51 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   // any page-1 fetch (filter change, retry, post-reopen refresh) resets it to 1.
   const loadedPageRef = useRef(1);
 
+  // What the SERVER seed asked for: the ?filter= status and nothing else - the seed query
+  // applies no teacher, class-type or date filter, so those four are '' by construction.
+  const seededParams = buildFilterParams(initialStatusFilter, '', '', '', '');
+
+  // The filter-param string that produced the rows CURRENTLY on screen, seeded from the
+  // server render when that seed is usable. null means "unknown" - the seed query failed,
+  // or the last fetch did - and forces the honest spinner on the next page-1 fetch rather
+  // than a silent refresh over rows nothing can vouch for.
+  const displayedParamsRef = useRef<string | null>(initialTotal !== null ? seededParams : null);
+
   // Returns true only when the list was actually refreshed from the server.
   // page 1 REPLACES the list; page > 1 APPENDS to it (the Load More button).
   const fetchReports = useCallback(async (page = 1) => {
     // Claim the newest request; every post-await write below re-checks this id.
     const requestId = ++reportsRequestIdRef.current;
-    if (page === 1) setLoading(true);
-    else            setLoadingMore(true);
+    // Through the shared builder, so this request and the mount effect's skip test can
+    // never describe the same filter state differently.
+    const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo);
+    // Whether this fetch is about to show the SAME view that is already rendered.
+    // Meaningless for page > 1, which appends to that view and touches neither flag.
+    const isSameView = filterParams === displayedParamsRef.current;
+    if (page === 1) {
+      // A same-view refresh keeps the table up; anything else is about to show DIFFERENT
+      // rows, and the spinner is the honest signal that what is on screen no longer answers
+      // the filters above it. Both flags are set unconditionally, so a superseded request's
+      // leftovers cannot survive into this one.
+      setLoading(!isSameView);
+      setRefreshing(isSameView);
+    } else {
+      setLoadingMore(true);
+    }
     setListError('');
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    if (statusFilter)      params.set('status',       statusFilter);
-    if (teacherFilter)     params.set('teacher_id',   teacherFilter);
-    if (classStatusFilter) params.set('class_status', classStatusFilter);
-    if (dateFrom)          params.set('date_from',    dateFrom);
-    if (dateTo)            params.set('date_to',      dateTo);
+    // page FIRST, then the filter portion - the exact param order this request has always
+    // used, so the URL stays byte-identical to the pre-refactor one for every filter state.
+    const queryString = filterParams ? `page=${page}&${filterParams}` : `page=${page}`;
     try {
-      const res = await fetch(`/api/admin/reports?${params.toString()}`);
+      const res = await fetch(`/api/admin/reports?${queryString}`);
       if (requestId !== reportsRequestIdRef.current) return false;
       if (!res.ok) {
         const message = await errorText(res, 'Could not load reports');
         if (requestId !== reportsRequestIdRef.current) return false;
         setListError(message);
+        // Whatever is behind the error banner can no longer be vouched for against the
+        // filters above, so the retry shows the spinner instead of a silent refresh.
+        displayedParamsRef.current = null;
         return false;
       }
       const data = await res.json();
@@ -468,6 +522,10 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       }
       setTotal(typeof data.total === 'number' ? data.total : null);
       loadedPageRef.current = page;
+      // The rows now on screen came from these filter params. Recorded behind the same
+      // staleness guard as the rows themselves, so a superseded response can never relabel
+      // a list it did not produce.
+      displayedParamsRef.current = filterParams;
       // Behind the staleness guard above, so a superseded response can never overwrite
       // fresher counts. Nulls are ignored by the parent - last known good number survives.
       onTotalsChangeRef.current(data.pendingTotal ?? null, data.flaggedTotal ?? null);
@@ -475,11 +533,14 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     } catch {
       if (requestId !== reportsRequestIdRef.current) return false;
       setListError('Network error - could not load reports.');
+      displayedParamsRef.current = null;
       return false;
     } finally {
-      // A superseded request must never turn the spinner off - the newest request
-      // owns the loading state until its own response lands.
-      if (page === 1 && requestId === reportsRequestIdRef.current) setLoading(false);
+      // A superseded request must never turn either page-1 flag off - the newest request
+      // set its own pair on the way in and owns them until its own response lands. Both are
+      // cleared together: whichever of the two this request turned on is the one it has to
+      // turn off, and it is the only request allowed to.
+      if (page === 1 && requestId === reportsRequestIdRef.current) { setLoading(false); setRefreshing(false); }
       // loadingMore is cleared UNCONDITIONALLY, staleness token or not: a load-more whose
       // writes the token refused (a filter changed mid-flight) would otherwise leave the
       // button stuck disabled forever. Safe because only one load-more can ever be in
@@ -489,7 +550,33 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     }
   }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
 
-  useEffect(() => { fetchReports(); }, [fetchReports]);
+  // The mount fetch, with ONE skip: the first run after a full page load, when the
+  // server-rendered rows already ARE what this fetch would return.
+  //
+  // (a) This effect's FIRST run always sees the server-seeded filter state. The persistence
+  //     restore runs from an earlier effect in the same mount pass, but its setState lands a
+  //     render later - so statusFilter is still initialStatusFilter here and the other four
+  //     are still ''. That is what makes the comparison against seededParams meaningful.
+  // (b) A restore that CHANGES a filter re-memoises fetchReports and re-runs this effect.
+  //     seedFreshRef is already false by then, so that run fetches - and with the honest
+  //     spinner, because displayedParamsRef still holds the seeded params and cannot match.
+  // (c) A restore that restores nothing (or one skipped outright by hasUrlFilters) changes
+  //     no state, so React schedules no re-render and there is no second run - and the
+  //     seeded rows ARE the correct list, so there is nothing to fetch.
+  // (d) initialTotal === null means the seed query FAILED: the empty list on screen means
+  //     "error", not "no reports", so the fetch must run and heal it.
+  // (e) A tab switch unmounts ReportsList outright; returning re-mounts it with seedFreshRef
+  //     already false (the ref lives in the parent, which does not unmount), so tab returns
+  //     still refetch for freshness - but as a same-view refresh, which keeps the table on
+  //     screen instead of blanking it to the spinner.
+  useEffect(() => {
+    if (seedFreshRef.current) {
+      seedFreshRef.current = false;
+      const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo);
+      if (initialTotal !== null && filterParams === seededParams) return;
+    }
+    fetchReports();
+  }, [fetchReports, initialTotal, seededParams, seedFreshRef, statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
 
   async function handleReopen(reportId: string) {
     setReopenError('');
@@ -639,7 +726,10 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
             <div className="mt-4 text-center">
               <button
                 onClick={() => { fetchReports(loadedPageRef.current + 1); }}
-                disabled={loadingMore}
+                // refreshing too: a silent same-view refresh is in flight, and letting Load
+                // More race it would append fresh page-2 rows onto a page-1 set the request
+                // token is about to discard.
+                disabled={loadingMore || refreshing}
                 className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60"
               >
                 {loadingMore ? 'Loading...' : `Load more (${total - reports.length} remaining)`}
@@ -795,8 +885,14 @@ function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, adminTzRaw, initialPendingCount, initialFlaggedCount, hasUrlFilters = false }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, adminTzRaw, initialPendingCount, initialFlaggedCount, initialTotal, hasUrlFilters = false }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
+
+  // Owned by the PARENT deliberately. ReportsList unmounts on every tab switch, so a ref
+  // declared inside it would read true again on every return to All Reports and skip a
+  // fetch the seeded rows can no longer answer for. The skip must apply only to the FIRST
+  // mount after a full page load; tab returns must still refetch so the list stays fresh.
+  const seedFreshRef = useRef(true);
 
   // Seeded from the server's global counts, then kept in step with each list fetch. These
   // are the outstanding-work totals, not a count of the rows currently on screen.
@@ -972,7 +1068,7 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} adminTzRaw={adminTzRaw} hasUrlFilters={hasUrlFilters} onTotalsChange={handleTotalsChange} />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} adminTzRaw={adminTzRaw} hasUrlFilters={hasUrlFilters} initialTotal={initialTotal} seedFreshRef={seedFreshRef} onTotalsChange={handleTotalsChange} />}
       {activeTab === 'trace' && <LiveTrace adminTimezone={adminTimezone} />}
 
       {showExport && (
