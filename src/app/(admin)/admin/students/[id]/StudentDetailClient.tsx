@@ -734,6 +734,7 @@ export default function StudentDetailClient({
     const from = record.from
     const to = record.to
     if (typeof from !== 'string' || typeof to !== 'string') return null
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
 
     let preset: DateRangePreset | null
     if (record.preset === null) preset = null
