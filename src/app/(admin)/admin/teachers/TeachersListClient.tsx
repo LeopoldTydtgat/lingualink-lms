@@ -27,8 +27,6 @@ type Props = {
   loadError?: boolean
 }
 
-const STATUS_OPTIONS = ['All', 'current', 'former', 'on_hold']
-
 const ROLE_LABEL: Record<string, string> = {
   teacher: 'Teacher',
   teacher_exam: 'Teacher+Exam',
@@ -39,6 +37,26 @@ const STATUS_LABEL: Record<string, string> = {
   current: 'Current',
   former: 'Former',
   on_hold: 'On Hold',
+}
+
+type TabId = 'all' | 'on_hold' | 'archived'
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'all', label: 'All Teachers' },
+  { id: 'on_hold', label: 'On Hold' },
+  { id: 'archived', label: 'Archived' },
+]
+
+// Single implementation shared by the list filter and the tab counts, so a tab's
+// number can never disagree with the rows that tab shows. This also removes the
+// old status-dropdown-ANDed-with-Show-Archived shape by construction: there is
+// only one status control now, so two of them cannot contradict each other.
+function matchesTab(t: Teacher, tab: TabId): boolean {
+  if (tab === 'archived') return t.status === 'former'
+  if (tab === 'on_hold') return t.status === 'on_hold'
+  // 'all' is deliberately "not former" rather than "is current", so a row with a
+  // null or unrecognised status is still visible somewhere.
+  return t.status !== 'former'
 }
 
 function StatusBadge({ status }: { status: string | null }) {
@@ -64,33 +82,39 @@ function StatusBadge({ status }: { status: string | null }) {
 export default function TeachersListClient({ teachers, loadError = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('All')
-  const [showArchived, setShowArchived] = useState(false)
+  const [tab, setTab] = useState<TabId>('all')
 
-  // Picking the 'former' status is an explicit request FOR archived rows, so it
-  // overrides the Show Archived toggle. ANDing the two (the previous behaviour)
-  // made status='former' with the toggle off return nothing at all - a dead
-  // empty state reachable straight from the filter controls.
-  const includeArchived = showArchived || statusFilter === 'former'
+  // Trimmed once so a pasted trailing space cannot silently empty the table.
+  const query = search.trim().toLowerCase()
 
   const filtered = teachers.filter((t) => {
     const matchesSearch =
-      (t.full_name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      t.email.toLowerCase().includes(search.toLowerCase())
-    const matchesStatus =
-      statusFilter === 'All' || t.status === statusFilter
-    const matchesArchived = includeArchived || t.status !== 'former'
-    return matchesSearch && matchesStatus && matchesArchived
+      query === '' ||
+      (t.full_name ?? '').toLowerCase().includes(query) ||
+      t.email.toLowerCase().includes(query)
+    return matchesSearch && matchesTab(t, tab)
   })
 
-  // The header count reports the VISIBLE rows, not the unfiltered fetch, and
-  // names the archived share only when archived rows are actually on screen.
-  const archivedVisible = filtered.filter((t) => t.status === 'former').length
-  // A failed read means the number is unknown, not zero.
+  // Counts ignore the search text, so typing never makes a tab look empty.
+  const counts: Record<TabId, number> = {
+    all: teachers.filter((t) => matchesTab(t, 'all')).length,
+    on_hold: teachers.filter((t) => matchesTab(t, 'on_hold')).length,
+    archived: teachers.filter((t) => matchesTab(t, 'archived')).length,
+  }
+
+  // A failed read means the number is unknown, not zero. The archived share is
+  // no longer named here - the Archived tab carries its own count.
   const countLabel = loadError
     ? 'Teachers unavailable'
-    : `${filtered.length} teacher${filtered.length !== 1 ? 's' : ''}` +
-      (archivedVisible > 0 ? ` \u00B7 ${archivedVisible} archived` : '')
+    : `${teachers.length} teacher${teachers.length !== 1 ? 's' : ''} total`
+
+  const emptyMessage = query
+    ? `No teachers match "${query}".`
+    : tab === 'on_hold'
+    ? 'No teachers are on hold.'
+    : tab === 'archived'
+    ? 'No archived teachers.'
+    : 'No teachers yet.'
 
   return (
     <div className="p-6">
@@ -111,42 +135,69 @@ export default function TeachersListClient({ teachers, loadError = false }: Prop
         </button>
       </div>
 
-      {/* Search and filters */}
+      {/* Tab strip */}
+      <div
+        role="tablist"
+        style={{ display: 'flex', gap: '24px', borderBottom: '1px solid #E0DFDC', marginBottom: '20px' }}
+      >
+        {TABS.map(({ id, label }) => {
+          const isActive = tab === id
+
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setTab(id)}
+              style={{
+                padding: '10px 2px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '14px',
+                ...(isActive
+                  ? {
+                      color: '#111827',
+                      fontWeight: 600,
+                      borderBottom: '2px solid #FF8303',
+                      marginBottom: '-1px',
+                    }
+                  : {
+                      color: '#4b5563',
+                      fontWeight: 500,
+                      borderBottom: '2px solid transparent',
+                    }),
+              }}
+            >
+              {label}
+              <span
+                style={{
+                  marginLeft: '8px',
+                  padding: '1px 8px',
+                  borderRadius: '20px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  backgroundColor: '#f3f4f6',
+                  color: '#4b5563',
+                }}
+              >
+                {/* A failed read means the count is unknown, not zero. */}
+                {loadError ? '—' : counts[id]}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Search */}
       <div className="flex gap-3 mb-6">
         <input
           type="text"
           placeholder="Search by name or email..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none"
+          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:border-orange-400"
         />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none bg-white"
-        >
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>
-              {s === 'All' ? 'All Statuses' : STATUS_LABEL[s] ?? s}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={() => setShowArchived(!showArchived)}
-          className="px-3 py-2 rounded-lg text-sm font-medium border"
-          aria-pressed={includeArchived}
-          // Reflects whether archived rows are actually being shown, so the
-          // status='former' override above does not leave the toggle reading
-          // "off" while archived rows are on screen. Tailwind v4 cannot build
-          // colour classes dynamically - state colours stay inline styles.
-          style={
-            includeArchived
-              ? { backgroundColor: '#FF8303', color: '#ffffff', borderColor: '#FF8303' }
-              : { backgroundColor: '#ffffff', color: '#6b7280', borderColor: '#e5e7eb' }
-          }
-        >
-          Show Archived
-        </button>
       </div>
 
       {/* Table */}
@@ -182,7 +233,7 @@ export default function TeachersListClient({ teachers, loadError = false }: Prop
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={6} className="text-center py-10 text-gray-400">
-                  No teachers found.
+                  {emptyMessage}
                 </td>
               </tr>
             ) : (
