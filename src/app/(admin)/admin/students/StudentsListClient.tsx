@@ -158,6 +158,63 @@ function HoursBadge({ hours, total }: { hours: number | null; total: number | nu
   )
 }
 
+const MAX_TEACHER_AVATARS = 3
+
+// Assigned teachers. The old orange pills repeated the same two or three names
+// on nearly every row, so they read as noise rather than information. Names now
+// render as plain text with a small initial circle each; the circles are capped
+// so a student with many teachers cannot stretch the column.
+function TeacherList({ teachers }: { teachers: Teacher[] }) {
+  if (teachers.length === 0) {
+    return <span className="text-gray-400">&mdash;</span>
+  }
+
+  const shown = teachers.slice(0, MAX_TEACHER_AVATARS)
+  const overflow = teachers.length - shown.length
+
+  const circleBase = {
+    width: '22px',
+    height: '22px',
+    borderRadius: '50%',
+    fontSize: '11px',
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  } as const
+
+  return (
+    <div style={{ maxWidth: '200px' }}>
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+        {shown.map((t) => (
+          <span
+            key={t.id}
+            // Decorative only: the names directly below carry the same
+            // information, so this is hidden rather than announced twice.
+            aria-hidden="true"
+            title={t.full_name || 'Unnamed teacher'}
+            style={{ ...circleBase, backgroundColor: '#FFEEE6', color: '#FD5602' }}
+          >
+            {(t.full_name || '?').charAt(0).toUpperCase()}
+          </span>
+        ))}
+        {overflow > 0 && (
+          <span
+            aria-hidden="true"
+            style={{ ...circleBase, backgroundColor: '#f3f4f6', color: '#4b5563' }}
+          >
+            +{overflow}
+          </span>
+        )}
+      </div>
+      <div style={{ fontSize: '13px', color: '#4b5563', lineHeight: 1.3 }}>
+        {teachers.map((t) => t.full_name || 'Unnamed teacher').join(', ')}
+      </div>
+    </div>
+  )
+}
+
 export default function StudentsListClient({ students, initialLowHoursOnly = false, loadError = false }: Props) {
   const router = useRouter()
   const [search, setSearch] = useState('')
@@ -397,20 +454,7 @@ export default function StudentsListClient({ students, initialLowHoursOnly = fal
 
                   {/* Assigned teachers */}
                   <td className="px-4 py-3">
-                    {student.teachers.length === 0 ? (
-                      <span className="text-gray-400">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {student.teachers.map((t) => (
-                          <span
-                            key={t.id}
-                            className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-700"
-                          >
-                            {t.full_name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <TeacherList teachers={student.teachers} />
                   </td>
 
                   <td className="px-4 py-3">
