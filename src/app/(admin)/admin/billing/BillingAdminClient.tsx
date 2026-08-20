@@ -280,6 +280,10 @@ export default function BillingAdminClient({
   const [cbLessons, setCbLessons] = useState<LessonRow[]>([])
   const [cbLoading, setCbLoading] = useState(false)
   const [cbLoaded, setCbLoaded] = useState(false)
+  // The filter values behind the rows currently on screen, captured only when a
+  // load SUCCEEDS; null until the first successful Apply. The export must describe
+  // the table the admin is looking at, never the draft filters above it (NEW354).
+  const [cbAppliedFilters, setCbAppliedFilters] = useState<{ company: string; dateFrom: string; dateTo: string } | null>(null)
 
   // ── Load shared reference data on mount ───────────────────────────────────
   // Teachers and companies are fetched without sensitive fields — hourly_rate
@@ -684,6 +688,9 @@ export default function BillingAdminClient({
       if (!studentIds.length) {
         setCbLessons([])
         setCbLoaded(true)
+        // This IS a successful load — an empty table is still a table, and the
+        // export must describe it with the filters that produced it (NEW354).
+        setCbAppliedFilters({ company: cbFilterCompany, dateFrom: cbFilterDateFrom, dateTo: cbFilterDateTo })
         setDataError(null)
         return
       }
@@ -716,6 +723,11 @@ export default function BillingAdminClient({
       const hydrated = await hydrateLessons(raw || [])
       setCbLessons(hydrated)
       setCbLoaded(true)
+      // Snapshot the filters that produced these rows, in lockstep with cbLoaded.
+      // Deliberately NOT set on any failure path above or in the catch below: the
+      // table there still shows the last successful load, so the export must keep
+      // describing THAT load, not the filters of the attempt that failed (NEW354).
+      setCbAppliedFilters({ company: cbFilterCompany, dateFrom: cbFilterDateFrom, dateTo: cbFilterDateTo })
       setDataError(null)
     } catch (err: unknown) {
       // hydrateLessons throws when the rates/policies lookup fails.
@@ -1425,11 +1437,20 @@ export default function BillingAdminClient({
             </button>
             <button
               onClick={() => downloadExport('company_billing', {
-                ...(cbFilterCompany && { companyId: cbFilterCompany }),
-                ...(cbFilterDateFrom && { dateFrom: cbFilterDateFrom }),
-                ...(cbFilterDateTo && { dateTo: cbFilterDateTo }),
+                // Built from cbAppliedFilters, NOT the live cb* filter state: the
+                // export mirrors the LOADED table. Reading the draft filters here
+                // meant changing a filter and exporting without pressing Apply
+                // produced a file whose rows did not match the screen (NEW354).
+                // Same keys and same omit-when-empty logic as before, so with the
+                // filters applied the request is byte-identical to the old one.
+                ...(cbAppliedFilters?.company && { companyId: cbAppliedFilters.company }),
+                ...(cbAppliedFilters?.dateFrom && { dateFrom: cbAppliedFilters.dateFrom }),
+                ...(cbAppliedFilters?.dateTo && { dateTo: cbAppliedFilters.dateTo }),
               })}
-              disabled={downloadingType === 'company_billing'}
+              // The export mirrors the loaded table; before the first Apply there is
+              // no table to mirror. Matches the Student Billing Export CSV button,
+              // which is likewise disabled until its load has succeeded (sbLoaded).
+              disabled={downloadingType === 'company_billing' || !cbLoaded || cbAppliedFilters === null}
               className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
