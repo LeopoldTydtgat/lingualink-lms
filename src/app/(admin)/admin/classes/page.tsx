@@ -52,6 +52,13 @@ export default async function AdminClassesPage({
       initialDateFrom={todayKey}
       initialDateTo={todayKey}
       adminTz={profile?.timezone ?? null}
+      // Presence of the param, not the seed it produced: ?filter=today on a
+      // timezone-less profile (and any unrecognised ?filter= value) still yields an
+      // empty todayKey, and that empty result is the URL's answer. The client must
+      // honour it rather than restoring a remembered range over the top of it, so
+      // this asks whether the URL spoke at all — `filter === ''` counts, `undefined`
+      // does not. `filter` is the only param this page reads.
+      hasUrlFilters={filter !== undefined}
     />
   )
 }

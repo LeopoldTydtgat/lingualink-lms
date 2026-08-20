@@ -1,11 +1,14 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 import { formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../_components/DateRangeFilter'
+import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets'
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -73,6 +76,29 @@ interface LessonRow {
 }
 
 type ActiveTab = 'teacher_invoices' | 'student_billing' | 'company_billing'
+
+// The three tabs, in render order. Module-level and single-source: the tab switcher
+// maps over this list AND isActiveTab below validates a restored tab id against it,
+// so a fourth tab added here is understood by both at once. A second hand-written
+// copy of the same three keys is exactly the thing that eventually drifts.
+const TABS: ReadonlyArray<{ key: ActiveTab; label: string }> = [
+  { key: 'teacher_invoices', label: 'Teacher Invoices' },
+  { key: 'student_billing',  label: 'Student Billing' },
+  { key: 'company_billing',  label: 'Company Billing' },
+]
+
+// The Teacher Invoices status <select>'s options, module-level for the same reason:
+// the select renders from this list and parseStoredFilters validates a restored
+// status against it, so "the values the dropdown offers" is ONE definition rather
+// than two. 'late' is deliberately absent - getInvoiceStatusColor colours it, but no
+// filter has ever offered it, and a stored record must mean what the dropdown means.
+const INVOICE_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '',         label: 'All Statuses' },
+  { value: 'pending',  label: 'Pending' },
+  { value: 'uploaded', label: 'Uploaded' },
+  { value: 'paid',     label: 'Paid' },
+  { value: 'overdue',  label: 'Overdue' },
+]
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -159,6 +185,174 @@ function escapeCSV(val: unknown): string {
     return `"${str.replace(/"/g, '""')}"`
   }
   return str
+}
+
+// ── Filter persistence ─────────────────────────────────────────────────────────
+
+// Page-scoped, so each admin list keeps its own record (cf. 'll-admin-reports-filters').
+const FILTERS_STORAGE_KEY = 'll-admin-billing-filters'
+
+/**
+ * What this page remembers for the rest of the browsing session.
+ *
+ * The open tab, and the three tabs' filter INPUTS. Nothing else - and in particular
+ * never the fact that a load had happened. sbLoaded / cbLoaded, sbLessons / cbLessons
+ * and cbAppliedFilters all stay at their mount defaults through a restore, and neither
+ * loadStudentBilling nor loadCompanyBilling is triggered by one. That is the whole
+ * point of the Apply model on a money screen: a restore fills the inputs and stops
+ * there, so restored filters can never end up captioning rows that were fetched under
+ * different ones. The admin presses Apply and sees figures they asked for this visit.
+ *
+ * Also not remembered, each for its own reason: expandedInvoiceId and the
+ * invoiceLessons cache (a detail panel is a drill-down into rows that may have moved
+ * on, not a view of this list), markingPaidId (a half-finished money confirmation must
+ * never survive a navigation and come back pre-armed), the export/download state and
+ * the invoice-template upload state (one-shot actions, not filters).
+ *
+ * Each date range is stored as EITHER a preset id OR concrete day keys, never both:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "This month" must still mean this month in
+ *                       September; storing its day keys would pin the filter to a
+ *                       month that has passed, which is the staleness this avoids.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ *
+ * The two ranges are independent, so there are two such pairs: Student Billing and
+ * Company Billing each keep their own, and a preset on one says nothing about the other.
+ */
+interface StoredFilters {
+  tab:        ActiveTab
+  invTeacher: string
+  invMonth:   string
+  invStatus:  string
+  sbStudent:  string
+  sbPreset:   DateRangePreset | null
+  sbFrom:     string
+  sbTo:       string
+  cbCompany:  string
+  cbPreset:   DateRangePreset | null
+  cbFrom:     string
+  cbTo:       string
+}
+
+const DEFAULT_STORED_FILTERS: StoredFilters = {
+  tab:        'teacher_invoices',
+  invTeacher: '',
+  invMonth:   '',
+  invStatus:  '',
+  sbStudent:  '',
+  sbPreset:   null,
+  sbFrom:     '',
+  sbTo:       '',
+  cbCompany:  '',
+  cbPreset:   null,
+  cbFrom:     '',
+  cbTo:       '',
+}
+
+function isActiveTab(value: unknown): value is ActiveTab {
+  return typeof value === 'string' && TABS.some(t => t.key === value)
+}
+
+// 'YYYY-MM-DD' or empty. A restored day key goes straight back into a date input and
+// into resolveDayBounds, which hands it to zonedDayRangeToUtcBounds - and that helper
+// FALLS BACK to a SAST-bounded range on a malformed key rather than failing, so a bad
+// one would silently scope the money query to the wrong window instead of erroring.
+// Caught at the door, exactly as the Reports list catches its own.
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+function isDayKeyOrEmpty(value: string): boolean {
+  return value === '' || DAY_KEY_RE.test(value)
+}
+
+// invoices.billing_month is always 'YYYY-MM-01', so that is the only shape a stored
+// month may have. Deliberately NOT checked against monthOptions: that list is derived
+// from invoices, which load async and are [] at parse time, so a list check there
+// would reject every stored month on every visit. The async case is handled instead by
+// the one-shot reconcile in the component, which judges the month once the invoices
+// have actually arrived.
+const BILLING_MONTH_RE = /^\d{4}-\d{2}-01$/
+function isBillingMonthOrEmpty(value: string): boolean {
+  return value === '' || BILLING_MONTH_RE.test(value)
+}
+
+/**
+ * One range's stored half: a preset id, or a literal day-key pair, never both. Shared
+ * by both ranges so the Student and Company halves cannot come to validate differently.
+ *
+ * Returns null to REJECT THE WHOLE RECORD: a wrong type, a malformed day key or a
+ * preset id this build does not know all mean the record was written by another
+ * version of this page or edited by hand, and nothing in it can then be trusted field
+ * by field. A MISSING field rejects too - undefined is neither null nor a known id.
+ */
+function parseRangePair(
+  rawPreset: unknown,
+  rawFrom: unknown,
+  rawTo: unknown
+): { preset: DateRangePreset | null; from: string; to: string } | null {
+  if (typeof rawFrom !== 'string' || typeof rawTo !== 'string') return null
+  if (!isDayKeyOrEmpty(rawFrom) || !isDayKeyOrEmpty(rawTo)) return null
+
+  let preset: DateRangePreset | null
+  if (rawPreset === null) preset = null
+  else if (isDateRangePreset(rawPreset)) preset = rawPreset
+  else return null
+
+  // Enforces the either/or invariant on the way IN as well as on the way out: with a
+  // preset active the stored dates are meaningless and the range comes from the clock.
+  return { preset, from: preset ? '' : rawFrom, to: preset ? '' : rawTo }
+}
+
+/**
+ * Shape validation for a decoded stored record. Null rejects the whole record and the
+ * page opens on defaults.
+ *
+ * STRUCTURAL problems reject everything: not an object, a field of the wrong type, a
+ * tab id that is not one of TABS, a billing month that is not 'YYYY-MM-01', a
+ * malformed day key, or an unknown preset id.
+ *
+ * DATA DRIFT does not: an invoice status the dropdown no longer offers is a
+ * well-formed record whose target has moved, so that ONE field falls back to "all"
+ * rather than throwing two still-valid date ranges away with it.
+ *
+ * ENTITY IDS ARE NOT VALIDATED HERE, deliberately. teachers, students and companies
+ * are all [] at parse time - they load async - so any list check would blank every
+ * stored id on every visit. They pass through as plain strings and are reconciled
+ * once in the component, the first time their list actually arrives.
+ *
+ * Module-level rather than a closure: with the entity lists out of the picture this
+ * depends on nothing but its argument, which also keeps its identity stable.
+ */
+function parseStoredFilters(raw: unknown): StoredFilters | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
+  const record = raw as Record<string, unknown>
+
+  const { tab, invTeacher, invMonth, invStatus, sbStudent, cbCompany } = record
+  if (!isActiveTab(tab)) return null
+  if (typeof invTeacher !== 'string' || typeof invMonth !== 'string') return null
+  if (typeof invStatus !== 'string') return null
+  if (typeof sbStudent !== 'string' || typeof cbCompany !== 'string') return null
+  if (!isBillingMonthOrEmpty(invMonth)) return null
+
+  const sb = parseRangePair(record.sbPreset, record.sbFrom, record.sbTo)
+  if (sb === null) return null
+  const cb = parseRangePair(record.cbPreset, record.cbFrom, record.cbTo)
+  if (cb === null) return null
+
+  return {
+    tab,
+    invTeacher,
+    invMonth,
+    invStatus: INVOICE_STATUS_OPTIONS.some(o => o.value === invStatus) ? invStatus : '',
+    sbStudent,
+    sbPreset: sb.preset,
+    sbFrom:   sb.from,
+    sbTo:     sb.to,
+    cbCompany,
+    cbPreset: cb.preset,
+    cbFrom:   cb.from,
+    cbTo:     cb.to,
+  }
 }
 
 // ── Server-side entity fetcher ─────────────────────────────────────────────────
@@ -280,6 +474,192 @@ export default function BillingAdminClient({
   const [cbLessons, setCbLessons] = useState<LessonRow[]>([])
   const [cbLoading, setCbLoading] = useState(false)
   const [cbLoaded, setCbLoaded] = useState(false)
+  // The filter values behind the rows currently on screen, captured only when a
+  // load SUCCEEDS; null until the first successful Apply. The export must describe
+  // the table the admin is looking at, never the draft filters above it (NEW354).
+  const [cbAppliedFilters, setCbAppliedFilters] = useState<{ company: string; dateFrom: string; dateTo: string } | null>(null)
+
+  // ── Session filter persistence ─────────────────────────────────────────────
+  // Restores the open tab and every filter INPUT for the rest of the browsing
+  // session, and nothing else - see StoredFilters above for what is left out and why.
+
+  // ?filter=invoices_review is this page's only deep link; page.tsx turns it into
+  // initialTab + initialInvoiceStatus. Either prop being present means the URL asked
+  // for a specific view, and the URL then wins outright: no restore, and storage is
+  // overwritten from what the URL produced, so a deep link is never quietly widened
+  // or narrowed by a remembered filter. Same rule as the Reports list. Written as the
+  // OR of both props rather than as one of them, so it stays correct if the server
+  // page ever seeds a tab without a status or the other way round.
+  const hasUrlFilters = initialTab !== undefined || initialInvoiceStatus !== undefined
+
+  // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves.
+  //
+  // matchDateRangePreset is the same call that decides which quick-range button
+  // renders as active, so what a row shows and what gets stored are one decision
+  // rather than two that can disagree. A hand-typed range that happens to equal a
+  // preset is therefore stored AS that preset - which is what the row is already
+  // telling the admin it is. ONE `now` feeds both calls, so the two ranges can never
+  // be judged against instants a hair either side of a local midnight.
+  //
+  // The clock read sits in a memo that runs during render, but it changes nothing
+  // rendered: persistedFilters is read only inside the hook's effects. And on the
+  // first render every date is '', which matchDateRangePreset short-circuits before
+  // it probes Intl at all - so the server pass and the hydration pass do no clock
+  // work whatsoever and cannot disagree.
+  const persistedFilters = useMemo<StoredFilters>(() => {
+    const now = new Date()
+    const sbPreset = matchDateRangePreset(sbFilterDateFrom, sbFilterDateTo, exportTz, now)
+    const cbPreset = matchDateRangePreset(cbFilterDateFrom, cbFilterDateTo, exportTz, now)
+    return {
+      tab:        activeTab,
+      invTeacher: invoiceFilterTeacher,
+      invMonth:   invoiceFilterMonth,
+      invStatus:  invoiceFilterStatus,
+      sbStudent:  sbFilterStudent,
+      sbPreset,
+      sbFrom:     sbPreset ? '' : sbFilterDateFrom,
+      sbTo:       sbPreset ? '' : sbFilterDateTo,
+      cbCompany:  cbFilterCompany,
+      cbPreset,
+      cbFrom:     cbPreset ? '' : cbFilterDateFrom,
+      cbTo:       cbPreset ? '' : cbFilterDateTo,
+    }
+  }, [
+    activeTab,
+    invoiceFilterTeacher, invoiceFilterMonth, invoiceFilterStatus,
+    sbFilterStudent, sbFilterDateFrom, sbFilterDateTo,
+    cbFilterCompany, cbFilterDateFrom, cbFilterDateTo,
+    exportTz,
+  ])
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect,
+   * never during render - so the clock read below cannot desync server and client.
+   *
+   * Fills the INPUTS ONLY. loadStudentBilling / loadCompanyBilling are deliberately
+   * NOT called: sbLoaded and cbLoaded stay false, both tabs open on their "press Apply
+   * to load" line, both Export buttons stay disabled, and cbAppliedFilters stays null.
+   * A restored filter therefore never sits above money rows fetched under a different
+   * one - the admin re-runs Apply, and table and filters agree by construction.
+   */
+  function applyStoredFilters(stored: StoredFilters) {
+    setActiveTab(stored.tab)
+    setInvoiceFilterTeacher(stored.invTeacher)
+    setInvoiceFilterMonth(stored.invMonth)
+    setInvoiceFilterStatus(stored.invStatus)
+    setSbFilterStudent(stored.sbStudent)
+    setCbFilterCompany(stored.cbCompany)
+
+    // Recomputed against NOW, which is the whole point of storing an id rather than a
+    // pair of dates: a session that spans midnight, or a tab returned to the next
+    // morning, gets the preset the admin chose rather than the days it covered when
+    // they chose it. One `now` for both ranges, as in the memo above.
+    //
+    // No null-timezone branch here, unlike the Reports list: exportTz is a settings
+    // value the server always resolves to a real zone (getExportTimezone falls back to
+    // EXPORT_TZ_FALLBACK), so "which day is today" always has an answer and a stored
+    // preset can always be rebuilt. It is also the SAME zone resolveDayBounds scopes
+    // the query in, so the rebuilt days are exactly the days Apply will fetch.
+    const now = new Date()
+    if (stored.sbPreset) {
+      const range = getPresetRange(stored.sbPreset, now, exportTz)
+      setSbFilterDateFrom(range.from)
+      setSbFilterDateTo(range.to)
+    } else {
+      setSbFilterDateFrom(stored.sbFrom)
+      setSbFilterDateTo(stored.sbTo)
+    }
+    if (stored.cbPreset) {
+      const range = getPresetRange(stored.cbPreset, now, exportTz)
+      setCbFilterDateFrom(range.from)
+      setCbFilterDateTo(range.to)
+    } else {
+      setCbFilterDateFrom(stored.cbFrom)
+      setCbFilterDateTo(stored.cbTo)
+    }
+  }
+
+  // No fetch race to guard against, unlike the Reports list: nothing on this page
+  // fetches when a filter changes. The reference loads below ignore the filters
+  // entirely and every billing query sits behind Apply, so the restore landing a frame
+  // after mount can only change what the inputs read.
+  //
+  // The return value is not destructured: this page has no Clear-filters button to
+  // wire a clear() to, and adding one is out of scope. The hook already REMOVES the
+  // key by itself whenever the record returns to DEFAULT_STORED_FILTERS, which is the
+  // same end state clear() would produce.
+  useFilterPersistence<StoredFilters>({
+    storageKey: FILTERS_STORAGE_KEY,
+    value: persistedFilters,
+    defaultValue: DEFAULT_STORED_FILTERS,
+    skipRestore: hasUrlFilters,
+    parse: parseStoredFilters,
+    apply: applyStoredFilters,
+  })
+
+  // ── One-shot entity-id reconcile ───────────────────────────────────────────
+  // A restored teacher / student / company id - and the restored billing month - cannot
+  // be checked at parse time: all four lists (teachers, students, companies, invoices)
+  // are [] on mount and only arrive over the network. Left unchecked, a value whose row
+  // has since been deleted is the INVISIBLE-FILTER trap - the <select> has no <option>
+  // matching its value, so it renders as the "All ..." option while the state goes on
+  // scoping the query. The admin reads "All Teachers" above a list silently narrowed to
+  // a teacher who no longer exists.
+  //
+  // Each effect therefore waits for ITS list to arrive NON-EMPTY before judging: an
+  // empty list means "the fetch has not landed", not "this id is gone", and blanking
+  // on it would throw away every valid restored selection. Each sets its ref BEFORE it
+  // compares anything, so the one shot is consumed on that first non-empty arrival
+  // whether or not the value turned out to be stale - the effect never runs a second
+  // time, and a selection the admin makes LATER, including re-picking the very value
+  // that was just blanked, can never be touched by it. The functional setter reads the
+  // value at commit time instead of closing over a stale one.
+  //
+  // LIMITATION: if a list load FAILS it stays [], the reconcile never fires, and a
+  // stale value survives the visit. Accepted, and visible either way: a failed teachers,
+  // companies or invoices load raises dataError through loadBaseData - all three are
+  // named in its `failed` list - and the students fetch, which swallows its error,
+  // leaves an empty Student dropdown, which is itself the signal. Nothing here fetches
+  // without Apply, so the worst case is a query the admin explicitly asked for coming
+  // back empty.
+  //
+  // invoiceFilterMonth is reconciled the same way, off `invoices`, even though it is
+  // not an entity id: the month options are derived from the invoice rows THEMSELVES
+  // (getMonthOptions), so a restored month whose last surviving invoice has since gone
+  // leaves the select with no matching <option>. It renders as "All Months" while the
+  // state goes on filtering filteredInvoices down to nothing - the identical
+  // invisible-filter trap the three entity reconciles close, reached through a derived
+  // option list instead of a table. It is checked against `invoices` rather than
+  // monthOptions because they are the same set: monthOptions IS the distinct
+  // billing_month values of that array, so one .some() over the source avoids
+  // depending on a derived value recomputed on every render.
+  const teacherReconciledRef = useRef(false)
+  useEffect(() => {
+    if (teacherReconciledRef.current || teachers.length === 0) return
+    teacherReconciledRef.current = true
+    setInvoiceFilterTeacher(prev => (prev && !teachers.some(t => t.id === prev) ? '' : prev))
+  }, [teachers])
+
+  const studentReconciledRef = useRef(false)
+  useEffect(() => {
+    if (studentReconciledRef.current || students.length === 0) return
+    studentReconciledRef.current = true
+    setSbFilterStudent(prev => (prev && !students.some(s => s.id === prev) ? '' : prev))
+  }, [students])
+
+  const companyReconciledRef = useRef(false)
+  useEffect(() => {
+    if (companyReconciledRef.current || companies.length === 0) return
+    companyReconciledRef.current = true
+    setCbFilterCompany(prev => (prev && !companies.some(c => c.id === prev) ? '' : prev))
+  }, [companies])
+
+  const monthReconciledRef = useRef(false)
+  useEffect(() => {
+    if (monthReconciledRef.current || invoices.length === 0) return
+    monthReconciledRef.current = true
+    setInvoiceFilterMonth(prev => (prev && !invoices.some(inv => inv.billing_month === prev) ? '' : prev))
+  }, [invoices])
 
   // ── Load shared reference data on mount ───────────────────────────────────
   // Teachers and companies are fetched without sensitive fields — hourly_rate
@@ -684,6 +1064,9 @@ export default function BillingAdminClient({
       if (!studentIds.length) {
         setCbLessons([])
         setCbLoaded(true)
+        // This IS a successful load — an empty table is still a table, and the
+        // export must describe it with the filters that produced it (NEW354).
+        setCbAppliedFilters({ company: cbFilterCompany, dateFrom: cbFilterDateFrom, dateTo: cbFilterDateTo })
         setDataError(null)
         return
       }
@@ -716,6 +1099,11 @@ export default function BillingAdminClient({
       const hydrated = await hydrateLessons(raw || [])
       setCbLessons(hydrated)
       setCbLoaded(true)
+      // Snapshot the filters that produced these rows, in lockstep with cbLoaded.
+      // Deliberately NOT set on any failure path above or in the catch below: the
+      // table there still shows the last successful load, so the export must keep
+      // describing THAT load, not the filters of the attempt that failed (NEW354).
+      setCbAppliedFilters({ company: cbFilterCompany, dateFrom: cbFilterDateFrom, dateTo: cbFilterDateTo })
       setDataError(null)
     } catch (err: unknown) {
       // hydrateLessons throws when the rates/policies lookup fails.
@@ -874,12 +1262,6 @@ export default function BillingAdminClient({
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const tabs: { key: ActiveTab; label: string }[] = [
-    { key: 'teacher_invoices', label: 'Teacher Invoices' },
-    { key: 'student_billing', label: 'Student Billing' },
-    { key: 'company_billing', label: 'Company Billing' },
-  ]
-
   return (
     <div className="p-6">
       <input ref={templateInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleTemplateUpload} />
@@ -893,7 +1275,7 @@ export default function BillingAdminClient({
 
       {/* Tab switcher */}
       <div className="flex gap-0 mb-6 border border-gray-200 rounded-lg overflow-hidden w-fit">
-        {tabs.map(tab => (
+        {TABS.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -1040,11 +1422,12 @@ export default function BillingAdminClient({
               onChange={e => setInvoiceFilterStatus(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
             >
-              <option value="">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="uploaded">Uploaded</option>
-              <option value="paid">Paid</option>
-              <option value="overdue">Overdue</option>
+              {/* Rendered from the same list parseStoredFilters validates a
+                  restored status against, so the options the dropdown offers and the
+                  values a stored record may hold cannot drift apart. */}
+              {INVOICE_STATUS_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
 
             <button
@@ -1278,24 +1661,24 @@ export default function BillingAdminClient({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">From</label>
-              <input
-                type="date"
-                value={sbFilterDateFrom}
-                onChange={e => setSbFilterDateFrom(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">To</label>
-              <input
-                type="date"
-                value={sbFilterDateTo}
-                onChange={e => setSbFilterDateTo(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
+            {/* Date range. The same two filter values as before, now carrying the
+                shared component's timezone-correct quick-range presets alongside the
+                From/To inputs. The presets resolve in exportTz - the SAME zone
+                resolveDayBounds scopes the query in - so the days a preset highlights
+                are exactly the days Apply will fetch. exportTz is always a string
+                (getExportTimezone falls back to EXPORT_TZ_FALLBACK), so the presets are
+                never dead here, unlike the Reports row where a null admin timezone
+                disables them. A preset only fills the two inputs: the load still waits
+                for Apply, and both Export buttons already describe the LOADED table
+                rather than the draft filters (this tab's CSV serialises sbLessons;
+                Company Billing's reads cbAppliedFilters, NEW354), so a preset clicked
+                without Apply cannot produce a file that disagrees with the screen. */}
+            <DateRangeFilter
+              from={sbFilterDateFrom}
+              to={sbFilterDateTo}
+              onChange={(f, t) => { setSbFilterDateFrom(f); setSbFilterDateTo(t) }}
+              tz={exportTz}
+            />
             <button
               onClick={loadStudentBilling}
               disabled={sbLoading}
@@ -1397,24 +1780,16 @@ export default function BillingAdminClient({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">From</label>
-              <input
-                type="date"
-                value={cbFilterDateFrom}
-                onChange={e => setCbFilterDateFrom(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">To</label>
-              <input
-                type="date"
-                value={cbFilterDateTo}
-                onChange={e => setCbFilterDateTo(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
+            {/* Date range - the same swap as the Student Billing row above, on this
+                tab's own filter state. The comment there covers why exportTz is the
+                right zone for the presets and why a preset cannot desync the Export
+                button from the table. */}
+            <DateRangeFilter
+              from={cbFilterDateFrom}
+              to={cbFilterDateTo}
+              onChange={(f, t) => { setCbFilterDateFrom(f); setCbFilterDateTo(t) }}
+              tz={exportTz}
+            />
             <button
               onClick={loadCompanyBilling}
               disabled={cbLoading}
@@ -1425,11 +1800,20 @@ export default function BillingAdminClient({
             </button>
             <button
               onClick={() => downloadExport('company_billing', {
-                ...(cbFilterCompany && { companyId: cbFilterCompany }),
-                ...(cbFilterDateFrom && { dateFrom: cbFilterDateFrom }),
-                ...(cbFilterDateTo && { dateTo: cbFilterDateTo }),
+                // Built from cbAppliedFilters, NOT the live cb* filter state: the
+                // export mirrors the LOADED table. Reading the draft filters here
+                // meant changing a filter and exporting without pressing Apply
+                // produced a file whose rows did not match the screen (NEW354).
+                // Same keys and same omit-when-empty logic as before, so with the
+                // filters applied the request is byte-identical to the old one.
+                ...(cbAppliedFilters?.company && { companyId: cbAppliedFilters.company }),
+                ...(cbAppliedFilters?.dateFrom && { dateFrom: cbAppliedFilters.dateFrom }),
+                ...(cbAppliedFilters?.dateTo && { dateTo: cbAppliedFilters.dateTo }),
               })}
-              disabled={downloadingType === 'company_billing'}
+              // The export mirrors the loaded table; before the first Apply there is
+              // no table to mirror. Matches the Student Billing Export CSV button,
+              // which is likewise disabled until its load has succeeded (sbLoaded).
+              disabled={downloadingType === 'company_billing' || !cbLoaded || cbAppliedFilters === null}
               className="ml-auto flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
