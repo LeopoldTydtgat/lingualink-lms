@@ -6,6 +6,7 @@ import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billabili
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
 import { formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
+import { DateRangeFilter } from '../_components/DateRangeFilter'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -1290,24 +1291,24 @@ export default function BillingAdminClient({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">From</label>
-              <input
-                type="date"
-                value={sbFilterDateFrom}
-                onChange={e => setSbFilterDateFrom(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">To</label>
-              <input
-                type="date"
-                value={sbFilterDateTo}
-                onChange={e => setSbFilterDateTo(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
+            {/* Date range. The same two filter values as before, now carrying the
+                shared component's timezone-correct quick-range presets alongside the
+                From/To inputs. The presets resolve in exportTz - the SAME zone
+                resolveDayBounds scopes the query in - so the days a preset highlights
+                are exactly the days Apply will fetch. exportTz is always a string
+                (getExportTimezone falls back to EXPORT_TZ_FALLBACK), so the presets are
+                never dead here, unlike the Reports row where a null admin timezone
+                disables them. A preset only fills the two inputs: the load still waits
+                for Apply, and both Export buttons already describe the LOADED table
+                rather than the draft filters (this tab's CSV serialises sbLessons;
+                Company Billing's reads cbAppliedFilters, NEW354), so a preset clicked
+                without Apply cannot produce a file that disagrees with the screen. */}
+            <DateRangeFilter
+              from={sbFilterDateFrom}
+              to={sbFilterDateTo}
+              onChange={(f, t) => { setSbFilterDateFrom(f); setSbFilterDateTo(t) }}
+              tz={exportTz}
+            />
             <button
               onClick={loadStudentBilling}
               disabled={sbLoading}
@@ -1409,24 +1410,16 @@ export default function BillingAdminClient({
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">From</label>
-              <input
-                type="date"
-                value={cbFilterDateFrom}
-                onChange={e => setCbFilterDateFrom(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">To</label>
-              <input
-                type="date"
-                value={cbFilterDateTo}
-                onChange={e => setCbFilterDateTo(e.target.value)}
-                className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700"
-              />
-            </div>
+            {/* Date range - the same swap as the Student Billing row above, on this
+                tab's own filter state. The comment there covers why exportTz is the
+                right zone for the presets and why a preset cannot desync the Export
+                button from the table. */}
+            <DateRangeFilter
+              from={cbFilterDateFrom}
+              to={cbFilterDateTo}
+              onChange={(f, t) => { setCbFilterDateFrom(f); setCbFilterDateTo(t) }}
+              tz={exportTz}
+            />
             <button
               onClick={loadCompanyBilling}
               disabled={cbLoading}
