@@ -41,7 +41,20 @@ export default async function AdminReportsPage({
     .eq('id', user.id)
     .maybeSingle();
 
+  // TWO props out of one column, on purpose - they are not interchangeable.
+  //
+  // adminTimezone keeps the 'UTC' fallback because it feeds Intl formatting, which needs
+  // a string; a wrong-but-valid zone still renders a readable timestamp, and there is no
+  // "no zone" rendering to fall back to.
+  //
+  // adminTzRaw keeps the null because it feeds the DateRangeFilter quick-range presets,
+  // where UTC is NOT a survivable default: "today"/"this week" resolved in UTC name the
+  // wrong calendar day for most of the world, and a filter silently set to the wrong day
+  // is worse than one that does not offer presets at all. So the presets go dead on null
+  // instead of guessing - the same call this page already makes for the ?filter= seed,
+  // and the same one the admin classes page makes for its own ?filter=today.
   const adminTimezone = adminProfile?.timezone ?? 'UTC';
+  const adminTzRaw: string | null = adminProfile?.timezone ?? null;
 
   // Query 1: reports + lessons + teacher
   const { data: reportsData } = await supabase
@@ -176,8 +189,20 @@ export default async function AdminReportsPage({
       initialStatusFilter={initialStatusFilter}
       initialReopenId={reopen}
       adminTimezone={adminTimezone}
+      adminTzRaw={adminTzRaw}
       initialPendingCount={initialPendingCount}
       initialFlaggedCount={initialFlaggedCount}
+      // Presence of a URL param, not the state it produced: an unrecognised ?filter=
+      // value still yields an empty initialStatusFilter, and that empty result IS the
+      // URL's answer - the client must honour it rather than restoring a remembered
+      // filter over the top.
+      //
+      // ?reopen= counts too, even though it seeds no filter at all: it deep-links ONE
+      // specific report (the dashboard's flagged-report Reopen button), and a remembered
+      // status/teacher/date filter could easily exclude that very row - leaving the
+      // confirmation modal open over a list that does not contain the report it is about.
+      // A deep link gets the clean default list.
+      hasUrlFilters={filter !== undefined || reopen !== undefined}
     />
   );
 }

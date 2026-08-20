@@ -2,9 +2,12 @@
 
 // src/app/(admin)/admin/reports/ReportsClient.tsx
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
+import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../_components/DateRangeFilter';
+import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets';
+import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,10 +54,22 @@ interface Props {
   initialReopenId?: string;
   // The logged-in admin's IANA timezone (server page falls back to 'UTC').
   adminTimezone: string;
+  // The SAME profiles.timezone as adminTimezone above, but WITHOUT the 'UTC' fallback.
+  // Deliberately a second prop rather than a reuse of that one: adminTimezone feeds Intl
+  // formatting, which needs a string and for which UTC is a survivable last resort, while
+  // this feeds the DateRangeFilter presets, where "which day is today" has no honest
+  // answer without a zone. The presets must go dead on null rather than quietly name the
+  // UTC day - so the null has to survive the trip, and collapsing the two props into one
+  // would destroy exactly the distinction that keeps them from guessing.
+  adminTzRaw: string | null;
   // Global outstanding-work counts from the server - NOT scoped by the list filters, and
   // never a placeholder 0 (the server falls back to a derived number on a failed count).
   initialPendingCount: number;
   initialFlaggedCount: number;
+  // True when the URL carried ?filter= or ?reopen=. The URL then wins outright: no
+  // restore from sessionStorage, and storage is overwritten from what the URL produced,
+  // so a deep link is never quietly widened or narrowed by a remembered filter.
+  hasUrlFilters?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -138,9 +153,78 @@ function LessonStatusBadge({ status, cancelled_by, rescheduled_by }: { status: s
   );
 }
 
+// ─── List filter persistence ──────────────────────────────────────────────────
+
+// The Status dropdown's options, and with them the set of status values this page is
+// willing to restore. One list rather than two: a value read back out of storage is
+// accepted only if it is still something the dropdown can display.
+const STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '',          label: 'All Statuses' },
+  { value: 'pending',   label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'flagged',   label: 'Flagged' },
+  { value: 'reopened',  label: 'Reopened' },
+];
+
+// Same contract for the Class Type dropdown. The values are the ones the GET route
+// understands as class_status (taken | student_no_show | teacher_no_show).
+const CLASS_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '',                label: 'All Class Types' },
+  { value: 'taken',           label: 'Class Taken' },
+  { value: 'student_no_show', label: 'Student No-Show' },
+  { value: 'teacher_no_show', label: 'Teacher No-Show' },
+];
+
+// Page-scoped, so each admin list keeps its own record (cf. 'll-admin-classes-filters').
+const FILTERS_STORAGE_KEY = 'll-admin-reports-filters';
+
+/**
+ * What this page remembers for the rest of the browsing session.
+ *
+ * NOT the open tab, NOT how many pages of rows had been loaded, and nothing from the
+ * export modal: a remembered page 3 is meaningless against a result set that has moved
+ * on, and the export dialog is a one-shot form rather than a view of this list.
+ *
+ * The date range is stored as EITHER a preset id OR concrete day keys, never both:
+ *
+ *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
+ *                       clock on restore. "Today" must still mean today tomorrow;
+ *                       storing its dates would pin the filter to a day that has
+ *                       passed, which is the exact staleness this split avoids.
+ *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
+ *                       An explicitly chosen date means that date and nothing else.
+ */
+interface StoredFilters {
+  status:      string;
+  teacher:     string;
+  classStatus: string;
+  preset:      DateRangePreset | null;
+  from:        string;
+  to:          string;
+}
+
+const DEFAULT_STORED_FILTERS: StoredFilters = {
+  status:      '',
+  teacher:     '',
+  classStatus: '',
+  preset:      null,
+  from:        '',
+  to:          '',
+};
+
+// 'YYYY-MM-DD' or empty. The stored value goes straight back into a date input and into
+// the GET route's date_from/date_to, so anything else is rejected at the door rather
+// than sent to the server as a query it never expects. (The route ignores a malformed
+// day key rather than failing on it - which is precisely why a bad one must be caught
+// here: sent on, it would silently drop the date filter instead of restoring it.)
+const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function isDayKeyOrEmpty(value: string): boolean {
+  return value === '' || DAY_KEY_RE.test(value);
+}
+
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, adminTzRaw, hasUrlFilters, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; adminTzRaw: string | null; hasUrlFilters: boolean; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   // Separate from `loading`: a Load More fetch must leave the already-rendered table on
@@ -219,6 +303,117 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [classStatusFilter, setClassStatusFilter] = useState('');
   const [dateFrom,          setDateFrom]          = useState('');
   const [dateTo,            setDateTo]            = useState('');
+
+  // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves.
+  //
+  // matchDateRangePreset is the same call that decides which quick-range button renders
+  // as active, so what the row shows and what gets stored are one decision rather than
+  // two that can disagree. A hand-typed range that happens to equal a preset is therefore
+  // stored as that preset - which is exactly what the row is telling the admin it is.
+  const persistedFilters = useMemo<StoredFilters>(() => {
+    const preset = matchDateRangePreset(dateFrom, dateTo, adminTzRaw, new Date());
+    return {
+      status:      statusFilter,
+      teacher:     teacherFilter,
+      classStatus: classStatusFilter,
+      preset,
+      from: preset ? '' : dateFrom,
+      to:   preset ? '' : dateTo,
+    };
+  }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, adminTzRaw]);
+
+  /**
+   * Shape validation for a decoded stored record. Null rejects the whole record and the
+   * page opens on defaults.
+   *
+   * STRUCTURAL problems reject everything: not an object, a field of the wrong type, a
+   * malformed day key, or a preset id this build does not know (a record written by a
+   * different version of this page, or edited by hand - nothing about it can be trusted
+   * field by field).
+   *
+   * DATA DRIFT does not: a teacher who has since left, or a status the dropdown no longer
+   * offers, is a well-formed record whose target has moved. Those single fields fall back
+   * to "all" instead of throwing away a still-valid date range with them. Left as-is, a
+   * teacher id absent from the dropdown would filter the list by an invisible selection -
+   * the select would render blank while the fetch quietly narrowed the results.
+   */
+  function parseStoredFilters(raw: unknown): StoredFilters | null {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+    const record = raw as Record<string, unknown>;
+
+    const status      = record.status;
+    const teacher     = record.teacher;
+    const classStatus = record.classStatus;
+    const from        = record.from;
+    const to          = record.to;
+    if (typeof status !== 'string' || typeof teacher !== 'string') return null;
+    if (typeof classStatus !== 'string') return null;
+    if (typeof from !== 'string' || typeof to !== 'string') return null;
+    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null;
+
+    let preset: DateRangePreset | null;
+    if (record.preset === null) preset = null;
+    else if (isDateRangePreset(record.preset)) preset = record.preset;
+    else return null;
+
+    return {
+      status:      STATUS_OPTIONS.some((o) => o.value === status) ? status : '',
+      teacher:     teachers.some((t) => t.id === teacher) ? teacher : '',
+      classStatus: CLASS_STATUS_OPTIONS.some((o) => o.value === classStatus) ? classStatus : '',
+      preset,
+      // Enforces the invariant on the way in as well as on the way out: with a preset
+      // active the stored dates are meaningless and the range comes from the clock.
+      from: preset ? '' : from,
+      to:   preset ? '' : to,
+    };
+  }
+
+  /**
+   * Push a restored record into filter state. Runs once, from the hook's mount effect -
+   * never during render, so the clock read below cannot desync server and client markup.
+   * loadedPageRef is untouched: a restore only ever happens on mount, and the page-1
+   * fetch it provokes resets that ref itself.
+   */
+  function applyStoredFilters(stored: StoredFilters) {
+    setStatusFilter(stored.status);
+    setTeacherFilter(stored.teacher);
+    setClassStatusFilter(stored.classStatus);
+    if (stored.preset) {
+      // Recomputed against NOW, which is the whole point of storing the id: a session
+      // that spans midnight, or a tab returned to the next morning, gets the preset the
+      // admin chose rather than the days it covered when they chose it.
+      //
+      // No timezone means no honest answer to "which day is today" - the same reason
+      // DateRangeFilter disables the preset buttons and the server page declines to seed
+      // ?filter=today. The range restores empty rather than guessing UTC, and the hook
+      // then rewrites storage to match what is on screen.
+      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null;
+      setDateFrom(range?.from ?? '');
+      setDateTo(range?.to ?? '');
+    } else {
+      setDateFrom(stored.from);
+      setDateTo(stored.to);
+    }
+  }
+
+  // RESTORE RACE - already covered by the request token below, deliberately and with no
+  // extra guard. The mount fetch fires once from the fetchReports effect with the default
+  // filters; the restore lands a frame later, changes the filter state, re-memoises
+  // fetchReports and re-runs that effect. Both requests are then in flight, and
+  // reportsRequestIdRef makes the newer one win whichever order they return in - which is
+  // what that token is for. ClassesListClient documents the same thing about its own.
+  //
+  // This also runs on a RETURN to the All Reports tab, because the tab switch unmounts
+  // ReportsList outright. That is the intended behaviour: the filters survive the round
+  // trip instead of snapping back to defaults, exactly as they do across a Back nav.
+  const { clear: clearStoredFilters } = useFilterPersistence<StoredFilters>({
+    storageKey: FILTERS_STORAGE_KEY,
+    value: persistedFilters,
+    defaultValue: DEFAULT_STORED_FILTERS,
+    skipRestore: hasUrlFilters,
+    parse: parseStoredFilters,
+    apply: applyStoredFilters,
+  });
 
   // The header badge counts live in the parent. Held in a ref so fetchReports can call it
   // WITHOUT taking it as a dependency: fetchReports is keyed on the five filters and drives
@@ -323,29 +518,42 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
 
   return (
     <div>
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-5">
+      {/* Filters. items-end is new alongside the DateRangeFilter swap and is not
+          decoration: that component's three items each stack a label above their control
+          and so stand taller than the bare selects beside them. Left at the row's default
+          align-items:stretch, those selects would stretch to the new height. The Classes
+          filter row pins alignItems:'flex-end' for the same reason. */}
+      <div className="flex flex-wrap items-end gap-3 mb-5">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
-          <option value="">All Statuses</option>
-          <option value="pending">Pending</option>
-          <option value="completed">Completed</option>
-          <option value="flagged">Flagged</option>
-          <option value="reopened">Reopened</option>
+          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select value={teacherFilter} onChange={(e) => setTeacherFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
           <option value="">All Teachers</option>
           {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
         </select>
         <select value={classStatusFilter} onChange={(e) => setClassStatusFilter(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
-          <option value="">All Class Types</option>
-          <option value="taken">Class Taken</option>
-          <option value="student_no_show">Student No-Show</option>
-          <option value="teacher_no_show">Teacher No-Show</option>
+          {CLASS_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-        <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+        {/* Date range. The From/To pair plus the timezone-correct quick-range presets; a
+            preset reports both halves in ONE onChange, so one click is one render and one
+            request. No page reset here (unlike the Classes list, which owns a page state):
+            any filter change re-memoises fetchReports, whose effect always refetches page
+            1 and resets loadedPageRef with it. */}
+        <DateRangeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => { setDateFrom(f); setDateTo(t); }}
+          tz={adminTzRaw}
+        />
         {(statusFilter || teacherFilter || classStatusFilter || dateFrom || dateTo) && (
-          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
+          // clearStoredFilters() alongside the state resets: "Clear" has to mean cleared
+          // for the next visit too, and without it the only thing wiping the key would be
+          // the hook noticing the state fell back to its defaults - which it cannot notice
+          // when no state actually changed. This button only renders while a filter is
+          // set, so that case is unreachable through it today; the call is what keeps the
+          // guarantee true if the condition ever changes. ClassesListClient's clearFilters
+          // calls it for the same reason.
+          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); clearStoredFilters(); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
             Clear filters
           </button>
         )}
@@ -587,7 +795,7 @@ function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, initialPendingCount, initialFlaggedCount }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, adminTzRaw, initialPendingCount, initialFlaggedCount, hasUrlFilters = false }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   // Seeded from the server's global counts, then kept in step with each list fetch. These
@@ -764,7 +972,7 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} onTotalsChange={handleTotalsChange} />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} adminTzRaw={adminTzRaw} hasUrlFilters={hasUrlFilters} onTotalsChange={handleTotalsChange} />}
       {activeTab === 'trace' && <LiveTrace adminTimezone={adminTimezone} />}
 
       {showExport && (
