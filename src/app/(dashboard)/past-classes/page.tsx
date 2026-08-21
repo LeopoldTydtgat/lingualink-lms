@@ -5,6 +5,7 @@ import PastClassesClient from './PastClassesClient'
 
 type RawStudentJoin = {
   full_name: string | null
+  photo_url: string | null
 } | null
 
 type RawLessonRow = {
@@ -80,7 +81,8 @@ export default async function PastClassesPage() {
       cancelled_by,
       rescheduled_by,
       students (
-        full_name
+        full_name,
+        photo_url
       )
     `)
     .eq('teacher_id', user.id)
@@ -120,6 +122,7 @@ export default async function PastClassesPage() {
       cancelled_by: l.cancelled_by ?? null,
       rescheduled_by: l.rescheduled_by ?? null,
       student_name: student?.full_name ?? 'Unknown student',
+      student_photo_url: student?.photo_url ?? null,
     }
   })
 

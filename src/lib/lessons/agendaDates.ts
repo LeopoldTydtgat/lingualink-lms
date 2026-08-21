@@ -92,3 +92,16 @@ export function formatDayDivider(isoString: string, timezone: string, dateKey: s
   const relative = formatDayHeading(isoString, timezone, dateKey, todayKey)
   return relative === absolute ? absolute : `${relative} - ${absolute}`
 }
+
+// Time of day in the account holder's own zone, 24-hour. The agenda rows print
+// time only - the divider above them carries the date - so this is deliberately
+// time-only. UpcomingClassesClient still holds a byte-identical local copy;
+// converge it here when that file is next touched.
+export function formatTimeOfDay(isoString: string, timezone: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: timezone,
+    hour12: false,
+  }).format(new Date(isoString))
+}

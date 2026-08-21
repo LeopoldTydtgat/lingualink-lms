@@ -1,11 +1,13 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { isCancelledStatus } from '@/lib/billing/billability'
+import { formatDayDate, formatMonth, formatDayDivider, formatTimeOfDay } from '@/lib/lessons/agendaDates'
+import { getLocalDateKey } from '@/lib/utils/timezone'
 
 // One ended lesson belonging to the viewing teacher. Flattened upstream: the
-// student join is already flattened to student_name.
+// student join is already flattened to student_name / student_photo_url.
 type PastLesson = {
   id: string
   scheduled_at: string
@@ -16,6 +18,7 @@ type PastLesson = {
   cancelled_by: string | null
   rescheduled_by: string | null
   student_name: string
+  student_photo_url: string | null
 }
 
 // Completed report for a lesson. Supplies feedback text only - it is NEVER
@@ -73,21 +76,21 @@ function lessonBucket(lesson: PastLesson): Bucket {
   return 'No report'
 }
 
-// Hours of notice between a cancellation and the class it cancelled. Whole
-// hours below a day, whole days above. Instant-vs-instant in UTC ms - no local
-// calendar date is involved, so no timezone projection is needed or wanted.
-// Returns null when the cancellation instant is AFTER the class start (legacy
-// or admin-cancelled-late rows): a negative notice is meaningless and must not
-// render as "0h before".
+// Bare notice magnitude between a cancellation and the class it cancelled -
+// e.g. "18 min", "17h", "2d". Whole hours below a day, whole days above.
+// Instant-vs-instant in UTC ms - no local calendar date is involved, so no
+// timezone projection is needed or wanted. Returns null when the cancellation
+// instant is AFTER the class start (legacy or admin-cancelled-late rows): a
+// negative notice is meaningless and must not render as "0h".
 function noticeLabel(cancelledAt: string, scheduledAt: string): string | null {
   const diffMs = new Date(scheduledAt).getTime() - new Date(cancelledAt).getTime()
   if (diffMs <= 0) return null
   const minutes = Math.floor(diffMs / 60000)
-  if (minutes < 60) return `${minutes} min before`
+  if (minutes < 60) return `${minutes} min`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h before`
+  if (hours < 24) return `${hours}h`
   const days = Math.floor(hours / 24)
-  return `${days}d before`
+  return `${days}d`
 }
 
 type Pill = { label: string; backgroundColor: string; color: string }
@@ -126,53 +129,42 @@ export default function PastClassesClient({
 }: Props) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<string>('All')
-  // null => use the default collapse (newest month expanded, all others collapsed).
-  const [collapsedMonths, setCollapsedMonths] = useState<Set<string> | null>(null)
+  // Today's date key in the VIEWER's timezone, for the Today divider label. Set in
+  // the effect, never during render: react-hooks/purity is ON in this file and a
+  // clock read in a render body would also make the SSR pass disagree with
+  // hydration. Null until mounted, which the divider treats as "no relative label".
+  const [todayKey, setTodayKey] = useState<string | null>(null)
 
-  // All three formatters are pinned to the viewer's account zone. scheduled_at and
-  // cancelled_at are timestamptz instants: without an explicit timeZone they render
-  // in whatever zone the browser happens to sit in, not the teacher's own.
-  const dateTimeFmt = useMemo(
+  useEffect(() => {
+    // Named read rather than a bare setState in the effect body, the shape both
+    // agenda lists already use (UpcomingClassesClient, MyClassesClient): the clock
+    // is the external system being sampled here, not state derived from props, and
+    // react-hooks/set-state-in-effect only reads it that way once the sample is a
+    // named operation. Set once - this page is history, so unlike those two lists it
+    // has no group whose label goes stale at local midnight.
+    function syncTodayKey() {
+      setTodayKey(getLocalDateKey(new Date(), viewerTz))
+    }
+    syncTodayKey()
+  }, [viewerTz])
+
+  // Pinned to the viewer's account zone. scheduled_at and cancelled_at are
+  // timestamptz instants: without an explicit timeZone they render in whatever zone
+  // the browser happens to sit in, not the teacher's own.
+  //
+  // Day-only, no year: used for the cancellation line only, where the month
+  // separator above already carries the year. The class's own start is printed
+  // as a time range by the row instead, under a divider that already carries
+  // its date. Time comes from the shared formatTimeOfDay helper, not a second
+  // formatter here.
+  const dayFmt = useMemo(
     () =>
       new Intl.DateTimeFormat('en-GB', {
         day: 'numeric',
         month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
         timeZone: viewerTz,
       }),
     [viewerTz]
-  )
-
-  // en-CA renders 'YYYY-MM', so the group key sorts lexically and matches the
-  // collapsedMonths keys. Key and label come from the same zoned formatting of the
-  // same instant, so they can never disagree about which month a class fell in.
-  const monthKeyFmt = useMemo(
-    () => new Intl.DateTimeFormat('en-CA', { timeZone: viewerTz, year: 'numeric', month: '2-digit' }),
-    [viewerTz]
-  )
-  const monthLabelFmt = useMemo(
-    () => new Intl.DateTimeFormat('en-GB', { timeZone: viewerTz, month: 'long', year: 'numeric' }),
-    [viewerTz]
-  )
-
-  // Local helper 1: full date + time for an instant, in the viewer's zone. Used for
-  // BOTH scheduled_at and cancelled_at - the cancellation TIME is a client
-  // requirement, the date alone is not enough.
-  function formatDateTime(instant: string) {
-    return dateTimeFmt.format(new Date(instant))
-  }
-
-  // Local helper 2: the month bucket for an instant, in the viewer's zone, so a
-  // boundary instant cannot land in the wrong month group. useCallback rather than a
-  // plain function because the grouping memo below depends on it.
-  const formatMonth = useCallback(
-    (instant: string) => {
-      const d = new Date(instant)
-      return { key: monthKeyFmt.format(d), label: monthLabelFmt.format(d) }
-    },
-    [monthKeyFmt, monthLabelFmt]
   )
 
   const reportsByLessonId = useMemo(() => {
@@ -205,42 +197,39 @@ export default function PastClassesClient({
     return byChip.filter((l) => l.student_name.toLowerCase().includes(q))
   }, [lessons, filter, search])
 
-  const groups = useMemo(() => {
-    const map = new Map<string, { key: string; label: string; lessons: PastLesson[] }>()
+  // Flat agenda, one group per calendar DAY - the same shape the teacher's Upcoming
+  // Classes list uses, so the two pages read as one product. The key comes from
+  // getLocalDateKey in the viewer's own zone, the same helper Upcoming uses and the
+  // same zone the divider label below is formatted in, so the key and its label agree
+  // by construction and a boundary instant cannot land under the wrong date.
+  //
+  // Days sort DESCENDING and rows sort descending within a day: this is history, the
+  // exact opposite of Upcoming's ascending order. Newest class first, always.
+  const days = useMemo(() => {
+    const map = new Map<string, PastLesson[]>()
     for (const lesson of visible) {
-      const { key, label } = formatMonth(lesson.scheduled_at)
-      let group = map.get(key)
-      if (!group) {
-        group = { key, label, lessons: [] }
-        map.set(key, group)
-      }
-      group.lessons.push(lesson)
+      const key = getLocalDateKey(new Date(lesson.scheduled_at), viewerTz)
+      const bucket = map.get(key)
+      if (bucket) bucket.push(lesson)
+      else map.set(key, [lesson])
     }
-    const out = [...map.values()].sort((a, b) => (a.key < b.key ? 1 : -1))
-    for (const g of out) {
-      g.lessons.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
-    }
-    return out
-  }, [visible, formatMonth])
-
-  // Default collapse: newest month expanded, all others collapsed. The null state
-  // uses this, so switching chip resets back to it.
-  const defaultCollapsed = useMemo(() => new Set(groups.slice(1).map((g) => g.key)), [groups])
-  const searching = search.trim() !== ''
-  // While searching, force every month expanded so a match inside an otherwise-
-  // collapsed month is actually visible. This only overrides which groups render
-  // collapsed - collapsedMonths itself is untouched, so clearing the search box
-  // restores the user's manual collapse state exactly as they left it.
-  const effectiveCollapsed = searching ? new Set<string>() : collapsedMonths ?? defaultCollapsed
-
-  function toggleMonth(key: string) {
-    setCollapsedMonths((prev) => {
-      const next = new Set(prev ?? defaultCollapsed)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
+    // The bucket arrays are built here by push, so sorting them in place never
+    // touches the `lessons` prop array `visible` can pass straight through.
+    const out = [...map.entries()].map(([key, dayLessons]) => {
+      dayLessons.sort((a, b) => new Date(b.scheduled_at).getTime() - new Date(a.scheduled_at).getTime())
+      return { key, lessons: dayLessons }
     })
-  }
+    out.sort((a, b) => (a.key < b.key ? 1 : -1))
+    return out
+  }, [visible, viewerTz])
+
+  // Header counts come from the FULL lesson set, never the filtered or searched view,
+  // exactly like the chip counts: the subtitle states what this teacher's history
+  // holds, not what the current chip happens to show.
+  const cancelledCount = useMemo(
+    () => lessons.filter((l) => isCancelledStatus(l.status)).length,
+    [lessons]
+  )
 
   return (
     <div className="space-y-6">
@@ -248,7 +237,15 @@ export default function PastClassesClient({
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Past Classes</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Every class you have taught, missed or had cancelled.
+          {lessons.length} {lessons.length === 1 ? 'class' : 'classes'}
+          {cancelledCount > 0 && (
+            <>
+              {' '}&middot;{' '}
+              <span className="font-medium" style={{ color: '#FF8303' }}>
+                {cancelledCount} cancelled
+              </span>
+            </>
+          )}
         </p>
       </div>
 
@@ -287,7 +284,7 @@ export default function PastClassesClient({
               return (
                 <button
                   key={f}
-                  onClick={() => { setFilter(f); setCollapsedMonths(null) }}
+                  onClick={() => setFilter(f)}
                   className="text-xs px-3 py-1.5 rounded-full border transition-colors"
                   style={
                     active
@@ -302,90 +299,165 @@ export default function PastClassesClient({
             })}
           </div>
 
-          {groups.length === 0 ? (
+          {days.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-12">No classes match this filter.</p>
           ) : (
-            <div className="space-y-4">
-              {groups.map((group) => {
-                const collapsed = effectiveCollapsed.has(group.key)
-                return (
-                  <div key={group.key} className="space-y-3">
-                    <button
-                      onClick={() => toggleMonth(group.key)}
-                      aria-expanded={!collapsed}
-                      className="w-full flex items-center justify-between px-1 py-1 text-left"
-                    >
-                      <span className="flex items-center gap-2">
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                          className="text-gray-400"
-                          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}
-                        >
-                          <path d="M6 9l6 6 6-6"/>
-                        </svg>
-                        <span className="font-semibold text-gray-900">{group.label}</span>
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {group.lessons.length} {group.lessons.length === 1 ? 'class' : 'classes'}
-                      </span>
-                    </button>
+            <div className="space-y-5">
+              {days.map((day, dayIndex) => {
+                // Every calendar month in the list carries its header, the first one
+                // included: two structurally identical months must not look different,
+                // and in a flat agenda 1 Sept and 31 Aug are otherwise indistinguishable
+                // neighbours. The first day has no previous day to compare against, so it
+                // counts as a month change by definition. Months are compared on the day
+                // keys, which getLocalDateKey already built in the viewer's timezone, so
+                // the comparison and the text below it agree by construction.
+                //
+                // No mount gate: formatMonth is pure and takes its zone as an argument, so
+                // the server and the first client pass emit the same string.
+                const showMonthSeparator =
+                  dayIndex === 0 || day.key.slice(0, 7) !== days[dayIndex - 1].key.slice(0, 7)
+                const firstOfDay = day.lessons[0]
 
-                    {!collapsed && (
-                      <div className="space-y-3">
-                        {group.lessons.map((lesson) => {
-                          const cancelled = isCancelledStatus(lesson.status)
-                          const pill = statusPill(lesson)
-                          const report = reportsByLessonId[lesson.id]
-                          const rescheduled = cancelled && lesson.rescheduled_by != null
-                          const reason = lesson.cancellation_reason?.trim() ?? ''
-                          // Null when there is no cancellation instant, or when the cancellation landed
-                          // after the class had already started (see noticeLabel).
-                          const notice = lesson.cancelled_at
-                            ? noticeLabel(lesson.cancelled_at, lesson.scheduled_at)
-                            : null
-                          return (
-                            <div
-                              key={lesson.id}
-                              className="bg-white rounded-xl shadow-sm p-4"
-                              style={{ border: '1px solid #f3f4f6' }}
-                            >
-                              <div className="flex items-start justify-between gap-3 mb-2">
-                                <div>
-                                  <p className="font-medium text-gray-900">{formatDateTime(lesson.scheduled_at)}</p>
-                                  <p className="text-sm text-gray-600">{lesson.student_name}</p>
-                                </div>
-                                <span
-                                  className="text-xs px-2 py-1 rounded-full flex-shrink-0"
-                                  style={{ backgroundColor: pill.backgroundColor, color: pill.color }}
-                                >
-                                  {pill.label}
-                                </span>
+                return (
+                  <div key={day.key}>
+                    {showMonthSeparator && (
+                      <p
+                        style={{
+                          // The first header already has the chip row's gap above it; only
+                          // a mid-list month break has to open a break of its own.
+                          margin: dayIndex === 0 ? '0 0 10px' : '28px 0 10px',
+                          paddingBottom: '6px',
+                          paddingLeft: '2px',
+                          borderBottom: '1px solid #E0DFDC',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          letterSpacing: '0.06em',
+                          color: '#111827',
+                        }}
+                      >
+                        {formatMonth(firstOfDay.scheduled_at, viewerTz)}
+                      </p>
+                    )}
+                    {/* Slim text divider, not a card and not a control: nothing collapses
+                        on this page, so it carries no chevron and no lesson count.
+                        DELIBERATE DEVIATION from Upcoming, which prints the raw date key
+                        until it mounts: pre-mount this prints the absolute date instead.
+                        formatDayDate is deterministic on server and client, so SSR and the
+                        first client pass still match, and the teacher never sees a bare
+                        '2026-08-21'. Once the effect supplies todayKey the divider swaps to
+                        formatDayDivider; on a past-only list 'Tomorrow' is unreachable and
+                        'Today' is reachable, both of which formatDayHeading handles. */}
+                    <p
+                      style={{
+                        margin: '0 0 6px 2px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: '#9ca3af',
+                      }}
+                    >
+                      {todayKey === null
+                        ? formatDayDate(firstOfDay.scheduled_at, viewerTz)
+                        : formatDayDivider(firstOfDay.scheduled_at, viewerTz, day.key, todayKey)}
+                    </p>
+                    <div className="card-elevated overflow-hidden">
+                      {day.lessons.map((lesson, i) => {
+                        const cancelled = isCancelledStatus(lesson.status)
+                        const pill = statusPill(lesson)
+                        const report = reportsByLessonId[lesson.id]
+                        const rescheduled = cancelled && lesson.rescheduled_by != null
+                        const reason = lesson.cancellation_reason?.trim() ?? ''
+                        // Null when there is no cancellation instant, or when the cancellation landed
+                        // after the class had already started (see noticeLabel).
+                        const notice = lesson.cancelled_at
+                          ? noticeLabel(lesson.cancelled_at, lesson.scheduled_at)
+                          : null
+                        // There is no ends_at column on this page, so the end is derived by
+                        // adding the duration to the start. Instant arithmetic in UTC ms,
+                        // NOT local date construction - the toISOString() ban covers
+                        // building a local calendar date, which this is not.
+                        const endIso = new Date(
+                          new Date(lesson.scheduled_at).getTime() + lesson.duration_minutes * 60000
+                        ).toISOString()
+
+                        return (
+                          <div
+                            key={lesson.id}
+                            className="bg-white"
+                            style={{ borderTop: i === 0 ? 'none' : '1px solid #f3f4f6' }}
+                          >
+                            {/* items-start, not Upcoming's items-center: a row here can carry a
+                                cancellation line and an unclamped feedback block under its time
+                                line, and centring would float the avatar and the pill in the
+                                middle of a tall row. */}
+                            <div className="w-full flex items-start gap-4 p-4 text-left">
+                              {/* Plain div, NOT a Link to /students/[training_id]: that page's
+                                  teacher access gate requires an active claim - an upcoming
+                                  lesson or an open report - which a past-only student does not
+                                  have, so the link would 404 for most rows on this page. */}
+                              <div
+                                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden"
+                                style={{ backgroundColor: '#FFE8C2' }}
+                              >
+                                {lesson.student_photo_url ? (
+                                  <img
+                                    src={lesson.student_photo_url}
+                                    alt={lesson.student_name}
+                                    className="w-10 h-10 rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <span className="font-semibold text-sm" style={{ color: '#FF8303' }}>
+                                    {lesson.student_name.charAt(0)}
+                                  </span>
+                                )}
                               </div>
 
-                              <p className="text-xs text-gray-500">{lesson.duration_minutes} min</p>
-
-                              {cancelled && lesson.cancelled_at && (
-                                <p className="text-xs text-gray-500 mt-1">
-                                  {rescheduled ? 'Rescheduled ' : 'Cancelled '}
-                                  {formatDateTime(lesson.cancelled_at)}
-                                  {notice !== null ? ` - ${notice}` : ''}
-                                  {reason !== '' && reason !== pill.label ? ` (${reason})` : ''}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-semibold">{lesson.student_name}</p>
+                                {/* Time only: the divider above the group carries the date for
+                                    every row beneath it. */}
+                                <p className="text-sm text-gray-500">
+                                  {`${formatTimeOfDay(lesson.scheduled_at, viewerTz)} - ${formatTimeOfDay(endIso, viewerTz)} · ${lesson.duration_minutes} min`}
                                 </p>
-                              )}
 
-                              {/* Full feedback, never clamped: this page is the
-                                  teacher's permanent record of the class. */}
-                              {!cancelled && report?.feedback_text && (
-                                <p className="text-sm text-gray-600 mt-2 italic whitespace-pre-line">
-                                  &ldquo;{report.feedback_text}&rdquo;
-                                </p>
-                              )}
+                                {cancelled && lesson.cancelled_at && (
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    {rescheduled ? 'Rescheduled' : 'Cancelled'} on{' '}
+                                    {dayFmt.format(new Date(lesson.cancelled_at))} at{' '}
+                                    {formatTimeOfDay(lesson.cancelled_at, viewerTz)}
+                                    {notice !== null ? `, ${notice} before the class` : ''}
+                                    {reason !== '' && reason !== pill.label ? ` (${reason})` : ''}
+                                  </p>
+                                )}
+
+                                {/* Full feedback, never clamped: this page is the
+                                    teacher's permanent record of the class. */}
+                                {!cancelled && report?.feedback_text && (
+                                  <p className="text-sm text-gray-600 mt-2 italic whitespace-pre-line">
+                                    &ldquo;{report.feedback_text}&rdquo;
+                                  </p>
+                                )}
+                              </div>
+
+                              <span
+                                className="flex-shrink-0"
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: '4px',
+                                  backgroundColor: pill.backgroundColor,
+                                  color: pill.color,
+                                }}
+                              >
+                                {pill.label}
+                              </span>
                             </div>
-                          )
-                        })}
-                      </div>
-                    )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )
               })}
