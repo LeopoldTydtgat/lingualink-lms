@@ -39,26 +39,31 @@ const CELL_BOOKABLE_BG = '#D8EEDC'
 // per-cell :hover, so "the cell under the pointer" and "the run that cell
 // would place" are one and the same highlight here.
 const CELL_BOOKABLE_HOVER_BG = '#C4E4CA'
-const CELL_GREY_BG = '#F7F6F4'
+const CELL_GREY_BG = '#EEEDEA'
 // Blocked cells in a column the week returned NO slots for at all: a day the
 // teacher never offers (a weekend, a day off) rather than one whose openings
 // are taken. A shade quieter than CELL_GREY_BG so an untouched column recedes
 // instead of reading as seven hours of individually-refused times.
-const CELL_EMPTY_COLUMN_BG = '#FCFBFA'
+const CELL_EMPTY_COLUMN_BG = '#F7F6F4'
 // Hairline drawn across the top edge of every whole-hour row, so the axis has
 // a visible beat at :00 without a full gridline every 30 minutes.
-const HOUR_LINE = '1px solid #F0EFEC'
+const HOUR_LINE = '1px solid #E2E0DC'
 // Hover ghost: the run a tap WOULD place, previewed in situ. Dashed brand
 // orange over a deepened green fill (CELL_BOOKABLE_HOVER_BG) plus a darker
 // orange glyph and time range on the run's first cell -- the fill only ever
 // deepens within the green family, so a ghost can never be mistaken for the
-// solid-orange selection.
+// cream, left-accented selection.
 const GHOST_BORDER = '2px dashed #FF8303'
 const GHOST_GLYPH_COLOR = '#9A5203'
-// Selected-run fill — solid brand orange, the same #FF8303 as the run outline,
-// so a selected block reads as one filled event instead of a pale amber tint.
-// The run's label, tick and duration line are painted white on top of it.
-const CELL_SELECTED_BG = '#FF8303'
+// Selected-run chrome — mirrors the teacher Day-to-Day lesson block
+// (src/app/(dashboard)/schedule/tabs/DayToDay.tsx): a pale cream fill instead
+// of a solid block, a thin border on the run's outer edges only, and a 3px
+// brand-orange left accent carried by every cell so the run still reads as
+// one continuous event. The run's label and duration line are painted in the
+// same dark neutrals as the teacher block, not white.
+const CELL_SELECTED_BG = '#FFF3E0'
+const CELL_SELECTED_BORDER = '1px solid #FFD9A8'
+const CELL_SELECTED_ACCENT = '3px solid #FF8303'
 // Selected-teacher pill ring — green family derived from CELL_BOOKABLE_BG
 // (border a stronger green of the same hue, bg a slightly lighter tint).
 // PLACEHOLDER pending the client's portal-wide green-vs-orange decision,
@@ -71,6 +76,20 @@ const TEACHER_SELECTED_BG = '#F1F8F2'
 // colouring cells would collide with the three states the legend names.
 const TODAY_ACCENT = '#FF8303'
 const TODAY_PILL_BG = '#FFF0DC'
+// Reschedule only: the run the class CURRENTLY occupies, so the grid says
+// where it already is instead of leaving the student to remember. Verbatim the
+// teacher Day-to-Day past-lesson chrome
+// (src/app/(dashboard)/schedule/tabs/DayToDay.tsx:1368,1370) — a near-white
+// fill under a muted grey left accent, the portal's existing "this already
+// exists, it is not an offer" language. Deliberately neither the green of an
+// opening nor the cream of the selection: the original run is neither.
+const CELL_ORIGINAL_BG = '#F9FAFB'
+const CELL_ORIGINAL_ACCENT = '3px solid #D6D3CE'
+// Raised by a tap that resolves to the class's OWN current start — the single
+// instant a reschedule cannot move to. Shared by both tap paths (direct and
+// snapped) so the two can never drift apart. A UX guard only: /api/student/book
+// rejects the identical booking regardless, and stays the actual safety net.
+const CURRENT_TIME_NOTICE = 'This is the current time for this class. Pick a different time.'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -789,7 +808,7 @@ export default function BookingGridClient({
   // Chrome for a cell inside the selected run, so the run reads as ONE
   // continuous event block. Applied on the AVAILABLE-cell branch only: every
   // 30-min step of a valid run is available by construction, so a grey cell can
-  // never fall inside one. A single 1px #FF8303 outline around the block (top
+  // never fall inside one. A single 1px #FFD9A8 outline around the block (top
   // edge only on the first cell, bottom edge only on the last, right edge on
   // all), a 3px solid
   // #FF8303 left accent on every run cell (teacher Day-to-Day event style),
@@ -802,32 +821,34 @@ export default function BookingGridClient({
   // without a top cap — accepted, mirrors the NEW324 last-day-of-week limit.
   const runCellChrome = (isFirst: boolean, isLast: boolean): CSSProperties => ({
     backgroundColor: CELL_SELECTED_BG,
-    borderStyle: 'solid',
-    borderColor: '#FF8303',
-    // top right bottom left — internal horizontal borders stay 0.
-    borderWidth: `${isFirst ? 1 : 0}px 1px ${isLast ? 1 : 0}px 3px`,
+    borderLeft: CELL_SELECTED_ACCENT,
+    borderRight: CELL_SELECTED_BORDER,
+    borderTop: isFirst ? CELL_SELECTED_BORDER : 'none',
+    borderBottom: isLast ? CELL_SELECTED_BORDER : 'none',
     borderRadius:
-      isFirst && isLast ? '6px' : isFirst ? '6px 6px 0 0' : isLast ? '0 0 6px 6px' : '0',
+      isFirst && isLast ? '8px' : isFirst ? '8px 8px 0 0' : isLast ? '0 0 8px 8px' : '0',
     marginTop: isFirst ? '0' : '-2px',
   })
 
-  // Time-range text painted on the run's FIRST cell only. White for contrast
-  // on the solid-orange CELL_SELECTED_BG; aria-hidden where rendered — the
-  // start cell's aria-label already announces the slot.
+  // Time-range text painted on the run's FIRST cell only. Dark neutral for
+  // contrast on the cream CELL_SELECTED_BG, matching the teacher Day-to-Day
+  // lesson block's title text; aria-hidden where rendered — the start cell's
+  // aria-label already announces the slot.
   const runLabelStyle: CSSProperties = {
     fontSize: '11px',
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 1,
-    color: '#ffffff',
+    color: '#111827',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   }
-  // Same treatment one step down, for the duration line on the run's LAST cell.
+  // Same treatment one step down, for the duration line on the run's LAST cell
+  // — matches the teacher block's secondary text colour.
   const runSubLabelStyle: CSSProperties = {
     fontSize: '10px',
     fontWeight: '600',
     lineHeight: 1,
-    color: '#ffffff',
+    color: '#4B5563',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   }
@@ -850,6 +871,27 @@ export default function BookingGridClient({
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textAlign: 'center',
+  }
+  // Original-run label — the class's current time range, on that run's FIRST
+  // cell. Same single-clipped-line shape as every other run label (lineHeight
+  // 1, nowrap, overflow hidden) so it can never grow the 30px row, in the muted
+  // grey of the chrome it sits on.
+  //
+  // The 'Current time · ' prefix is deliberately dropped. runFirstCellLayout
+  // centres its content and clips BOTH edges, and at the grid's own minimum
+  // column width (minmax(88px, 1fr) → ~79px of content box) a 28-character 10px
+  // string overflows by roughly half its length — centred, that eats the range
+  // from both ends and leaves a mangled middle rather than a shorter true
+  // label. The range alone (~65px) always renders whole at every width the grid
+  // can reach. The context strip above the grid still carries the words, and
+  // the start cell's aria-label carries them for screen readers.
+  const originalLabelStyle: CSSProperties = {
+    fontSize: '10px',
+    fontWeight: '600',
+    lineHeight: 1,
+    color: '#9CA3AF',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
   }
   // Layout added to the first run cell so the tick and label sit centred on a
   // single clipped line.
@@ -1052,9 +1094,15 @@ export default function BookingGridClient({
         return
       }
 
-      // Success — go back to my classes
-      router.push('/student/my-classes')
-      router.refresh()
+      // Success — leave for My Classes. replace (not push) so the booking
+      // route and its ?reschedule= param leave the history stack rather than
+      // remaining live underneath. No router.refresh() either: the navigation
+      // already fetches the destination's server components, whereas refresh()
+      // re-ran the SOURCE route's server component — /student/book, still
+      // carrying ?reschedule=<id> — whose dead-id guard then fired on the row
+      // reschedule_class_atomic had just cancelled, producing a false "no longer
+      // be rescheduled" banner on a SUCCESSFUL reschedule.
+      router.replace('/student/my-classes')
     } catch {
       setSubmitError('Something went wrong. Please try again.')
       setIsSubmitting(false)
@@ -1102,6 +1150,44 @@ export default function BookingGridClient({
       ? teachers.find((t) => t.id === rescheduleLesson.teacher_id) ?? null
       : null
 
+  // Reschedule only: the class's own current start in the EXACT ISO shape every
+  // slot start on this page carries, plus the run it occupies.
+  //
+  // SHAPE. slot.startIso is minted as `new Date(startMs).toISOString()` by the
+  // availability engine (api/student/availability/slotEngine.ts:148,164), and
+  // snapToValidStart returns `new Date(...).toISOString()` as well
+  // (lib/bookingWeekGrid.ts) — both the fixed ECMA-262 Date Time String Format,
+  // YYYY-MM-DDTHH:mm:ss.sssZ. rescheduleLesson.scheduled_at arrives RAW from
+  // PostgREST as a timestamptz, YYYY-MM-DDTHH:mm:ss+00:00, which would never
+  // string-equal a slot start: every comparison below would be silently false
+  // and the guard would do nothing at all. Round-tripping it through the SAME
+  // `new Date(...).toISOString()` puts both sides in one shape, where `===` is
+  // exactly epoch-ms equality.
+  //
+  // An unparseable scheduled_at fails the guard OPEN (null blocks nothing) and
+  // must never throw a RangeError out of render — this is a UX guard, and
+  // /api/student/book still refuses the identical booking.
+  const originalStartMs =
+    originalStart !== null && Number.isFinite(originalStart.getTime())
+      ? originalStart.getTime()
+      : null
+  const originalStartIso =
+    originalStartMs !== null ? new Date(originalStartMs).toISOString() : null
+  // The original run's half-open instant bounds, in the same epoch-ms shape as
+  // runStartMs/runEndMs and ghostStartMs/ghostEndMs above: a cell is inside the
+  // run iff its instant falls in [originalStartMs, originalEndMs), which for a
+  // 30/60/90-minute lesson is exactly that run's 30-minute step instants.
+  const originalEndMs =
+    originalStartMs !== null && rescheduleLesson !== null
+      ? originalStartMs + rescheduleLesson.duration_minutes * 60000
+      : null
+  // Range text for the original run's first cell, off the same
+  // studentTimezone-pinned formatter the context strip above already uses.
+  const originalRangeLabel =
+    originalStart !== null && originalEnd !== null
+      ? `${timeFormatter.format(originalStart)} – ${timeFormatter.format(originalEnd)}`
+      : null
+
   // Compact pills — bare minutes; the group label carries the unit and the
   // aria-label stays descriptive ("30 minutes").
   const durationOptions = [
@@ -1114,13 +1200,13 @@ export default function BookingGridClient({
   // available cell is now a bare CELL_BOOKABLE_BG fill — no edge, no centre
   // dot — so the Available swatch is the same solid fill and nothing else. The
   // Unavailable fill keeps a palette-grey edge so it doesn't vanish on white
-  // (its fill is near-white), and Selected takes the solid-orange run fill.
-  // Decorative only.
+  // (its fill is near-white). Decorative only.
   const legendItems = [
     { label: 'Available', bg: CELL_BOOKABLE_BG, border: 'none' },
     { label: 'Unavailable', bg: CELL_GREY_BG, border: '1px solid #E0DFDC' },
-    // Matches a real selected cell: selected bg + 1px #FF8303 border.
-    { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
+    // The swatch mirrors the run's cream fill and orange left accent, so the
+    // legend cannot drift out of sync with what the grid actually paints.
+    { label: 'Selected', bg: CELL_SELECTED_BG, border: CELL_SELECTED_BORDER, borderLeft: CELL_SELECTED_ACCENT },
   ]
 
   // Shared icon+label+value cell used by every confirm-panel row.
@@ -1131,14 +1217,18 @@ export default function BookingGridClient({
           width: '36px',
           height: '36px',
           borderRadius: '8px',
-          backgroundColor: '#FFF0DC',
+          backgroundColor: '#f3f4f6',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <Icon size={18} color="#FF8303" />
+        {/* Neutral box, neutral icon: on this panel orange is reserved for
+            the Confirm action alone, so every row icon here — and the box
+            behind it — matches the grey the cancellation footnote's Info
+            icon already uses. */}
+        <Icon size={18} color="#6b7280" />
       </div>
       <div style={{ minWidth: 0 }}>
         <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
@@ -1165,7 +1255,9 @@ export default function BookingGridClient({
         {/* Desktop summary header — width mirrors the aside so their tops align
             (display comes from the classes; never set it inline here) */}
         <div className="hidden lg:flex lg:w-[288px] lg:shrink-0" style={{ alignItems: 'center', gap: '7px' }}>
-          <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          {/* #9ca3af to match the grey caption beside it — orange on this
+              panel is reserved for the Confirm action alone. */}
+          <Calendar size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
           <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
         </div>
       </div>
@@ -1657,6 +1749,7 @@ export default function BookingGridClient({
                             borderRadius: '50%',
                             backgroundColor: item.bg,
                             border: item.border,
+                            ...(item.borderLeft ? { borderLeft: item.borderLeft } : {}),
                             flexShrink: 0,
                           }}
                         />
@@ -1885,11 +1978,55 @@ export default function BookingGridClient({
                           const isGhostFirst = inGhostRun && t === ghostStartMs
                           const isGhostLast =
                             inGhostRun && ghostEndMs !== null && t + SLOT_MINUTES * 60000 === ghostEndMs
+                          // Reschedule only: the run this class currently sits
+                          // on. Half-open epoch-ms bounds, exactly like the
+                          // selected and ghost runs above; originalStartMs is
+                          // null on every fresh booking, so both flags below are
+                          // dead outside a reschedule. Painted on this AVAILABLE
+                          // branch only, which is where the run normally lands:
+                          // the excludeLessonId the fetch sends is precisely
+                          // what keeps the class's own slots free. The three
+                          // gaps the selected run already documents
+                          // (cross-midnight column split, day-8 continuation,
+                          // DST fall-back row) can leave a step unpainted, and a
+                          // run blocked by something else entirely renders grey
+                          // — cosmetic either way, the tap guard is independent.
+                          const inOriginalRun =
+                            originalStartMs !== null &&
+                            originalEndMs !== null &&
+                            t >= originalStartMs &&
+                            t < originalEndMs
+                          // The one instant a reschedule cannot move to. Uses
+                          // the SAME string comparison the two tap guards use,
+                          // so what is painted and what is refused can never
+                          // disagree.
+                          const isOriginalStart =
+                            originalStartIso !== null && slot.startIso === originalStartIso
+                          // First-cell label precedence, encoded once: selected
+                          // wins outright, then ghost, then original.
+                          const showOriginalLabel =
+                            isOriginalStart &&
+                            !inSelectedRun &&
+                            !inGhostRun &&
+                            originalRangeLabel !== null
                           const slotTime = formatSlotTime(slot.startIso, studentTimezone)
                           return (
                             <button
                               key={key}
                               onClick={() => {
+                                // Reschedule only: the class's own current
+                                // start. Re-booking it is a no-op the server
+                                // rejects anyway, so refuse it here and say why
+                                // rather than spend a round trip on a 400.
+                                // ONLY this instant is refused — an OVERLAPPING
+                                // move (+30 min into the same run) is a
+                                // legitimate reschedule, which is exactly why
+                                // /api/student/book excludes the lesson from its
+                                // own clash check.
+                                if (isReschedule && slot.startIso === originalStartIso) {
+                                  setSnapNotice(CURRENT_TIME_NOTICE)
+                                  return
+                                }
                                 if (slot.bookable) {
                                   setSelectedStartIso(slot.startIso)
                                   setSnapNotice(null)
@@ -1908,36 +2045,70 @@ export default function BookingGridClient({
                                   )
                                   return
                                 }
+                                // The snap walked backwards onto the class's own
+                                // current start: unplaceable for the same reason
+                                // a direct tap on it is, so it is rejected at the
+                                // CALL SITE — snapToValidStart stays a pure
+                                // instant walk with no reschedule knowledge.
+                                if (isReschedule && snapped === originalStartIso) {
+                                  setSnapNotice(CURRENT_TIME_NOTICE)
+                                  return
+                                }
                                 setSelectedStartIso(snapped)
                                 setSnapNotice(null)
                               }}
                               onMouseEnter={
                                 canHover
-                                  ? () =>
+                                  ? () => {
                                       // Resolved by EXACTLY the rule onClick uses, so
                                       // the preview and the tap can never disagree: a
                                       // bookable cell ghosts its own run, a free but
                                       // un-startable one ghosts the run that would
                                       // snap in, and a tap that would resolve to
                                       // nothing ghosts nothing (null clears it).
+                                      const preview = slot.bookable
+                                        ? slot.startIso
+                                        : snapToValidStart(
+                                            slot.startIso,
+                                            selectedDuration / SLOT_MINUTES,
+                                            instantSet
+                                          )
+                                      // Including the reschedule refusal, for the
+                                      // same reason: previewing a run the tap
+                                      // will not place would be a lie, so the
+                                      // class's own current start ghosts nothing.
                                       setHoverStartIso(
-                                        slot.bookable
-                                          ? slot.startIso
-                                          : snapToValidStart(
-                                              slot.startIso,
-                                              selectedDuration / SLOT_MINUTES,
-                                              instantSet
-                                            )
+                                        isReschedule && preview === originalStartIso ? null : preview
                                       )
+                                    }
                                   : undefined
                               }
                               aria-pressed={isSelected}
+                              aria-disabled={isOriginalStart}
                               aria-label={
-                                slot.bookable ? `Book ${slotTime}` : `Book a class around ${slotTime}`
+                                // aria-disabled above, never the `disabled`
+                                // attribute: the cell must stay FOCUSABLE so a
+                                // keyboard user reaches it, hears why it is
+                                // refused and tabs on. Only the start cell is
+                                // refused — the rest of the original run keeps
+                                // its normal label because it remains a
+                                // legitimate target.
+                                isOriginalStart
+                                  ? 'Current class time - choose a different slot'
+                                  : slot.bookable
+                                  ? `Book ${slotTime}`
+                                  : `Book a class around ${slotTime}`
                               }
                               style={{
                                 minHeight: '30px',
                                 cursor: 'pointer',
+                                // CHROME PRECEDENCE — selected > ghost >
+                                // original, with one deliberate exception: an
+                                // original-run cell under the ghost keeps the
+                                // original FILL while the ghost owns its edge
+                                // and its label. Selected wins outright, fill
+                                // included, so a cell inside both the original
+                                // and the selected run reads purely as the pick.
                                 ...(inSelectedRun
                                   ? runCellChrome(isRunFirst, isRunLast)
                                   : {
@@ -1946,14 +2117,29 @@ export default function BookingGridClient({
                                       borderRadius: `${prevFree ? '0' : '6px'} ${prevFree ? '0' : '6px'} ${nextFree ? '0' : '6px'} ${nextFree ? '0' : '6px'}`,
                                       border: inGhostRun ? GHOST_BORDER : 'none',
                                       // Key order matters: React writes `border`
-                                      // first, so this longhand lands on top of it.
-                                      // Omitted entirely on a ghost cell, whose
-                                      // dashed edge owns all four sides.
+                                      // first, so these longhands land on top of
+                                      // it. Both are omitted entirely on a ghost
+                                      // cell, whose dashed edge owns all four
+                                      // sides — that is the ghost-over-original
+                                      // half of the precedence noted above.
+                                      ...(inOriginalRun && !inGhostRun
+                                        ? { borderLeft: CELL_ORIGINAL_ACCENT }
+                                        : {}),
                                       ...(showHourLine && !inGhostRun ? { borderTop: HOUR_LINE } : {}),
-                                      // Deeper green under the ghost: exactly
-                                      // the cells this hover would fill, called
-                                      // out beneath the dashed outline.
-                                      backgroundColor: inGhostRun ? CELL_BOOKABLE_HOVER_BG : CELL_BOOKABLE_BG,
+                                      // The original run's near-white fill
+                                      // outranks BOTH greens, the ghost's
+                                      // included: hovering the class's own run
+                                      // still previews the move, without
+                                      // pretending the run underneath is a fresh
+                                      // opening. Deeper green under the ghost
+                                      // otherwise: exactly the cells this hover
+                                      // would fill, called out beneath the dashed
+                                      // outline.
+                                      backgroundColor: inOriginalRun
+                                        ? CELL_ORIGINAL_BG
+                                        : inGhostRun
+                                        ? CELL_BOOKABLE_HOVER_BG
+                                        : CELL_BOOKABLE_BG,
                                       marginTop: prevFree ? '-2px' : '0',
                                     }),
                                 ...(isRunFirst ? runFirstCellLayout : {}),
@@ -1961,11 +2147,17 @@ export default function BookingGridClient({
                                 ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
                                 ...(isGhostFirst ? runFirstCellLayout : {}),
                                 ...(isGhostLast && !isGhostFirst ? runLastCellLayout : {}),
+                                // Last, and only where no selected or ghost label
+                                // already owns the cell (showOriginalLabel encodes
+                                // that): the same clipped single-line box the
+                                // other two run heads use, so the label cannot
+                                // change the row height.
+                                ...(showOriginalLabel ? runFirstCellLayout : {}),
                               }}
                             >
                               {isRunFirst && selectedRangeLabel !== null && (
                                 <>
-                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#ffffff', flexShrink: 0 }} />
+                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#FF8303', flexShrink: 0 }} />
                                   <span aria-hidden="true" style={runLabelStyle}>
                                     {selectedRangeLabel}
                                   </span>
@@ -1997,6 +2189,15 @@ export default function BookingGridClient({
                               {isGhostLast && !isGhostFirst && (
                                 <span aria-hidden="true" style={ghostSubLabelStyle}>
                                   {selectedDuration} min
+                                </span>
+                              )}
+                              {/* Original-run head — the class's current time
+                                  range. Yields to both the selected and the ghost
+                                  label; decorative, the start cell's own
+                                  aria-label carries the meaning. */}
+                              {showOriginalLabel && (
+                                <span aria-hidden="true" style={originalLabelStyle}>
+                                  {originalRangeLabel}
                                 </span>
                               )}
                             </button>
@@ -2085,7 +2286,9 @@ export default function BookingGridClient({
           {/* Panel header — mobile-only copy; the desktop header lives in Row 0 */}
           <div className="lg:hidden">
             <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
-              <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              {/* #9ca3af to match the grey caption beside it — orange on this
+                  panel is reserved for the Confirm action alone. */}
+              <Calendar size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
               <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
             </div>
           </div>
@@ -2182,15 +2385,18 @@ export default function BookingGridClient({
                   }}
                 >
                   {renderCell(ChartNoAxesColumn, 'Remaining after booking', formatHours(hoursAfter))}
+                  {/* Green, not orange: green already means "available / yours"
+                      on the grid above (CELL_BOOKABLE_BG), and orange on this
+                      panel is reserved for the Confirm action alone. */}
                   <span
                     style={{
                       flexShrink: 0,
-                      backgroundColor: '#FFF0DC',
+                      backgroundColor: '#D8EEDC',
                       borderRadius: '999px',
                       padding: '4px 12px',
                       fontSize: '13px',
                       fontWeight: '600',
-                      color: '#FF8303',
+                      color: '#2E7D4F',
                     }}
                   >
                     {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}
