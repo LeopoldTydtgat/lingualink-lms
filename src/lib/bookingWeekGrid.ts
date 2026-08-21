@@ -263,15 +263,32 @@ export function buildRowAxis(
  * DST FALL-BACK RULE (CAL2). On a fall-back day one wall-clock hour occurs
  * TWICE, so two distinct UTC instants legitimately claim the same row key —
  * e.g. in America/New_York on 2026-11-01 the wall time 01:00 is both
- * 05:00:00Z (EDT, UTC-4) and 06:00:00Z (EST, UTC-5). The EARLIER instant wins
- * the cell, decided by an explicit `new Date(startIso).getTime()` comparison:
- * never by input order, and never by last-write-wins, which silently dropped
- * the earlier instant out of the grid so it could never be booked. Keeping
- * the earlier instant matches the 'first occurrence' disambiguation
+ * 05:00:00Z (EDT, UTC-4) and 06:00:00Z (EST, UTC-5). Only one of them can
+ * have the cell: rendering both — duplicate rows, or a split cell — is a
+ * rejected design. The winner is decided in two steps, and never by input
+ * order or by last-write-wins, which silently dropped whichever instant
+ * happened to be fed first out of the grid so it could never be booked:
+ *
+ *   1. available: true beats available: false.
+ *   2. Otherwise — both free, or both blocked — the EARLIER instant wins, by
+ *      an explicit `new Date(startIso).getTime()` comparison.
+ *
+ * AVAILABILITY LEADS because the cell's tap gate is raw availability: a
+ * blocked cell is inert, so an earlier-but-blocked instant taking the row
+ * would shadow a free later one into unreachability — the hour would render
+ * grey and refuse every tap even though the student really could book its
+ * second occurrence. Dropping the earlier instant when IT is the blocked one
+ * costs nothing, because it was never bookable in the first place.
+ *
+ * The earlier-instant tie-break therefore only decides equally-available
+ * pairs, and there it matches the 'first occurrence' disambiguation
  * wallTimeToUtcMs applies to an ambiguous wall time (lib/utils/timezone.ts),
- * so a duplicated wall hour resolves to the same instant here as it does
- * everywhere else in the app. The later instant is simply not offered:
- * rendering both — duplicate rows or a split cell — is a rejected design.
+ * so a duplicated wall hour whose two occurrences are equally available
+ * resolves to the same instant here as it does everywhere else in the app.
+ *
+ * Both steps read only the two candidate slots' own fields, so the winner is
+ * order-independent by construction: feeding the same slots in any order
+ * picks the same one.
  *
  * Spring-forward needs no handling: the skipped wall hour does not exist in
  * the timezone, so utcInstantToTzParts never reports those row keys for any
@@ -289,13 +306,13 @@ export function buildCellMaps(
       const parts = utcInstantToTzParts(slot.startIso, studentTimezone)
       const rowKey = parts.hour * 60 + parts.minute
       const existing = m.get(rowKey)
-      // Explicit epoch-ms comparison — order-independent by construction.
-      if (
+      // Step 1 availability, step 2 the earlier instant — see CAL2 above.
+      const wins =
         existing === undefined ||
-        new Date(slot.startIso).getTime() < new Date(existing.startIso).getTime()
-      ) {
-        m.set(rowKey, slot)
-      }
+        (slot.available !== existing.available
+          ? slot.available
+          : new Date(slot.startIso).getTime() < new Date(existing.startIso).getTime())
+      if (wins) m.set(rowKey, slot)
     }
     cellMaps.set(key, m)
   }

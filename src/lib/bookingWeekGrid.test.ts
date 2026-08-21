@@ -498,6 +498,14 @@ describe('buildCellMaps (CAL2)', () => {
   // America/New_York falls back on 2026-11-01 at 02:00 EDT → 01:00 EST, so the
   // wall time 01:00 occurs TWICE: once at 05:00:00Z (EDT, UTC-4) and again at
   // 06:00:00Z (EST, UTC-5). Both land on grid row key 60.
+  //
+  // The collision winner is decided in two steps: available:true beats
+  // available:false, and only when the two are equally available does the
+  // EARLIER instant win. Availability leads because the cell's tap gate is
+  // raw availability — an earlier-but-blocked instant holding the row would
+  // render grey and refuse every tap, shadowing a free later occurrence the
+  // student really could book. Every collision case below is asserted under
+  // BOTH feed orders, since neither step may depend on input order.
   const NY = 'America/New_York'
   const FALLBACK_KEY = '2026-11-01'
   const EDT_ONE_AM = Date.UTC(2026, 10, 1, 5, 0)
@@ -522,15 +530,21 @@ describe('buildCellMaps (CAL2)', () => {
     expect(EST_ONE_AM - EDT_ONE_AM).toBe(60 * 60 * 1000)
   }
 
+  // The single cell on the duplicated 01:00 row, for one feed order.
+  function oneAmCell(feed: GridStartSlot[]) {
+    return buildCellMaps([FALLBACK_KEY], { [FALLBACK_KEY]: feed }, NY).get(FALLBACK_KEY)
+  }
+
   it('fixture: both instants really are wall-clock 01:00 on the fall-back day', () => {
     assertFixtureIsTheDuplicatedHour()
   })
 
   it('fall-back collision: the EARLIER instant wins the cell (earlier fed first)', () => {
     assertFixtureIsTheDuplicatedHour()
+    // Both occurrences free, so step 1 ties and the earlier instant decides.
     const cellMaps = buildCellMaps(
       [FALLBACK_KEY],
-      { [FALLBACK_KEY]: [gridSlot(EDT_ONE_AM), gridSlot(EST_ONE_AM)] },
+      { [FALLBACK_KEY]: [gridSlot(EDT_ONE_AM, true, true), gridSlot(EST_ONE_AM, true, true)] },
       NY,
     )
     const column = cellMaps.get(FALLBACK_KEY)
@@ -543,12 +557,81 @@ describe('buildCellMaps (CAL2)', () => {
     assertFixtureIsTheDuplicatedHour()
     const cellMaps = buildCellMaps(
       [FALLBACK_KEY],
-      { [FALLBACK_KEY]: [gridSlot(EST_ONE_AM), gridSlot(EDT_ONE_AM)] },
+      { [FALLBACK_KEY]: [gridSlot(EST_ONE_AM, true, true), gridSlot(EDT_ONE_AM, true, true)] },
       NY,
     )
     const column = cellMaps.get(FALLBACK_KEY)
     expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
     expect(column?.size).toBe(1)
+  })
+
+  it('fall-back collision: an AVAILABLE later instant beats an unavailable earlier one', () => {
+    assertFixtureIsTheDuplicatedHour()
+    // 01:00 EDT is booked/blocked, 01:00 EST is free. Earlier-wins alone would
+    // hand the row to the blocked instant and the cell would render grey and
+    // inert, making a slot the student really could book unreachable.
+    const blockedEarlier = gridSlot(EDT_ONE_AM, false, false)
+    const freeLater = gridSlot(EST_ONE_AM, true, true)
+    for (const feed of [
+      [blockedEarlier, freeLater],
+      [freeLater, blockedEarlier],
+    ]) {
+      const column = oneAmCell(feed)
+      expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EST_ONE_AM))
+      expect(column?.get(ROW_ONE_AM)?.available).toBe(true)
+      expect(column?.size).toBe(1)
+    }
+  })
+
+  it('fall-back collision: an AVAILABLE earlier instant beats an unavailable later one', () => {
+    assertFixtureIsTheDuplicatedHour()
+    // The mirror case, where both steps point the same way. It is what proves
+    // step 1 is "available wins" rather than "later wins".
+    const freeEarlier = gridSlot(EDT_ONE_AM, true, true)
+    const blockedLater = gridSlot(EST_ONE_AM, false, false)
+    for (const feed of [
+      [freeEarlier, blockedLater],
+      [blockedLater, freeEarlier],
+    ]) {
+      const column = oneAmCell(feed)
+      expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
+      expect(column?.get(ROW_ONE_AM)?.available).toBe(true)
+      expect(column?.size).toBe(1)
+    }
+  })
+
+  it('fall-back collision: both available — the EARLIER instant wins the tie-break', () => {
+    assertFixtureIsTheDuplicatedHour()
+    // Step 1 ties, so step 2 decides — and it matches the 'first occurrence'
+    // disambiguation wallTimeToUtcMs applies to an ambiguous wall time.
+    const freeEarlier = gridSlot(EDT_ONE_AM, true, true)
+    const freeLater = gridSlot(EST_ONE_AM, true, true)
+    for (const feed of [
+      [freeEarlier, freeLater],
+      [freeLater, freeEarlier],
+    ]) {
+      const column = oneAmCell(feed)
+      expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
+      expect(column?.get(ROW_ONE_AM)?.available).toBe(true)
+      expect(column?.size).toBe(1)
+    }
+  })
+
+  it('fall-back collision: both unavailable — the EARLIER instant wins the tie-break', () => {
+    assertFixtureIsTheDuplicatedHour()
+    // Neither is bookable, so which one holds the grey cell is cosmetic — but
+    // it must still be the rule that decides it, never the feed order.
+    const blockedEarlier = gridSlot(EDT_ONE_AM, false, false)
+    const blockedLater = gridSlot(EST_ONE_AM, false, false)
+    for (const feed of [
+      [blockedEarlier, blockedLater],
+      [blockedLater, blockedEarlier],
+    ]) {
+      const column = oneAmCell(feed)
+      expect(column?.get(ROW_ONE_AM)?.startIso).toBe(iso(EDT_ONE_AM))
+      expect(column?.get(ROW_ONE_AM)?.available).toBe(false)
+      expect(column?.size).toBe(1)
+    }
   })
 
   it('non-transition day: keys and slots map 1:1 and hold the input slot objects', () => {
