@@ -20,9 +20,10 @@ import {
   getWeekColumnKeys,
   buildInstantSet,
   getValidStartsByColumn,
-  collapseEmptyBands,
+  buildRowAxis,
   getVisibleColumns,
   buildCellMaps,
+  snapToValidStart,
   SLOT_MINUTES,
   type SlotsResponse,
 } from '@/lib/bookingWeekGrid'
@@ -43,12 +44,11 @@ const CELL_SELECTED_BG = '#FF8303'
 // same as the cell colours above.
 const TEACHER_SELECTED_BORDER = '#4CAF50'
 const TEACHER_SELECTED_BG = '#F1F8F2'
-// Legend "Available" dot — deeper tint of the cell green, same hue. Legend
-// tints are STRONGER than the cell fills because small swatches need more
-// saturation to read as the same colour; at 10px the pale cell fill reads
-// grey. Solid stronger fill chosen over pale-fill + green border: a 10px
-// bordered pale dot reads as a grey ring, not as green.
-const LEGEND_AVAILABLE_DOT = '#A5D6A7'
+// Today's column marker — the brand orange, used for the header's 2px bottom
+// rule and its day line. Grid cells are never tinted by it: "today" is a
+// calendar landmark, not an availability state, and colouring cells would
+// collide with the three states the legend names.
+const TODAY_ACCENT = '#FF8303'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -564,6 +564,15 @@ export default function BookingGridClient({
   const [refetchNonce, setRefetchNonce] = useState(0)
 
   const [selectedStartIso, setSelectedStartIso] = useState<string | null>(null)
+  // Amber notice raised when a tap on a FREE cell cannot resolve to any valid
+  // start for the chosen length (snapToValidStart returned null — the free run
+  // around that cell is shorter than the class). Cleared on a successful
+  // selection and on the three user actions that invalidate it: duration, week
+  // and teacher changes. NOT cleared by a background refetch (visibility/focus,
+  // or the 409/400 recovery), so a notice can outlive the availability it
+  // described until the student acts again — the text names a length and a
+  // week, never a specific slot, so a stale one is misleading at worst.
+  const [snapNotice, setSnapNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [profileTeacher, setProfileTeacher] = useState<Teacher | null>(null)
@@ -682,7 +691,14 @@ export default function BookingGridClient({
   // Only used for the whole-week-empty check: the grid always renders all 7
   // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
-  const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
+  // The grid's time axis: one row per 30-min wall-clock line from the week's
+  // earliest slot to its latest, gaps included. Every slot contributes its row
+  // regardless of availability or bookability, so the axis is a property of the
+  // WEEK, not of the chosen length — flipping 30/60/90 repaints the cells but
+  // never resizes or reflows the grid. This replaces the old collapsed bands,
+  // whose rows appeared and disappeared with the duration and needed a "· · ·"
+  // separator to explain the jumps.
+  const rowAxis = buildRowAxis(validStartsByColumn, studentTimezone)
   // Empty-state copy only: suggest a shorter class only when one actually
   // has openings this week, not merely when it's enabled on the account.
   // Reschedule locks the duration, so that path never offers it.
@@ -693,10 +709,11 @@ export default function BookingGridClient({
       .some((m) => getVisibleColumns(getValidStartsByColumn(columnKeys, slots, instantSet, m)).length > 0)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
-  // Built for all 7 columns — a day with no bookable starts just yields no
-  // cell hits, so every row renders grey there. On a DST fall-back day the
-  // duplicated wall hour resolves to the EARLIER of the two instants (see the
-  // buildCellMaps docstring).
+  // Built for all 7 columns — a day with no slots just yields no cell hits, so
+  // every row renders grey there. On a DST fall-back day the duplicated wall
+  // hour is claimed by two instants and only one gets the cell: the AVAILABLE
+  // one, falling back to the earlier instant when both are equally available
+  // (see the buildCellMaps docstring).
   const cellMaps = buildCellMaps(columnKeys, validStartsByColumn, studentTimezone)
 
   // Backstop invalidation: whenever fresh availability lands or the duration
@@ -711,17 +728,19 @@ export default function BookingGridClient({
     }
   }, [slots, selectedDuration, selectedStartIso])
 
-  // Selected-run bounds in epoch ms, computed once per render: a bookable cell
-  // renders selected when its instant falls inside [runStartMs, runEndMs).
+  // Selected-run bounds in epoch ms, computed once per render: an AVAILABLE
+  // cell renders selected when its instant falls inside [runStartMs, runEndMs).
   // Instants compare via getTime() — never string-compare ISO values. Selection
   // STATE stays selectedStartIso only; this is render-only.
   const runStartMs = selectedStartIso !== null ? new Date(selectedStartIso).getTime() : null
   const runEndMs = runStartMs !== null ? runStartMs + selectedDuration * 60000 : null
 
-  // Chrome shared by BOTH cell branches (bookable button + inert grey div) for
-  // a cell inside the selected run, so the run reads as ONE continuous event
-  // block: a single 1px #FF8303 outline around the block (top edge only on the
-  // first cell, bottom edge only on the last, right edge on all), a 3px solid
+  // Chrome for a cell inside the selected run, so the run reads as ONE
+  // continuous event block. Applied on the AVAILABLE-cell branch only: every
+  // 30-min step of a valid run is available by construction, so a grey cell can
+  // never fall inside one. A single 1px #FF8303 outline around the block (top
+  // edge only on the first cell, bottom edge only on the last, right edge on
+  // all), a 3px solid
   // #FF8303 left accent on every run cell (teacher Day-to-Day event style),
   // and corner rounding only at the block's ends. Non-first cells take a -2px
   // top margin — equal to the grid's 2px row gap — chosen over taller cells
@@ -779,7 +798,10 @@ export default function BookingGridClient({
     padding: '0 4px',
     overflow: 'hidden',
   }
-  // Layout for an unselected bookable cell, centring its availability dot.
+  // Layout for an unselected available cell. It carries no content any more
+  // (the centre dot went with the cell border — a bare fill reads as available
+  // on its own), but the centring is kept so the branch stays symmetric with
+  // the two run layouts above and any future glyph lands centred.
   const bookableCellLayout: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -825,6 +847,13 @@ export default function BookingGridClient({
   const currentWeekKey = getWeekStartKey(studentTimezone)
   const isPrevDisabled = weekStartKey <= currentWeekKey
   const isCurrentWeek = weekStartKey === currentWeekKey
+  // Today's column key in the STUDENT timezone — the same frame the column
+  // keys live in, so the comparison below is a plain string match. Never
+  // browser-local Date math: a student in Tokyo reading the page from a UTC
+  // browser must see THEIR today highlighted, not the browser's. Recomputed
+  // per render like currentWeekKey; a page left open across midnight moves the
+  // marker on the next render, which the visibility refetch already triggers.
+  const todayKey = getLocalDateKey(new Date(), studentTimezone)
 
   // ── Handlers ──
 
@@ -835,6 +864,8 @@ export default function BookingGridClient({
     // than letting a stale pick sit in the confirm panel while the new week
     // loads (the backstop effect would only clear it after the fetch lands).
     setSelectedStartIso(null)
+    // The notice named a length that did not fit in the OLD week's slots.
+    setSnapNotice(null)
   }
 
   const goBack = () => {
@@ -852,6 +883,8 @@ export default function BookingGridClient({
     // New teacher → new availability; validity of the old pick is unknowable
     // until the refetch lands, so fail safe and clear immediately.
     setSelectedStartIso(null)
+    // Same reasoning for the notice: it described the OLD teacher's slots.
+    setSnapNotice(null)
   }
 
   function handleDurationSelect(minutes: number) {
@@ -863,6 +896,9 @@ export default function BookingGridClient({
     if (!allowedDurations.includes(minutes)) return
     if (minutes === selectedDuration) return
     setSelectedDuration(minutes)
+    // The notice names the OLD length ("A 90-minute class does not fit here"),
+    // and a shorter one is exactly what it told the student to try.
+    setSnapNotice(null)
     // Local-only recompute: keep the selection if it is still a valid start
     // for the new duration, otherwise clear it.
     if (
@@ -956,13 +992,14 @@ export default function BookingGridClient({
     { minutes: 90, label: '90', hours: 1.5 },
   ]
 
-  // Legend entries. Each swatch now mirrors what the grid actually paints: the
-  // Available swatch is a white box with the same LEGEND_AVAILABLE_DOT edge and
-  // small green centre dot a bookable cell carries, the Unavailable fill gets a
-  // palette-grey edge so it doesn't vanish on white, and Selected takes the
-  // solid-orange run fill. Decorative only.
+  // Legend entries. Each swatch mirrors what the grid actually paints: an
+  // available cell is now a bare CELL_BOOKABLE_BG fill — no edge, no centre
+  // dot — so the Available swatch is the same solid fill and nothing else. The
+  // Unavailable fill keeps a palette-grey edge so it doesn't vanish on white
+  // (its fill is near-white), and Selected takes the solid-orange run fill.
+  // Decorative only.
   const legendItems = [
-    { label: 'Available', bg: '#ffffff', border: `1px solid ${LEGEND_AVAILABLE_DOT}` },
+    { label: 'Available', bg: CELL_BOOKABLE_BG, border: 'none' },
     { label: 'Unavailable', bg: CELL_GREY_BG, border: '1px solid #E0DFDC' },
     // Matches a real selected cell: selected bg + 1px #FF8303 border.
     { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
@@ -1446,18 +1483,8 @@ export default function BookingGridClient({
                         backgroundColor: item.bg,
                         border: item.border,
                         flexShrink: 0,
-                        ...(item.label === 'Available'
-                          ? { display: 'flex', alignItems: 'center', justifyContent: 'center' }
-                          : {}),
                       }}
-                    >
-                      {item.label === 'Available' && (
-                        <span
-                          aria-hidden="true"
-                          style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
-                        />
-                      )}
-                    </span>
+                    />
                     <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
                       {item.label}
                     </span>
@@ -1486,8 +1513,20 @@ export default function BookingGridClient({
                 />
                 {columnKeys.map((key) => {
                   const day = columnDate(key)
+                  // Today's column in the STUDENT frame — a plain key match, no
+                  // Date comparison. The 2px rule is painted transparent on the
+                  // other six headers so the marker can never change the header
+                  // row's height as the student navigates between weeks.
+                  const isToday = key === todayKey
                   return (
-                    <div key={key} style={{ textAlign: 'center', padding: '2px' }}>
+                    <div
+                      key={key}
+                      style={{
+                        textAlign: 'center',
+                        padding: '2px',
+                        borderBottom: `2px solid ${isToday ? TODAY_ACCENT : 'transparent'}`,
+                      }}
+                    >
                       <p
                         style={{
                           fontSize: '10px',
@@ -1499,195 +1538,186 @@ export default function BookingGridClient({
                       >
                         {weekdayFormatter.format(day)}
                       </p>
-                      <p style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
+                      <p style={{ fontSize: '13px', fontWeight: '600', color: isToday ? TODAY_ACCENT : '#111827' }}>
                         {dayMonthFormatter.format(day)}
                       </p>
                     </div>
                   )
                 })}
 
-                {/* Time rows, band by band, with a gap marker between bands */}
-                {bands.map((band, bandIdx) => (
-                  <div key={band[0]} style={{ display: 'contents' }}>
-                    {bandIdx > 0 && (
-                      <div
-                        style={{
-                          gridColumn: '1 / -1',
-                          textAlign: 'center',
-                          padding: '2px 0',
-                          fontSize: '10px',
-                          letterSpacing: '3px',
-                          color: '#d1d5db',
-                          backgroundColor: '#fbfaf9',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        · · ·
-                      </div>
-                    )}
-                    {band.map((minutes) => (
-                      <div key={minutes} style={{ display: 'contents' }}>
-                        {/* Sticky time column. Root cause of the drifting
-                            labels (previous attempt): lineHeight 24px made
-                            this cell's line box TALLER than the 22px slot
-                            cells, so the label cell — not the slot cells —
-                            sized each row track, and the top-anchored
-                            (flex-start) line box tied the glyphs to the row
-                            top instead of the cell box. Fix: collapse the
-                            line box (lineHeight 1), pin the cell to the slot
-                            height (minHeight 22px) so it never competes in
-                            track sizing, and flex-centre — every label now
-                            centres identically on its own 22px cell,
-                            first/middle/last rows of a band alike. */}
-                        <div
+                {/* Time rows — one per axis entry, top to bottom. The axis is
+                    continuous by construction (buildRowAxis), so there are no
+                    bands to separate and no "· · ·" marker: an empty stretch of
+                    the day renders as ordinary grey rows, which is what it is. */}
+                {rowAxis.map((minutes) => (
+                  <div key={minutes} style={{ display: 'contents' }}>
+                    {/* Sticky time column. Root cause of the drifting labels
+                        (previous attempt): lineHeight 24px made this cell's
+                        line box TALLER than the slot cells, so the label cell —
+                        not the slot cells — sized each row track, and the
+                        top-anchored (flex-start) line box tied the glyphs to
+                        the row top instead of the cell box. Fix: collapse the
+                        line box (lineHeight 1), pin the cell to the slot height
+                        (minHeight 30px) so it never competes in track sizing,
+                        and flex-centre — every label now centres identically on
+                        its own 30px cell. */}
+                    <div
+                      style={{
+                        position: 'sticky',
+                        left: 0,
+                        zIndex: 2,
+                        backgroundColor: '#ffffff',
+                        minHeight: '30px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'flex-end',
+                        paddingRight: '8px',
+                        fontSize: '11px',
+                        lineHeight: 1,
+                        fontWeight: '500',
+                        color: '#6b7280',
+                      }}
+                    >
+                      {formatRowLabel(minutes)}
+                    </div>
+                    {columnKeys.map((key) => {
+                      const slot = cellMaps.get(key)?.get(minutes)
+                      // Grey = not FREE: blocked, booked, past, within 24h, or
+                      // not offered at all. Deliberately not `!slot.bookable` —
+                      // a free slot that cannot START this length is green and
+                      // tappable, and snaps (see below).
+                      if (slot === undefined || !slot.available) {
+                        return (
+                          <div
+                            key={key}
+                            aria-hidden="true"
+                            style={{
+                              minHeight: '30px',
+                              borderRadius: '6px',
+                              border: 'none',
+                              backgroundColor: CELL_GREY_BG,
+                            }}
+                          />
+                        )
+                      }
+                      // Everything below is a FREE slot, so it is green and
+                      // tappable whether or not it is a valid START for the
+                      // chosen length: a free cell the run cannot start on snaps
+                      // backwards to the run that ENDS on it (snapToValidStart).
+                      // Colour therefore tracks raw availability alone and no
+                      // longer flickers as the student flips 30/60/90.
+                      //
+                      // Selected-run painting lives on this branch only: every
+                      // 30-min step of a valid run is available by construction
+                      // (that is what made its start bookable), so no GREY cell
+                      // can ever fall inside the highlight. That is the whole
+                      // invariant — it does NOT promise the orange block is
+                      // visually contiguous. A step can have no cell at all and
+                      // leave a gap, in three pre-existing cases: a cross-
+                      // midnight run continues in the next column (documented
+                      // at runCellChrome), a NEW324 day-8 continuation instant
+                      // is in instantSet but under no column key, and a DST
+                      // fall-back row is won by the other of the two instants
+                      // claiming it. All three predate the axis; none can paint
+                      // a blocked cell orange.
+                      const isSelected = slot.startIso === selectedStartIso
+                      const t = new Date(slot.startIso).getTime()
+                      const inSelectedRun =
+                        runStartMs !== null && runEndMs !== null && t >= runStartMs && t < runEndMs
+                      // Block position from epoch-ms only (see runCellChrome).
+                      const isRunFirst = inSelectedRun && t === runStartMs
+                      const isRunLast =
+                        inSelectedRun && runEndMs !== null && t + SLOT_MINUTES * 60000 === runEndMs
+                      const slotTime = formatSlotTime(slot.startIso, studentTimezone)
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => {
+                            if (slot.bookable) {
+                              setSelectedStartIso(slot.startIso)
+                              setSnapNotice(null)
+                              return
+                            }
+                            const snapped = snapToValidStart(
+                              slot.startIso,
+                              selectedDuration / SLOT_MINUTES,
+                              instantSet
+                            )
+                            if (snapped === null) {
+                              // Fails closed — nothing is selected, and the
+                              // notice says why instead of leaving a dead tap.
+                              setSnapNotice(
+                                `A ${selectedDuration}-minute class does not fit here. Try a shorter length.`
+                              )
+                              return
+                            }
+                            setSelectedStartIso(snapped)
+                            setSnapNotice(null)
+                          }}
+                          aria-pressed={isSelected}
+                          aria-label={
+                            slot.bookable ? `Book ${slotTime}` : `Book a class around ${slotTime}`
+                          }
                           style={{
-                            position: 'sticky',
-                            left: 0,
-                            zIndex: 2,
-                            backgroundColor: '#ffffff',
-                            minHeight: '22px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'flex-end',
-                            paddingRight: '8px',
-                            fontSize: '11px',
-                            lineHeight: 1,
-                            fontWeight: '500',
-                            color: '#6b7280',
+                            minHeight: '30px',
+                            cursor: 'pointer',
+                            ...(inSelectedRun
+                              ? runCellChrome(isRunFirst, isRunLast)
+                              : {
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  backgroundColor: CELL_BOOKABLE_BG,
+                                }),
+                            ...(isRunFirst ? runFirstCellLayout : {}),
+                            ...(!inSelectedRun ? bookableCellLayout : {}),
+                            ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
                           }}
                         >
-                          {formatRowLabel(minutes)}
-                        </div>
-                        {columnKeys.map((key) => {
-                          const slot = cellMaps.get(key)?.get(minutes)
-                          // bookable:false deliberately merges "blocked/booked" with
-                          // "free but the remaining run is too short for the chosen
-                          // duration" — the raw available flag was discarded in
-                          // Stage A, so both render as the same grey cell. A cell
-                          // with no slot at all on this row renders grey too.
-                          if (slot === undefined || !slot.bookable) {
-                            // A grey cell can still sit INSIDE the selected run:
-                            // mid-run continuation slots are free but not valid
-                            // starts themselves (bookable:false), and the highlight
-                            // must span the full duration. Paint by the same
-                            // epoch-ms range as the bookable branch; the cell stays
-                            // inert (no handler, aria-hidden) — only a start cell
-                            // is ever selectable. Any slot instant inside a VALID
-                            // selected run is necessarily available (that is what
-                            // made the start bookable), so this never paints over
-                            // a booked/blocked cell. Slot-less cells have no
-                            // instant and are never in-run.
-                            const cellMs = slot !== undefined ? new Date(slot.startIso).getTime() : null
-                            const inSelectedRun =
-                              cellMs !== null &&
-                              runStartMs !== null &&
-                              runEndMs !== null &&
-                              cellMs >= runStartMs &&
-                              cellMs < runEndMs
-                            // Block position from epoch-ms only (see runCellChrome).
-                            const isRunFirst = inSelectedRun && cellMs === runStartMs
-                            const isRunLast =
-                              inSelectedRun &&
-                              cellMs !== null &&
-                              runEndMs !== null &&
-                              cellMs + SLOT_MINUTES * 60000 === runEndMs
-                            return (
-                              <div
-                                key={key}
-                                aria-hidden="true"
-                                style={{
-                                  minHeight: '22px',
-                                  ...(inSelectedRun
-                                    ? runCellChrome(isRunFirst, isRunLast)
-                                    : {
-                                        borderRadius: '6px',
-                                        border: 'none',
-                                        backgroundColor: CELL_GREY_BG,
-                                      }),
-                                  ...(isRunFirst ? runFirstCellLayout : {}),
-                                  ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
-                                }}
-                              >
-                                {isRunFirst && selectedRangeLabel !== null && (
-                                  <>
-                                    <Check size={11} strokeWidth={3} style={{ color: '#ffffff', flexShrink: 0 }} />
-                                    <span style={runLabelStyle}>{selectedRangeLabel}</span>
-                                  </>
-                                )}
-                                {isRunLast && !isRunFirst && (
-                                  <span style={runSubLabelStyle}>{selectedDuration} min</span>
-                                )}
-                              </div>
-                            )
-                          }
-                          // Exact start cell only — the run's other cells keep
-                          // aria-pressed false while still painting selected.
-                          const isSelected = slot.startIso === selectedStartIso
-                          const t = new Date(slot.startIso).getTime()
-                          const inSelectedRun =
-                            runStartMs !== null && runEndMs !== null && t >= runStartMs && t < runEndMs
-                          // Block position from epoch-ms only (see runCellChrome).
-                          const isRunFirst = inSelectedRun && t === runStartMs
-                          const isRunLast =
-                            inSelectedRun && runEndMs !== null && t + SLOT_MINUTES * 60000 === runEndMs
-                          // Text-less cell — an unselected bookable cell shows
-                          // only a small green dot, the run's FIRST cell paints
-                          // the selected range and its LAST cell the duration;
-                          // the slot time lives in the aria-label (and in the
-                          // summary column).
-                          return (
-                            <button
-                              key={key}
-                              onClick={() => setSelectedStartIso(slot.startIso)}
-                              aria-pressed={isSelected}
-                              aria-label={`Book ${formatSlotTime(slot.startIso, studentTimezone)}`}
-                              style={{
-                                minHeight: '22px',
-                                cursor: 'pointer',
-                                ...(inSelectedRun
-                                  ? runCellChrome(isRunFirst, isRunLast)
-                                  : {
-                                      borderRadius: '6px',
-                                      border: `1px solid ${LEGEND_AVAILABLE_DOT}`,
-                                      backgroundColor: CELL_BOOKABLE_BG,
-                                    }),
-                                ...(isRunFirst ? runFirstCellLayout : {}),
-                                ...(!inSelectedRun ? bookableCellLayout : {}),
-                                ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
-                              }}
-                            >
-                              {!inSelectedRun && (
-                                <span
-                                  aria-hidden="true"
-                                  style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
-                                />
-                              )}
-                              {isRunFirst && selectedRangeLabel !== null && (
-                                <>
-                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#ffffff', flexShrink: 0 }} />
-                                  <span aria-hidden="true" style={runLabelStyle}>
-                                    {selectedRangeLabel}
-                                  </span>
-                                </>
-                              )}
-                              {isRunLast && !isRunFirst && (
-                                <span aria-hidden="true" style={runSubLabelStyle}>
-                                  {selectedDuration} min
-                                </span>
-                              )}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    ))}
+                          {isRunFirst && selectedRangeLabel !== null && (
+                            <>
+                              <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#ffffff', flexShrink: 0 }} />
+                              <span aria-hidden="true" style={runLabelStyle}>
+                                {selectedRangeLabel}
+                              </span>
+                            </>
+                          )}
+                          {isRunLast && !isRunFirst && (
+                            <span aria-hidden="true" style={runSubLabelStyle}>
+                              {selectedDuration} min
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
             </div>
+            {/* Snap notice — raised only by a tap that could not resolve to any
+                valid start. Amber, matching the low-hours notice in the summary
+                aside: both are "this cannot happen as asked" rather than errors.
+                role="status" so the tap gives screen-reader users the same
+                feedback the fill change gives everyone else. */}
+            {snapNotice !== null && (
+              <div
+                role="status"
+                style={{
+                  marginTop: '10px',
+                  padding: '12px 16px',
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  color: '#92400e',
+                }}
+              >
+                {snapNotice}
+              </div>
+            )}
             {/* Hint under the grid — decorative, the cells carry their own labels. */}
             <p style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: '#6b7280' }}>
               <Lightbulb size={13} color="#FF8303" aria-hidden="true" />
-              Click on any available slot to select your class time.
+              Tap any available time to place your class. It will snap to a start that fits.
             </p>
             </>
           )}
