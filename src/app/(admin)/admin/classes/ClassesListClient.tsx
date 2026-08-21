@@ -155,6 +155,38 @@ function getStatusMeta(status: string): { label: string; bg: string; color: stri
   }
 }
 
+// The status cell renders as two pills: a short OUTCOME ("Cancelled" / "Rescheduled")
+// carrying the colour, and a quiet grey ACTOR ("by student"). getCancellationLabel is
+// deliberately NOT changed - it is shared by eight call sites across all three portals
+// and its combined string is correct everywhere else. This splits the same two inputs
+// locally, for this table only, so the pills never wrap and every row is one line high.
+//
+// Mirrors getCancellationLabel's own resolution order exactly: reschedule wins over
+// cancellation, cancelled_by wins over the status suffix, and an unattributed legacy row
+// yields no actor rather than an invented one.
+function getOutcomeParts(lesson: Lesson): { outcome: string; actor: string | null } | null {
+  const label = getCancellationLabel(lesson, 'admin')
+  if (label === null) return null
+
+  const isReschedule = lesson.rescheduled_by === 'student' || lesson.rescheduled_by === 'admin'
+  const outcome = isReschedule ? 'Rescheduled' : 'Cancelled'
+
+  let actor: string | null
+  if (isReschedule) {
+    actor = lesson.rescheduled_by as string
+  } else if (lesson.cancelled_by === 'student' || lesson.cancelled_by === 'teacher' || lesson.cancelled_by === 'admin') {
+    actor = lesson.cancelled_by
+  } else if (lesson.status === 'cancelled_by_student') {
+    actor = 'student'
+  } else if (lesson.status === 'cancelled_by_teacher') {
+    actor = 'teacher'
+  } else {
+    actor = null
+  }
+
+  return { outcome, actor }
+}
+
 // Read-only marker for a SCHEDULED lesson whose duration is not one this student is
 // allowed to book. Returns null when nothing should render. Same {label, bg, color}
 // shape getStatusMeta returns, because every pill in this file is styled from a plain
@@ -589,7 +621,7 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
         {/* Table header */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: filterStatus === 'cancelled' ? '1fr 1fr 160px 80px 110px 1fr 80px' : '1fr 1fr 160px 80px 110px 80px',
+          gridTemplateColumns: '1fr 1fr 150px 95px 200px 150px 70px',
           padding: '12px 16px',
           backgroundColor: '#F9FAFB',
           borderBottom: '1px solid #E5E7EB',
@@ -603,10 +635,12 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
           <span>Student</span>
           <span>Date &amp; Time</span>
           <span>Duration</span>
-          <span>Status</span>
-          {filterStatus === 'cancelled' && (
-            <span>Reason</span>
-          )}
+          <span style={{ textAlign: 'center' }}>Status</span>
+          {/* Always rendered, not gated on the Cancelled filter: the admin should see
+              when a class was cancelled without having to filter for it first. Replaces
+              the old Reason column, which echoed the status pill on every row - students
+              are never asked for a cancellation reason, so nothing ever writes one. */}
+          <span style={{ textAlign: 'center' }}>Cancelled at</span>
           <span>Report</span>
         </div>
 
@@ -625,7 +659,7 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
         ) : (
           lessons.map((lesson, index) => {
             const statusMeta = getStatusMeta(lesson.status)
-            const statusLabel = getCancellationLabel(lesson, 'admin') ?? statusMeta.label
+            const outcomeParts = getOutcomeParts(lesson)
             // A missing student join gives `undefined` here, which resolves to the
             // 'unknown' marker rather than to no marker: we genuinely could not read
             // the list, and that is what the row should say.
@@ -641,7 +675,7 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
                 onClick={() => router.push(`/admin/classes/${lesson.id}`)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: filterStatus === 'cancelled' ? '1fr 1fr 160px 80px 110px 1fr 80px' : '1fr 1fr 160px 80px 110px 80px',
+                  gridTemplateColumns: '1fr 1fr 150px 95px 200px 150px 70px',
                   padding: '14px 16px',
                   borderBottom: index < lessons.length - 1 ? '1px solid #F3F4F6' : 'none',
                   cursor: 'pointer',
@@ -736,25 +770,51 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
                   )}
                 </span>
 
-                {/* Status tag */}
-                <span style={{
-                  display: 'inline-block',
-                  padding: '3px 10px',
-                  borderRadius: '20px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  backgroundColor: statusMeta.bg,
-                  color: statusMeta.color,
-                  width: 'fit-content',
-                }}>
-                  {statusLabel}
-                </span>
+                {/* Two pills, never stacked and never wrapping: the outcome carries the
+                    colour, the actor is quiet grey beside it. The wrapper is one grid
+                    child - the row is a CSS grid and a second sibling would silently
+                    consume the next column. Same trap the duration marker documents. */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'nowrap' }}>
+                  <span style={{
+                    // Fixed width so the grey actor pill beside it starts at the same x
+                    // on every row. Without it, "Cancelled" and "Rescheduled" are
+                    // different widths and the actor pills stagger down the column.
+                    // 104px fits "Rescheduled", the widest label this cell renders.
+                    minWidth: '104px',
+                    textAlign: 'center',
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    backgroundColor: statusMeta.bg,
+                    color: statusMeta.color,
+                    whiteSpace: 'nowrap',
+                    boxSizing: 'border-box',
+                  }}>
+                    {outcomeParts ? outcomeParts.outcome : statusMeta.label}
+                  </span>
+                  {outcomeParts?.actor && (
+                    <span style={{
+                      padding: '3px 8px',
+                      borderRadius: '20px',
+                      fontSize: '11px',
+                      backgroundColor: '#F3F4F6',
+                      color: '#4B5563',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      by {outcomeParts.actor}
+                    </span>
+                  )}
+                </div>
 
-                {filterStatus === 'cancelled' && (
-                  <div onClick={(e) => e.stopPropagation()} style={{ fontSize: '13px', color: '#6B7280' }}>
-                    {lesson.cancellation_reason ?? <span style={{ color: '#D1D5DB', fontStyle: 'italic' }}>No reason provided</span>}
-                  </div>
-                )}
+                {/* Same adminTz ternary and the same two formatters the Date & Time cell
+                    uses, so this stamp and the class time can never render in different
+                    zones. A row that was never cancelled gets an em dash, not a blank. */}
+                <span style={{ fontSize: '12px', color: '#374151', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                  {lesson.cancelled_at
+                    ? (adminTz ? formatInstantInTz(lesson.cancelled_at, adminTz) : formatDateTime(lesson.cancelled_at))
+                    : <span style={{ color: '#D1D5DB' }}>&mdash;</span>}
+                </span>
 
                 {/* Report link — stop propagation so clicking it doesn't open class detail.
                     Points at the report's own detail page. The old ?lesson_id= form went to
