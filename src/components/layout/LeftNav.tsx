@@ -17,6 +17,7 @@ import {
   LogOut,
   ShieldCheck,
   Loader2,
+  History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -30,6 +31,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: 'Upcoming Classes',        href: '/upcoming-classes', icon: LayoutDashboard, matchPaths: ['/upcoming-classes', '/dashboard'] },
+  { label: 'Past Classes',            href: '/past-classes',     icon: History },
   { label: 'Schedule & Availability', href: '/schedule',         icon: CalendarDays },
   { label: 'Class Reports',           href: '/reports',          icon: FileText },
   { label: 'Students & Trainings',    href: '/students',         icon: Users },
