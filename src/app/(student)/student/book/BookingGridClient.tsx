@@ -13,16 +13,17 @@
 import { useState, useEffect, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Lightbulb, type LucideIcon } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Plus, Lightbulb, type LucideIcon } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 import { isBookableStart } from '@/lib/bookingGrid'
 import {
   getWeekColumnKeys,
   buildInstantSet,
   getValidStartsByColumn,
-  collapseEmptyBands,
+  buildRowAxis,
   getVisibleColumns,
   buildCellMaps,
+  snapToValidStart,
   SLOT_MINUTES,
   type SlotsResponse,
 } from '@/lib/bookingWeekGrid'
@@ -31,24 +32,64 @@ import {
 // PLACEHOLDERS pending a design decision (BOOK-1 Stage B) — swap these for the
 // approved palette when design lands. All state-dependent colours go through
 // inline style props (Tailwind v4 cannot apply dynamically constructed classes).
-const CELL_BOOKABLE_BG = '#E8F5E9'
-const CELL_GREY_BG = '#F7F6F4'
-// Selected-run fill — solid brand orange, the same #FF8303 as the run outline,
-// so a selected block reads as one filled event instead of a pale amber tint.
-// The run's label, tick and duration line are painted white on top of it.
-const CELL_SELECTED_BG = '#FF8303'
+const CELL_BOOKABLE_BG = '#D8EEDC'
+// Hover shade for an available cell, one step deeper than the resting green.
+// Painted on the cells of the run the pointer is previewing: hoverStartIso is
+// the only hover state this page tracks, and inline styles cannot carry a
+// per-cell :hover, so "the cell under the pointer" and "the run that cell
+// would place" are one and the same highlight here.
+const CELL_BOOKABLE_HOVER_BG = '#C4E4CA'
+const CELL_GREY_BG = '#EEEDEA'
+// Blocked cells in a column the week returned NO slots for at all: a day the
+// teacher never offers (a weekend, a day off) rather than one whose openings
+// are taken. A shade quieter than CELL_GREY_BG so an untouched column recedes
+// instead of reading as seven hours of individually-refused times.
+const CELL_EMPTY_COLUMN_BG = '#F7F6F4'
+// Hairline drawn across the top edge of every whole-hour row, so the axis has
+// a visible beat at :00 without a full gridline every 30 minutes.
+const HOUR_LINE = '1px solid #E2E0DC'
+// Hover ghost: the run a tap WOULD place, previewed in situ. Dashed brand
+// orange over a deepened green fill (CELL_BOOKABLE_HOVER_BG) plus a darker
+// orange glyph and time range on the run's first cell -- the fill only ever
+// deepens within the green family, so a ghost can never be mistaken for the
+// cream, left-accented selection.
+const GHOST_BORDER = '2px dashed #FF8303'
+const GHOST_GLYPH_COLOR = '#9A5203'
+// Selected-run chrome — mirrors the teacher Day-to-Day lesson block
+// (src/app/(dashboard)/schedule/tabs/DayToDay.tsx): a pale cream fill instead
+// of a solid block, a thin border on the run's outer edges only, and a 3px
+// brand-orange left accent carried by every cell so the run still reads as
+// one continuous event. The run's label and duration line are painted in the
+// same dark neutrals as the teacher block, not white.
+const CELL_SELECTED_BG = '#FFF3E0'
+const CELL_SELECTED_BORDER = '1px solid #FFD9A8'
+const CELL_SELECTED_ACCENT = '3px solid #FF8303'
 // Selected-teacher pill ring — green family derived from CELL_BOOKABLE_BG
 // (border a stronger green of the same hue, bg a slightly lighter tint).
 // PLACEHOLDER pending the client's portal-wide green-vs-orange decision,
 // same as the cell colours above.
 const TEACHER_SELECTED_BORDER = '#4CAF50'
 const TEACHER_SELECTED_BG = '#F1F8F2'
-// Legend "Available" dot — deeper tint of the cell green, same hue. Legend
-// tints are STRONGER than the cell fills because small swatches need more
-// saturation to read as the same colour; at 10px the pale cell fill reads
-// grey. Solid stronger fill chosen over pale-fill + green border: a 10px
-// bordered pale dot reads as a grey ring, not as green.
-const LEGEND_AVAILABLE_DOT = '#A5D6A7'
+// Today's column marker — the brand orange, now carried by the header cell's
+// weekday and date text on a TODAY_PILL_BG ground. Grid cells are never tinted
+// by it: "today" is a calendar landmark, not an availability state, and
+// colouring cells would collide with the three states the legend names.
+const TODAY_ACCENT = '#FF8303'
+const TODAY_PILL_BG = '#FFF0DC'
+// Reschedule only: the run the class CURRENTLY occupies, so the grid says
+// where it already is instead of leaving the student to remember. Verbatim the
+// teacher Day-to-Day past-lesson chrome
+// (src/app/(dashboard)/schedule/tabs/DayToDay.tsx:1368,1370) — a near-white
+// fill under a muted grey left accent, the portal's existing "this already
+// exists, it is not an offer" language. Deliberately neither the green of an
+// opening nor the cream of the selection: the original run is neither.
+const CELL_ORIGINAL_BG = '#F9FAFB'
+const CELL_ORIGINAL_ACCENT = '3px solid #D6D3CE'
+// Raised by a tap that resolves to the class's OWN current start — the single
+// instant a reschedule cannot move to. Shared by both tap paths (direct and
+// snapped) so the two can never drift apart. A UX guard only: /api/student/book
+// rejects the identical booking regardless, and stays the actual safety net.
+const CURRENT_TIME_NOTICE = 'This is the current time for this class. Pick a different time.'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -564,10 +605,36 @@ export default function BookingGridClient({
   const [refetchNonce, setRefetchNonce] = useState(0)
 
   const [selectedStartIso, setSelectedStartIso] = useState<string | null>(null)
+  // Amber notice raised when a tap on a FREE cell cannot resolve to any valid
+  // start for the chosen length (snapToValidStart returned null — the free run
+  // around that cell is shorter than the class). Cleared on a successful
+  // selection and on the three user actions that invalidate it: duration, week
+  // and teacher changes. NOT cleared by a background refetch (visibility/focus,
+  // or the 409/400 recovery), so a notice can outlive the availability it
+  // described until the student acts again — the text names a length and a
+  // week, never a specific slot, so a stale one is misleading at worst.
+  const [snapNotice, setSnapNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [profileTeacher, setProfileTeacher] = useState<Teacher | null>(null)
   const [confirmHover, setConfirmHover] = useState(false)
+  // Hover preview ONLY. The start instant the run would get if the cell under
+  // the pointer were tapped, resolved by exactly the same rule the click
+  // handler uses. Nothing on the hover path ever writes selectedStartIso, so a
+  // pointer sweeping the grid can never change what is selected or booked.
+  const [hoverStartIso, setHoverStartIso] = useState<string | null>(null)
+  // Evaluated once, outside render. On a touch device (hover: none) a tap fires
+  // mouseenter, so the ghost would paint a preview of the selection that same
+  // tap is about to make and then sit there with no mouseleave to clear it —
+  // pure cost. SSR has no matchMedia, so this starts false and the first client
+  // render decides; hoverStartIso is null either way, so no ghost is in the
+  // markup on either side of hydration and nothing can mismatch.
+  const [canHover] = useState<boolean>(
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(hover: hover)').matches
+  )
 
   const selectedTeacher = teachers.find((t) => t.id === selectedTeacherId) ?? teachers[0]
 
@@ -682,7 +749,14 @@ export default function BookingGridClient({
   // Only used for the whole-week-empty check: the grid always renders all 7
   // columns (a day with nothing bookable is a normal all-grey column).
   const visibleColumns = getVisibleColumns(validStartsByColumn)
-  const bands = collapseEmptyBands(validStartsByColumn, studentTimezone, selectedDuration)
+  // The grid's time axis: one row per 30-min wall-clock line from the week's
+  // earliest slot to its latest, gaps included. Every slot contributes its row
+  // regardless of availability or bookability, so the axis is a property of the
+  // WEEK, not of the chosen length — flipping 30/60/90 repaints the cells but
+  // never resizes or reflows the grid. This replaces the old collapsed bands,
+  // whose rows appeared and disappeared with the duration and needed a "· · ·"
+  // separator to explain the jumps.
+  const rowAxis = buildRowAxis(validStartsByColumn, studentTimezone)
   // Empty-state copy only: suggest a shorter class only when one actually
   // has openings this week, not merely when it's enabled on the account.
   // Reschedule locks the duration, so that path never offers it.
@@ -693,11 +767,17 @@ export default function BookingGridClient({
       .some((m) => getVisibleColumns(getValidStartsByColumn(columnKeys, slots, instantSet, m)).length > 0)
 
   // Per-column lookup: student-local wall minutes → the slot on that row.
-  // Built for all 7 columns — a day with no bookable starts just yields no
-  // cell hits, so every row renders grey there. On a DST fall-back day the
-  // duplicated wall hour resolves to the EARLIER of the two instants (see the
-  // buildCellMaps docstring).
+  // Built for all 7 columns — a day with no slots just yields no cell hits, so
+  // every row renders grey there. On a DST fall-back day the duplicated wall
+  // hour is claimed by two instants and only one gets the cell: the AVAILABLE
+  // one, falling back to the earlier instant when both are equally available
+  // (see the buildCellMaps docstring).
   const cellMaps = buildCellMaps(columnKeys, validStartsByColumn, studentTimezone)
+  // Columns the week returned no slots for AT ALL — resolved once per render,
+  // never per cell. Their blocked cells take the quieter CELL_EMPTY_COLUMN_BG:
+  // an all-grey column with a populated map is "fully booked", one with an
+  // empty map is "not offered", and the two should not look identical.
+  const emptyColumns = new Set(columnKeys.filter((key) => cellMaps.get(key)?.size === 0))
 
   // Backstop invalidation: whenever fresh availability lands or the duration
   // changes, drop a selection that is no longer a valid start for the current
@@ -711,17 +791,26 @@ export default function BookingGridClient({
     }
   }, [slots, selectedDuration, selectedStartIso])
 
-  // Selected-run bounds in epoch ms, computed once per render: a bookable cell
-  // renders selected when its instant falls inside [runStartMs, runEndMs).
+  // Selected-run bounds in epoch ms, computed once per render: an AVAILABLE
+  // cell renders selected when its instant falls inside [runStartMs, runEndMs).
   // Instants compare via getTime() — never string-compare ISO values. Selection
   // STATE stays selectedStartIso only; this is render-only.
   const runStartMs = selectedStartIso !== null ? new Date(selectedStartIso).getTime() : null
   const runEndMs = runStartMs !== null ? runStartMs + selectedDuration * 60000 : null
 
-  // Chrome shared by BOTH cell branches (bookable button + inert grey div) for
-  // a cell inside the selected run, so the run reads as ONE continuous event
-  // block: a single 1px #FF8303 outline around the block (top edge only on the
-  // first cell, bottom edge only on the last, right edge on all), a 3px solid
+  // Ghost-run bounds — the same epoch-ms shape as the selected run above, for
+  // the run the pointer is hovering. Gated on canHover so a touch device never
+  // computes them at all, and always yielded to by the real selection: a cell
+  // inside the selected run is never drawn as a ghost.
+  const ghostStartMs = canHover && hoverStartIso !== null ? new Date(hoverStartIso).getTime() : null
+  const ghostEndMs = ghostStartMs !== null ? ghostStartMs + selectedDuration * 60000 : null
+
+  // Chrome for a cell inside the selected run, so the run reads as ONE
+  // continuous event block. Applied on the AVAILABLE-cell branch only: every
+  // 30-min step of a valid run is available by construction, so a grey cell can
+  // never fall inside one. A single 1px #FFD9A8 outline around the block (top
+  // edge only on the first cell, bottom edge only on the last, right edge on
+  // all), a 3px solid
   // #FF8303 left accent on every run cell (teacher Day-to-Day event style),
   // and corner rounding only at the block's ends. Non-first cells take a -2px
   // top margin — equal to the grid's 2px row gap — chosen over taller cells
@@ -732,32 +821,75 @@ export default function BookingGridClient({
   // without a top cap — accepted, mirrors the NEW324 last-day-of-week limit.
   const runCellChrome = (isFirst: boolean, isLast: boolean): CSSProperties => ({
     backgroundColor: CELL_SELECTED_BG,
-    borderStyle: 'solid',
-    borderColor: '#FF8303',
-    // top right bottom left — internal horizontal borders stay 0.
-    borderWidth: `${isFirst ? 1 : 0}px 1px ${isLast ? 1 : 0}px 3px`,
+    borderLeft: CELL_SELECTED_ACCENT,
+    borderRight: CELL_SELECTED_BORDER,
+    borderTop: isFirst ? CELL_SELECTED_BORDER : 'none',
+    borderBottom: isLast ? CELL_SELECTED_BORDER : 'none',
     borderRadius:
-      isFirst && isLast ? '6px' : isFirst ? '6px 6px 0 0' : isLast ? '0 0 6px 6px' : '0',
+      isFirst && isLast ? '8px' : isFirst ? '8px 8px 0 0' : isLast ? '0 0 8px 8px' : '0',
     marginTop: isFirst ? '0' : '-2px',
   })
 
-  // Time-range text painted on the run's FIRST cell only. White for contrast
-  // on the solid-orange CELL_SELECTED_BG; aria-hidden where rendered — the
-  // start cell's aria-label already announces the slot.
+  // Time-range text painted on the run's FIRST cell only. Dark neutral for
+  // contrast on the cream CELL_SELECTED_BG, matching the teacher Day-to-Day
+  // lesson block's title text; aria-hidden where rendered — the start cell's
+  // aria-label already announces the slot.
   const runLabelStyle: CSSProperties = {
     fontSize: '11px',
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 1,
-    color: '#ffffff',
+    color: '#111827',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   }
-  // Same treatment one step down, for the duration line on the run's LAST cell.
+  // Same treatment one step down, for the duration line on the run's LAST cell
+  // — matches the teacher block's secondary text colour.
   const runSubLabelStyle: CSSProperties = {
     fontSize: '10px',
     fontWeight: '600',
     lineHeight: 1,
-    color: '#ffffff',
+    color: '#4B5563',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  }
+  // Ghost equivalents of the two styles above, painted on the hover-preview
+  // run instead of the selected one — same shape, darker glyph orange
+  // (GHOST_GLYPH_COLOR) so a ghost can never be mistaken for the solid-orange
+  // selection label.
+  const ghostLabelStyle: CSSProperties = {
+    fontSize: '10px',
+    fontWeight: '600',
+    lineHeight: 1,
+    color: GHOST_GLYPH_COLOR,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  }
+  const ghostSubLabelStyle: CSSProperties = {
+    fontSize: '9px',
+    lineHeight: 1,
+    color: GHOST_GLYPH_COLOR,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textAlign: 'center',
+  }
+  // Original-run label — the class's current time range, on that run's FIRST
+  // cell. Same single-clipped-line shape as every other run label (lineHeight
+  // 1, nowrap, overflow hidden) so it can never grow the 30px row, in the muted
+  // grey of the chrome it sits on.
+  //
+  // The 'Current time · ' prefix is deliberately dropped. runFirstCellLayout
+  // centres its content and clips BOTH edges, and at the grid's own minimum
+  // column width (minmax(88px, 1fr) → ~79px of content box) a 28-character 10px
+  // string overflows by roughly half its length — centred, that eats the range
+  // from both ends and leaves a mangled middle rather than a shorter true
+  // label. The range alone (~65px) always renders whole at every width the grid
+  // can reach. The context strip above the grid still carries the words, and
+  // the start cell's aria-label carries them for screen readers.
+  const originalLabelStyle: CSSProperties = {
+    fontSize: '10px',
+    fontWeight: '600',
+    lineHeight: 1,
+    color: '#9CA3AF',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
   }
@@ -779,11 +911,41 @@ export default function BookingGridClient({
     padding: '0 4px',
     overflow: 'hidden',
   }
-  // Layout for an unselected bookable cell, centring its availability dot.
+  // Layout for an unselected available cell. It carries no content any more
+  // (the centre dot went with the cell border — a bare fill reads as available
+  // on its own), but the centring is kept so the branch stays symmetric with
+  // the two run layouts above and any future glyph lands centred.
   const bookableCellLayout: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  }
+  // Toolbar group caption. One shared treatment across the card's groups so
+  // Duration and Week (and Teacher, when a multi-teacher training renders it)
+  // read as one centred unit under a single rule rather than three captions
+  // that merely happen to sit on the same line.
+  const toolbarGroupLabel: CSSProperties = {
+    fontSize: '11px',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: '6px',
+  }
+  // Sticky time-column label chrome. Whole hours are the axis's beat — darker,
+  // heavier, and carrying the hour hairline — while the half-hours between them
+  // recede to a light grey, so a column of times reads as hours first and
+  // subdivisions second. A helper rather than four inline ternaries because the
+  // label cell is not inside a block-bodied map.
+  const rowLabelChrome = (minutes: number): CSSProperties => {
+    const isHourRow = minutes % 60 === 0
+    return {
+      borderTop: isHourRow ? HOUR_LINE : 'none',
+      fontSize: isHourRow ? '11px' : '10px',
+      fontWeight: isHourRow ? '600' : '400',
+      color: isHourRow ? '#111827' : '#c4c2bc',
+    }
   }
 
   // The column header / week label Dates are anchored at NOON student-local
@@ -825,6 +987,24 @@ export default function BookingGridClient({
   const currentWeekKey = getWeekStartKey(studentTimezone)
   const isPrevDisabled = weekStartKey <= currentWeekKey
   const isCurrentWeek = weekStartKey === currentWeekKey
+  // Today's column key in the STUDENT timezone — the same frame the column
+  // keys live in, so the comparison below is a plain string match. Never
+  // browser-local Date math: a student in Tokyo reading the page from a UTC
+  // browser must see THEIR today highlighted, not the browser's. Recomputed
+  // per render like currentWeekKey; a page left open across midnight moves the
+  // marker on the next render, which the visibility refetch already triggers.
+  const todayKey = getLocalDateKey(new Date(), studentTimezone)
+
+  // Loading has two shapes. The FIRST load has nothing on screen to preserve,
+  // so it gets the bare centred line. Every LATER load — week nav, a teacher
+  // swap, the visibility/focus refetch, the 409/400 recovery — already has a
+  // week rendered, and unmounting it to that same bare line flashes the whole
+  // panel. Those keep the current view mounted, dimmed and inert, under a small
+  // overlay. `slots` is deliberately never cleared by the fetch effect, so its
+  // emptiness is exactly the "nothing has ever landed" test.
+  const hasSlotData = Object.keys(slots).length > 0
+  const isFirstLoad = loading && !hasSlotData
+  const isRefreshing = loading && hasSlotData
 
   // ── Handlers ──
 
@@ -835,6 +1015,8 @@ export default function BookingGridClient({
     // than letting a stale pick sit in the confirm panel while the new week
     // loads (the backstop effect would only clear it after the fetch lands).
     setSelectedStartIso(null)
+    // The notice named a length that did not fit in the OLD week's slots.
+    setSnapNotice(null)
   }
 
   const goBack = () => {
@@ -852,6 +1034,8 @@ export default function BookingGridClient({
     // New teacher → new availability; validity of the old pick is unknowable
     // until the refetch lands, so fail safe and clear immediately.
     setSelectedStartIso(null)
+    // Same reasoning for the notice: it described the OLD teacher's slots.
+    setSnapNotice(null)
   }
 
   function handleDurationSelect(minutes: number) {
@@ -863,6 +1047,9 @@ export default function BookingGridClient({
     if (!allowedDurations.includes(minutes)) return
     if (minutes === selectedDuration) return
     setSelectedDuration(minutes)
+    // The notice names the OLD length ("A 90-minute class does not fit here"),
+    // and a shorter one is exactly what it told the student to try.
+    setSnapNotice(null)
     // Local-only recompute: keep the selection if it is still a valid start
     // for the new duration, otherwise clear it.
     if (
@@ -907,9 +1094,15 @@ export default function BookingGridClient({
         return
       }
 
-      // Success — go back to my classes
-      router.push('/student/my-classes')
-      router.refresh()
+      // Success — leave for My Classes. replace (not push) so the booking
+      // route and its ?reschedule= param leave the history stack rather than
+      // remaining live underneath. No router.refresh() either: the navigation
+      // already fetches the destination's server components, whereas refresh()
+      // re-ran the SOURCE route's server component — /student/book, still
+      // carrying ?reschedule=<id> — whose dead-id guard then fired on the row
+      // reschedule_class_atomic had just cancelled, producing a false "no longer
+      // be rescheduled" banner on a SUCCESSFUL reschedule.
+      router.replace('/student/my-classes')
     } catch {
       setSubmitError('Something went wrong. Please try again.')
       setIsSubmitting(false)
@@ -933,6 +1126,15 @@ export default function BookingGridClient({
       ? `${timeFormatter.format(selectedStart)} – ${timeFormatter.format(selectedEnd)}`
       : null
 
+  // Same shape as selectedRangeLabel above, for the hover ghost's first cell.
+  // hoverStartIso is the tap-resolved preview start (see ghostStartMs); the
+  // formatter is the same studentTimezone-pinned instance, never a new one.
+  const hoverStart = hoverStartIso !== null ? new Date(hoverStartIso) : null
+  const ghostRangeLabel =
+    hoverStart !== null
+      ? `${timeFormatter.format(hoverStart)} – ${timeFormatter.format(new Date(hoverStart.getTime() + selectedDuration * 60000))}`
+      : null
+
   // Original lesson being moved (reschedule mode): instants for the context
   // strip. The teacher is resolved against the assigned list independently of
   // the locked selection, so the strip always names the ORIGINAL teacher even
@@ -948,6 +1150,44 @@ export default function BookingGridClient({
       ? teachers.find((t) => t.id === rescheduleLesson.teacher_id) ?? null
       : null
 
+  // Reschedule only: the class's own current start in the EXACT ISO shape every
+  // slot start on this page carries, plus the run it occupies.
+  //
+  // SHAPE. slot.startIso is minted as `new Date(startMs).toISOString()` by the
+  // availability engine (api/student/availability/slotEngine.ts:148,164), and
+  // snapToValidStart returns `new Date(...).toISOString()` as well
+  // (lib/bookingWeekGrid.ts) — both the fixed ECMA-262 Date Time String Format,
+  // YYYY-MM-DDTHH:mm:ss.sssZ. rescheduleLesson.scheduled_at arrives RAW from
+  // PostgREST as a timestamptz, YYYY-MM-DDTHH:mm:ss+00:00, which would never
+  // string-equal a slot start: every comparison below would be silently false
+  // and the guard would do nothing at all. Round-tripping it through the SAME
+  // `new Date(...).toISOString()` puts both sides in one shape, where `===` is
+  // exactly epoch-ms equality.
+  //
+  // An unparseable scheduled_at fails the guard OPEN (null blocks nothing) and
+  // must never throw a RangeError out of render — this is a UX guard, and
+  // /api/student/book still refuses the identical booking.
+  const originalStartMs =
+    originalStart !== null && Number.isFinite(originalStart.getTime())
+      ? originalStart.getTime()
+      : null
+  const originalStartIso =
+    originalStartMs !== null ? new Date(originalStartMs).toISOString() : null
+  // The original run's half-open instant bounds, in the same epoch-ms shape as
+  // runStartMs/runEndMs and ghostStartMs/ghostEndMs above: a cell is inside the
+  // run iff its instant falls in [originalStartMs, originalEndMs), which for a
+  // 30/60/90-minute lesson is exactly that run's 30-minute step instants.
+  const originalEndMs =
+    originalStartMs !== null && rescheduleLesson !== null
+      ? originalStartMs + rescheduleLesson.duration_minutes * 60000
+      : null
+  // Range text for the original run's first cell, off the same
+  // studentTimezone-pinned formatter the context strip above already uses.
+  const originalRangeLabel =
+    originalStart !== null && originalEnd !== null
+      ? `${timeFormatter.format(originalStart)} – ${timeFormatter.format(originalEnd)}`
+      : null
+
   // Compact pills — bare minutes; the group label carries the unit and the
   // aria-label stays descriptive ("30 minutes").
   const durationOptions = [
@@ -956,16 +1196,17 @@ export default function BookingGridClient({
     { minutes: 90, label: '90', hours: 1.5 },
   ]
 
-  // Legend entries. Each swatch now mirrors what the grid actually paints: the
-  // Available swatch is a white box with the same LEGEND_AVAILABLE_DOT edge and
-  // small green centre dot a bookable cell carries, the Unavailable fill gets a
-  // palette-grey edge so it doesn't vanish on white, and Selected takes the
-  // solid-orange run fill. Decorative only.
+  // Legend entries. Each swatch mirrors what the grid actually paints: an
+  // available cell is now a bare CELL_BOOKABLE_BG fill — no edge, no centre
+  // dot — so the Available swatch is the same solid fill and nothing else. The
+  // Unavailable fill keeps a palette-grey edge so it doesn't vanish on white
+  // (its fill is near-white). Decorative only.
   const legendItems = [
-    { label: 'Available', bg: '#ffffff', border: `1px solid ${LEGEND_AVAILABLE_DOT}` },
+    { label: 'Available', bg: CELL_BOOKABLE_BG, border: 'none' },
     { label: 'Unavailable', bg: CELL_GREY_BG, border: '1px solid #E0DFDC' },
-    // Matches a real selected cell: selected bg + 1px #FF8303 border.
-    { label: 'Selected', bg: CELL_SELECTED_BG, border: '1px solid #FF8303' },
+    // The swatch mirrors the run's cream fill and orange left accent, so the
+    // legend cannot drift out of sync with what the grid actually paints.
+    { label: 'Selected', bg: CELL_SELECTED_BG, border: CELL_SELECTED_BORDER, borderLeft: CELL_SELECTED_ACCENT },
   ]
 
   // Shared icon+label+value cell used by every confirm-panel row.
@@ -976,14 +1217,18 @@ export default function BookingGridClient({
           width: '36px',
           height: '36px',
           borderRadius: '8px',
-          backgroundColor: '#FFF0DC',
+          backgroundColor: '#f3f4f6',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <Icon size={18} color="#FF8303" />
+        {/* Neutral box, neutral icon: on this panel orange is reserved for
+            the Confirm action alone, so every row icon here — and the box
+            behind it — matches the grey the cancellation footnote's Info
+            icon already uses. */}
+        <Icon size={18} color="#6b7280" />
       </div>
       <div style={{ minWidth: 0 }}>
         <p style={{ fontSize: '12px', color: '#6b7280' }}>{label}</p>
@@ -1000,17 +1245,19 @@ export default function BookingGridClient({
       {/* ── Row 0: title + timezone line, desktop summary header ── */}
       <div className="flex lg:items-end gap-4" style={{ marginBottom: '10px' }}>
         <div className="flex-1 min-w-0">
+          {/* The timezone line used to sit here; it now closes the left column
+              as a quiet footer under the grid, where it answers the question it
+              actually raises ("what clock are these cells on?"). */}
           <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
             {isReschedule ? 'Reschedule Class' : 'Book a Class'}
           </h1>
-          <p style={{ fontSize: '12px', color: '#9ca3af' }}>
-            Times shown in your timezone: {studentTimezone}
-          </p>
         </div>
         {/* Desktop summary header — width mirrors the aside so their tops align
             (display comes from the classes; never set it inline here) */}
         <div className="hidden lg:flex lg:w-[288px] lg:shrink-0" style={{ alignItems: 'center', gap: '7px' }}>
-          <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+          {/* #9ca3af to match the grey caption beside it — orange on this
+              panel is reserved for the Confirm action alone. */}
+          <Calendar size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
           <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
         </div>
       </div>
@@ -1102,17 +1349,18 @@ export default function BookingGridClient({
       <div className="flex flex-col lg:flex-row lg:items-start gap-4">
       {/* ── Left column: toolbar, grid ── */}
       <div className="flex-1 min-w-0">
-      {/* ── Toolbar card: teacher · duration · week groups on ONE nowrap row.
-          The Teacher group NEVER scrolls, clips, or truncates — the space is
-          freed by compact Duration ("30/60/90" pills) and a compact Week
-          group instead. ── */}
+      {/* ── Toolbar card: teacher · duration · week groups on ONE nowrap row,
+          centred as a single unit. The Teacher group NEVER scrolls, clips, or
+          truncates — the space is freed by compact Duration ("30/60/90"
+          pills) and a compact Week group instead. ── */}
       <div
         className="shadow-sm"
         style={{
           display: 'flex',
           flexWrap: 'nowrap',
-          alignItems: 'flex-start',
-          columnGap: '14px',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '20px',
           marginBottom: '10px',
           backgroundColor: '#ffffff',
           border: '1px solid #f3f4f6',
@@ -1124,7 +1372,7 @@ export default function BookingGridClient({
             single-teacher trainings; full names, no squeeze ── */}
         {teachers.length > 1 && (
           <div style={{ flexShrink: 0 }}>
-            <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+            <p style={toolbarGroupLabel}>
               Teacher
             </p>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -1224,10 +1472,10 @@ export default function BookingGridClient({
         {/* ── Duration group — compact "30/60/90" pills; local-only
             recompute, no refetch ── */}
         <div style={{ flexShrink: 0 }}>
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+          <p style={toolbarGroupLabel}>
             Duration (min)
           </p>
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
         {durationOptions.map((option) => {
           const canBook = hoursRemaining >= option.hours
           // NEW-A1: enabled on this student's account.
@@ -1265,8 +1513,9 @@ export default function BookingGridClient({
                   : undefined
               }
               style={{
-                padding: '6px 12px',
-                borderRadius: '999px',
+                minWidth: '76px',
+                padding: '8px 16px',
+                borderRadius: '8px',
                 border: '2px solid',
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
                 backgroundColor: isSelected ? '#FFF0DC' : '#ffffff',
@@ -1277,6 +1526,7 @@ export default function BookingGridClient({
                 color: '#111827',
                 display: 'inline-flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: '4px',
               }}
             >
@@ -1289,10 +1539,19 @@ export default function BookingGridClient({
           </div>
         </div>
 
+        {/* Divider between the two groups — a standalone 40px rule rather
+            than the Week group's old full-height borderLeft, so it stays
+            centred on the row whichever group happens to be taller.
+            Decorative. */}
+        <div
+          aria-hidden="true"
+          style={{ width: '1px', height: '40px', backgroundColor: '#E0DFDC', flexShrink: 0 }}
+        />
+
         {/* ── Week group — prev · label · Today · next; fixed width, nothing
             shifts or appears/disappears on navigation ── */}
-        <div style={{ flexShrink: 0, borderLeft: '1px solid #E0DFDC', paddingLeft: '14px' }}>
-          <p style={{ fontSize: '11px', fontWeight: '600', color: '#9ca3af', marginBottom: '6px' }}>
+        <div style={{ flexShrink: 0 }}>
+          <p style={toolbarGroupLabel}>
             Week
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1301,10 +1560,14 @@ export default function BookingGridClient({
           disabled={isPrevDisabled}
           aria-label="Previous week"
           style={{
-            padding: '6px 10px',
+            height: '36px',
+            padding: '0 10px',
             border: '1px solid #E0DFDC',
-            borderRadius: '6px',
+            borderRadius: '8px',
             backgroundColor: '#ffffff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             cursor: isPrevDisabled ? 'not-allowed' : 'pointer',
             opacity: isPrevDisabled ? 0.4 : 1,
           }}
@@ -1312,15 +1575,15 @@ export default function BookingGridClient({
           <ChevronLeft size={16} color="#4b5563" />
         </button>
           {/* Fixed min-width sized to the widest realistic cross-month label
-              ("28 Sept – 4 Oct 2026") at 12px, text centred, so week
+              ("28 Sept – 4 Oct 2026") at 14px, text centred, so week
               navigation never shifts the arrows or the Today button. */}
           <span
             style={{
-              fontSize: '12px',
+              fontSize: '14px',
               fontWeight: '600',
               color: '#111827',
               display: 'inline-block',
-              minWidth: '120px',
+              minWidth: '170px',
               textAlign: 'center',
             }}
           >
@@ -1333,9 +1596,10 @@ export default function BookingGridClient({
             onClick={goThisWeek}
             disabled={isCurrentWeek}
             style={{
-              padding: '4px 10px',
+              height: '36px',
+              padding: '0 14px',
               border: '1px solid #E0DFDC',
-              borderRadius: '999px',
+              borderRadius: '8px',
               backgroundColor: '#ffffff',
               fontSize: '12px',
               fontWeight: '500',
@@ -1350,10 +1614,14 @@ export default function BookingGridClient({
           onClick={goForward}
           aria-label="Next week"
           style={{
-            padding: '6px 10px',
+            height: '36px',
+            padding: '0 10px',
             border: '1px solid #E0DFDC',
-            borderRadius: '6px',
+            borderRadius: '8px',
             backgroundColor: '#ffffff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             cursor: 'pointer',
           }}
         >
@@ -1375,7 +1643,7 @@ export default function BookingGridClient({
           it is harmless and keeps the effect's dependency logic untouched. ── */}
       {!noDurationsEnabled && (
         <>
-          {loading && (
+          {isFirstLoad && (
             <div style={{ textAlign: 'center', padding: '40px', color: '#9ca3af', fontSize: '14px' }}>
               Loading availability...
             </div>
@@ -1393,235 +1661,276 @@ export default function BookingGridClient({
               }}
             >
               {error}
-            </div>
-          )}
-
-          {!loading && !error && visibleColumns.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '32px 16px' }}>
-              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
-                No {selectedDuration}-minute openings {isCurrentWeek ? 'this week' : `the week of ${weekLabel}`}.
-              </p>
-              <p style={{ fontSize: '13px', color: '#9ca3af' }}>
-                {isCurrentWeek
-                  ? shorterLengthAllowed
-                    ? 'Use the arrow above to check the next week, or try a shorter class length.'
-                    : 'Use the arrow above to check the next week.'
-                  : shorterLengthAllowed
-                    ? 'Use the arrows above to check another week, or try a shorter class length.'
-                    : 'Use the arrows above to check another week.'}
-              </p>
-            </div>
-          )}
-
-          {!loading && !error && visibleColumns.length > 0 && (
-            // Horizontally scrollable on mobile; the time column stays sticky.
-            <>
-            <div
-              className="shadow-[0_1px_2px_rgba(0,0,0,0.05),0_2px_6px_rgba(0,0,0,0.05),0_8px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.07),0_14px_32px_rgba(0,0,0,0.08)] hover:-translate-y-[3px] transition-[box-shadow,transform] duration-200"
-              style={{
-                overflowX: 'auto',
-                border: '1px solid #f3f4f6',
-                borderRadius: '12px',
-                backgroundColor: '#ffffff',
-              }}
-            >
-              {/* ── Colour legend — Day-to-Day-style dots, one line, top-left
-                  above the day headers; swatch colours follow the consts ── */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '10px 12px 0',
-                }}
-              >
-                {legendItems.map((item) => (
-                  <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span
-                      aria-hidden="true"
-                      style={{
-                        width: '10px',
-                        height: '10px',
-                        borderRadius: '50%',
-                        backgroundColor: item.bg,
-                        border: item.border,
-                        flexShrink: 0,
-                        ...(item.label === 'Available'
-                          ? { display: 'flex', alignItems: 'center', justifyContent: 'center' }
-                          : {}),
-                      }}
-                    >
-                      {item.label === 'Available' && (
-                        <span
-                          aria-hidden="true"
-                          style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
-                        />
-                      )}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
-                      {item.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  display: 'grid',
-                  // Fixed 7-day Mon–Sun frame: every column renders every week,
-                  // all at identical widths — empty days are all-grey columns.
-                  gridTemplateColumns: '56px repeat(7, minmax(88px, 1fr))',
-                  gap: '2px',
-                  padding: '8px',
-                }}
-              >
-                {/* Header row: sticky corner + one label per day column */}
-                <div
+              {/* The message already says "please try again"; this is that try.
+                  Wiring only — bumping refetchNonce re-runs the untouched fetch
+                  effect on the current teacher and week, which is exactly the
+                  plain re-fetch that heals the refresh-token race. */}
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setRefetchNonce((n) => n + 1)}
                   style={{
-                    position: 'sticky',
-                    left: 0,
-                    zIndex: 2,
+                    padding: '6px 12px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #E0DFDC',
+                    borderRadius: '6px',
+                    fontSize: '13px',
+                    fontWeight: '500',
+                    color: '#4b5563',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Everything the grid area can show once a response has landed,
+              wrapped so a LATER load can dim it in place rather than unmount
+              it. Week nav, teacher swaps and both background refetches keep
+              the previous week on screen underneath; the wrapper is inert
+              while that runs, so nothing under the pointer can be tapped
+              against availability that is already being replaced. */}
+          {!isFirstLoad && !error && (
+            <div style={{ position: 'relative' }}>
+              <div
+                style={{
+                  opacity: isRefreshing ? 0.5 : 1,
+                  pointerEvents: isRefreshing ? 'none' : undefined,
+                }}
+              >
+              {visibleColumns.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '32px 16px' }}>
+                  <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
+                    No {selectedDuration}-minute openings {isCurrentWeek ? 'this week' : `the week of ${weekLabel}`}.
+                  </p>
+                  <p style={{ fontSize: '13px', color: '#9ca3af' }}>
+                    {isCurrentWeek
+                      ? shorterLengthAllowed
+                        ? 'Use the arrow above to check the next week, or try a shorter class length.'
+                        : 'Use the arrow above to check the next week.'
+                      : shorterLengthAllowed
+                        ? 'Use the arrows above to check another week, or try a shorter class length.'
+                        : 'Use the arrows above to check another week.'}
+                  </p>
+                </div>
+              )}
+
+              {visibleColumns.length > 0 && (
+                // Horizontally scrollable on mobile; the time column stays sticky.
+                <>
+                <div
+                  className="shadow-[0_1px_2px_rgba(0,0,0,0.05),0_2px_6px_rgba(0,0,0,0.05),0_8px_20px_rgba(0,0,0,0.06)] hover:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_6px_14px_rgba(0,0,0,0.07),0_14px_32px_rgba(0,0,0,0.08)] hover:-translate-y-[3px] transition-[box-shadow,transform] duration-200"
+                  style={{
+                    overflowX: 'auto',
+                    border: '1px solid #f3f4f6',
+                    borderRadius: '12px',
                     backgroundColor: '#ffffff',
                   }}
-                />
-                {columnKeys.map((key) => {
-                  const day = columnDate(key)
-                  return (
-                    <div key={key} style={{ textAlign: 'center', padding: '2px' }}>
-                      <p
-                        style={{
-                          fontSize: '10px',
-                          fontWeight: '500',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.04em',
-                          color: '#6b7280',
-                        }}
-                      >
-                        {weekdayFormatter.format(day)}
-                      </p>
-                      <p style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
-                        {dayMonthFormatter.format(day)}
-                      </p>
-                    </div>
-                  )
-                })}
-
-                {/* Time rows, band by band, with a gap marker between bands */}
-                {bands.map((band, bandIdx) => (
-                  <div key={band[0]} style={{ display: 'contents' }}>
-                    {bandIdx > 0 && (
-                      <div
-                        style={{
-                          gridColumn: '1 / -1',
-                          textAlign: 'center',
-                          padding: '2px 0',
-                          fontSize: '10px',
-                          letterSpacing: '3px',
-                          color: '#d1d5db',
-                          backgroundColor: '#fbfaf9',
-                          borderRadius: '6px',
-                        }}
-                      >
-                        · · ·
+                >
+                  {/* ── Colour legend — Day-to-Day-style dots, one line, top-left
+                      above the day headers; swatch colours follow the consts ── */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '10px 12px 0',
+                    }}
+                  >
+                    {legendItems.map((item) => (
+                      <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: '10px',
+                            height: '10px',
+                            borderRadius: '50%',
+                            backgroundColor: item.bg,
+                            border: item.border,
+                            ...(item.borderLeft ? { borderLeft: item.borderLeft } : {}),
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ fontSize: '12px', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                          {item.label}
+                        </span>
                       </div>
-                    )}
-                    {band.map((minutes) => (
+                    ))}
+                  </div>
+
+                  <div
+                    // ONE clear for the whole grid rather than a per-cell
+                    // mouseleave: sweeping between two adjacent cells fires leave
+                    // then enter, and a per-cell handler makes the ghost flicker off
+                    // and on across every boundary. Leaving the grid entirely is the
+                    // only moment the preview should actually disappear.
+                    onMouseLeave={canHover ? () => setHoverStartIso(null) : undefined}
+                    style={{
+                      display: 'grid',
+                      // Fixed 7-day Mon–Sun frame: every column renders every week,
+                      // all at identical widths — empty days are all-grey columns.
+                      gridTemplateColumns: '56px repeat(7, minmax(88px, 1fr))',
+                      gap: '2px',
+                      padding: '8px',
+                    }}
+                  >
+                    {/* Header row: sticky corner + one label per day column. The
+                        whole row is sticky to the TOP as well, so the day names stay
+                        with the cells while the grid scrolls; the corner cell is
+                        sticky on both axes and therefore sits one layer above the
+                        day headers (4) and the sticky time column (2). Every header
+                        is painted opaque white for that overlap. */}
+                    <div
+                      style={{
+                        position: 'sticky',
+                        left: 0,
+                        top: 0,
+                        zIndex: 4,
+                        backgroundColor: '#ffffff',
+                      }}
+                    />
+                    {columnKeys.map((key) => {
+                      const day = columnDate(key)
+                      // Today's column in the STUDENT frame — a plain key match, no
+                      // Date comparison. Marked with a filled pill instead of an
+                      // underline: the pill lives entirely inside the header cell's
+                      // own box, so the marker cannot change the header row's height
+                      // as the student navigates between weeks. That is what the old
+                      // transparent 2px rule existed to guarantee, and with the pill
+                      // it is structural rather than a painted-out border.
+                      const isToday = key === todayKey
+                      // Reuses the per-render emptyColumns set — never
+                      // recomputed per cell. The label sits in the HEADER rather
+                      // than overlaying the column: the grid is a single CSS
+                      // grid whose cells are auto-placed through `display:
+                      // contents` row wrappers, so there is no per-column box to
+                      // position an overlay against, and an explicitly
+                      // grid-placed spanning element would occupy tracks the
+                      // auto-placement walks through and dislodge every cell
+                      // after it.
+                      const isEmptyColumn = emptyColumns.has(key)
+                      return (
+                        <div
+                          key={key}
+                          style={{
+                            textAlign: 'center',
+                            padding: '4px 2px',
+                            position: 'sticky',
+                            top: 0,
+                            zIndex: 3,
+                            backgroundColor: isToday ? TODAY_PILL_BG : '#ffffff',
+                            borderRadius: isToday ? '8px' : '0',
+                          }}
+                        >
+                          <p
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: '500',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em',
+                              color: isToday ? TODAY_ACCENT : '#6b7280',
+                            }}
+                          >
+                            {weekdayFormatter.format(day)}
+                          </p>
+                          <p style={{ fontSize: '13px', fontWeight: '600', color: isToday ? TODAY_ACCENT : '#111827' }}>
+                            {dayMonthFormatter.format(day)}
+                          </p>
+                          {/* A day the week returned no slots for at all. Named
+                              once, in the header, instead of on any cell —
+                              nothing is written into the column's own cells. */}
+                          {isEmptyColumn && (
+                            <p
+                              aria-hidden="true"
+                              style={{ fontSize: '10px', color: '#9ca3af', pointerEvents: 'none' }}
+                            >
+                              No availability
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* Time rows — one per axis entry, top to bottom. The axis is
+                        continuous by construction (buildRowAxis), so there are no
+                        bands to separate and no "· · ·" marker: an empty stretch of
+                        the day renders as ordinary grey rows, which is what it is. */}
+                    {rowAxis.map((minutes, rowIdx) => (
                       <div key={minutes} style={{ display: 'contents' }}>
-                        {/* Sticky time column. Root cause of the drifting
-                            labels (previous attempt): lineHeight 24px made
-                            this cell's line box TALLER than the 22px slot
-                            cells, so the label cell — not the slot cells —
-                            sized each row track, and the top-anchored
-                            (flex-start) line box tied the glyphs to the row
-                            top instead of the cell box. Fix: collapse the
-                            line box (lineHeight 1), pin the cell to the slot
-                            height (minHeight 22px) so it never competes in
-                            track sizing, and flex-centre — every label now
-                            centres identically on its own 22px cell,
-                            first/middle/last rows of a band alike. */}
+                        {/* Sticky time column. Root cause of the drifting labels
+                            (previous attempt): lineHeight 24px made this cell's
+                            line box TALLER than the slot cells, so the label cell —
+                            not the slot cells — sized each row track, and the
+                            top-anchored (flex-start) line box tied the glyphs to
+                            the row top instead of the cell box. Fix: collapse the
+                            line box (lineHeight 1), pin the cell to the slot height
+                            (minHeight 30px) so it never competes in track sizing,
+                            and flex-centre — every label now centres identically on
+                            its own 30px cell. */}
                         <div
                           style={{
                             position: 'sticky',
                             left: 0,
                             zIndex: 2,
                             backgroundColor: '#ffffff',
-                            minHeight: '22px',
+                            minHeight: '30px',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'flex-end',
                             paddingRight: '8px',
-                            fontSize: '11px',
                             lineHeight: 1,
-                            fontWeight: '500',
-                            color: '#6b7280',
+                            ...rowLabelChrome(minutes),
                           }}
                         >
                           {formatRowLabel(minutes)}
                         </div>
                         {columnKeys.map((key) => {
-                          const slot = cellMaps.get(key)?.get(minutes)
-                          // bookable:false deliberately merges "blocked/booked" with
-                          // "free but the remaining run is too short for the chosen
-                          // duration" — the raw available flag was discarded in
-                          // Stage A, so both render as the same grey cell. A cell
-                          // with no slot at all on this row renders grey too.
-                          if (slot === undefined || !slot.bookable) {
-                            // A grey cell can still sit INSIDE the selected run:
-                            // mid-run continuation slots are free but not valid
-                            // starts themselves (bookable:false), and the highlight
-                            // must span the full duration. Paint by the same
-                            // epoch-ms range as the bookable branch; the cell stays
-                            // inert (no handler, aria-hidden) — only a start cell
-                            // is ever selectable. Any slot instant inside a VALID
-                            // selected run is necessarily available (that is what
-                            // made the start bookable), so this never paints over
-                            // a booked/blocked cell. Slot-less cells have no
-                            // instant and are never in-run.
-                            const cellMs = slot !== undefined ? new Date(slot.startIso).getTime() : null
-                            const inSelectedRun =
-                              cellMs !== null &&
-                              runStartMs !== null &&
-                              runEndMs !== null &&
-                              cellMs >= runStartMs &&
-                              cellMs < runEndMs
-                            // Block position from epoch-ms only (see runCellChrome).
-                            const isRunFirst = inSelectedRun && cellMs === runStartMs
-                            const isRunLast =
-                              inSelectedRun &&
-                              cellMs !== null &&
-                              runEndMs !== null &&
-                              cellMs + SLOT_MINUTES * 60000 === runEndMs
+                          const columnMap = cellMaps.get(key)
+                          const slot = columnMap?.get(minutes)
+                          // Whole hours carry the axis hairline (HOUR_LINE) across
+                          // the row's top edge, matching the heavier hour label.
+                          const isHourRow = minutes % 60 === 0
+                          // Grey = not FREE: blocked, booked, past, within 24h, or
+                          // not offered at all. Deliberately not `!slot.bookable` —
+                          // a free slot that cannot START this length is green and
+                          // tappable, and snaps (see below).
+                          if (slot === undefined || !slot.available) {
                             return (
                               <div
                                 key={key}
                                 aria-hidden="true"
                                 style={{
-                                  minHeight: '22px',
-                                  ...(inSelectedRun
-                                    ? runCellChrome(isRunFirst, isRunLast)
-                                    : {
-                                        borderRadius: '6px',
-                                        border: 'none',
-                                        backgroundColor: CELL_GREY_BG,
-                                      }),
-                                  ...(isRunFirst ? runFirstCellLayout : {}),
-                                  ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
+                                  minHeight: '30px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  borderTop: isHourRow ? HOUR_LINE : 'none',
+                                  backgroundColor: emptyColumns.has(key) ? CELL_EMPTY_COLUMN_BG : CELL_GREY_BG,
                                 }}
-                              >
-                                {isRunFirst && selectedRangeLabel !== null && (
-                                  <>
-                                    <Check size={11} strokeWidth={3} style={{ color: '#ffffff', flexShrink: 0 }} />
-                                    <span style={runLabelStyle}>{selectedRangeLabel}</span>
-                                  </>
-                                )}
-                                {isRunLast && !isRunFirst && (
-                                  <span style={runSubLabelStyle}>{selectedDuration} min</span>
-                                )}
-                              </div>
+                              />
                             )
                           }
-                          // Exact start cell only — the run's other cells keep
-                          // aria-pressed false while still painting selected.
+                          // Everything below is a FREE slot, so it is green and
+                          // tappable whether or not it is a valid START for the
+                          // chosen length: a free cell the run cannot start on snaps
+                          // backwards to the run that ENDS on it (snapToValidStart).
+                          // Colour therefore tracks raw availability alone and no
+                          // longer flickers as the student flips 30/60/90.
+                          //
+                          // Selected-run painting lives on this branch only: every
+                          // 30-min step of a valid run is available by construction
+                          // (that is what made its start bookable), so no GREY cell
+                          // can ever fall inside the highlight. That is the whole
+                          // invariant — it does NOT promise the orange block is
+                          // visually contiguous. A step can have no cell at all and
+                          // leave a gap, in three pre-existing cases: a cross-
+                          // midnight run continues in the next column (documented
+                          // at runCellChrome), a NEW324 day-8 continuation instant
+                          // is in instantSet but under no column key, and a DST
+                          // fall-back row is won by the other of the two instants
+                          // claiming it. All three predate the axis; none can paint
+                          // a blocked cell orange.
                           const isSelected = slot.startIso === selectedStartIso
                           const t = new Date(slot.startIso).getTime()
                           const inSelectedRun =
@@ -1630,41 +1939,225 @@ export default function BookingGridClient({
                           const isRunFirst = inSelectedRun && t === runStartMs
                           const isRunLast =
                             inSelectedRun && runEndMs !== null && t + SLOT_MINUTES * 60000 === runEndMs
-                          // Text-less cell — an unselected bookable cell shows
-                          // only a small green dot, the run's FIRST cell paints
-                          // the selected range and its LAST cell the duration;
-                          // the slot time lives in the aria-label (and in the
-                          // summary column).
+                          // Band fusion. A free cell whose axis neighbour in THIS
+                          // column is also free drops the edge between them, so a
+                          // stretch of availability reads as one solid block instead
+                          // of a ladder of separate pills: corners round only where
+                          // the band actually ends, and a -2px top margin swallows
+                          // the grid's 2px row gap exactly as runCellChrome does for
+                          // the selected run (a negative margin overlaps the gap
+                          // without changing the row-track sizing, and the sticky
+                          // time column still contributes a full 30px to every row).
+                          // Adjacency is read off the AXIS entries, never minutes
+                          // +/- 30: buildRowAxis is a union of the 30-min ruler and
+                          // every wall-minute a slot really lands on, so an
+                          // off-residue week (:17/:47 overrides) has rows the ruler
+                          // never steps to, and stepping would fuse across a gap.
+                          const prevMinutes = rowAxis[rowIdx - 1]
+                          const nextMinutes = rowAxis[rowIdx + 1]
+                          const prevSlot =
+                            prevMinutes === undefined ? undefined : columnMap?.get(prevMinutes)
+                          const nextSlot =
+                            nextMinutes === undefined ? undefined : columnMap?.get(nextMinutes)
+                          const prevFree = prevSlot !== undefined && prevSlot.available
+                          const nextFree = nextSlot !== undefined && nextSlot.available
+                          // Inside a fused band the fill is continuous by design and
+                          // the -2px margin would clip the line anyway, so the hour
+                          // hairline is drawn on a band's TOP cell only (grey cells
+                          // always take it — they are never fused).
+                          const showHourLine = isHourRow && !prevFree
+                          // Hover preview of the run this cell would place. Never
+                          // drawn over the real selection: the selected run owns its
+                          // cells outright.
+                          const inGhostRun =
+                            !inSelectedRun &&
+                            ghostStartMs !== null &&
+                            ghostEndMs !== null &&
+                            t >= ghostStartMs &&
+                            t < ghostEndMs
+                          const isGhostFirst = inGhostRun && t === ghostStartMs
+                          const isGhostLast =
+                            inGhostRun && ghostEndMs !== null && t + SLOT_MINUTES * 60000 === ghostEndMs
+                          // Reschedule only: the run this class currently sits
+                          // on. Half-open epoch-ms bounds, exactly like the
+                          // selected and ghost runs above; originalStartMs is
+                          // null on every fresh booking, so both flags below are
+                          // dead outside a reschedule. Painted on this AVAILABLE
+                          // branch only, which is where the run normally lands:
+                          // the excludeLessonId the fetch sends is precisely
+                          // what keeps the class's own slots free. The three
+                          // gaps the selected run already documents
+                          // (cross-midnight column split, day-8 continuation,
+                          // DST fall-back row) can leave a step unpainted, and a
+                          // run blocked by something else entirely renders grey
+                          // — cosmetic either way, the tap guard is independent.
+                          const inOriginalRun =
+                            originalStartMs !== null &&
+                            originalEndMs !== null &&
+                            t >= originalStartMs &&
+                            t < originalEndMs
+                          // The one instant a reschedule cannot move to. Uses
+                          // the SAME string comparison the two tap guards use,
+                          // so what is painted and what is refused can never
+                          // disagree.
+                          const isOriginalStart =
+                            originalStartIso !== null && slot.startIso === originalStartIso
+                          // First-cell label precedence, encoded once: selected
+                          // wins outright, then ghost, then original.
+                          const showOriginalLabel =
+                            isOriginalStart &&
+                            !inSelectedRun &&
+                            !inGhostRun &&
+                            originalRangeLabel !== null
+                          const slotTime = formatSlotTime(slot.startIso, studentTimezone)
                           return (
                             <button
                               key={key}
-                              onClick={() => setSelectedStartIso(slot.startIso)}
+                              onClick={() => {
+                                // Reschedule only: the class's own current
+                                // start. Re-booking it is a no-op the server
+                                // rejects anyway, so refuse it here and say why
+                                // rather than spend a round trip on a 400.
+                                // ONLY this instant is refused — an OVERLAPPING
+                                // move (+30 min into the same run) is a
+                                // legitimate reschedule, which is exactly why
+                                // /api/student/book excludes the lesson from its
+                                // own clash check.
+                                if (isReschedule && slot.startIso === originalStartIso) {
+                                  setSnapNotice(CURRENT_TIME_NOTICE)
+                                  return
+                                }
+                                if (slot.bookable) {
+                                  setSelectedStartIso(slot.startIso)
+                                  setSnapNotice(null)
+                                  return
+                                }
+                                const snapped = snapToValidStart(
+                                  slot.startIso,
+                                  selectedDuration / SLOT_MINUTES,
+                                  instantSet
+                                )
+                                if (snapped === null) {
+                                  // Fails closed — nothing is selected, and the
+                                  // notice says why instead of leaving a dead tap.
+                                  setSnapNotice(
+                                    `A ${selectedDuration}-minute class does not fit here. Try a shorter length.`
+                                  )
+                                  return
+                                }
+                                // The snap walked backwards onto the class's own
+                                // current start: unplaceable for the same reason
+                                // a direct tap on it is, so it is rejected at the
+                                // CALL SITE — snapToValidStart stays a pure
+                                // instant walk with no reschedule knowledge.
+                                if (isReschedule && snapped === originalStartIso) {
+                                  setSnapNotice(CURRENT_TIME_NOTICE)
+                                  return
+                                }
+                                setSelectedStartIso(snapped)
+                                setSnapNotice(null)
+                              }}
+                              onMouseEnter={
+                                canHover
+                                  ? () => {
+                                      // Resolved by EXACTLY the rule onClick uses, so
+                                      // the preview and the tap can never disagree: a
+                                      // bookable cell ghosts its own run, a free but
+                                      // un-startable one ghosts the run that would
+                                      // snap in, and a tap that would resolve to
+                                      // nothing ghosts nothing (null clears it).
+                                      const preview = slot.bookable
+                                        ? slot.startIso
+                                        : snapToValidStart(
+                                            slot.startIso,
+                                            selectedDuration / SLOT_MINUTES,
+                                            instantSet
+                                          )
+                                      // Including the reschedule refusal, for the
+                                      // same reason: previewing a run the tap
+                                      // will not place would be a lie, so the
+                                      // class's own current start ghosts nothing.
+                                      setHoverStartIso(
+                                        isReschedule && preview === originalStartIso ? null : preview
+                                      )
+                                    }
+                                  : undefined
+                              }
                               aria-pressed={isSelected}
-                              aria-label={`Book ${formatSlotTime(slot.startIso, studentTimezone)}`}
+                              aria-disabled={isOriginalStart}
+                              aria-label={
+                                // aria-disabled above, never the `disabled`
+                                // attribute: the cell must stay FOCUSABLE so a
+                                // keyboard user reaches it, hears why it is
+                                // refused and tabs on. Only the start cell is
+                                // refused — the rest of the original run keeps
+                                // its normal label because it remains a
+                                // legitimate target.
+                                isOriginalStart
+                                  ? 'Current class time - choose a different slot'
+                                  : slot.bookable
+                                  ? `Book ${slotTime}`
+                                  : `Book a class around ${slotTime}`
+                              }
                               style={{
-                                minHeight: '22px',
+                                minHeight: '30px',
                                 cursor: 'pointer',
+                                // CHROME PRECEDENCE — selected > ghost >
+                                // original, with one deliberate exception: an
+                                // original-run cell under the ghost keeps the
+                                // original FILL while the ghost owns its edge
+                                // and its label. Selected wins outright, fill
+                                // included, so a cell inside both the original
+                                // and the selected run reads purely as the pick.
                                 ...(inSelectedRun
                                   ? runCellChrome(isRunFirst, isRunLast)
                                   : {
-                                      borderRadius: '6px',
-                                      border: `1px solid ${LEGEND_AVAILABLE_DOT}`,
-                                      backgroundColor: CELL_BOOKABLE_BG,
+                                      // Top corners round only at a band's top, bottom
+                                      // corners only at its bottom; 0 in between.
+                                      borderRadius: `${prevFree ? '0' : '6px'} ${prevFree ? '0' : '6px'} ${nextFree ? '0' : '6px'} ${nextFree ? '0' : '6px'}`,
+                                      border: inGhostRun ? GHOST_BORDER : 'none',
+                                      // Key order matters: React writes `border`
+                                      // first, so these longhands land on top of
+                                      // it. Both are omitted entirely on a ghost
+                                      // cell, whose dashed edge owns all four
+                                      // sides — that is the ghost-over-original
+                                      // half of the precedence noted above.
+                                      ...(inOriginalRun && !inGhostRun
+                                        ? { borderLeft: CELL_ORIGINAL_ACCENT }
+                                        : {}),
+                                      ...(showHourLine && !inGhostRun ? { borderTop: HOUR_LINE } : {}),
+                                      // The original run's near-white fill
+                                      // outranks BOTH greens, the ghost's
+                                      // included: hovering the class's own run
+                                      // still previews the move, without
+                                      // pretending the run underneath is a fresh
+                                      // opening. Deeper green under the ghost
+                                      // otherwise: exactly the cells this hover
+                                      // would fill, called out beneath the dashed
+                                      // outline.
+                                      backgroundColor: inOriginalRun
+                                        ? CELL_ORIGINAL_BG
+                                        : inGhostRun
+                                        ? CELL_BOOKABLE_HOVER_BG
+                                        : CELL_BOOKABLE_BG,
+                                      marginTop: prevFree ? '-2px' : '0',
                                     }),
                                 ...(isRunFirst ? runFirstCellLayout : {}),
                                 ...(!inSelectedRun ? bookableCellLayout : {}),
                                 ...(isRunLast && !isRunFirst ? runLastCellLayout : {}),
+                                ...(isGhostFirst ? runFirstCellLayout : {}),
+                                ...(isGhostLast && !isGhostFirst ? runLastCellLayout : {}),
+                                // Last, and only where no selected or ghost label
+                                // already owns the cell (showOriginalLabel encodes
+                                // that): the same clipped single-line box the
+                                // other two run heads use, so the label cannot
+                                // change the row height.
+                                ...(showOriginalLabel ? runFirstCellLayout : {}),
                               }}
                             >
-                              {!inSelectedRun && (
-                                <span
-                                  aria-hidden="true"
-                                  style={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: TEACHER_SELECTED_BORDER, display: 'block' }}
-                                />
-                              )}
                               {isRunFirst && selectedRangeLabel !== null && (
                                 <>
-                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#ffffff', flexShrink: 0 }} />
+                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#FF8303', flexShrink: 0 }} />
                                   <span aria-hidden="true" style={runLabelStyle}>
                                     {selectedRangeLabel}
                                   </span>
@@ -1675,24 +2168,114 @@ export default function BookingGridClient({
                                   {selectedDuration} min
                                 </span>
                               )}
+                              {/* Ghost head marker + time range, same shape as the
+                                  selected run's first-cell tick+label. Mutually
+                                  exclusive with the two run labels above —
+                                  inGhostRun requires !inSelectedRun — and
+                                  decorative: the cell's own aria-label already
+                                  names the slot. */}
+                              {isGhostFirst && ghostRangeLabel !== null && (
+                                <>
+                                  <Plus
+                                    size={11}
+                                    aria-hidden="true"
+                                    style={{ color: GHOST_GLYPH_COLOR, flexShrink: 0 }}
+                                  />
+                                  <span aria-hidden="true" style={ghostLabelStyle}>
+                                    {ghostRangeLabel}
+                                  </span>
+                                </>
+                              )}
+                              {isGhostLast && !isGhostFirst && (
+                                <span aria-hidden="true" style={ghostSubLabelStyle}>
+                                  {selectedDuration} min
+                                </span>
+                              )}
+                              {/* Original-run head — the class's current time
+                                  range. Yields to both the selected and the ghost
+                                  label; decorative, the start cell's own
+                                  aria-label carries the meaning. */}
+                              {showOriginalLabel && (
+                                <span aria-hidden="true" style={originalLabelStyle}>
+                                  {originalRangeLabel}
+                                </span>
+                              )}
                             </button>
                           )
                         })}
                       </div>
                     ))}
                   </div>
-                ))}
+                </div>
+                {/* Snap notice — raised only by a tap that could not resolve to any
+                    valid start. Amber, matching the low-hours notice in the summary
+                    aside: both are "this cannot happen as asked" rather than errors.
+                    role="status" so the tap gives screen-reader users the same
+                    feedback the fill change gives everyone else. */}
+                {snapNotice !== null && (
+                  <div
+                    role="status"
+                    style={{
+                      marginTop: '10px',
+                      padding: '12px 16px',
+                      backgroundColor: '#fffbeb',
+                      border: '1px solid #fde68a',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      color: '#92400e',
+                    }}
+                  >
+                    {snapNotice}
+                  </div>
+                )}
+                {/* Hint under the grid — decorative, the cells carry their own labels. */}
+                <p style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: '#6b7280' }}>
+                  <Lightbulb size={13} color="#FF8303" aria-hidden="true" />
+                  Tap any available time to place your class. It will snap to a start that fits.
+                </p>
+                </>
+              )}
               </div>
+              {isRefreshing && (
+                <div
+                  role="status"
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    pointerEvents: 'none',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: '#6b7280',
+                  }}
+                >
+                  Loading...
+                </div>
+              )}
             </div>
-            {/* Hint under the grid — decorative, the cells carry their own labels. */}
-            <p style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: '#6b7280' }}>
-              <Lightbulb size={13} color="#FF8303" aria-hidden="true" />
-              Click on any available slot to select your class time.
-            </p>
-            </>
           )}
         </>
       )}
+      {/* Timezone footer: the quiet answer to the question the grid raises,
+          moved out from under the H1. Full width of the left column, below
+          the card and both of its notices, so it reads as a caption on the
+          grid rather than a subtitle on the page. Rendered outside the
+          noDurationsEnabled gate, exactly as it was in row 0: which clock
+          the page speaks is true whether or not a grid is on screen. */}
+      <p
+        style={{
+          marginTop: '10px',
+          padding: '8px 12px',
+          backgroundColor: '#F7F6F4',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#6b7280',
+        }}
+      >
+        Times shown in your timezone: {studentTimezone}
+      </p>
       {/* ── end left column ── */}
       </div>
 
@@ -1703,7 +2286,9 @@ export default function BookingGridClient({
           {/* Panel header — mobile-only copy; the desktop header lives in Row 0 */}
           <div className="lg:hidden">
             <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '12px' }}>
-              <Calendar size={14} color="#FF8303" style={{ flexShrink: 0 }} />
+              {/* #9ca3af to match the grey caption beside it — orange on this
+                  panel is reserved for the Confirm action alone. */}
+              <Calendar size={14} color="#9ca3af" style={{ flexShrink: 0 }} />
               <p style={{ fontSize: '12px', fontWeight: '600', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Booking Summary</p>
             </div>
           </div>
@@ -1800,15 +2385,18 @@ export default function BookingGridClient({
                   }}
                 >
                   {renderCell(ChartNoAxesColumn, 'Remaining after booking', formatHours(hoursAfter))}
+                  {/* Green, not orange: green already means "available / yours"
+                      on the grid above (CELL_BOOKABLE_BG), and orange on this
+                      panel is reserved for the Confirm action alone. */}
                   <span
                     style={{
                       flexShrink: 0,
-                      backgroundColor: '#FFF0DC',
+                      backgroundColor: '#D8EEDC',
                       borderRadius: '999px',
                       padding: '4px 12px',
                       fontSize: '13px',
                       fontWeight: '600',
-                      color: '#FF8303',
+                      color: '#2E7D4F',
                     }}
                   >
                     {isReschedule ? 'Reschedule — no hours deducted' : `${formatHours(hoursRemaining)} → ${formatHours(hoursAfter)}`}

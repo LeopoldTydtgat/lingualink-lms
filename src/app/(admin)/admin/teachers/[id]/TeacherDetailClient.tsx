@@ -148,6 +148,9 @@ type Props = {
   purgeBlockedBy: string[]
   adminTz: string
   teacherAtAGlance: TeacherAtAGlance
+  /** True when the classes read came back exactly at its 1000-row cap, so older
+   *  classes exist beyond it. Drives the disclosure line above the Classes table. */
+  lessonsCapped: boolean
 }
 
 type Tab = 'overview' | 'classes' | 'invoices' | 'history' | 'messages'
@@ -484,7 +487,7 @@ function MessageThread({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy, adminTz, teacherAtAGlance }: Props) {
+export default function TeacherDetailClient({ teacher, lessons, invoices, history, conversations, purgeBlockedBy, adminTz, teacherAtAGlance, lessonsCapped }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [selectedConversation, setSelectedConversation] = useState<AdminConversation | null>(null)
@@ -949,43 +952,48 @@ export default function TeacherDetailClient({ teacher, lessons, invoices, histor
 
       {/* Classes tab */}
       {activeTab === 'classes' && (
-        <div className="card-elevated overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Student</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Date &amp; Time</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lessons.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="text-center py-10 text-gray-400">
-                    No classes yet.
-                  </td>
+        <div className="space-y-2">
+          {lessonsCapped && (
+            <p className="text-sm text-gray-400">Showing the most recent 1000 classes.</p>
+          )}
+          <div className="card-elevated overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Student</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date &amp; Time</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Duration</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
                 </tr>
-              ) : (
-                lessons.map((lesson) => (
-                  <tr key={lesson.id} className="border-b border-gray-50">
-                    <td className="px-4 py-3 text-gray-800">{lesson.student_name}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
-                        day: '2-digit', month: 'short', year: 'numeric',
-                        hour: '2-digit', minute: '2-digit',
-                        timeZone: adminTz,
-                      })}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
-                    <td className="px-4 py-3">
-                      <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
+              </thead>
+              <tbody>
+                {lessons.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="text-center py-10 text-gray-400">
+                      No classes yet.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  lessons.map((lesson) => (
+                    <tr key={lesson.id} className="border-b border-gray-50">
+                      <td className="px-4 py-3 text-gray-800">{lesson.student_name}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {new Date(lesson.scheduled_at).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{lesson.duration_minutes} min</td>
+                      <td className="px-4 py-3">
+                        <LessonStatusBadge status={lesson.status} cancelled_by={lesson.cancelled_by} rescheduled_by={lesson.rescheduled_by} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -150,7 +150,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       cancelled_by,
       rescheduled_by,
       profiles!lessons_teacher_id_fkey (
-        full_name
+        full_name,
+        photo_url
       )
     `)
     .eq('training_id', id)

@@ -209,7 +209,8 @@ export default async function TeacherDetailPage({
     hoursThisMonth,
   }
 
-  // Fetch teacher's classes (most recent 50)
+  // Fetch teacher's classes. Explicit limit, never unbounded: PostgREST silently caps
+  // an unbounded query at its max-rows setting, and a silent cap is the bug being removed here.
   const { data: lessons } = await supabase
     .from('lessons')
     .select(`
@@ -225,7 +226,7 @@ export default async function TeacherDetailPage({
     `)
     .eq('teacher_id', id)
     .order('scheduled_at', { ascending: false })
-    .limit(50)
+    .limit(1000)
 
   // Sync amount_eur for this teacher so the Invoices tab matches the latest
   // billable-lesson total.
@@ -257,6 +258,11 @@ export default async function TeacherDetailPage({
       ? (l.students[0] as { full_name: string } | undefined)?.full_name ?? '—'
       : (l.students as { full_name: string } | null)?.full_name ?? '—',
   }))
+
+  // The read came back exactly at its cap, so older classes almost certainly exist
+  // beyond it. The Classes tab says so rather than presenting a truncated list as
+  // the teacher's whole history.
+  const lessonsCapped = flatLessons.length === 1000
 
   // ── Purge eligibility: check all linked students are 'former' ───────────────
   const { data: linkedLessonRows } = await supabase
@@ -355,6 +361,7 @@ export default async function TeacherDetailPage({
       purgeBlockedBy={purgeBlockedBy}
       adminTz={adminTz}
       teacherAtAGlance={teacherAtAGlance}
+      lessonsCapped={lessonsCapped}
     />
   )
 }
