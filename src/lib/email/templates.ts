@@ -5,6 +5,14 @@
 // Hardcoded so the email never depends on a runtime env var to render its header.
 const LOGO_URL = 'https://varrxikjrbycpobydlev.supabase.co/storage/v1/object/public/templates/lingualink-logo-onorange.png'
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 interface EmailTemplateOptions {
   recipientName: string | null | undefined
   recipientFallback?: string
@@ -13,7 +21,7 @@ interface EmailTemplateOptions {
   contactEmail: string
 }
 
-export function buildEmailTemplate({ recipientName, recipientFallback = 'there', bodyHtml, contactEmail }: EmailTemplateOptions): string {
+export function buildEmailTemplate({ recipientName, recipientFallback = 'there', subject, bodyHtml, contactEmail }: EmailTemplateOptions): string {
   return `
 <!DOCTYPE html>
 <html lang="en">
@@ -22,6 +30,11 @@ export function buildEmailTemplate({ recipientName, recipientFallback = 'there',
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 </head>
 <body style="margin:0;padding:0;background-color:#F3F4F6;font-family:Inter,Arial,sans-serif;">
+  <!-- Preheader: the text email clients show in the message-list preview line.
+       Hidden in the rendered email. Without it, clients fall back to the first
+       thing in the body, which is the logo image URL. -->
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(subject)}</div>
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F3F4F6;padding:40px 0;">
     <tr>
       <td align="center">
@@ -234,7 +247,7 @@ export function teacherCancellationEmailContent(
     intro = `Your cancellation of the class with <strong style="color:#FF8303;">${studentName}</strong> is confirmed.`
   } else if (cancelledBy === 'student') {
     intro = studentCancelledUnder24h === true
-      ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student. Because the cancellation was made less than 24 hours before the class, it is still included in your invoice.`
+      ? `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student with less than 24 hours' notice.`
       : `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by the student with more than 24 hours' notice.`
   } else {
     intro = `Your class with <strong style="color:#FF8303;">${studentName}</strong> has been cancelled by admin.`

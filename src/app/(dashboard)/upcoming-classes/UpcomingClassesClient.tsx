@@ -91,10 +91,15 @@ function groupByDay(classes: Class[], timezone: string): Record<string, Class[]>
 //
 // Call this once per rendered card and pass the result down. Two calls with the same
 // arguments are not free: each one owns its own setInterval.
-function useLessonCountdown(startsAt: string, endsAt: string): LessonCountdown | null {
+function useLessonCountdown(startsAt: string, endsAt: string, enabled: boolean): LessonCountdown | null {
   const [countdown, setCountdown] = useState<LessonCountdown | null>(null)
 
   useEffect(() => {
+    // A cancelled card consumes nothing from this tick: it renders the cancel pill in
+    // place of <Countdown>, and both isLive and showReschedule are hard-false on
+    // isCancelled regardless of the value here. Running the interval anyway would cost a
+    // setState re-render per second per cancelled row for no on-screen effect.
+    if (!enabled) return
     const startMs = new Date(startsAt).getTime()
     const endMs = new Date(endsAt).getTime()
     function update() {
@@ -103,7 +108,7 @@ function useLessonCountdown(startsAt: string, endsAt: string): LessonCountdown |
     update()
     const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
-  }, [startsAt, endsAt])
+  }, [startsAt, endsAt, enabled])
 
   return countdown
 }
@@ -241,8 +246,8 @@ function PrevReportSection({ prevReport, teacherTimezone, mounted }: { prevRepor
 function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, isFirst = false }: { cls: Class; onReschedule: (cls: Class) => void; teacherTimezone: string; mounted: boolean; nextId: string | null; isFirst?: boolean }) {
   const router = useRouter()
   const [expanded, setExpanded] = useState(false)
-  const countdown = useLessonCountdown(cls.starts_at, cls.ends_at)
   const isCancelled = isCancelledStatus(cls.status)
+  const countdown = useLessonCountdown(cls.starts_at, cls.ends_at, !isCancelled)
   const cancelLabel = getCancellationLabel(cls, 'teacher')
   const durationMin = Math.round((new Date(cls.ends_at).getTime() - new Date(cls.starts_at).getTime()) / 60000)
   const isNext = mounted && cls.id === nextId && !isCancelled
@@ -353,13 +358,19 @@ function ClassCard({ cls, onReschedule, teacherTimezone, mounted, nextId, isFirs
           {isCancelled && cls.cancelled_at && (
             <div className="space-y-1">
               <p className="text-xs text-gray-500">
-                {`Cancelled ${formatDate(cls.cancelled_at, teacherTimezone)}, ${hoursBeforeStart}h before class`}
+                {`Cancelled ${formatDate(cls.cancelled_at, teacherTimezone)} at ${formatTime(cls.cancelled_at, teacherTimezone)}, ${hoursBeforeStart}h before class`}
                 {cls.cancellation_reason ? ` · ${cls.cancellation_reason}` : ''}
               </p>
+              {/* Notice window only, never pay. The client had the invoice wording stripped
+                  from the teacher cancellation email (3143590) on the same grounds: teachers
+                  have their pay terms from their contracts. getBillability stays as the
+                  boundary source so this string and the money path can never disagree - do
+                  NOT re-derive 24h from hoursBeforeStart. Both branches are grey: the old
+                  green was itself a pay signal. */}
               {cancellationBillability && (
                 cancellationBillability.billableToTeacher
-                  ? <p className="text-xs" style={{ color: '#15803D' }}>You are paid for this class</p>
-                  : <p className="text-xs" style={{ color: '#6b7280' }}>Cancelled with more than 24h notice</p>
+                  ? <p className="text-xs" style={{ color: '#6b7280' }}>Cancelled with less than 24 hours&apos; notice</p>
+                  : <p className="text-xs" style={{ color: '#6b7280' }}>Cancelled with more than 24 hours&apos; notice</p>
               )}
             </div>
           )}
@@ -457,14 +468,22 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         ? endOfWeekKey(todayKey)
         : endOfMonthKey(todayKey)
 
-  const filteredUpcomingClasses = rangeMaxKey === null
-    ? upcomingClasses
-    : upcomingClasses.filter(cls => getTzDateKey(new Date(cls.starts_at), teacherTimezone) <= rangeMaxKey)
+  // Filters the ORIGINAL classes array, not a concat of the upcoming and cancelled lists.
+  // page.tsx orders the query by scheduled_at ascending, so filtering in place preserves
+  // that order and no re-sort is needed; concatenating would have put every cancelled row
+  // out of time order within its day. Cancelled rows get the same window bound as upcoming
+  // ones so they cannot escape This Week / This Month.
+  //
+  // nextId is NOT derived from this list - it stays on upcomingClasses, so a cancelled row
+  // can never be labelled NEXT even if it sorts first in its day.
+  const displayClasses = rangeMaxKey === null
+    ? classes
+    : classes.filter(cls => getTzDateKey(new Date(cls.starts_at), teacherTimezone) <= rangeMaxKey)
 
   // Flat agenda: every upcoming class is a row, the next one included. It is marked in
   // place by its left rail and NEXT / IN CLASS pill rather than pulled out into a hero, so
   // no day can lose its only lesson to a card above the list.
-  const grouped = groupByDay(filteredUpcomingClasses, teacherTimezone)
+  const grouped = groupByDay(displayClasses, teacherTimezone)
   const days = Object.keys(grouped).sort()
 
   const [rescheduleTarget, setRescheduleTarget] = useState<Class | null>(null)
@@ -585,7 +604,10 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       </div>
 
-      {upcomingClasses.length > 0 && (
+      {/* Gated on the full list, not upcomingClasses: a teacher holding only cancelled
+          classes still needs the control, because rangeMaxKey defaults to 'month' and would
+          otherwise hide out-of-month cancelled rows with no way to reach them. */}
+      {classes.length > 0 && (
         <div style={{ display: 'inline-flex' }}>
           {([
             ['week', 'This Week'],
@@ -618,7 +640,7 @@ export default function UpcomingClassesClient({ classes, profile, profileComplet
         </div>
       )}
 
-      {upcomingClasses.length === 0 ? (
+      {classes.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col items-center text-center py-12 px-6">
           <EmptyStateCalendar />
           <h2 className="mt-4 text-lg font-semibold text-gray-900">No upcoming classes yet</h2>

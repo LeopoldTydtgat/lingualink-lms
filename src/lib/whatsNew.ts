@@ -275,10 +275,13 @@ export async function fetchWhatsNew(
       const shortNotice =
         new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
       cancelledText = shortNotice
-        ? `${nameOf(l.student_id)} cancelled within 24hr - you are paid for this class`
-        : `${nameOf(l.student_id)} cancelled a class`
+        ? `${nameOf(l.student_id)} cancelled with less than 24 hours' notice`
+        : `${nameOf(l.student_id)} cancelled with more than 24 hours' notice`
     } else {
-      // No pay claim in the admin branch: admin-cancel pay depends on the refund decision and is not guaranteed.
+      // No branch here makes a pay claim. The client had pay and invoice wording stripped
+      // from the teacher cancellation email and the Upcoming Classes card on the same
+      // grounds: teachers hold their pay terms in their contracts. Notice-period wording
+      // stays, pay language does not.
       cancelledText = `Admin cancelled your class with ${nameOf(l.student_id)}`
     }
     items.push({

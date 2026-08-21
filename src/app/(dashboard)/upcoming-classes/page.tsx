@@ -58,17 +58,32 @@ export default async function UpcomingClassesPage() {
     console.error('Error fetching lessons:', error)
   }
 
-  // A class leaves this list when it ENDS, not when it starts: an in-progress class must
-  // stay visible, matching the right panel's "In class" state on the same screen
-  // ((dashboard)/layout.tsx picks its lesson with the same now < start + duration rule).
-  // Cancelled rows — the only non-'scheduled' statuses this query returns — keep the
-  // original start-based cutoff: a cancelled class has nothing left to run, so nothing
-  // to keep on screen past its start.
+  // A class leaves this list when it ENDS, not when it starts - every status, scheduled
+  // and cancelled alike. For scheduled rows this keeps an in-progress class on screen,
+  // matching the right panel's "In class" state ((dashboard)/layout.tsx picks its lesson
+  // with the same now < start + duration rule).
+  //
+  // Cancelled rows previously used a start-based cutoff on the reasoning that a cancelled
+  // class has nothing left to run. That reasoning was wrong for this surface: a student
+  // cancelling inside 24 hours produced a row that lived less than 24 hours, so a teacher
+  // not logged in during that window never saw the cancellation at all - the exact
+  // complaint the cancelled cards were built to answer. Client rule, 21 Aug: a cancelled
+  // class stays visible for the whole slot it would have occupied, then goes.
+  //
+  // The permanent record lives on the teacher Past Classes page (not yet built). That page
+  // MUST use this same end-based cutoff, or a cancelled class falls into a gap where it is
+  // on neither list for the length of its slot.
+  //
+  // NOTE: (dashboard)/students/[id]/page.tsx deliberately keeps the old two-branch rule.
+  // There the same predicate also feeds the Next Classes tab, so a cancelled row lingering
+  // past its start would appear under a heading that promises classes that will happen.
+  // The two files are meant to differ; do not "align" them.
+  //
+  // The coarse SQL prefilter above already reaches back MAX_LESSON_MS to catch in-progress
+  // classes, so cancelled rows mid-slot are fetched without any query change.
   const visibleLessons = (rawLessons ?? []).filter((l) => {
     const startMs = new Date(l.scheduled_at).getTime()
-    return l.status === 'scheduled'
-      ? listNowMs < startMs + l.duration_minutes * 60 * 1000
-      : listNowMs < startMs
+    return listNowMs < startMs + l.duration_minutes * 60 * 1000
   })
 
   // Build a "last time's recap" per student: the most recent PAST lesson that has a
