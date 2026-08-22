@@ -641,6 +641,11 @@ export default function BookingGridClient({
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(hover: hover)').matches
   )
+  // Which cell currently holds keyboard focus, as "<columnKey>|<rowMinutes>".
+  // Drives an authored focus ring: the cells carry no z-index of their own, so a
+  // focused cell would otherwise be painted over by the sticky time column
+  // (zIndex 2) and the sticky day headers (zIndex 3).
+  const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null)
 
   const selectedTeacher = teachers.find((t) => t.id === selectedTeacherId) ?? teachers[0]
 
@@ -2055,9 +2060,12 @@ export default function BookingGridClient({
                             !inGhostRun &&
                             originalRangeLabel !== null
                           const slotTime = timeFormatter.format(new Date(slot.startIso))
+                          const cellFocusKey = `${key}|${minutes}`
+                          const isFocused = focusedCellKey === cellFocusKey
                           return (
                             <button
                               key={key}
+                              className="booking-cell"
                               onClick={() => {
                                 // Reschedule only: the class's own current
                                 // start. Re-booking it is a no-op the server
@@ -2128,6 +2136,8 @@ export default function BookingGridClient({
                                     }
                                   : undefined
                               }
+                              onFocus={() => setFocusedCellKey(cellFocusKey)}
+                              onBlur={() => setFocusedCellKey((prev) => (prev === cellFocusKey ? null : prev))}
                               aria-pressed={isSelected}
                               aria-disabled={isOriginalStart}
                               aria-label={
@@ -2198,6 +2208,23 @@ export default function BookingGridClient({
                                 // other two run heads use, so the label cannot
                                 // change the row height.
                                 ...(showOriginalLabel ? runFirstCellLayout : {}),
+                                // Keyboard focus lift. The ring itself is set in
+                                // globals.css. Black rather than orange because
+                                // orange already means selection in this grid;
+                                // zIndex 5 clears the sticky corner (4), headers
+                                // (3) and time column (2) so the ring is never
+                                // painted over.
+                                ...(isFocused
+                                  ? {
+                                      // Raised so the sticky time column (zIndex 2), day headers (3) and
+                                      // corner (4) cannot paint over the focus ring. The ring itself is in
+                                      // globals.css under .booking-cell:focus-visible - it must be a real
+                                      // pseudo-class so a mouse click leaves no ring. This lift is harmless
+                                      // on a mouse click, where no ring is drawn.
+                                      position: 'relative' as const,
+                                      zIndex: 5,
+                                    }
+                                  : {}),
                               }}
                             >
                               {isRunFirst && selectedRangeLabel !== null && (
