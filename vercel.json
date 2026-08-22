@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/cron/google-busy-sync",
-      "schedule": "0 8 * * *"
+      "schedule": "*/15 * * * *"
     }
   ]
 }
