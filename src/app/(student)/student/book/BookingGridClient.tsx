@@ -188,16 +188,6 @@ function getWeekStartKey(timezone: string): string {
   return addDaysToDateKey(todayKey, weekday === 0 ? -6 : 1 - weekday)
 }
 
-// Format time as "09:00" in a given timezone
-function formatSlotTime(isoString: string, timezone: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: timezone,
-  }).format(new Date(isoString))
-}
-
 // A grid row's sticky-column label: pure wall-clock arithmetic on minutes since
 // student-local midnight — no Date, no timezone maths, nothing to get wrong.
 function formatRowLabel(minutes: number): string {
@@ -2059,7 +2049,7 @@ export default function BookingGridClient({
                             !inSelectedRun &&
                             !inGhostRun &&
                             originalRangeLabel !== null
-                          const slotTime = formatSlotTime(slot.startIso, studentTimezone)
+                          const slotTime = timeFormatter.format(new Date(slot.startIso))
                           return (
                             <button
                               key={key}
