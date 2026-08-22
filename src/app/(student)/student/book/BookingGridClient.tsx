@@ -606,10 +606,10 @@ export default function BookingGridClient({
   // start for the chosen length (snapToValidStart returned null — the free run
   // around that cell is shorter than the class). Cleared on a successful
   // selection and on the three user actions that invalidate it: duration, week
-  // and teacher changes. NOT cleared by a background refetch (visibility/focus,
-  // or the 409/400 recovery), so a notice can outlive the availability it
-  // described until the student acts again — the text names a length and a
-  // week, never a specific slot, so a stale one is misleading at worst.
+  // and teacher changes. On top of those eager clears, it is also dropped
+  // whenever fresh slot data lands, since the notice described the previous
+  // snapshot. The text names a length and a week, never a specific slot, so a
+  // stale one is misleading at worst.
   const [snapNotice, setSnapNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   // The ?reschedule=<id> on the URL has no live lesson behind it AND we are not
@@ -696,6 +696,11 @@ export default function BookingGridClient({
             const data = await r.json()
             if (controller.signal.aborted) return // superseded — don't clobber newer state
             setSlots(data.slots ?? {})
+            // The notice describes the PREVIOUS slots snapshot and cannot be
+            // known to hold against this new data, so it is dropped fail-safe:
+            // a missing advisory is cheaper than a false one that talks a
+            // student out of a slot that is in fact bookable.
+            setSnapNotice(null)
             setLoading(false)
             return
           }
