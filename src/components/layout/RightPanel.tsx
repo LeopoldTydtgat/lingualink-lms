@@ -170,15 +170,17 @@ export default function RightPanel({
   // another session. Moved here verbatim from the deleted NotificationsBell, which
   // used to own the only What's New subscription. One channel, postgres_changes
   // scoped to this teacher wherever a teacher_id column exists, and a debounced
-  // router.refresh(). This ONLY asks Next.js to re-run the layout; the server
-  // refetch (fetchWhatsNew) stays the single source of truth for what shows, and
-  // dismiss logic is untouched.
+  // router.refresh(). router.refresh() re-runs the WHOLE current route, layout and
+  // page, so any page whose server component redirects on mutable state can be
+  // redirected by this refresh; the student booking page was hit by exactly that
+  // and now decides client-side instead. The server refetch (fetchWhatsNew) stays
+  // the single source of truth for what shows, and dismiss logic is untouched.
   //
   // This is now the (dashboard) layout's ONLY realtime refresher. It absorbed the
   // deleted BillingRealtimeRefresher, whose subscription (lessons filtered to this
   // same teacher_id) and focus refresh were both strict subsets of what runs here —
   // two components mounted in one layout meant two router.refresh() calls per focus,
-  // and router.refresh() re-runs the whole layout, so the billing summary this panel
+  // and router.refresh() re-runs the whole route, so the billing summary this panel
   // renders is recomputed by the refresh below exactly as it was before.
   //
   // The teacherId prop is deliberately NOT used as the filter key even though it
