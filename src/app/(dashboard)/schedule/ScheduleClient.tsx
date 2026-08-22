@@ -23,6 +23,14 @@ export interface AvailabilityRecord {
   start_at: string | null
   end_at: string | null
   is_available: boolean
+  // Row owner: 'manual' = drawn in the portal, 'google_sync' = mirrored from the
+  // teacher's Google Calendar and read-only here (the DELETE route refuses it).
+  // OPTIONAL on purpose: POST /api/teacher/availability does not return the
+  // column, so rows appended optimistically from its response carry no source.
+  // Absent therefore means manual - a row just created through the portal is
+  // manual by construction, and only the branch source === 'google_sync' ever
+  // changes behaviour.
+  source?: string | null
 }
 
 interface Props {

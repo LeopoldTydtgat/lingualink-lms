@@ -58,7 +58,7 @@ export default async function SchedulePage() {
   // Fetch existing availability for this teacher
   const { data: availability } = await supabase
     .from('availability')
-    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available')
+    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available, source')
     .eq('teacher_id', profile.id)
     .order('start_at', { ascending: true })
 
