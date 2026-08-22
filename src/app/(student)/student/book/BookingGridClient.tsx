@@ -10,7 +10,7 @@
 // hidden), text-less slot cells (time lives in the aria-label), and a sticky
 // summary column beside the grid replacing the old bottom confirm panel.
 
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Plus, Lightbulb, type LucideIcon } from 'lucide-react'
@@ -979,29 +979,52 @@ export default function BookingGridClient({
   // round-trips to the column's key.
   const columnDate = (key: string) => new Date(localToUtc(key + 'T12:00', studentTimezone))
 
-  const weekdayFormatter = new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: studentTimezone })
-  const dayMonthFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone })
-  const longDateFormatter = new Intl.DateTimeFormat('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: studentTimezone,
-  })
-  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: studentTimezone,
-  })
+  const weekdayFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const dayMonthFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const longDateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: studentTimezone,
+      }),
+    [studentTimezone]
+  )
+  const timeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: studentTimezone,
+      }),
+    [studentTimezone]
+  )
 
   // Week label off the noon-anchored column Dates, pinned to the student tz
   // like every other label on the page — Intl formatters only, never
   // toLocaleDateString / Date getters. Compact same-month form "20 – 26 Jul
   // 2026" (month named once); cross-month keeps "27 Jul – 2 Aug 2026".
-  const weekEndFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone })
-  const dayOnlyFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone })
-  const monthYearKeyFormatter = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: studentTimezone })
+  const weekEndFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const dayOnlyFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const monthYearKeyFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
   const weekStartDay = columnDate(columnKeys[0])
   const weekEndDay = columnDate(columnKeys[6])
   const weekLabel =
