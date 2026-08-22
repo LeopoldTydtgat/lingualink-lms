@@ -1623,7 +1623,7 @@ export default function BookingGridClient({
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
                 backgroundColor: isSelected ? '#FFF0DC' : '#ffffff',
                 cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled && !isSelected ? 0.5 : 1,
+                opacity: disabled ? 0.5 : 1,
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#111827',
