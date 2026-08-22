@@ -114,64 +114,6 @@ export function getValidStartsByColumn(
 }
 
 /**
- * The grid's visible time rows, collapsed into contiguous bands.
- *
- * A row is a 30-min wall-clock line identified by minutes since student-local
- * midnight (540 = 09:00). Rows are wall-clock, NOT instants: on a
- * DST-transition week the same 09:00 row maps to different UTC instants on
- * different columns, and keying rows by instant would split one visual row in
- * two. utcInstantToTzParts pins the wall clock to the student timezone —
- * Date.getHours() is browser-local and wrong for a student elsewhere.
- *
- * A row exists iff at least one column has a BOOKABLE start at that wall
- * time, OR that wall time is a 30-min step inside some bookable run: every
- * bookable start contributes the wall-clock rows of all durationMinutes / 30
- * steps of its run (each step instant is start epoch-ms + k * SLOT_MS,
- * converted back to the student wall clock via utcInstantToTzParts — never
- * Date getters or ISO-string math). Without the continuation rows, wall times
- * that are valid inside a run but a valid START nowhere in the week were
- * collapsed away, and a selected run's highlight was swallowed by the gap
- * band. Rows that neither host a bookable start nor continue any bookable
- * run are collapsed away with the empty ones. Rows 30 minutes apart are
- * contiguous and share a band; each gap starts a new band, so the UI can
- * render a gap marker between bands. Bands are sorted ascending by minutes —
- * early-morning continuation rows (e.g. 00:00 after a cross-midnight run)
- * sort first, matching a top-down time axis; midnight adjacency (23:30 →
- * 00:00) is deliberately NOT treated as contiguous, since grid rows are a
- * single day's vertical axis.
- */
-export function collapseEmptyBands(
-  validStartsByColumn: Record<string, GridStartSlot[]>,
-  studentTimezone: string,
-  durationMinutes: number,
-): number[][] {
-  const slotsNeeded = durationMinutes / SLOT_MINUTES
-  const rowMinutes = new Set<number>()
-  for (const columnSlots of Object.values(validStartsByColumn)) {
-    for (const slot of columnSlots) {
-      if (!slot.bookable) continue
-      const startMs = new Date(slot.startIso).getTime()
-      for (let step = 0; step < slotsNeeded; step++) {
-        const parts = utcInstantToTzParts(new Date(startMs + step * SLOT_MS), studentTimezone)
-        rowMinutes.add(parts.hour * 60 + parts.minute)
-      }
-    }
-  }
-
-  const sorted = [...rowMinutes].sort((a, b) => a - b)
-  const bands: number[][] = []
-  for (const minutes of sorted) {
-    const currentBand = bands[bands.length - 1]
-    if (currentBand && minutes - currentBand[currentBand.length - 1] === SLOT_MINUTES) {
-      currentBand.push(minutes)
-    } else {
-      bands.push([minutes])
-    }
-  }
-  return bands
-}
-
-/**
  * Column keys with at least one bookable start this week — days with nothing
  * bookable (for the chosen duration) are hidden entirely. Order follows the
  * input record's key order, i.e. the chronological columnKeys order that
@@ -185,14 +127,19 @@ export function getVisibleColumns(
   )
 }
 
+// A row is a wall-clock line identified by minutes since student-local
+// midnight (540 = 09:00). Rows are wall-clock, NOT instants: on a
+// DST-transition week the same 09:00 row maps to different UTC instants on
+// different columns, and keying rows by instant would split one visual row in
+// two. utcInstantToTzParts pins the wall clock to the student timezone -
+// Date.getHours() is browser-local and wrong for a student elsewhere.
+
 /**
  * The grid's UNCOLLAPSED time axis: the ascending row keys the grid renders,
  * spanning the earliest wall-clock row any slot occupies to the latest, with
  * the gap rows in between included.
  *
- * Where collapseEmptyBands answers "which rows are worth showing for THIS
- * duration" (bookable starts and their run steps only, split into bands),
- * this answers "how tall is the day" — so a grid can render a stable axis
+ * This answers "how tall is the day" - so a grid can render a stable axis
  * that does not resize as the student flips between 30/60/90 min. EVERY slot
  * in the record contributes its row, available or not: the blocked cells are
  * exactly the grey background the axis has to make room for, and dropping
@@ -256,9 +203,9 @@ export function buildRowAxis(
 
 /**
  * The grid body's per-column cell lookup: for each column key, a map from
- * student-local wall minutes (hour * 60 + minute — the same keying
- * collapseEmptyBands uses for rows) to the slot that renders on that row. A
- * column with no slots yields an empty map, so every row renders grey there.
+ * student-local wall minutes (hour * 60 + minute - the same keying
+ * buildRowAxis uses for rows) to the slot that renders on that row. A column
+ * with no slots yields an empty map, so every row renders grey there.
  *
  * DST FALL-BACK RULE (CAL2). On a fall-back day one wall-clock hour occurs
  * TWICE, so two distinct UTC instants legitimately claim the same row key —
