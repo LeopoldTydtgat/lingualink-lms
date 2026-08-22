@@ -10,7 +10,7 @@
 // hidden), text-less slot cells (time lives in the aria-label), and a sticky
 // summary column beside the grid replacing the old bottom confirm panel.
 
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Plus, Lightbulb, type LucideIcon } from 'lucide-react'
@@ -548,7 +548,7 @@ export default function BookingGridClient({
   studentId,
   studentTimezone,
   trainingId,
-  hoursRemaining,
+  hoursRemaining: initialHoursRemaining,
   teachers,
   rescheduleLesson,
   rescheduleUnavailable,
@@ -589,7 +589,8 @@ export default function BookingGridClient({
       : teachers[0].id
   )
   const [selectedDuration, setSelectedDuration] = useState<number>(
-    rescheduleLesson?.duration_minutes ?? pickDefaultDuration(allowedDurations, hoursRemaining)
+    rescheduleLesson?.duration_minutes ??
+      pickDefaultDuration(allowedDurations, initialHoursRemaining)
   )
 
   // Monday of the visible week as a YYYY-MM-DD key in the STUDENT timezone —
@@ -641,6 +642,19 @@ export default function BookingGridClient({
       typeof window.matchMedia === 'function' &&
       window.matchMedia('(hover: hover)').matches
   )
+  // Which cell currently holds keyboard focus, as "<columnKey>|<rowMinutes>".
+  // Drives an authored focus ring: the cells carry no z-index of their own, so a
+  // focused cell would otherwise be painted over by the sticky time column
+  // (zIndex 2) and the sticky day headers (zIndex 3).
+  const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null)
+  // The student's hours balance. Seeded from the server prop, which is the
+  // EFFECTIVE balance (a reschedule's own hours already added back), then
+  // refreshed from every successful slot fetch below — the balance used to
+  // arrive exactly once and went stale the moment anything changed it while
+  // this page stayed open. The route returns the RAW balance, so the reschedule
+  // adjustment is re-applied at the point of update. Display only:
+  // /api/student/book re-reads the training and is the actual gate.
+  const [hoursRemaining, setHoursRemaining] = useState(initialHoursRemaining)
 
   const selectedTeacher = teachers.find((t) => t.id === selectedTeacherId) ?? teachers[0]
 
@@ -696,6 +710,18 @@ export default function BookingGridClient({
             const data = await r.json()
             if (controller.signal.aborted) return // superseded — don't clobber newer state
             setSlots(data.slots ?? {})
+            // Balance refresh off the same response (see the hoursRemaining
+            // state above). The field is the RAW balance, so the reschedule
+            // adjustment the server page applied is re-applied here. A null or
+            // absent field — admin caller, no active training, or the route's
+            // logged-and-swallowed query error — leaves the current value
+            // untouched rather than blanking a balance we still have.
+            if (typeof data.hoursRemaining === 'number' && Number.isFinite(data.hoursRemaining)) {
+              setHoursRemaining(
+                data.hoursRemaining +
+                  (rescheduleLesson !== null ? rescheduleLesson.duration_minutes / 60 : 0)
+              )
+            }
             // The notice describes the PREVIOUS slots snapshot and cannot be
             // known to hold against this new data, so it is dropped fail-safe:
             // a missing advisory is cheaper than a false one that talks a
@@ -974,29 +1000,52 @@ export default function BookingGridClient({
   // round-trips to the column's key.
   const columnDate = (key: string) => new Date(localToUtc(key + 'T12:00', studentTimezone))
 
-  const weekdayFormatter = new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: studentTimezone })
-  const dayMonthFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone })
-  const longDateFormatter = new Intl.DateTimeFormat('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: studentTimezone,
-  })
-  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: studentTimezone,
-  })
+  const weekdayFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const dayMonthFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const longDateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: studentTimezone,
+      }),
+    [studentTimezone]
+  )
+  const timeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: studentTimezone,
+      }),
+    [studentTimezone]
+  )
 
   // Week label off the noon-anchored column Dates, pinned to the student tz
   // like every other label on the page — Intl formatters only, never
   // toLocaleDateString / Date getters. Compact same-month form "20 – 26 Jul
   // 2026" (month named once); cross-month keeps "27 Jul – 2 Aug 2026".
-  const weekEndFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone })
-  const dayOnlyFormatter = new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone })
-  const monthYearKeyFormatter = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: studentTimezone })
+  const weekEndFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const dayOnlyFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { day: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
+  const monthYearKeyFormatter = useMemo(
+    () => new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: studentTimezone }),
+    [studentTimezone]
+  )
   const weekStartDay = columnDate(columnKeys[0])
   const weekEndDay = columnDate(columnKeys[6])
   const weekLabel =
@@ -1134,6 +1183,15 @@ export default function BookingGridClient({
   // reschedule's own hours back in) ──
   const hoursUsed = selectedDuration / 60
   const hoursAfter = hoursRemaining - hoursUsed
+  // The Confirm button was gated on isSubmitting alone, so a student whose
+  // balance cannot cover the pick could still press it: /api/student/book
+  // rejected the POST, but the UI invited the attempt. FRESH BOOK ONLY - on a
+  // reschedule hoursAfter equals the raw balance by construction (the effective
+  // balance added the locked lesson's own hours back in and hoursUsed removes
+  // exactly the same amount, since the duration is locked to the original), so
+  // gating here would block a legitimate move for any student sitting on a
+  // negative raw balance. The server stays the authority in both cases.
+  const confirmDisabled = isSubmitting || (!isReschedule && hoursAfter < 0)
   const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + selectedDuration * 60000) : null
@@ -1565,7 +1623,7 @@ export default function BookingGridClient({
                 borderColor: isSelected ? '#FF8303' : '#E0DFDC',
                 backgroundColor: isSelected ? '#FFF0DC' : '#ffffff',
                 cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled && !isSelected ? 0.5 : 1,
+                opacity: disabled ? 0.5 : 1,
                 fontSize: '14px',
                 fontWeight: '600',
                 color: '#111827',
@@ -2055,9 +2113,12 @@ export default function BookingGridClient({
                             !inGhostRun &&
                             originalRangeLabel !== null
                           const slotTime = timeFormatter.format(new Date(slot.startIso))
+                          const cellFocusKey = `${key}|${minutes}`
+                          const isFocused = focusedCellKey === cellFocusKey
                           return (
                             <button
                               key={key}
+                              className="booking-cell"
                               onClick={() => {
                                 // Reschedule only: the class's own current
                                 // start. Re-booking it is a no-op the server
@@ -2128,6 +2189,8 @@ export default function BookingGridClient({
                                     }
                                   : undefined
                               }
+                              onFocus={() => setFocusedCellKey(cellFocusKey)}
+                              onBlur={() => setFocusedCellKey((prev) => (prev === cellFocusKey ? null : prev))}
                               aria-pressed={isSelected}
                               aria-disabled={isOriginalStart}
                               aria-label={
@@ -2198,6 +2261,23 @@ export default function BookingGridClient({
                                 // other two run heads use, so the label cannot
                                 // change the row height.
                                 ...(showOriginalLabel ? runFirstCellLayout : {}),
+                                // Keyboard focus lift. The ring itself is set in
+                                // globals.css. Black rather than orange because
+                                // orange already means selection in this grid;
+                                // zIndex 5 clears the sticky corner (4), headers
+                                // (3) and time column (2) so the ring is never
+                                // painted over.
+                                ...(isFocused
+                                  ? {
+                                      // Raised so the sticky time column (zIndex 2), day headers (3) and
+                                      // corner (4) cannot paint over the focus ring. The ring itself is in
+                                      // globals.css under .booking-cell:focus-visible - it must be a real
+                                      // pseudo-class so a mouse click leaves no ring. This lift is harmless
+                                      // on a mouse click, where no ring is drawn.
+                                      position: 'relative' as const,
+                                      zIndex: 5,
+                                    }
+                                  : {}),
                               }}
                             >
                               {isRunFirst && selectedRangeLabel !== null && (
@@ -2497,20 +2577,24 @@ export default function BookingGridClient({
 
               <button
                 onClick={handleConfirm}
-                disabled={isSubmitting}
+                disabled={confirmDisabled}
+                // Names the out-of-hours reason only. While submitting the
+                // label already says 'Booking...', so a tooltip there would be
+                // wrong.
+                title={confirmDisabled && !isSubmitting ? 'Not enough hours remaining' : undefined}
                 onMouseEnter={() => setConfirmHover(true)}
                 onMouseLeave={() => setConfirmHover(false)}
                 style={{
                   width: '100%',
                   padding: '12px 32px',
-                  backgroundColor: confirmHover && !isSubmitting ? '#FD7000' : '#FF8303',
+                  backgroundColor: confirmHover && !confirmDisabled ? '#FD7000' : '#FF8303',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '10px',
                   fontSize: '15px',
                   fontWeight: '600',
-                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                  opacity: isSubmitting ? 0.7 : 1,
+                  cursor: confirmDisabled ? 'not-allowed' : 'pointer',
+                  opacity: confirmDisabled ? 0.7 : 1,
                 }}
               >
                 {isSubmitting ? 'Booking...' : 'Confirm Booking'}

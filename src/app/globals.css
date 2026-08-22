@@ -285,3 +285,12 @@
   box-shadow: 0 0 0 1px #FF8303,
               0 4px 16px rgba(255, 131, 3, 0.18) !important;
 }
+
+/* Booking grid slot cell - keyboard focus ring. :focus-visible so a mouse click
+   does not leave a ring behind; inline styles cannot express this pseudo-class,
+   which is why it lives here. Black rather than orange because orange already
+   means selection in this grid. */
+.booking-cell:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
+}

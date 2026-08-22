@@ -7,7 +7,7 @@ import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability
 import { getMondayWeekStart, addDays, getWeekDays, formatWeekLabel } from '@/lib/utils/week'
 import { utcInstantToTzParts, isValidTimeZone } from '@/lib/utils/timezone'
 import { buildIcsCalendar } from '@/lib/ics'
-import { Download } from 'lucide-react'
+import { Download, Lock } from 'lucide-react'
 import { AvailabilityRecord } from '../ScheduleClient'
 
 interface Profile { id: string; full_name: string; role: string; timezone: string }
@@ -142,11 +142,25 @@ function expandGeneralSlots(
   return blocks
 }
 
+// Rows the Google busy-sync owns. Google Calendar is the source of truth for
+// them: they are labelled and read-only in the portal, and the DELETE route
+// refuses them outright. Everything else is manual and unchanged.
+const GOOGLE_SOURCE = 'google_sync'
+
+// Positive test only. An absent/unknown source is treated as manual, which is
+// correct for the one case that produces it: a row appended optimistically from
+// the POST response, which does not return the column and is manual by
+// construction. The server-side guard, not this branch, is the enforcement.
+function isGoogleBlock(source: string | null | undefined): boolean {
+  return source === GOOGLE_SOURCE
+}
+
 interface SpecificBlock {
   dayIdx: number
   startMin: number
   endMin: number
   recordId: string
+  source: string | null
 }
 
 interface ClassBlock {
@@ -183,7 +197,7 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date, tz
       for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
         const dayMid = startOfDayLocal(addDays(weekStart, dayIdx))
         if (dayMid >= spanStartSod && dayMid <= spanEndSod) {
-          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id })
+          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id, source: r.source ?? null })
         }
       }
       continue
@@ -203,7 +217,7 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date, tz
     const endMin = sameDay
       ? e.hour * 60 + e.minute
       : 24 * 60  // event spans midnight — clamp to end of day
-    blocks.push({ dayIdx, startMin, endMin, recordId: r.id })
+    blocks.push({ dayIdx, startMin, endMin, recordId: r.id, source: r.source ?? null })
   }
   return blocks
 }
@@ -277,6 +291,9 @@ function computeWashLabel(
 // it never sits under a booking.
 interface BlockSegment {
   recordId: string
+  // Carried from the source record so the red layer can branch on it without
+  // re-reading the availability array.
+  source: string | null
   dayIdx: number
   startMin: number
   endMin: number
@@ -322,6 +339,7 @@ function subtractClassIntervals(
     .filter(g => g.end - g.start >= 4)
     .map(g => ({
       recordId: run.recordId,
+      source: run.source,
       dayIdx: run.dayIdx,
       startMin: g.start,
       endMin: g.end,
@@ -374,6 +392,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [weekStart, setWeekStart] = useState<Date>(() => getMondayWeekStart(tzTodayDate(displayTz)))
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  // Google-synced blocks open this explainer instead of the delete confirmation.
+  // Deliberately a boolean, not a record id: there is nothing to act on.
+  const [googleBlockInfo, setGoogleBlockInfo] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [classDetail, setClassDetail] = useState<{
     studentName: string
@@ -401,6 +422,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        if (googleBlockInfo) { setGoogleBlockInfo(false); return }
         if (classDetail) { setClassDetail(null); return }
         setMode(null)
         setDrag(null)
@@ -409,7 +431,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [classDetail])
+  }, [classDetail, googleBlockInfo])
 
   // Now-indicator tick — recompute every 60s.
   useEffect(() => {
@@ -591,6 +613,13 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       )
     return { green: split(greenBlocks), red: split(redBlocks) }
   }, [greenBlocks, redBlocks, classBlocksList])
+
+  // Drives the footer's extra line only. Keyed off the visible week's red
+  // segments, so the hint appears exactly when a locked block is on screen.
+  const hasGoogleBlock = useMemo(
+    () => availabilitySegments.red.some(b => isGoogleBlock(b.source)),
+    [availabilitySegments]
+  )
 
   // NEW282: earliest event minute (since local midnight) in the visible week — the smallest
   // start among booked classes and every availability/unavailability block. Holiday and
@@ -1314,14 +1343,37 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                 })}
 
                 {/* Layer 1: specific unavailable + holiday (red) - split around booked classes */}
-                {availabilitySegments.red.filter(b => b.dayIdx === dayIdx).map((b, i) => {
+                {availabilitySegments.red
+                  .filter(b => b.dayIdx === dayIdx)
+                  // Google-owned segments paint FIRST, i.e. underneath. Every red
+                  // segment shares zIndex 2, so paint order is array order: a google
+                  // block ordered last would sit on top of an overlapping manual one
+                  // and swallow its click, and that manual block would then be
+                  // unreachable from anywhere in the UI (the other two tabs list only
+                  // general/holiday rows) - permanently undeletable. Manual blocks are
+                  // the only actionable ones, so they take the top layer. .sort() is
+                  // stable (ES2019+) and runs on the array filter() just returned, so
+                  // it neither reorders same-kind blocks nor mutates the memo. It is a
+                  // no-op while every row is manual.
+                  .sort((x, y) => Number(isGoogleBlock(y.source)) - Number(isGoogleBlock(x.source)))
+                  .map((b, i) => {
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  // Google-owned blocks keep the identical red palette - they block
+                  // bookings exactly like a manual one - and differ only by the lock,
+                  // the label, and where the click goes. Manual blocks render and
+                  // behave exactly as before.
+                  const isGoogle = isGoogleBlock(b.source)
                   return (
                     <div
                       key={`un-${b.recordId}-${i}`}
-                      onClick={() => { setActionError(''); setPendingDelete(b.recordId) }}
+                      title={isGoogle ? 'From Google Calendar - manage this event in Google Calendar' : undefined}
+                      onClick={() => {
+                        setActionError('')
+                        if (isGoogle) { setGoogleBlockInfo(true); return }
+                        setPendingDelete(b.recordId)
+                      }}
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
@@ -1338,12 +1390,24 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                       {b.labelHost && (height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                            <span style={{ fontSize: '11.5px', fontWeight: 600, color: '#B91C1C' }}>Unavailable</span>
+                            {isGoogle && (
+                              <Lock size={11} color="#B91C1C" strokeWidth={2.5} aria-hidden="true" style={{ flexShrink: 0 }} />
+                            )}
+                            <span style={
+                              isGoogle
+                                ? { fontSize: '11.5px', fontWeight: 600, color: '#B91C1C', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+                                : { fontSize: '11.5px', fontWeight: 600, color: '#B91C1C' }
+                            }>
+                              {isGoogle ? 'From Google Calendar' : 'Unavailable'}
+                            </span>
                           </div>
                           <div style={{ fontSize: '11px', color: '#B91C1C' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</div>
                         </>
                       ) : (
                         <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                          {isGoogle && (
+                            <Lock size={10} color="#B91C1C" strokeWidth={2.5} aria-hidden="true" style={{ flexShrink: 0 }} />
+                          )}
                           <span style={{ fontSize: '11px', color: '#B91C1C', whiteSpace: 'nowrap' }}>{timeRangeLabel(b.runStartMin, b.runEndMin)}</span>
                         </div>
                       ))}
@@ -1448,6 +1512,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
 
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
         Click any green or red block to remove it. Booked classes cannot be removed here.
+        {hasGoogleBlock && ' Blocks marked with a lock come from Google Calendar and are managed there.'}
       </p>
         </>
       )}
@@ -1592,6 +1657,50 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => setClassDetail(null)}
+                style={{
+                  padding: '8px 20px', borderRadius: '6px', border: '1px solid #D1D5DB',
+                  backgroundColor: '#F3F4F6', color: '#374151', fontSize: '13px',
+                  fontWeight: '600', cursor: 'pointer',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google-synced block explainer. Non-destructive by design: Google Calendar
+          owns these rows, so there is nothing to confirm here - only a Close. Same
+          shell as the class-detail modal above. */}
+      {googleBlockInfo && (
+        <div
+          onClick={() => setGoogleBlockInfo(false)}
+          style={{
+            position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff', borderRadius: '12px', padding: '24px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)', minWidth: '320px', maxWidth: '360px',
+            }}
+          >
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+              <Lock size={15} color="#B91C1C" aria-hidden="true" style={{ flexShrink: 0 }} />
+              <p style={{ fontSize: '16px', fontWeight: 600, color: '#111827' }}>
+                From Google Calendar
+              </p>
+            </div>
+            <p style={{ fontSize: '13px', color: '#374151', marginBottom: '20px', lineHeight: 1.5 }}>
+              This block comes from your Google Calendar. To free this time, delete or move
+              the event in Google Calendar - the portal updates within 15 minutes.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setGoogleBlockInfo(false)}
                 style={{
                   padding: '8px 20px', borderRadius: '6px', border: '1px solid #D1D5DB',
                   backgroundColor: '#F3F4F6', color: '#374151', fontSize: '13px',

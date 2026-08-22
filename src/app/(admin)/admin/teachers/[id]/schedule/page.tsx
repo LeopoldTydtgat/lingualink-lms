@@ -43,7 +43,7 @@ export default async function AdminTeacherSchedulePage({
 
   const { data: availability, error: availabilityError } = await supabase
     .from('availability')
-    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available')
+    .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available, source')
     .eq('teacher_id', id)
     .order('start_at', { ascending: true })
 

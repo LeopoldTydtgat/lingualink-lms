@@ -18,7 +18,7 @@ export async function DELETE(
   const admin = createAdminClient()
   const { data: record, error: fetchError } = await admin
     .from('availability')
-    .select('teacher_id')
+    .select('teacher_id, source')
     .eq('id', id)
     .maybeSingle()
 
@@ -27,6 +27,28 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
   }
   if (!record) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  // Source gate. Deliberately placed BEFORE the admin-escalation branch and
+  // before the delete: Google Calendar owns 'google_sync' rows, so no role may
+  // remove them here. An admin bypass would not even be useful - the next sync
+  // run restores the row - it would only make the portal lie about what it did.
+  //
+  // Strict allow-list, not `!== 'google_sync'`: the column is NOT NULL with a
+  // CHECK of ('manual','google_sync'), so anything else means the schema moved
+  // under this route and the safe answer is to refuse rather than guess.
+  if (record.source !== 'manual') {
+    if (record.source === 'google_sync') {
+      return NextResponse.json(
+        { error: 'This block is synced from Google Calendar and cannot be deleted here.' },
+        { status: 403 }
+      )
+    }
+    console.error(
+      '[DELETE /api/teacher/availability/[id]] unrecognised availability.source, refusing delete:',
+      record.source
+    )
+    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
+  }
 
   // Admin escalation - see the comment in the sibling POST route for why this is
   // requireAdmin and not requireStaff.

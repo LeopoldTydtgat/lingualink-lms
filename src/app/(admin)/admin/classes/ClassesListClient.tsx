@@ -6,8 +6,7 @@ import Link from 'next/link'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { checkAllowedDuration } from '@/lib/lessons/allowedDurations'
 import { formatInstantInTz } from '@/lib/exportTime'
-import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../_components/DateRangeFilter'
-import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets'
+import { DateRangeFilter } from '../_components/DateRangeFilter'
 import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
 
 interface Teacher {
@@ -48,18 +47,29 @@ interface LessonReport {
 
 interface Props {
   teachers: Teacher[]
-  // Seeded from ?filter=today by the server page (admin's own timezone); '' means
-  // "no date filter".
+  // The range the list OPENS on, resolved server-side in the admin's own timezone.
+  // Two different things arrive here: ?filter=today seeds that single day, and every
+  // other landing seeds month-to-date - the 1st of the current month through today.
+  // '' means "no date filter", which is what a profile with no timezone gets.
   initialDateFrom?: string
   initialDateTo?: string
+  // The LANDING default, which Clear returns to. A separate pair because it and the
+  // two above DISAGREE under ?filter=today: that deep link opens on one day, but Clear
+  // must hand back the month-to-date view rather than the deep link's range. Equal to
+  // initialDateFrom/To on every other landing, and '' on a timezone-less profile,
+  // which keeps Clear emptying the inputs there exactly as it always did.
+  defaultDateFrom?: string
+  defaultDateTo?: string
   // Admin's profile timezone; null when unset. Date & Time column renders
   // in this zone so it agrees with the GET route's date-filter bucketing.
   adminTz: string | null
   // True when the URL carried a filter/deep-link param. The URL then wins outright:
   // no restore from sessionStorage, and storage is overwritten from what the URL
-  // produced. A '' seed (?filter=today with no profile timezone, or an unrecognised
-  // ?filter= value) still counts — the admin asked for a specific view via the URL,
-  // so a remembered filter must not silently widen or narrow it.
+  // produced. Presence of the param is the test, not the range it produced - an
+  // unrecognised ?filter= value lands on the month-to-date default and a timezone-less
+  // profile lands on no date filter at all, and either way that IS the URL's answer.
+  // With the date range no longer in the stored record, what this suppresses is the
+  // remembered TEACHER and STATUS: a deep link gets the clean default list.
   hasUrlFilters?: boolean
 }
 
@@ -85,37 +95,26 @@ const FILTERS_STORAGE_KEY = 'll-admin-classes-filters'
  * term reads as a broken list ("where did my classes go?") on a page you did not type
  * it on, and a remembered page 7 is meaningless against a result set that has moved on.
  *
- * The date range is stored as EITHER a preset id OR concrete day keys, never both:
+ * AND NOT THE DATE RANGE, which is the landing default's business rather than the
+ * session's: every landing opens on month-to-date, computed from the clock at request
+ * time by the server page, so a remembered range could add nothing except the chance
+ * of disagreeing with it. It also retires the staleness this record used to work
+ * around - a stored range cannot go stale if there is no stored range.
  *
- *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
- *                       clock on restore. "Today" must still mean today tomorrow;
- *                       storing its dates would pin the filter to a day that has
- *                       passed, which is the exact staleness this split avoids.
- *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
- *                       An explicitly chosen date means that date and nothing else.
+ * Records written BEFORE dates left this key still carry preset/from/to.
+ * parseStoredFilters below reads teacher and status out of them and ignores the rest
+ * rather than rejecting the record, so an admin mid-session keeps the selection they
+ * had. That is also why the storage key is deliberately unchanged: there is no
+ * incompatible shape to fence off, only three fields nothing reads any more.
  */
 interface StoredFilters {
   teacher: string
   status: string
-  preset: DateRangePreset | null
-  from: string
-  to: string
 }
 
 const DEFAULT_STORED_FILTERS: StoredFilters = {
   teacher: '',
   status: '',
-  preset: null,
-  from: '',
-  to: '',
-}
-
-// 'YYYY-MM-DD' or empty. The stored value goes straight back into a date input and
-// into the GET route's date_from/date_to, so anything else is rejected at the door
-// rather than sent to the server as a query the route never expects.
-const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
-function isDayKeyOrEmpty(value: string): boolean {
-  return value === '' || DAY_KEY_RE.test(value)
 }
 
 // Flattens the embedded report to a single row or null. Array.isArray() first, per
@@ -240,7 +239,7 @@ function formatDateTime(isoString: string): string {
   return `${day}/${month}/${year} ${hours}:${mins}`
 }
 
-export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '', adminTz, hasUrlFilters = false }: Props) {
+export default function ClassesListClient({ teachers, initialDateFrom = '', initialDateTo = '', defaultDateFrom = '', defaultDateTo = '', adminTz, hasUrlFilters = false }: Props) {
   const router = useRouter()
 
   const [lessons, setLessons] = useState<Lesson[]>([])
@@ -270,40 +269,32 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
     return () => clearTimeout(timer)
   }, [search])
 
-  // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves —
-  // `search` and `page` are not dependencies, so typing in the search box neither
-  // rewrites storage nor pays for the preset match below.
-  //
-  // matchDateRangePreset is the same call that decides which quick-range button is
-  // highlighted, so what the screen shows as active and what gets stored are one
-  // decision. A hand-typed range that happens to equal a preset is therefore stored
-  // as that preset — which is exactly what the row is telling the admin it is.
-  const persistedFilters = useMemo<StoredFilters>(() => {
-    const preset = matchDateRangePreset(filterDateFrom, filterDateTo, adminTz, new Date())
-    return {
-      teacher: filterTeacher,
-      status: filterStatus,
-      preset,
-      from: preset ? '' : filterDateFrom,
-      to: preset ? '' : filterDateTo,
-    }
-  }, [filterTeacher, filterStatus, filterDateFrom, filterDateTo, adminTz])
+  // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves.
+  // `search`, `page` and both dates are absent from the deps on purpose: none of them
+  // is stored, so none of them should cost a rebuild or a write.
+  const persistedFilters = useMemo<StoredFilters>(() => ({
+    teacher: filterTeacher,
+    status: filterStatus,
+  }), [filterTeacher, filterStatus])
 
   /**
    * Shape validation for a decoded stored record. Null rejects the whole record and
    * the page opens on defaults.
    *
-   * STRUCTURAL problems reject everything: not an object, a field of the wrong type,
-   * a malformed day key, or a preset id this build does not know (a record written by
-   * a different version of this page, or edited by hand — nothing about it can be
-   * trusted field by field).
+   * STRUCTURAL problems reject everything: not an object, or a field of the wrong
+   * type - a record written by a different version of this page, or edited by hand,
+   * cannot be trusted field by field.
    *
    * DATA DRIFT does not: a teacher who has since left, or a status the dropdown no
    * longer offers, is a well-formed record whose target has moved. Those single fields
-   * fall back to "all", instead of throwing away a still-valid date range with them.
-   * Left as-is, a teacher id absent from the dropdown would filter the list by an
-   * invisible selection — the select would render blank while the fetch quietly
-   * narrowed the results.
+   * fall back to "all". Left as-is, a teacher id absent from the dropdown would filter
+   * the list by an invisible selection - the select would render blank while the fetch
+   * quietly narrowed the results.
+   *
+   * OLD-SHAPE RECORDS PARSE. A record still carrying preset/from/to from before the
+   * date range left this key is read for teacher and status and nothing else: the
+   * extra fields are not inspected, not validated, and never a reason to reject. The
+   * next write replaces it with the current shape, so the migration costs nothing.
    */
   function parseStoredFilters(raw: unknown): StoredFilters | null {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
@@ -311,53 +302,26 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
 
     const teacher = record.teacher
     const status = record.status
-    const from = record.from
-    const to = record.to
     if (typeof teacher !== 'string' || typeof status !== 'string') return null
-    if (typeof from !== 'string' || typeof to !== 'string') return null
-    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null
-
-    let preset: DateRangePreset | null
-    if (record.preset === null) preset = null
-    else if (isDateRangePreset(record.preset)) preset = record.preset
-    else return null
 
     return {
       teacher: teachers.some((t) => t.id === teacher) ? teacher : '',
       status: STATUS_OPTIONS.some((o) => o.value === status) ? status : '',
-      preset,
-      // Enforces the invariant on the way in as well as on the way out: with a preset
-      // active the stored dates are meaningless and the range comes from the clock.
-      from: preset ? '' : from,
-      to: preset ? '' : to,
     }
   }
 
   /**
-   * Push a restored record into filter state. Runs once, from the hook's mount effect
-   * — never during render, so the clock read below cannot desync server and client
-   * markup. `page` is untouched: a restore only ever happens on mount, where it is
-   * already 1.
+   * Push a restored record into filter state. Runs once, from the hook's mount effect.
+   *
+   * Teacher and status ONLY. The two date inputs are deliberately not touched, and
+   * that is the whole point of taking dates out of the record: the month-to-date range
+   * the server page seeded survives the restore instead of being overwritten a frame
+   * later by a range from an earlier visit. `page` is untouched too - a restore only
+   * ever happens on mount, where it is already 1.
    */
   function applyStoredFilters(stored: StoredFilters) {
     setFilterTeacher(stored.teacher)
     setFilterStatus(stored.status)
-    if (stored.preset) {
-      // Recomputed against NOW, which is the whole point of storing the id: a session
-      // that spans midnight, or a tab reopened the next morning, gets the preset the
-      // admin chose rather than the days it covered when they chose it.
-      //
-      // No timezone means no honest answer to "which day is today" — the same reason
-      // DateRangeFilter disables the preset buttons and the server page declines to
-      // seed ?filter=today. The range restores empty rather than guessing UTC, and the
-      // hook then rewrites storage to match what is on screen.
-      const range = adminTz ? getPresetRange(stored.preset, new Date(), adminTz) : null
-      setFilterDateFrom(range?.from ?? '')
-      setFilterDateTo(range?.to ?? '')
-    } else {
-      setFilterDateFrom(stored.from)
-      setFilterDateTo(stored.to)
-    }
   }
 
   const { clear: clearStoredFilters } = useFilterPersistence<StoredFilters>({
@@ -440,8 +404,14 @@ export default function ClassesListClient({ teachers, initialDateFrom = '', init
     setDebouncedSearch('')
     setFilterTeacher('')
     setFilterStatus('')
-    setFilterDateFrom('')
-    setFilterDateTo('')
+    // Back to the range the page LANDED on, not to no range at all. Clear means "as I
+    // landed", and landing here means month-to-date; an admin who genuinely wants all
+    // time can still empty the two date inputs by hand. Both props are '' on a
+    // timezone-less profile, so Clear blanks them there exactly as it always did - and
+    // under ?filter=today this deliberately returns month-to-date rather than the deep
+    // link's single day, which is why the default arrives as its own prop pair.
+    setFilterDateFrom(defaultDateFrom)
+    setFilterDateTo(defaultDateTo)
     setPage(1)
     // Clear the remembered record too, immediately — "Clear" has to mean cleared for
     // the next visit as well, including when the filters were already at their
