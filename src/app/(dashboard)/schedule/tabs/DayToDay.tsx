@@ -498,6 +498,51 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     if (data !== null) setClasses(data)
   }
 
+  // Mirrors isSaving / isDeleting / drag for refreshAvailability below. The
+  // focus effect has [] deps, so reading those state values directly inside it
+  // would close over their mount-time values forever and the guard would never
+  // fire - only a ref reports the current ones.
+  const availabilityBusyRef = useRef(false)
+  useEffect(() => {
+    availabilityBusyRef.current = isSaving || isDeleting || drag !== null
+  }, [isSaving, isDeleting, drag])
+
+  // Generation counter: a response is dropped once a newer refresh has started,
+  // so two focus events in quick succession cannot land out of order.
+  const availabilityGenRef = useRef(0)
+
+  // The Google busy-sync cron writes availability rows every 15 minutes, but the
+  // array is seeded into state at mount only - an open page would never see them
+  // (the modal below promises otherwise). Re-read this teacher's rows on focus.
+  // Not range-scoped: general rows carry no instant, and the same array feeds the
+  // other two tabs, so it is always fetched and replaced whole. Column list is
+  // the server fetch's, verbatim - dropping `source` would strip the Google lock
+  // and route those rows into the delete-confirm dialog.
+  async function refreshAvailability() {
+    if (availabilityBusyRef.current || isDraggingRef.current) return
+    const gen = ++availabilityGenRef.current
+
+    const { data, error } = await supabase
+      .from('availability')
+      .select('id, teacher_id, type, day_of_week, start_time, end_time, start_at, end_at, is_available, source')
+      .eq('teacher_id', profile.id)
+      .order('start_at', { ascending: true })
+
+    // Same contract as fetchClassesForRange: a transient failure keeps the
+    // previous state rather than blanking the calendar.
+    if (error) {
+      console.error('[DayToDay refreshAvailability]', error)
+      return
+    }
+    if (!data) return
+    // Re-checked AFTER the await: a drag, save or delete that began while the
+    // read was in flight owns the array now, and these rows predate it.
+    if (availabilityBusyRef.current || isDraggingRef.current) return
+    if (gen !== availabilityGenRef.current) return
+
+    onAvailabilityChange(data as AvailabilityRecord[])
+  }
+
   // Refetch classes when the visible week changes.
   useEffect(() => {
     fetchClassesForRange(visibleRange.start, visibleRange.end)
@@ -559,10 +604,13 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // the stale block lingers until a manual refresh. BOTH listeners are needed: switching
   // browser tabs fires visibilitychange but not window focus; alt-tabbing back to the
   // window fires focus. A double-fire double-fetch is harmless (idempotent GET).
+  // Availability rides the same two listeners: nothing pushes the cron's rows to
+  // an open page, so focus is the moment to re-read them.
   useEffect(() => {
     function handler() {
       const range = visibleRangeRef.current
       if (range) fetchClassesForRange(range.start, range.end)
+      void refreshAvailability()
     }
     function onVisibility() {
       if (document.visibilityState === 'visible') handler()
