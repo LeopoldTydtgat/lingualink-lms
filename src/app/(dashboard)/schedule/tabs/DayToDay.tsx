@@ -511,6 +511,15 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // so two focus events in quick succession cannot land out of order.
   const availabilityGenRef = useRef(0)
 
+  // Mirrors the availability prop's length for the empty-read guard below, for
+  // the same reason as availabilityBusyRef: the focus effect has [] deps, so
+  // reading availability.length directly inside refreshAvailability would
+  // close over its mount-time value forever.
+  const availabilityLengthRef = useRef(availability.length)
+  useEffect(() => {
+    availabilityLengthRef.current = availability.length
+  }, [availability])
+
   // The Google busy-sync cron writes availability rows every 15 minutes, but the
   // array is seeded into state at mount only - an open page would never see them
   // (the modal below promises otherwise). Re-read this teacher's rows on focus.
@@ -539,6 +548,17 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     // read was in flight owns the array now, and these rows predate it.
     if (availabilityBusyRef.current || isDraggingRef.current) return
     if (gen !== availabilityGenRef.current) return
+
+    // Fail safe: never blank a populated calendar on an unexplained empty
+    // read. A zero-row response is indistinguishable from a genuinely
+    // narrowed RLS policy (the admin mirror depends on availability's ALL
+    // policy is_admin() clause) - Postgres returns [] for that, not an
+    // error, so the guard above never fires. A teacher who really deleted
+    // every row still sees the correct empty state on their next page load.
+    if (data.length === 0 && availabilityLengthRef.current > 0) {
+      console.warn('[DayToDay refreshAvailability] fetched 0 rows while local state has rows, suppressing to avoid blanking a live calendar')
+      return
+    }
 
     onAvailabilityChange(data as AvailabilityRecord[])
   }
