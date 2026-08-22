@@ -12,6 +12,11 @@ import type { GoogleConnectionSummary, GoogleNotice } from './GoogleConnectCard'
 const SYNC_FAILURE_KEY = 'google_busy_sync_failures'
 const SYNC_LAST_ERROR_KEY = 'google_busy_sync_last_error'
 const SYNC_LAST_SUCCESS_KEY = 'google_busy_sync_last_success_at'
+// Hard state, not a transient wobble: written 'true' only when Google answers
+// invalid_grant, and cleared to 'false' by a successful cron run
+// (src/app/api/cron/google-busy-sync/route.ts) or by a successful reconnect
+// (src/app/api/google/oauth/callback/route.ts).
+const SYNC_REVOKED_KEY = 'google_busy_sync_revoked'
 
 // Banner threshold: 3 consecutive failed cron runs; the counter resets to 0 on the first success.
 const SYNC_FAILURE_THRESHOLD = 3
@@ -93,43 +98,64 @@ export default async function SchedulePage({ searchParams }: PageProps) {
   const minAvailableHours = Number.isNaN(parsedMinHours) ? null : parsedMinHours
 
   // Sync-health banner — admin viewer only, so every other teacher skips the read.
+  //
+  // TWO SIGNALS, NEVER BOTH RENDERED, AND THE PRIORITY IS DECIDED HERE. A
+  // revoked grant is a hard state with one fixed remedy (reconnect); the
+  // 3-strike warning is a transient "it has been failing" notice. When the
+  // grant is revoked the cron ALSO marches the failure counter, so both are
+  // true at once — the revoked branch below therefore skips the counter
+  // entirely and leaves googleSyncWarning null. Stacking a vague warning on top
+  // of the actionable one would only bury it.
   let googleSyncWarning: string | null = null
+  let googleSyncRevoked = false
 
   if (profile.role === 'admin') {
     const { data: syncRows, error: syncError } = await admin
       .from('settings')
       .select('key, value')
-      .in('key', [SYNC_FAILURE_KEY, SYNC_LAST_ERROR_KEY, SYNC_LAST_SUCCESS_KEY])
+      .in('key', [SYNC_FAILURE_KEY, SYNC_LAST_ERROR_KEY, SYNC_LAST_SUCCESS_KEY, SYNC_REVOKED_KEY])
 
     if (syncError) {
       console.error('[schedule] google busy-sync health read failed:', syncError)
       // Fail SAFE: an unreadable counter is not evidence the sync is healthy, so
-      // the null path prompts action instead of hiding a possible outage.
+      // the null path prompts action instead of hiding a possible outage. The
+      // transient warning and NOT the reconnect banner: an unreadable row is no
+      // evidence the grant was revoked either, and "reconnect" is the wrong
+      // instruction to hand someone whose connection is in fact fine.
       googleSyncWarning = SYNC_UNKNOWN_WARNING
     } else {
       const values = new Map<string, string | null>(
         (syncRows ?? []).map((row) => [row.key, row.value])
       )
-      const rawFailures = values.get(SYNC_FAILURE_KEY)
 
-      if (rawFailures !== undefined) {
-        // Row absent (undefined) means the cron has never reported yet — that is
-        // not a failure signal. A row holding a null/garbage value is, because
-        // only this cron writes the key.
-        const failures = Number.parseInt(rawFailures ?? '', 10)
+      // Exact match on 'true', nothing looser. The key is written as the literal
+      // strings 'true'/'false' by the cron and the callback, so an absent row, a
+      // null or anything unrecognised is NOT a revocation claim and must not put
+      // a "reconnect" instruction in front of a working calendar.
+      googleSyncRevoked = values.get(SYNC_REVOKED_KEY) === 'true'
 
-        if (!Number.isFinite(failures)) {
-          googleSyncWarning = SYNC_UNKNOWN_WARNING
-        } else if (failures >= SYNC_FAILURE_THRESHOLD) {
-          const lastSuccessRaw = values.get(SYNC_LAST_SUCCESS_KEY)
-          const since =
-            (lastSuccessRaw ? formatDateInZone(lastSuccessRaw, profile.timezone) : null) ??
-            'an unknown time'
-          const lastError = values.get(SYNC_LAST_ERROR_KEY)
-          googleSyncWarning =
-            `Google Calendar sync has been failing since ${since}. ` +
-            `Your Google events may not be blocking bookings.` +
-            (lastError ? ` ${lastError}` : '')
+      if (!googleSyncRevoked) {
+        const rawFailures = values.get(SYNC_FAILURE_KEY)
+
+        if (rawFailures !== undefined) {
+          // Row absent (undefined) means the cron has never reported yet — that is
+          // not a failure signal. A row holding a null/garbage value is, because
+          // only this cron writes the key.
+          const failures = Number.parseInt(rawFailures ?? '', 10)
+
+          if (!Number.isFinite(failures)) {
+            googleSyncWarning = SYNC_UNKNOWN_WARNING
+          } else if (failures >= SYNC_FAILURE_THRESHOLD) {
+            const lastSuccessRaw = values.get(SYNC_LAST_SUCCESS_KEY)
+            const since =
+              (lastSuccessRaw ? formatDateInZone(lastSuccessRaw, profile.timezone) : null) ??
+              'an unknown time'
+            const lastError = values.get(SYNC_LAST_ERROR_KEY)
+            googleSyncWarning =
+              `Google Calendar sync has been failing since ${since}. ` +
+              `Your Google events may not be blocking bookings.` +
+              (lastError ? ` ${lastError}` : '')
+          }
         }
       }
     }
@@ -175,6 +201,7 @@ export default async function SchedulePage({ searchParams }: PageProps) {
       initialAvailability={availability ?? []}
       minAvailableHours={minAvailableHours}
       googleSyncWarning={googleSyncWarning}
+      googleSyncRevoked={googleSyncRevoked}
       googleConnection={googleConnection}
       googleNotice={googleNotice}
     />

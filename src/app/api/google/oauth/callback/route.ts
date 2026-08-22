@@ -26,6 +26,13 @@ import {
 // Buffer (in decodeIdTokenEmail) is Node-only, so pin the runtime.
 export const runtime = 'nodejs'
 
+// Sync-health keys, owned by src/app/api/cron/google-busy-sync/route.ts and read
+// by the banner on src/app/(dashboard)/schedule/page.tsx. Cleared on a
+// successful reconnect below so a fixed connection stops raising the alarm.
+// Same literal strings as the cron writes - the page compares to 'true' exactly.
+const SYNC_REVOKED_KEY = 'google_busy_sync_revoked'
+const SYNC_FAILURE_KEY = 'google_busy_sync_failures'
+
 type Outcome =
   // Success.
   | 'connected'
@@ -248,6 +255,33 @@ export async function GET(req: NextRequest) {
     if (writeError) {
       console.error('[google/oauth/callback] connection write failed:', writeError)
       return finish(req, 'save_error')
+    }
+
+    // ---- Reconnect hygiene -------------------------------------------------
+    // The banner must not outlive the fix. A reconnect is exactly the remedy the
+    // "connection lost" banner asks for, so the revoked flag and the consecutive-
+    // failure counter are cleared here rather than left standing until the next
+    // cron run - otherwise she does the thing she was told to do and the alarm
+    // is still on screen.
+    //
+    // _last_error and _last_success_at are DELIBERATELY NOT TOUCHED. A reconnect
+    // is not a successful sync: writing a success timestamp here would fabricate
+    // a sync that never ran, and the next real failure would then report itself
+    // as "failing since" a moment when nothing had actually synced.
+    const healthStamp = new Date().toISOString()
+    const { error: healthResetError } = await admin.from('settings').upsert(
+      [
+        { key: SYNC_REVOKED_KEY, value: 'false', updated_at: healthStamp },
+        { key: SYNC_FAILURE_KEY, value: '0', updated_at: healthStamp },
+      ],
+      { onConflict: 'key' }
+    )
+
+    if (healthResetError) {
+      // Logged, not fatal: the connection itself succeeded and the next successful
+      // cron run clears these keys anyway, so the only cost is a banner that
+      // lingers until then.
+      console.error('[google/oauth/callback] sync-health reset failed:', healthResetError)
     }
 
     return finish(req, 'connected')
