@@ -5,8 +5,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
-import { DateRangeFilter, matchDateRangePreset, isDateRangePreset } from '../_components/DateRangeFilter';
-import { getPresetRange, type DateRangePreset } from '@/lib/dates/dateRangePresets';
+import { DateRangeFilter } from '../_components/DateRangeFilter';
 import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -70,6 +69,18 @@ interface Props {
   // route's page-1 response reports for those filters. null when the seed query FAILED,
   // which forces the mount fetch rather than trusting the rows that query produced.
   initialTotal: number | null;
+  // The date range the list OPENS on, resolved server-side in the admin's own timezone:
+  // month-to-date on a plain landing, and '' under ANY URL param or a timezone-less
+  // profile. '' means "no date bound" - all history.
+  initialDateFrom: string;
+  initialDateTo: string;
+  // The LANDING default, which the Clear button returns to. A separate pair because the
+  // two DISAGREE under a deep link: ?filter= / ?reopen= land on no date bound at all, but
+  // Clear must hand back the month-to-date view. Equal to the initial pair on every plain
+  // landing, and '' for both on a timezone-less profile - where Clear empties the two
+  // inputs exactly as it always did.
+  defaultDateFrom: string;
+  defaultDateTo: string;
   // True when the URL carried ?filter= or ?reopen=. The URL then wins outright: no
   // restore from sessionStorage, and storage is overwritten from what the URL produced,
   // so a deep link is never quietly widened or narrowed by a remembered filter.
@@ -189,42 +200,32 @@ const FILTERS_STORAGE_KEY = 'll-admin-reports-filters';
  * export modal: a remembered page 3 is meaningless against a result set that has moved
  * on, and the export dialog is a one-shot form rather than a view of this list.
  *
- * The date range is stored as EITHER a preset id OR concrete day keys, never both:
+ * AND NOT THE DATE RANGE, deliberately. The landing default is recomputed server-side on
+ * every visit - month-to-date, from the clock at request time - so a stored range could
+ * add nothing except the chance of disagreeing with it, and month-to-date can never go
+ * stale across a month boundary the way a written-down range would. It also retires the
+ * staleness the old preset/from/to split existed to work around: a stored range cannot go
+ * stale if there is no stored range. The consequence is intended - a hand-picked range
+ * does NOT survive navigation, the admin re-picks it, and every landing in between opens
+ * on month-to-date. Client decision, 22 Aug, matching the Classes and Billing lists.
  *
- *   preset !== null  -> from/to are '' and the range is RECOMPUTED from the current
- *                       clock on restore. "Today" must still mean today tomorrow;
- *                       storing its dates would pin the filter to a day that has
- *                       passed, which is the exact staleness this split avoids.
- *   preset === null  -> a hand-typed custom range, stored as the literal day keys.
- *                       An explicitly chosen date means that date and nothing else.
+ * Records written BEFORE dates left this key still carry preset/from/to.
+ * parseStoredFilters below reads the three fields it knows and ignores the rest rather
+ * than rejecting the record, so an admin mid-session keeps the selection they had. That
+ * is also why the storage key is deliberately unchanged: there is no incompatible shape
+ * to fence off, only three fields nothing reads any more.
  */
 interface StoredFilters {
   status:      string;
   teacher:     string;
   classStatus: string;
-  preset:      DateRangePreset | null;
-  from:        string;
-  to:          string;
 }
 
 const DEFAULT_STORED_FILTERS: StoredFilters = {
   status:      '',
   teacher:     '',
   classStatus: '',
-  preset:      null,
-  from:        '',
-  to:          '',
 };
-
-// 'YYYY-MM-DD' or empty. The stored value goes straight back into a date input and into
-// the GET route's date_from/date_to, so anything else is rejected at the door rather
-// than sent to the server as a query it never expects. (The route ignores a malformed
-// day key rather than failing on it - which is precisely why a bad one must be caught
-// here: sent on, it would silently drop the date filter instead of restoring it.)
-const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-function isDayKeyOrEmpty(value: string): boolean {
-  return value === '' || DAY_KEY_RE.test(value);
-}
 
 // The five list-filter params, built in ONE place. fetchReports sends them, and the mount
 // effect compares them against what the server already rendered to decide whether that
@@ -247,7 +248,7 @@ function buildFilterParams(status: string, teacher: string, classStatus: string,
 
 // ─── Reports List ─────────────────────────────────────────────────────────────
 
-function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, adminTzRaw, hasUrlFilters, initialTotal, seedFreshRef, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; adminTzRaw: string | null; hasUrlFilters: boolean; initialTotal: number | null; seedFreshRef: React.MutableRefObject<boolean>; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
+function ReportsList({ initialReports, teachers, initialStatusFilter, initialReopenId, adminTimezone, adminTzRaw, hasUrlFilters, initialTotal, initialDateFrom, initialDateTo, defaultDateFrom, defaultDateTo, seedFreshRef, onTotalsChange }: { initialReports: Report[]; teachers: { id: string; full_name: string }[]; initialStatusFilter: string; initialReopenId?: string; adminTimezone: string; adminTzRaw: string | null; hasUrlFilters: boolean; initialTotal: number | null; initialDateFrom: string; initialDateTo: string; defaultDateFrom: string; defaultDateTo: string; seedFreshRef: React.MutableRefObject<boolean>; onTotalsChange: (pending: number | null, flagged: number | null) => void }) {
   const [reports,       setReports]       = useState<Report[]>(initialReports);
   const [loading,       setLoading]       = useState(false);
   // Separate from `loading`: a Load More fetch must leave the already-rendered table on
@@ -332,41 +333,36 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [statusFilter,      setStatusFilter]      = useState(initialStatusFilter);
   const [teacherFilter,     setTeacherFilter]     = useState('');
   const [classStatusFilter, setClassStatusFilter] = useState('');
-  const [dateFrom,          setDateFrom]          = useState('');
-  const [dateTo,            setDateTo]            = useState('');
+  const [dateFrom,          setDateFrom]          = useState(initialDateFrom);
+  const [dateTo,            setDateTo]            = useState(initialDateTo);
 
   // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves.
-  //
-  // matchDateRangePreset is the same call that decides which quick-range button renders
-  // as active, so what the row shows and what gets stored are one decision rather than
-  // two that can disagree. A hand-typed range that happens to equal a preset is therefore
-  // stored as that preset - which is exactly what the row is telling the admin it is.
-  const persistedFilters = useMemo<StoredFilters>(() => {
-    const preset = matchDateRangePreset(dateFrom, dateTo, adminTzRaw, new Date());
-    return {
-      status:      statusFilter,
-      teacher:     teacherFilter,
-      classStatus: classStatusFilter,
-      preset,
-      from: preset ? '' : dateFrom,
-      to:   preset ? '' : dateTo,
-    };
-  }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, adminTzRaw]);
+  // Both dates are absent from the deps on purpose: neither is stored any more, so neither
+  // should cost a rebuild or a write.
+  const persistedFilters = useMemo<StoredFilters>(() => ({
+    status:      statusFilter,
+    teacher:     teacherFilter,
+    classStatus: classStatusFilter,
+  }), [statusFilter, teacherFilter, classStatusFilter]);
 
   /**
    * Shape validation for a decoded stored record. Null rejects the whole record and the
    * page opens on defaults.
    *
-   * STRUCTURAL problems reject everything: not an object, a field of the wrong type, a
-   * malformed day key, or a preset id this build does not know (a record written by a
-   * different version of this page, or edited by hand - nothing about it can be trusted
-   * field by field).
+   * STRUCTURAL problems reject everything: not an object, or a field of the wrong type - a
+   * record written by a different version of this page, or edited by hand, cannot be
+   * trusted field by field.
    *
    * DATA DRIFT does not: a teacher who has since left, or a status the dropdown no longer
    * offers, is a well-formed record whose target has moved. Those single fields fall back
-   * to "all" instead of throwing away a still-valid date range with them. Left as-is, a
-   * teacher id absent from the dropdown would filter the list by an invisible selection -
-   * the select would render blank while the fetch quietly narrowed the results.
+   * to "all" instead of throwing the whole record away with them. Left as-is, a teacher id
+   * absent from the dropdown would filter the list by an invisible selection - the select
+   * would render blank while the fetch quietly narrowed the results.
+   *
+   * OLD-SHAPE RECORDS PARSE. A record still carrying preset/from/to from before the date
+   * range left this key is read for status, teacher and classStatus and nothing else:
+   * those three keys are never read, never validated, and never a reason to reject. The
+   * next write replaces the record with the current shape, so the migration costs nothing.
    */
   function parseStoredFilters(raw: unknown): StoredFilters | null {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
@@ -375,56 +371,30 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     const status      = record.status;
     const teacher     = record.teacher;
     const classStatus = record.classStatus;
-    const from        = record.from;
-    const to          = record.to;
     if (typeof status !== 'string' || typeof teacher !== 'string') return null;
     if (typeof classStatus !== 'string') return null;
-    if (typeof from !== 'string' || typeof to !== 'string') return null;
-    if (!isDayKeyOrEmpty(from) || !isDayKeyOrEmpty(to)) return null;
-
-    let preset: DateRangePreset | null;
-    if (record.preset === null) preset = null;
-    else if (isDateRangePreset(record.preset)) preset = record.preset;
-    else return null;
 
     return {
       status:      STATUS_OPTIONS.some((o) => o.value === status) ? status : '',
       teacher:     teachers.some((t) => t.id === teacher) ? teacher : '',
       classStatus: CLASS_STATUS_OPTIONS.some((o) => o.value === classStatus) ? classStatus : '',
-      preset,
-      // Enforces the invariant on the way in as well as on the way out: with a preset
-      // active the stored dates are meaningless and the range comes from the clock.
-      from: preset ? '' : from,
-      to:   preset ? '' : to,
     };
   }
 
   /**
    * Push a restored record into filter state. Runs once, from the hook's mount effect -
-   * never during render, so the clock read below cannot desync server and client markup.
-   * loadedPageRef is untouched: a restore only ever happens on mount, and the page-1
-   * fetch it provokes resets that ref itself.
+   * never during render. loadedPageRef is untouched: a restore only ever happens on mount,
+   * and the page-1 fetch it provokes resets that ref itself.
+   *
+   * Status, teacher and class type ONLY. It must NOT touch dateFrom/dateTo, and that is
+   * the whole point of taking dates out of the record: the seeded landing range stays in
+   * place under a restore instead of being overwritten a frame later by a range from an
+   * earlier visit. In the browser that reads as "teacher/status remembered, dates reset".
    */
   function applyStoredFilters(stored: StoredFilters) {
     setStatusFilter(stored.status);
     setTeacherFilter(stored.teacher);
     setClassStatusFilter(stored.classStatus);
-    if (stored.preset) {
-      // Recomputed against NOW, which is the whole point of storing the id: a session
-      // that spans midnight, or a tab returned to the next morning, gets the preset the
-      // admin chose rather than the days it covered when they chose it.
-      //
-      // No timezone means no honest answer to "which day is today" - the same reason
-      // DateRangeFilter disables the preset buttons and the server page declines to seed
-      // ?filter=today. The range restores empty rather than guessing UTC, and the hook
-      // then rewrites storage to match what is on screen.
-      const range = adminTzRaw ? getPresetRange(stored.preset, new Date(), adminTzRaw) : null;
-      setDateFrom(range?.from ?? '');
-      setDateTo(range?.to ?? '');
-    } else {
-      setDateFrom(stored.from);
-      setDateTo(stored.to);
-    }
   }
 
   // RESTORE RACE - already covered by the request token below, deliberately and with no
@@ -462,9 +432,10 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   // any page-1 fetch (filter change, retry, post-reopen refresh) resets it to 1.
   const loadedPageRef = useRef(1);
 
-  // What the SERVER seed asked for: the ?filter= status and nothing else - the seed query
-  // applies no teacher, class-type or date filter, so those four are '' by construction.
-  const seededParams = buildFilterParams(initialStatusFilter, '', '', '', '');
+  // What the SERVER seed asked for: the ?filter= status, plus - on a plain landing - the
+  // month-to-date bounds the seed query applied to the embedded lessons.scheduled_at.
+  // Teacher and class type are '' by construction: the seed query filters on neither.
+  const seededParams = buildFilterParams(initialStatusFilter, '', '', initialDateFrom, initialDateTo);
 
   // The filter-param string that produced the rows CURRENTLY on screen, seeded from the
   // server render when that seed is usable. null means "unknown" - the seed query failed,
@@ -555,8 +526,9 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   //
   // (a) This effect's FIRST run always sees the server-seeded filter state. The persistence
   //     restore runs from an earlier effect in the same mount pass, but its setState lands a
-  //     render later - so statusFilter is still initialStatusFilter here and the other four
-  //     are still ''. That is what makes the comparison against seededParams meaningful.
+  //     render later - so statusFilter is still initialStatusFilter here and the dates are
+  //     still initialDateFrom/initialDateTo, with teacher and class type still ''. That is
+  //     what makes the comparison against seededParams meaningful.
   // (b) A restore that CHANGES a filter re-memoises fetchReports and re-runs this effect.
   //     seedFreshRef is already false by then, so that run fetches - and with the honest
   //     spinner, because displayedParamsRef still holds the seeded params and cannot match.
@@ -640,7 +612,13 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
           // set, so that case is unreachable through it today; the call is what keeps the
           // guarantee true if the condition ever changes. ClassesListClient's clearFilters
           // calls it for the same reason.
-          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(''); setDateTo(''); clearStoredFilters(); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
+          //
+          // The dates go back to the LANDING DEFAULT, not to all-history: Clear means "as I
+          // landed", and landing here means month-to-date. Under a deep link that default
+          // differs from what the page actually landed on (?filter= / ?reopen= open with no
+          // date bound), exactly as it does on the Classes list. Both props are '' on a
+          // timezone-less profile, so Clear empties the two inputs there as it always did.
+          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(defaultDateFrom); setDateTo(defaultDateTo); clearStoredFilters(); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
             Clear filters
           </button>
         )}
@@ -885,7 +863,7 @@ function LiveTrace({ adminTimezone }: { adminTimezone: string }) {
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, adminTzRaw, initialPendingCount, initialFlaggedCount, initialTotal, hasUrlFilters = false }: Props) {
+export default function ReportsClient({ initialReports, teachers, students, initialStatusFilter = '', initialReopenId, adminTimezone, adminTzRaw, initialPendingCount, initialFlaggedCount, initialTotal, initialDateFrom, initialDateTo, defaultDateFrom, defaultDateTo, hasUrlFilters = false }: Props) {
   const [activeTab, setActiveTab] = useState<'list' | 'trace'>('list');
 
   // Owned by the PARENT deliberately. ReportsList unmounts on every tab switch, so a ref
@@ -1068,7 +1046,7 @@ export default function ReportsClient({ initialReports, teachers, students, init
         ))}
       </div>
 
-      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} adminTzRaw={adminTzRaw} hasUrlFilters={hasUrlFilters} initialTotal={initialTotal} seedFreshRef={seedFreshRef} onTotalsChange={handleTotalsChange} />}
+      {activeTab === 'list'  && <ReportsList initialReports={initialReports} teachers={teachers} initialStatusFilter={initialStatusFilter} initialReopenId={initialReopenId} adminTimezone={adminTimezone} adminTzRaw={adminTzRaw} hasUrlFilters={hasUrlFilters} initialTotal={initialTotal} initialDateFrom={initialDateFrom} initialDateTo={initialDateTo} defaultDateFrom={defaultDateFrom} defaultDateTo={defaultDateTo} seedFreshRef={seedFreshRef} onTotalsChange={handleTotalsChange} />}
       {activeTab === 'trace' && <LiveTrace adminTimezone={adminTimezone} />}
 
       {showExport && (

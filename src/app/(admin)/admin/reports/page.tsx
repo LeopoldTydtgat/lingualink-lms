@@ -3,6 +3,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import ReportsClient from './ReportsClient';
+import { getMonthToDateRange } from '@/lib/dates/dateRangePresets';
+import { localMidnightToUtc } from '@/lib/billing/monthRange';
 
 // Stat-card deep links (/admin/reports?filter=pending|flagged) seed the status
 // filter. Anything else falls through to the default "All Statuses".
@@ -56,13 +58,55 @@ export default async function AdminReportsPage({
   const adminTimezone = adminProfile?.timezone ?? 'UTC';
   const adminTzRaw: string | null = adminProfile?.timezone ?? null;
 
+  // Presence of a URL param, not the state it produced - the same test the hasUrlFilters
+  // prop at the bottom of this file carries down to the client, hoisted to a const here
+  // because the date seed below now reads it too.
+  const hasUrlFilters = filter !== undefined || reopen !== undefined;
+
+  // ONE clock read, shared by everything below. Two separate `new Date()` calls either
+  // side of a local midnight could let the seeded range and the default that Clear hands
+  // back name different days - a narrow window, but the kind this project closes rather
+  // than reasons about. The same single-read discipline as the admin classes page.
+  const now = new Date();
+
+  // monthToDate is the DEFAULT pair: the range the client's Clear button returns to. It is
+  // computed even on a deep link, because Clear must still hand back the landing default
+  // there - which is exactly why it travels as its own prop pair, separate from the seed.
+  //
+  // The SEED pair is what the list OPENS on, and it is EMPTY under ANY URL param.
+  // ?reopen= deep-links ONE specific report (the dashboard's flagged-report Reopen button)
+  // and ?filter= carries the dashboard card's GLOBAL pending/flagged semantics - so a
+  // month-to-date bound could exclude the very rows those links are about, leaving the
+  // reopen modal open over a list that does not contain its report, or a "23 pending" card
+  // landing on a list of four. A deep link therefore gets no date bound at all.
+  //
+  // A null timezone seeds nothing through either pair: without a zone there is no honest
+  // answer to "which day is today", and naming the wrong month for most of the world is
+  // worse than offering no date bound. That is the same call the admin classes page makes,
+  // and the same one this page already makes for the DateRangeFilter presets above.
+  const monthToDate = adminTzRaw ? getMonthToDateRange(now, adminTzRaw) : { from: '', to: '' };
+  const seedDateFrom = hasUrlFilters ? '' : monthToDate.from;
+  const seedDateTo   = hasUrlFilters ? '' : monthToDate.to;
+
   // Query 1: reports + lessons + teacher.
   //
   // MIRRORS the GET route's page-1 query for the SEEDED filter state
   // (src/app/api/admin/reports/route.ts): same select, same created_at DESC order, same 50
-  // rows, same exact count, and the same .eq('status', ...) when ?filter= named one. That
+  // rows, same exact count, the same .eq('status', ...) when ?filter= named one, and - on a
+  // plain landing - the same month-to-date bounds on the embedded lessons.scheduled_at,
+  // resolved through the same localMidnightToUtc edges over the same !inner embed. That
   // match is what lets the client skip its redundant mount fetch - the rows painted here
   // are the rows that fetch would have returned.
+
+  // The date bounds below select on the EMBEDDED lessons.scheduled_at, and filtering an
+  // embedded column on a PLAIN embed only nulls the embed - the parent report row still
+  // comes back, so the filter would exclude nothing. !inner is what makes the filter
+  // actually drop rows. reports.lesson_id is NOT NULL and admin RLS reads all lessons, so
+  // !inner drops nothing else. Applied only when a date bound is live; with none the select
+  // string stays byte-identical to the plain-embed version - the route's own reasoning,
+  // because this is the route's own query.
+  const lessonsEmbed = seedDateFrom ? 'lessons!inner' : 'lessons';
+
   let query = supabase
     .from('reports')
     .select(`
@@ -77,7 +121,7 @@ export default async function AdminReportsPage({
       completed_at,
       deadline_at,
       created_at,
-      lessons (
+      ${lessonsEmbed} (
         id,
         scheduled_at,
         duration_minutes,
@@ -97,6 +141,33 @@ export default async function AdminReportsPage({
   // client's mount fetch to narrow it is what painted the wrong rows for one frame on a
   // /admin/reports?filter=pending deep link.
   if (initialStatusFilter) query = query.eq('status', initialStatusFilter);
+
+  // The month-to-date landing bounds, resolved exactly as the GET route resolves its
+  // date_from/date_to: each yyyy-mm-dd names an admin-LOCAL calendar day, turned into a UTC
+  // instant by localMidnightToUtc, giving a half-open [from-midnight, midnight-after-to)
+  // pair so the To-day is included in full. The bound selects on the CLASS date (the joined
+  // lessons.scheduled_at the list renders in its "Class Date" column), never on
+  // reports.created_at, which records when the report row was written.
+  //
+  // Only the timezone branch exists here, unlike the route: these dates are non-empty ONLY
+  // when adminTzRaw is set (monthToDate is { from: '', to: '' } without it), so the route's
+  // bare-string no-timezone fallback is unreachable on this page. The `&& adminTzRaw` is
+  // also what narrows `string | null` to `string` for TypeScript.
+  if (seedDateFrom && adminTzRaw) {
+    const [y, m, d] = seedDateFrom.split('-').map(Number);
+    query = query.gte('lessons.scheduled_at', localMidnightToUtc(y, m, d, adminTzRaw));
+  }
+
+  if (seedDateTo && adminTzRaw) {
+    const [y, m, d] = seedDateTo.split('-').map(Number);
+    // Next calendar day via the Date constructor's own month/year rollover - the same
+    // approach the route and getDayRangeInTz use to find their exclusive end edge.
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    query = query.lt(
+      'lessons.scheduled_at',
+      localMidnightToUtc(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), adminTzRaw)
+    );
+  }
 
   const { data: reportsData, error: reportsError, count: reportsCount } = await query;
 
@@ -169,13 +240,17 @@ export default async function AdminReportsPage({
   // That second arm protects the two fallbacks directly above. They are only honest over an
   // UNFILTERED seed: with ?filter=flagged the seed holds flagged rows alone, so the pending
   // fallback derives 0 from rows that could never contain a pending report - and with the
-  // mount fetch skipped, nothing would ever correct it. So a filtered seed plus a failed
-  // global count forces that fetch, and the route's own counts repair the badges. An
-  // unfiltered seed keeps the existing fallback exactly, and both counts succeeding leaves
-  // every load unchanged - the fallbacks are unused and the skip stands.
+  // mount fetch skipped, nothing would ever correct it. A month-to-date seed is the SAME
+  // hazard on a different axis: it excludes an out-of-month pending or flagged report
+  // exactly as a status-filtered seed excludes another status, so the derived badge would
+  // undercount the outstanding workload the header exists to report. So a failed global
+  // count over EITHER kind of filtered seed forces that fetch, and the route's own counts
+  // repair the badges. A seed with neither filter keeps the existing fallback exactly, and
+  // both counts succeeding leaves every load unchanged - the fallbacks are unused and the
+  // skip stands.
   const initialTotal: number | null =
     reportsError ? null
-    : initialStatusFilter && (pendingCountRes.error || flaggedCountRes.error) ? null
+    : (initialStatusFilter || seedDateFrom) && (pendingCountRes.error || flaggedCountRes.error) ? null
     : (reportsCount ?? 0);
 
   const initialReports = (reportsData ?? []).map((r) => {
@@ -225,6 +300,17 @@ export default async function AdminReportsPage({
       initialPendingCount={initialPendingCount}
       initialFlaggedCount={initialFlaggedCount}
       initialTotal={initialTotal}
+      // The range the list OPENS on: month-to-date on a plain landing, '' under any URL
+      // param or a timezone-less profile. '' means no date bound - all history.
+      initialDateFrom={seedDateFrom}
+      initialDateTo={seedDateTo}
+      // The LANDING default, which the client's Clear button returns to. A separate pair
+      // because it and the two above DISAGREE under a deep link: ?filter= / ?reopen= open
+      // on no date bound at all, but Clear must hand back the month-to-date view rather
+      // than the deep link's. Equal to the seed pair on every plain landing, and '' for
+      // both on a timezone-less profile - where Clear empties the inputs as it always did.
+      defaultDateFrom={monthToDate.from}
+      defaultDateTo={monthToDate.to}
       // Presence of a URL param, not the state it produced: an unrecognised ?filter=
       // value still yields an empty initialStatusFilter, and that empty result IS the
       // URL's answer - the client must honour it rather than restoring a remembered
@@ -235,7 +321,10 @@ export default async function AdminReportsPage({
       // status/teacher/date filter could easily exclude that very row - leaving the
       // confirmation modal open over a list that does not contain the report it is about.
       // A deep link gets the clean default list.
-      hasUrlFilters={filter !== undefined || reopen !== undefined}
+      //
+      // A URL param also suppresses the month-to-date seed entirely - the list lands with
+      // both date inputs empty - for the reason spelled out at the seed block above.
+      hasUrlFilters={hasUrlFilters}
     />
   );
 }
