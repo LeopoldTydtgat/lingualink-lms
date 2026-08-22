@@ -77,9 +77,12 @@ export default function StudentNotificationsBell({ items, seenAt, studentId }: S
   // Realtime: refresh the feed when any source table it is built from changes in
   // another session. Mirrors the teacher feed (RightPanel) — one channel,
   // postgres_changes scoped to this student wherever a student_id column exists,
-  // and a debounced router.refresh(). This ONLY asks Next.js to re-run the layout;
-  // the server refetch (fetchStudentWhatsNew) stays the single source of truth for
-  // what shows, and seen/dismiss logic is untouched. Unlike the teacher feed there
+  // and a debounced router.refresh(). router.refresh() re-runs the WHOLE current
+  // route, layout and page, so any page whose server component redirects on
+  // mutable state can be redirected by this refresh; the student booking page was
+  // hit by exactly that and now decides client-side instead. The server refetch
+  // (fetchStudentWhatsNew) stays the single source of truth for what shows, and
+  // seen/dismiss logic is untouched. Unlike the teacher feed there
   // is no auth.getUser() resolve here: the students table PK arrives as a prop, and
   // it — not the auth uid — is what student_id columns hold.
   //

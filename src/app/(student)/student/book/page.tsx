@@ -89,6 +89,10 @@ export default async function BookPage({
     duration_minutes: number
     teacher_id: string
   } | null = null
+  // True only when a reschedule id was supplied and no live lesson came back.
+  // See the note at the assignment below for why this is a flag rather than a
+  // redirect.
+  let rescheduleUnavailable = false
 
   if (params.reschedule) {
     const { data: lesson, error: lessonError } = await supabase
@@ -102,8 +106,19 @@ export default async function BookPage({
       console.error('[student/book] reschedule lesson lookup failed:', lessonError)
       throw new Error('Failed to load lesson')
     }
-    // A dead reschedule id must never silently become a fresh booking.
-    if (!lesson) redirect('/student/my-classes?notice=reschedule_unavailable')
+    // A dead reschedule id must never silently become a fresh booking — but the
+    // DECISION now lives in the client, not here. StudentNotificationsBell runs a
+    // debounced router.refresh() off a realtime channel, and router.refresh()
+    // re-runs this entire server component: on a SUCCESSFUL reschedule the old
+    // lesson row is already cancelled mid-POST while ?reschedule=<id> is still on
+    // the URL, so a redirect fired from here bounced the student to
+    // "reschedule_unavailable" on a booking that had just worked. Client React
+    // state SURVIVES router.refresh(), so the client can tell "this id was always
+    // dead" from "we just cancelled it ourselves, successfully" — and this
+    // component cannot. Safety is unchanged: /api/student/book re-validates the
+    // old lesson with .eq('status', 'scheduled') and returns 404 if it is gone;
+    // that route, never this read, is the authority.
+    rescheduleUnavailable = !lesson
     rescheduleLesson = lesson ?? null
   }
 
@@ -198,6 +213,7 @@ export default async function BookPage({
       hoursRemaining={effectiveHoursRemaining}
       teachers={teachers}
       rescheduleLesson={rescheduleLesson}
+      rescheduleUnavailable={rescheduleUnavailable}
       allowedDurations={allowedDurations}
     />
   )

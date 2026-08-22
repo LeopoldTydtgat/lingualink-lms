@@ -3,7 +3,6 @@ import {
   getWeekColumnKeys,
   buildInstantSet,
   getValidStartsByColumn,
-  collapseEmptyBands,
   buildRowAxis,
   getVisibleColumns,
   buildCellMaps,
@@ -23,8 +22,6 @@ import { utcInstantToTzParts } from '@/lib/utils/timezone'
  *   column, whose continuation instants live only under the day-8 key;
  * - rows keyed by instant instead of student-local wall clock, which splits
  *   one visual row in two on a DST-transition week;
- * - mid-run continuation rows (valid inside a run, a valid start nowhere)
- *   collapsed out of the band list, swallowing the selected-run highlight;
  * - CAL2: two distinct UTC instants sharing one wall-clock row on a DST
  *   fall-back day, where last-write-wins silently dropped the earlier
  *   instant so it could never be booked;
@@ -229,105 +226,12 @@ describe('getVisibleColumns — empty days hidden', () => {
   })
 })
 
-describe('collapseEmptyBands', () => {
-  it('collapses the empty gap between morning and afternoon into a band break', () => {
-    // Mon 09:00+09:30 and Tue 15:00 — rows 540/570 contiguous, 900 separate.
-    const response: SlotsResponse = {
-      '2026-06-01': run(Date.UTC(2026, 5, 1, 9, 0), 2),
-      '2026-06-02': run(Date.UTC(2026, 5, 2, 15, 0), 1),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 30)
-    expect(collapseEmptyBands(byColumn, UTC, 30)).toEqual([[540, 570], [900]])
-  })
-
-  it('rows with only non-bookable slots collapse unless they continue a run', () => {
-    // At 60 min the isolated 15:00 slot is never a start NOR inside any run,
-    // so its row vanishes; 09:30 is no start either (no 10:00) but survives
-    // as the continuation row of the 09:00 start.
-    const response: SlotsResponse = {
-      '2026-06-01': run(Date.UTC(2026, 5, 1, 9, 0), 2),
-      '2026-06-02': run(Date.UTC(2026, 5, 2, 15, 0), 1),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 60)
-    expect(collapseEmptyBands(byColumn, UTC, 60)).toEqual([[540, 570]])
-  })
-
-  it('deduplicates the same wall-time row across columns', () => {
-    const response: SlotsResponse = {
-      '2026-06-01': run(Date.UTC(2026, 5, 1, 9, 0), 1),
-      '2026-06-03': run(Date.UTC(2026, 5, 3, 9, 0), 1),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 30)
-    expect(collapseEmptyBands(byColumn, UTC, 30)).toEqual([[540]])
-  })
-
-  it('90 min: mid-run rows that are a valid start nowhere still get rows, in the run band', () => {
-    // Mon 15:30–17:00 (3 slots): only 15:30 is a valid 90-min start, so
-    // 16:00/16:30 are pure continuations — before the durationMinutes rule
-    // they collapsed away and the selected run painted only its start cell.
-    // Tue 09:00–10:30 is a second, disjoint band with the same shape.
-    const response: SlotsResponse = {
-      '2026-06-01': run(Date.UTC(2026, 5, 1, 15, 30), 3),
-      '2026-06-02': run(Date.UTC(2026, 5, 2, 9, 0), 3),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 90)
-    // Sanity: exactly one bookable start per day.
-    expect(byColumn['2026-06-01'].map((s) => s.bookable)).toEqual([true, false, false])
-    expect(byColumn['2026-06-02'].map((s) => s.bookable)).toEqual([true, false, false])
-    expect(collapseEmptyBands(byColumn, UTC, 90)).toEqual([
-      [540, 570, 600],
-      [930, 960, 990],
-    ])
-  })
-
-  it('30 min: behaviour unchanged — no continuation rows beyond the start', () => {
-    const response: SlotsResponse = {
-      '2026-06-01': run(Date.UTC(2026, 5, 1, 15, 30), 1),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 30)
-    expect(collapseEmptyBands(byColumn, UTC, 30)).toEqual([[930]])
-  })
-
-  it('cross-midnight run: continuation rows land early-morning, never merged across midnight', () => {
-    // Tue 23:30 + Wed 00:00: the only 60-min start is 23:30; its 00:00
-    // continuation becomes wall row 0, which sorts FIRST and stays in its
-    // own band — 23:30 → 00:00 adjacency is deliberately not contiguous.
-    const response: SlotsResponse = {
-      '2026-06-02': run(Date.UTC(2026, 5, 2, 23, 30), 1),
-      '2026-06-03': run(Date.UTC(2026, 5, 3, 0, 0), 1),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 60)
-    expect(collapseEmptyBands(byColumn, UTC, 60)).toEqual([[0], [1410]])
-  })
-
-  it('90 min via day-8 extras: continuation rows come from start arithmetic, not response bucketing', () => {
-    // Sun 23:30 validates through day-8 continuations that are never columns:
-    // rows 00:00/00:30 must still appear (contiguous, before the 23:30 band)
-    // because they derive from the START instant + k·30min, not from any
-    // column's own slots.
-    const response: SlotsResponse = {
-      '2026-06-07': run(Date.UTC(2026, 5, 7, 23, 30), 1),
-      '2026-06-08': run(Date.UTC(2026, 5, 8, 0, 0), 2),
-    }
-    const columns = getWeekColumnKeys(WEEK)
-    const byColumn = getValidStartsByColumn(columns, response, buildInstantSet(response), 90)
-    expect(collapseEmptyBands(byColumn, UTC, 90)).toEqual([[0, 30], [1410]])
-  })
-})
-
 describe('buildRowAxis', () => {
   const columns = getWeekColumnKeys(WEEK)
 
   it('fills the gap rows between two availability bands, continuously', () => {
     // Mon 09:00+09:30 and Tue 15:00 — rows 540/570 and 900. The axis is the
-    // whole ruler between them, every 30-min row included, where
-    // collapseEmptyBands returns the two bands with the gap cut out.
+    // whole ruler between them, every 30-min row included.
     const response: SlotsResponse = {
       '2026-06-01': run(Date.UTC(2026, 5, 1, 9, 0), 2),
       '2026-06-02': run(Date.UTC(2026, 5, 2, 15, 0), 1),
@@ -336,8 +240,6 @@ describe('buildRowAxis', () => {
     expect(buildRowAxis(byColumn, UTC)).toEqual([
       540, 570, 600, 630, 660, 690, 720, 750, 780, 810, 840, 870, 900,
     ])
-    // The same input, collapsed: the gap rows are exactly what differs.
-    expect(collapseEmptyBands(byColumn, UTC, 30)).toEqual([[540, 570], [900]])
 
     // Duration-independent by construction — the axis reads every slot's row
     // and never the bookable flag. Bookability really does move underneath
@@ -361,8 +263,7 @@ describe('buildRowAxis', () => {
 
   it('unavailable slots contribute rows — the axis sizes the grey cells too', () => {
     // Mon 09:00 available, Wed 11:00 blocked. The blocked cell still has to
-    // render, so row 660 must exist and the axis must stretch to reach it;
-    // collapseEmptyBands, which answers a different question, drops it.
+    // render, so row 660 must exist and the axis must stretch to reach it.
     const response: SlotsResponse = {
       '2026-06-01': run(Date.UTC(2026, 5, 1, 9, 0), 1),
       '2026-06-03': run(Date.UTC(2026, 5, 3, 11, 0), 1, false),
@@ -374,7 +275,6 @@ describe('buildRowAxis', () => {
       available: false,
     })
     expect(buildRowAxis(byColumn, UTC)).toEqual([540, 570, 600, 630, 660])
-    expect(collapseEmptyBands(byColumn, UTC, 30)).toEqual([[540]])
   })
 
   it('DST fall-back: the duplicated wall hour is ONE row key, not two', () => {
@@ -482,8 +382,7 @@ describe('DST transition week (Europe/Madrid, spring forward 2026-03-29)', () =>
   })
 
   it('both sides of the transition land on the same 09:00/09:30 rows', () => {
-    expect(collapseEmptyBands(byColumn, MADRID, 30)).toEqual([[540, 570]])
-    // And the uncollapsed axis is those same two rows, nothing wider: the
+    // The uncollapsed axis is those same two rows, nothing wider: the
     // two offsets must not stretch the ruler.
     expect(buildRowAxis(byColumn, MADRID)).toEqual([540, 570])
   })
