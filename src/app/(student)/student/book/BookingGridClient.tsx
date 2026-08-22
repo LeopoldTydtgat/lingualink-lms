@@ -1183,6 +1183,15 @@ export default function BookingGridClient({
   // reschedule's own hours back in) ──
   const hoursUsed = selectedDuration / 60
   const hoursAfter = hoursRemaining - hoursUsed
+  // The Confirm button was gated on isSubmitting alone, so a student whose
+  // balance cannot cover the pick could still press it: /api/student/book
+  // rejected the POST, but the UI invited the attempt. FRESH BOOK ONLY - on a
+  // reschedule hoursAfter equals the raw balance by construction (the effective
+  // balance added the locked lesson's own hours back in and hoursUsed removes
+  // exactly the same amount, since the duration is locked to the original), so
+  // gating here would block a legitimate move for any student sitting on a
+  // negative raw balance. The server stays the authority in both cases.
+  const confirmDisabled = isSubmitting || (!isReschedule && hoursAfter < 0)
   const selectedStart = selectedStartIso !== null ? new Date(selectedStartIso) : null
   const selectedEnd =
     selectedStart !== null ? new Date(selectedStart.getTime() + selectedDuration * 60000) : null
@@ -2568,20 +2577,24 @@ export default function BookingGridClient({
 
               <button
                 onClick={handleConfirm}
-                disabled={isSubmitting}
+                disabled={confirmDisabled}
+                // Names the out-of-hours reason only. While submitting the
+                // label already says 'Booking...', so a tooltip there would be
+                // wrong.
+                title={confirmDisabled && !isSubmitting ? 'Not enough hours remaining' : undefined}
                 onMouseEnter={() => setConfirmHover(true)}
                 onMouseLeave={() => setConfirmHover(false)}
                 style={{
                   width: '100%',
                   padding: '12px 32px',
-                  backgroundColor: confirmHover && !isSubmitting ? '#FD7000' : '#FF8303',
+                  backgroundColor: confirmHover && !confirmDisabled ? '#FD7000' : '#FF8303',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '10px',
                   fontSize: '15px',
                   fontWeight: '600',
-                  cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                  opacity: isSubmitting ? 0.7 : 1,
+                  cursor: confirmDisabled ? 'not-allowed' : 'pointer',
+                  opacity: confirmDisabled ? 0.7 : 1,
                 }}
               >
                 {isSubmitting ? 'Booking...' : 'Confirm Booking'}
