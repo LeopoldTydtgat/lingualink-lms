@@ -135,6 +135,12 @@ interface Props {
   hoursRemaining: number
   teachers: Teacher[]
   rescheduleLesson: RescheduleLesson | null
+  // The server page found no live lesson behind the ?reschedule=<id> still on
+  // the URL. A flag, not a redirect: router.refresh() re-runs that server
+  // component mid-submit, and only client state — which survives the refresh —
+  // can tell "this id was always dead" from "we just cancelled it ourselves,
+  // successfully". /api/student/book stays the authority either way.
+  rescheduleUnavailable: boolean
   // The class lengths this student may book (NEW-A1), already sanitised by the
   // server page to a subset of 30/60/90. A UX input only — /api/student/book
   // re-reads students.allowed_durations and is the actual gate. Never widened
@@ -555,6 +561,7 @@ export default function BookingGridClient({
   hoursRemaining,
   teachers,
   rescheduleLesson,
+  rescheduleUnavailable,
   allowedDurations,
 }: Props) {
   const router = useRouter()
@@ -615,6 +622,15 @@ export default function BookingGridClient({
   // week, never a specific slot, so a stale one is misleading at worst.
   const [snapNotice, setSnapNotice] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // The ?reschedule=<id> on the URL has no live lesson behind it AND we are not
+  // the reason it went away. isSubmitting is the entire discriminator: it is set
+  // for the whole POST and reset to false ONLY on failure — a SUCCESSFUL
+  // reschedule deliberately leaves it true through the redirect — so a realtime
+  // router.refresh() landing mid-submit or after success re-runs the server
+  // component, re-derives rescheduleUnavailable as true, and still finds this
+  // false. That works because client state survives router.refresh(). No other
+  // condition belongs here.
+  const rescheduleDead = rescheduleUnavailable && !isSubmitting
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [profileTeacher, setProfileTeacher] = useState<Teacher | null>(null)
   const [confirmHover, setConfirmHover] = useState(false)
@@ -790,6 +806,15 @@ export default function BookingGridClient({
       setSelectedStartIso(null)
     }
   }, [slots, selectedDuration, selectedStartIso])
+
+  // Dead reschedule id: leave for My Classes carrying the notice the server page
+  // used to redirect with. replace (not push) so the dead ?reschedule= URL does
+  // not stay live in the history stack underneath the destination — the same
+  // reasoning handleConfirm's success navigation already uses.
+  useEffect(() => {
+    if (!rescheduleDead) return
+    router.replace('/student/my-classes?notice=reschedule_unavailable')
+  }, [rescheduleDead, router])
 
   // Selected-run bounds in epoch ms, computed once per render: an AVAILABLE
   // cell renders selected when its instant falls inside [runStartMs, runEndMs).
@@ -1236,6 +1261,31 @@ export default function BookingGridClient({
       </div>
     </div>
   )
+
+  // Dead reschedule id — the effect above is already navigating away. One quiet
+  // card holds the page for that frame instead of flashing the whole booking
+  // grid, whose teacher and duration would be locked to a lesson that no longer
+  // exists. Verified before writing this: no React hook is called between here
+  // and the end of the file, so the early return cannot skip one.
+  if (rescheduleDead) {
+    return (
+      <div
+        style={{
+          maxWidth: '420px',
+          margin: '0 auto',
+          backgroundColor: '#ffffff',
+          border: '1px solid #E0DFDC',
+          borderRadius: '10px',
+          padding: '16px',
+          textAlign: 'center',
+          fontSize: '15px',
+          color: '#4b5563',
+        }}
+      >
+        That class can no longer be rescheduled. Taking you back to your classes.
+      </div>
+    )
+  }
 
   return (
     // Row 0 (title + desktop summary header) and the full-width strips sit
