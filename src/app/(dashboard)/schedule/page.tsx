@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect } from 'next/navigation'
 import { isValidTimeZone, utcInstantToTzParts } from '@/lib/utils/timezone'
 import ScheduleClient from './ScheduleClient'
+import type { GoogleConnectionSummary, GoogleNotice } from './GoogleConnectCard'
 
 // ── Google busy-sync health ──────────────────────────────────────────────────
 // Single-user feature: only the admin teacher's Google calendar is mirrored, so
@@ -33,7 +34,25 @@ function formatDateInZone(iso: string, timezone: string): string | null {
   return `${parts.day} ${MONTHS[parts.month - 1]} ${parts.year}`
 }
 
-export default async function SchedulePage() {
+interface PageProps {
+  // Next.js 16 — searchParams is a Promise, must be awaited.
+  // ?google= is written by the two OAuth routes under /api/google/oauth/.
+  searchParams: Promise<{ google?: string }>
+}
+
+export default async function SchedulePage({ searchParams }: PageProps) {
+  // OAuth round-trip outcome, reduced to success/error HERE so the raw code
+  // ('token_error', 'state_error', ...) stays a server-log detail and never
+  // becomes user-facing copy. Anything that is not 'connected' is a failure,
+  // which keeps every future outcome code covered by default.
+  const { google: googleOutcome } = await searchParams
+  const googleNotice: GoogleNotice =
+    googleOutcome === 'connected'
+      ? 'success'
+      : typeof googleOutcome === 'string' && googleOutcome.length > 0
+        ? 'error'
+        : null
+
   const supabase = await createClient()
 
   // Check the user is logged in
@@ -116,12 +135,48 @@ export default async function SchedulePage() {
     }
   }
 
+  // Google Calendar connect card. Admin viewer only, exactly like the banner
+  // above: every other teacher skips the read AND is handed null, which is what
+  // makes the card ABSENT for them rather than merely disabled.
+  //
+  // public.google_calendar_connections is deny-all to anon/authenticated (RLS
+  // with zero policies + REVOKE), so this read has to go through the
+  // service-role client.
+  //
+  // EXPLICIT COLUMN LIST, AND DELIBERATELY NOT THE TOKEN COLUMNS: refresh_token,
+  // access_token and access_token_expires_at are never selected here, so nothing
+  // token-shaped exists in this scope to be handed to a client component by
+  // accident.
+  let googleConnection: GoogleConnectionSummary | null = null
+
+  if (profile.role === 'admin') {
+    const { data: connectionRow, error: connectionError } = await admin
+      .from('google_calendar_connections')
+      .select('id, google_email')
+      .eq('profile_id', profile.id)
+      .maybeSingle()
+
+    if (connectionError) {
+      console.error('[schedule] google calendar connection read failed:', connectionError)
+      // Fail SAFE: an unreadable row is not evidence of a working connection, so
+      // prompt for the action rather than claim one already exists.
+      googleConnection = { connected: false, email: null }
+    } else {
+      googleConnection = {
+        connected: connectionRow !== null,
+        email: connectionRow?.google_email ?? null,
+      }
+    }
+  }
+
   return (
     <ScheduleClient
       profile={profile}
       initialAvailability={availability ?? []}
       minAvailableHours={minAvailableHours}
       googleSyncWarning={googleSyncWarning}
+      googleConnection={googleConnection}
+      googleNotice={googleNotice}
     />
   )
 }

@@ -5,6 +5,10 @@ import GeneralAvailability from './tabs/GeneralAvailability'
 import DayToDay from './tabs/DayToDay'
 import Holidays from './tabs/Holidays'
 import CalendarSubscriptionCard from '@/components/shared/CalendarSubscriptionCard'
+import GoogleConnectCard, {
+  type GoogleConnectionSummary,
+  type GoogleNotice,
+} from './GoogleConnectCard'
 
 interface Profile {
   id: string
@@ -41,6 +45,15 @@ interface Props {
   // admin-only gate, the failure threshold and the fail-safe default all live
   // server-side in page.tsx — this component only renders what it is handed.
   googleSyncWarning: string | null
+  // Google Calendar connect card. NULL MEANS "DO NOT RENDER THE CARD AT ALL":
+  // page.tsx passes null for every non-admin caller, so a normal teacher never
+  // sees the card in any form. Only ever carries connected + email; the token
+  // columns are not read server-side, let alone passed here.
+  googleConnection: GoogleConnectionSummary | null
+  // Outcome of a just-completed OAuth round trip, already reduced to
+  // success/error from ?google= on the server. Derived per render from
+  // searchParams and stored in no state, so it cannot survive navigation.
+  googleNotice: GoogleNotice
 }
 
 type TabId = 'general' | 'daytodday' | 'holidays'
@@ -51,7 +64,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'holidays',   label: 'Holidays' },
 ]
 
-export default function ScheduleClient({ profile, initialAvailability, minAvailableHours, googleSyncWarning }: Props) {
+export default function ScheduleClient({ profile, initialAvailability, minAvailableHours, googleSyncWarning, googleConnection, googleNotice }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('general')
 
   // The FULL availability list lives here.
@@ -89,6 +102,11 @@ export default function ScheduleClient({ profile, initialAvailability, minAvaila
         >
           {googleSyncWarning}
         </div>
+      )}
+
+      {/* Admin-only, gated server-side: null means absent, not disabled. */}
+      {googleConnection && (
+        <GoogleConnectCard connection={googleConnection} notice={googleNotice} />
       )}
 
       {/* Tab buttons — the calendar subscription trigger rides the same row,
