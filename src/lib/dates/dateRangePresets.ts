@@ -133,3 +133,20 @@ export function getPresetRange(preset: DateRangePreset, now: Date, tz: string): 
     }
   }
 }
+
+/**
+ * Month-to-date: first day of the current calendar month through today, both
+ * resolved in `tz`. NOT a preset: it is the admin surfaces' landing default,
+ * re-computed on every landing rather than stored, so it can never go stale
+ * across a month boundary. Deliberately absent from PRESETS in
+ * DateRangeFilter — no button offers it, and on landing no quick-range
+ * highlight is expected (except the 1st of the month, when it equals the
+ * Today preset by arithmetic).
+ * Same contract as getPresetRange: `tz` must be a valid IANA zone; callers
+ * holding a null/empty timezone must not call this and must seed nothing.
+ */
+export function getMonthToDateRange(now: Date, tz: string): DateRange {
+  const todayKey = getDayKeyInTz(now, tz)
+  const { year, month } = partsOfDayKey(todayKey)
+  return { from: firstDayKeyOfMonth(year, month), to: todayKey }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getPresetRange } from './dateRangePresets'
+import { getMonthToDateRange, getPresetRange } from './dateRangePresets'
 
 const MADRID = 'Europe/Madrid'
 
@@ -61,5 +61,49 @@ describe('getPresetRange', () => {
     const now = new Date('2026-08-31T18:30:00Z')
     expect(getPresetRange('today', now, 'Asia/Kathmandu')).toEqual({ from: '2026-09-01', to: '2026-09-01' })
     expect(getPresetRange('this_month', now, 'Asia/Kathmandu')).toEqual({ from: '2026-09-01', to: '2026-09-30' })
+  })
+})
+
+// getMonthToDateRange is NOT a preset and is deliberately absent from PRESETS: it is
+// the landing default for the admin filter surfaces. What is pinned here is that `to`
+// is the LOCAL today in `tz` and `from` is the 1st of the month that local today falls
+// in — never the UTC one. The two boundary cases below straddle a UTC month edge in
+// opposite directions and each carries the UTC answer alongside, so a zone leak would
+// have to break an assertion rather than pass unnoticed. As above, every `now` is
+// written as a UTC instant with the intended local wall time named in the comment, so
+// no fixture depends on the machine's timezone.
+describe('getMonthToDateRange', () => {
+  it('Africa/Johannesburg: mid-month runs the 1st through today', () => {
+    // 22 Aug 2026 14:00 SAST (+02:00, no DST).
+    const now = new Date('2026-08-22T12:00:00Z')
+    expect(getMonthToDateRange(now, 'Africa/Johannesburg')).toEqual({ from: '2026-08-01', to: '2026-08-22' })
+  })
+
+  it('on the 1st the range collapses to that single day, equal to the Today preset', () => {
+    // 1 Aug 2026 14:00 SAST.
+    const now = new Date('2026-08-01T12:00:00Z')
+    expect(getMonthToDateRange(now, 'Africa/Johannesburg')).toEqual({ from: '2026-08-01', to: '2026-08-01' })
+    // The one day of the month on which a quick-range button lights up on landing —
+    // by arithmetic, not by getMonthToDateRange knowing anything about the presets.
+    expect(getMonthToDateRange(now, 'Africa/Johannesburg'))
+      .toEqual(getPresetRange('today', now, 'Africa/Johannesburg'))
+  })
+
+  it('Pacific/Auckland (+12): 23:30 on the last UTC day of August is already 1 Sep locally', () => {
+    // 31 Aug 2026 23:30Z = 11:30 on 1 Sep in Auckland. August 2026 is NZST (+12) —
+    // NZDT does not resume until the last Sunday of September — so the offset is +12.
+    const now = new Date('2026-08-31T23:30:00Z')
+    expect(getMonthToDateRange(now, 'Pacific/Auckland')).toEqual({ from: '2026-09-01', to: '2026-09-01' })
+    // The same instant read in UTC: the answer a leaked UTC day key would give.
+    expect(getMonthToDateRange(now, 'UTC')).toEqual({ from: '2026-08-01', to: '2026-08-31' })
+  })
+
+  it('America/Los_Angeles (-7): 04:00 on the 1st UTC is still 30 Jun locally, so the range is all of June', () => {
+    // 1 Jul 2026 04:00Z = 21:00 on 30 Jun in LA (PDT, -07:00). `to` is the 30th because
+    // that IS the local day — no month-length arithmetic runs in this helper at all.
+    const now = new Date('2026-07-01T04:00:00Z')
+    expect(getMonthToDateRange(now, 'America/Los_Angeles')).toEqual({ from: '2026-06-01', to: '2026-06-30' })
+    // The mirror of the Auckland case: UTC would name July, and only its 1st.
+    expect(getMonthToDateRange(now, 'UTC')).toEqual({ from: '2026-07-01', to: '2026-07-01' })
   })
 })
