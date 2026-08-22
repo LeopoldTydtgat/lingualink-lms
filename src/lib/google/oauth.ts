@@ -88,3 +88,162 @@ export function decodeIdTokenEmail(idToken: string): string | null {
 
   return email.trim()
 }
+
+// ---- Refresh-token exchange -------------------------------------------------
+//
+// Used by the busy-sync cron (src/app/api/cron/google-busy-sync/route.ts) on
+// EVERY run. Deliberately not conditional on the stored access_token's expiry:
+// the token lives ~60 minutes and the cron runs far more often than that, so a
+// "reuse if still valid" branch would be a second code path that only ever runs
+// with a stale token - i.e. the path least exercised and most likely to be
+// wrong when it matters.
+
+/** How long to wait on Google's token endpoint before giving up on the run. */
+const TOKEN_FETCH_TIMEOUT_MS = 10_000
+
+/**
+ * Three states, not two, because the caller must treat them differently:
+ * - 'revoked' is PERMANENT. The user pulled access (or deleted the app grant);
+ *   nothing retries out of it, a human has to reconnect.
+ * - 'transient_error' is a retry-next-run condition (network, 5xx, bad config).
+ * - 'refreshed' is the only state carrying a usable token.
+ */
+export type GoogleTokenRefreshOutcome = 'refreshed' | 'revoked' | 'transient_error'
+
+export interface GoogleTokenRefresh {
+  outcome: GoogleTokenRefreshOutcome
+  /** Populated only when outcome === 'refreshed'. */
+  accessToken: string | null
+  /** UTC ISO expiry, or null when Google returned no usable expires_in. */
+  expiresAtIso: string | null
+  /** Short, log-safe summary. Null on success. Never contains a token. */
+  error: string | null
+}
+
+/**
+ * Google documents expires_in as a number; a numeric string is accepted rather
+ * than lost.
+ *
+ * NOTE: src/app/api/google/oauth/callback/route.ts carries its own private copy
+ * of this. Deliberately not shared in this step - the callback is committed and
+ * working, and de-duplicating it is a separate change with its own blast radius.
+ */
+function parseExpiresInSeconds(raw: unknown): number | null {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+  if (typeof raw === 'string' && raw.trim() !== '' && Number.isFinite(Number(raw))) return Number(raw)
+  return null
+}
+
+/** Google's OAuth error body is { error, error_description }; both are log-only. */
+function readOAuthError(body: unknown): { error: string | null; description: string | null } {
+  if (!body || typeof body !== 'object') return { error: null, description: null }
+  const record = body as { error?: unknown; error_description?: unknown }
+  return {
+    error: typeof record.error === 'string' ? record.error : null,
+    description: typeof record.error_description === 'string' ? record.error_description : null,
+  }
+}
+
+/**
+ * Exchanges a stored refresh_token for a fresh access_token.
+ *
+ * NEVER logs either token. The refresh token is the whole connection; the
+ * access token is a live bearer credential for the user's calendar.
+ *
+ * Never throws: every failure mode comes back as an outcome the caller can act
+ * on, because the one caller is an unattended cron that must not 500.
+ */
+export async function refreshGoogleAccessToken(refreshToken: string): Promise<GoogleTokenRefresh> {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()
+
+  // An operator problem, not a revocation: reconnecting would not fix it, so it
+  // must NOT set the revoked flag. Transient keeps it in the failure counter,
+  // which is what surfaces it on the Schedule banner.
+  if (!clientId || !clientSecret) {
+    console.error('[google/oauth] refresh aborted, OAuth env vars missing:', {
+      hasClientId: Boolean(clientId),
+      hasClientSecret: Boolean(clientSecret),
+    })
+    return {
+      outcome: 'transient_error',
+      accessToken: null,
+      expiresAtIso: null,
+      error: 'Google OAuth client credentials are not configured',
+    }
+  }
+
+  const form = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token',
+  })
+
+  let response: Response
+  try {
+    response = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+      signal: AbortSignal.timeout(TOKEN_FETCH_TIMEOUT_MS),
+      cache: 'no-store',
+    })
+  } catch (networkError) {
+    console.error('[google/oauth] token refresh request failed:', networkError)
+    return {
+      outcome: 'transient_error',
+      accessToken: null,
+      expiresAtIso: null,
+      error: 'Google token endpoint unreachable',
+    }
+  }
+
+  const body: unknown = await response.json().catch((parseError: unknown) => {
+    console.error('[google/oauth] token refresh response was not JSON:', response.status, parseError)
+    return null
+  })
+
+  if (!response.ok) {
+    const { error, description } = readOAuthError(body)
+    console.error('[google/oauth] token refresh rejected:', response.status, { error, description })
+
+    // THE revocation signal. Google answers invalid_grant when the refresh
+    // token has been revoked, expired, or had its grant removed - all of which
+    // need a human to reconnect, none of which a retry can clear.
+    if ((response.status === 400 || response.status === 401) && error === 'invalid_grant') {
+      return {
+        outcome: 'revoked',
+        accessToken: null,
+        expiresAtIso: null,
+        error: 'Google refused the stored refresh token (invalid_grant)',
+      }
+    }
+
+    return {
+      outcome: 'transient_error',
+      accessToken: null,
+      expiresAtIso: null,
+      error: `Google token endpoint returned HTTP ${response.status}${error ? ` (${error})` : ''}`,
+    }
+  }
+
+  const accessToken = (body as { access_token?: unknown } | null)?.access_token
+  if (typeof accessToken !== 'string' || accessToken.trim().length === 0) {
+    console.error('[google/oauth] token refresh succeeded but carried no access_token')
+    return {
+      outcome: 'transient_error',
+      accessToken: null,
+      expiresAtIso: null,
+      error: 'Google returned no access_token',
+    }
+  }
+
+  const expiresInSeconds = parseExpiresInSeconds((body as { expires_in?: unknown }).expires_in)
+  // Null expiry degrades SAFE: a consumer that cannot tell when the access
+  // token dies must refresh, never assume it is still good.
+  const expiresAtIso =
+    expiresInSeconds === null ? null : new Date(Date.now() + expiresInSeconds * 1000).toISOString()
+
+  return { outcome: 'refreshed', accessToken, expiresAtIso, error: null }
+}
