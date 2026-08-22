@@ -281,5 +281,43 @@ export async function GET(req: NextRequest) {
     isAdmin: Boolean(isAdmin),
   })
 
-  return NextResponse.json({ slots: slotsByDate })
+  // The caller's LIVE hours balance, returned alongside the slots so the student
+  // grid can refresh a balance that only ever arrived once, as a server prop.
+  // Every slot refetch (tab focus/visibility, week nav, 409 recovery) now also
+  // carries the current number, so a grid left open across a booking made
+  // elsewhere, an admin adjustment or a cancellation stops showing a stale one.
+  //
+  // Same query shape the booking page uses (src/app/(student)/student/book/
+  // page.tsx): newest active training, RAW balance. The page adds a
+  // reschedule's own hours back in itself, so the client re-applies that
+  // adjustment on top of this value.
+  //
+  // Strictly additive and nullable:
+  //  - admin/staff callers have no students row -> callerStudent null -> null;
+  //  - no active training row -> null;
+  //  - a query error logs and yields null. It must NOT fail the response: the
+  //    slots are still valid, and /api/student/book re-reads the training and
+  //    remains the authority on the balance either way.
+  // The two admin surfaces that call this route (admin/classes/new/
+  // BookingFlowClient.tsx, admin/classes/[id]/edit/EditClassClient.tsx) read
+  // only `data.slots`, so the extra field is inert for them.
+  let hoursRemaining: number | null = null
+  if (callerStudent) {
+    const { data: activeTraining, error: activeTrainingError } = await admin
+      .from('trainings')
+      .select('total_hours, hours_consumed')
+      .eq('student_id', callerStudent.id)
+      .eq('status', 'active')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (activeTrainingError) {
+      console.error('[student availability] active training lookup failed:', activeTrainingError)
+    } else if (activeTraining) {
+      hoursRemaining = activeTraining.total_hours - activeTraining.hours_consumed
+    }
+  }
+
+  return NextResponse.json({ slots: slotsByDate, hoursRemaining })
 }

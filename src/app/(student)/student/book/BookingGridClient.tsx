@@ -548,7 +548,7 @@ export default function BookingGridClient({
   studentId,
   studentTimezone,
   trainingId,
-  hoursRemaining,
+  hoursRemaining: initialHoursRemaining,
   teachers,
   rescheduleLesson,
   rescheduleUnavailable,
@@ -589,7 +589,8 @@ export default function BookingGridClient({
       : teachers[0].id
   )
   const [selectedDuration, setSelectedDuration] = useState<number>(
-    rescheduleLesson?.duration_minutes ?? pickDefaultDuration(allowedDurations, hoursRemaining)
+    rescheduleLesson?.duration_minutes ??
+      pickDefaultDuration(allowedDurations, initialHoursRemaining)
   )
 
   // Monday of the visible week as a YYYY-MM-DD key in the STUDENT timezone —
@@ -646,6 +647,14 @@ export default function BookingGridClient({
   // focused cell would otherwise be painted over by the sticky time column
   // (zIndex 2) and the sticky day headers (zIndex 3).
   const [focusedCellKey, setFocusedCellKey] = useState<string | null>(null)
+  // The student's hours balance. Seeded from the server prop, which is the
+  // EFFECTIVE balance (a reschedule's own hours already added back), then
+  // refreshed from every successful slot fetch below — the balance used to
+  // arrive exactly once and went stale the moment anything changed it while
+  // this page stayed open. The route returns the RAW balance, so the reschedule
+  // adjustment is re-applied at the point of update. Display only:
+  // /api/student/book re-reads the training and is the actual gate.
+  const [hoursRemaining, setHoursRemaining] = useState(initialHoursRemaining)
 
   const selectedTeacher = teachers.find((t) => t.id === selectedTeacherId) ?? teachers[0]
 
@@ -701,6 +710,18 @@ export default function BookingGridClient({
             const data = await r.json()
             if (controller.signal.aborted) return // superseded — don't clobber newer state
             setSlots(data.slots ?? {})
+            // Balance refresh off the same response (see the hoursRemaining
+            // state above). The field is the RAW balance, so the reschedule
+            // adjustment the server page applied is re-applied here. A null or
+            // absent field — admin caller, no active training, or the route's
+            // logged-and-swallowed query error — leaves the current value
+            // untouched rather than blanking a balance we still have.
+            if (typeof data.hoursRemaining === 'number' && Number.isFinite(data.hoursRemaining)) {
+              setHoursRemaining(
+                data.hoursRemaining +
+                  (rescheduleLesson !== null ? rescheduleLesson.duration_minutes / 60 : 0)
+              )
+            }
             // The notice describes the PREVIOUS slots snapshot and cannot be
             // known to hold against this new data, so it is dropped fail-safe:
             // a missing advisory is cheaper than a false one that talks a
