@@ -878,12 +878,39 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           }),
         })
         if (res.ok) {
-          const data = await res.json()
+          const payload = await res.json()
+          // TWO RESPONSE SHAPES, BOTH SUPPORTED. The reconcile-aware route
+          // answers a 'specific' POST with an envelope
+          // { data, removed_ids, added }: the new block, the ids of the manual
+          // rows it superseded, and the trimmed remainders written back for the
+          // parts outside it. Any older deploy (and the general/holiday branch,
+          // which this component never posts) answers with the bare row.
+          // Detected on the presence of a `data` key, which no availability row
+          // carries; the bare shape degrades to exactly the previous behaviour -
+          // append the one returned row and remove nothing.
+          const envelope = payload !== null && typeof payload === 'object' && 'data' in payload
+          const created = (envelope ? payload.data : payload) as AvailabilityRecord | null
+          const removedIds: string[] =
+            envelope && Array.isArray(payload.removed_ids) ? payload.removed_ids : []
+          const added: AvailabilityRecord[] =
+            envelope && Array.isArray(payload.added) ? payload.added : []
           // Functional update: a second drag committed while this await was in
           // flight must merge into the LATEST state — the spread-from-closure
           // form resurrected the pre-add array and silently dropped the first
           // block. Mirrors GeneralAvailability's pattern.
-          if (data) onAvailabilityChange(prev => [...prev, data as AvailabilityRecord])
+          if (created || removedIds.length > 0 || added.length > 0) {
+            const removed = new Set(removedIds)
+            onAvailabilityChange(prev => {
+              // Single pass over prev: drop the rows the server reconciled away,
+              // then append the remainders it wrote back and the new block.
+              // filter() already returns a fresh array, so the pushes never
+              // mutate prev.
+              const next = prev.filter(a => !removed.has(a.id))
+              if (added.length > 0) next.push(...added)
+              if (created) next.push(created)
+              return next
+            })
+          }
         } else {
           const body = await res.json().catch(() => ({}))
           setActionError(body.error ?? 'Failed to save. Please try again.')
