@@ -167,6 +167,11 @@ interface Props {
   // new/edited/moved/deleted text box, undo/redo/clear). Never fires for an
   // in-progress pen draft or for the initial seed.
   onAnnotationsChange?: (annotations: Annotation[]) => void
+  // Non-fullscreen scroll body height cap, in vh. Optional so every existing
+  // call site (past-classes, reports, homework viewers) keeps today's 80vh
+  // unchanged; only a caller that explicitly passes a smaller value shrinks.
+  // Never applied in fullscreen, which stays flex:1/minHeight:0 regardless.
+  maxHeightVh?: number
 }
 
 type Status = 'loading' | 'ready' | 'error'
@@ -841,7 +846,7 @@ function EditableTextBox({
   )
 }
 
-export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnnotationsChange }: Props) {
+export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnnotationsChange, maxHeightVh = 80 }: Props) {
   // Outer element that goes fullscreen.
   const rootRef = useRef<HTMLDivElement | null>(null)
   // Scrollable body; we measure its inner width for fit-to-width and watch its
@@ -3467,7 +3472,7 @@ export default function PdfViewer({ fileUrl, initialAnnotations, readOnly, onAnn
     // (often to the last page). We restore the reader's page ourselves.
     overflowAnchor: 'none',
     padding: 16,
-    ...(isFullscreen ? { flex: 1, minHeight: 0 } : { maxHeight: '80vh' }),
+    ...(isFullscreen ? { flex: 1, minHeight: 0 } : { maxHeight: `${maxHeightVh}vh` }),
   }
 
   return (

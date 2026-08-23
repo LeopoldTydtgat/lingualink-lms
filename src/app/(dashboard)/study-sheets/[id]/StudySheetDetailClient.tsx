@@ -3,7 +3,7 @@
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowLeft, ExternalLink, Upload, CheckCircle, UserPlus } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Upload, CheckCircle, UserPlus, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Annotation } from '@/components/pdf/PdfViewer'
 import MaterialFileViewer from '@/components/study/MaterialFileViewer'
 import DifficultyBars from '@/components/study/DifficultyBars'
@@ -165,6 +165,11 @@ export default function StudySheetDetailClient({
 
   const [assignOpen, setAssignOpen] = useState(false)
 
+  // Files card collapse/expand. Default true (expanded) — only relevant once
+  // attachments.length > 0; the empty "No files attached" state is never
+  // gated on this and always renders regardless of its value.
+  const [filesExpanded, setFilesExpanded] = useState(true)
+
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [removingName, setRemovingName] = useState<string | null>(null)
@@ -305,49 +310,66 @@ export default function StudySheetDetailClient({
             <h2 className="font-semibold text-gray-900">Files</h2>
             <p className="text-sm text-gray-500 mt-0.5">Attached materials</p>
           </div>
-          {canManageFiles && (
-            <label
-              className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
-              style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
-              title="Upload a PDF, DOC, DOCX, PPT or PPTX"
-            >
-              <Upload className="w-4 h-4" />
-              {uploading ? 'Uploading…' : 'Add file'}
-              <input
-                ref={fileInputRef}
-                type="file"
-                className="hidden"
-                accept=".pdf,.doc,.docx,.ppt,.pptx"
-                disabled={uploading}
-                onChange={handleUpload}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {canManageFiles && (
+              <label
+                className="flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-md flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
+                style={{ color: '#FF8303', border: '1px solid #FF8303', backgroundColor: '#fff7ed' }}
+                title="Upload a PDF, DOC, DOCX, PPT or PPTX"
+              >
+                <Upload className="w-4 h-4" />
+                {uploading ? 'Uploading…' : 'Add file'}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.ppt,.pptx"
+                  disabled={uploading}
+                  onChange={handleUpload}
+                />
+              </label>
+            )}
+            {/* Collapse toggle — only shown once there is something to collapse.
+                The empty state below is never gated on filesExpanded. */}
+            {attachments.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilesExpanded(prev => !prev)}
+                className="p-1.5 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-50 flex-shrink-0"
+                title={filesExpanded ? 'Collapse files' : 'Expand files'}
+              >
+                {filesExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              </button>
+            )}
+          </div>
+        </div>
+        {(attachments.length === 0 || filesExpanded) && (
+          <div className={attachments.length === 0 ? 'px-6 py-3' : 'p-6'}>
+            {attachments.length === 0 ? (
+              <p className="text-center text-sm text-gray-400 py-2">
+                No files attached{canManageFiles ? '. Use “Add file” to upload one.' : '.'}
+              </p>
+            ) : (
+              <MaterialFileViewer
+                attachments={attachments}
+                sheetId={sheet.id}
+                mode="annotatable"
+                annotationsByName={annotationsByName}
+                liveLessonId={liveLessonId}
+                cardClassName="rounded-lg overflow-hidden bg-white"
+                cardStyle={{ border: '1px solid #E0DFDC' }}
+                onRemove={canManageFiles ? handleRemove : undefined}
+                removingName={removingName}
+                maxHeightVh={53}
               />
-            </label>
-          )}
-        </div>
-        <div className="p-6">
-          {attachments.length === 0 ? (
-            <p className="text-center text-sm text-gray-400 py-6">
-              No files attached{canManageFiles ? '. Use “Add file” to upload one.' : '.'}
-            </p>
-          ) : (
-            <MaterialFileViewer
-              attachments={attachments}
-              sheetId={sheet.id}
-              mode="annotatable"
-              annotationsByName={annotationsByName}
-              liveLessonId={liveLessonId}
-              cardClassName="rounded-lg overflow-hidden bg-white"
-              cardStyle={{ border: '1px solid #E0DFDC' }}
-              onRemove={canManageFiles ? handleRemove : undefined}
-              removingName={removingName}
-            />
-          )}
-          {(uploadError || removeError) && (
-            <p className="text-sm mt-3" style={{ color: '#FD5602' }}>
-              {uploadError || removeError}
-            </p>
-          )}
-        </div>
+            )}
+            {(uploadError || removeError) && (
+              <p className="text-sm mt-3" style={{ color: '#FD5602' }}>
+                {uploadError || removeError}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Links - the listening category's body, mirroring the student sheet view

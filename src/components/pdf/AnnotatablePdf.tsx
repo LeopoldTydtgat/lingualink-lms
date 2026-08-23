@@ -18,6 +18,7 @@ export default function AnnotatablePdf({
   attachmentName,
   initialAnnotations,
   seedLessonId,
+  maxHeightVh,
 }: {
   fileUrl: string
   studySheetId: string
@@ -29,6 +30,9 @@ export default function AnnotatablePdf({
   // why a later value of this prop must never reach the guard. Required, not
   // optional, so a new mount cannot silently opt out of the guard.
   seedLessonId: string | null
+  // Passed straight through to PdfViewer. Optional — omitted, every existing
+  // caller keeps PdfViewer's own 80vh default unchanged.
+  maxHeightVh?: number
 }) {
   // Debounce timer + the latest committed annotations pending a write.
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -335,6 +339,7 @@ export default function AnnotatablePdf({
         fileUrl={fileUrl}
         initialAnnotations={initialAnnotations}
         onAnnotationsChange={handleAnnotationsChange}
+        maxHeightVh={maxHeightVh}
       />
       {saveState === 'saved' && (
         <div
