@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
+import DifficultyBars from '@/components/study/DifficultyBars'
 import { fileTypeLabel } from '@/lib/study/fileTypeLabel'
 import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal, FileText } from 'lucide-react'
 import SheetFormModal from './SheetFormModal'
@@ -817,10 +818,13 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
                       {/* What this row IS, at a glance: a study sheet, or the file type
                           of the material's first file ('File' when it carries none) —
-                          followed by category and level, which used to hold columns of
-                          their own. Both stay filterable from the dropdowns above; a
-                          value the sheet does not carry renders no pill at all, rather
-                          than the placeholder dash the old Category column showed.
+                          followed by category, level and difficulty, which used to hold
+                          columns of their own. All three stay filterable from the
+                          dropdowns above, and difficulty is here so that filtering by it
+                          cannot hide rows with nothing on screen to explain why. A value
+                          the sheet does not carry renders nothing at all, rather than the
+                          placeholder dash the old Category column showed; difficulty is
+                          skipped on material rows, where the old column was blank too.
                           flex-wrap, so a narrow viewport stacks these instead of
                           pushing them out of the cell. */}
                       <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
@@ -844,6 +848,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                             {sheet.level}
                           </span>
                         )}
+                        {!material && <DifficultyBars count={sheet.difficulty} />}
                       </div>
                       {sheet.intro_text && (
                         <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
