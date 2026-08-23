@@ -16,6 +16,7 @@ import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit, recordStudentBookingAttempt } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { createLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
 // ── POST /api/student/book ────────────────────────────────────────────────────
@@ -790,6 +791,26 @@ export async function POST(req: NextRequest) {
         error: pendingReportError,
       })
     }
+
+    // ── 6c. Mirror the class onto the connected Google Calendar ─────────
+    // GCAL REBUILD 2. Writes a private time-block on the connected account's
+    // own calendar and stores the event id on this lesson row. Non-blocking by
+    // construction - createLessonGoogleEvent never throws and returns nothing,
+    // so there is no branch here and no failure of it can change what the
+    // student is told. Awaited rather than fired and forgotten because the
+    // serverless function can be frozen the instant the response is returned,
+    // which would silently drop a dangling promise mid-request.
+    //
+    // The RESCHEDULE path lands here too, and that is intended: the insert
+    // above created a NEW lesson row, so it needs its own event. The OLD row
+    // keeps its google_event_id untouched - deleting that event is a separate
+    // commit, and until that lands the column is the only pointer to it.
+    await createLessonGoogleEvent({
+      lessonId: newLesson.id,
+      studentName: studentRow.full_name,
+      scheduledAtIso: startTime.toISOString(),
+      durationMinutes,
+    })
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────
     const isReschedule = !!rescheduleId
