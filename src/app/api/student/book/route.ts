@@ -19,6 +19,20 @@ import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { createLessonGoogleEvent, deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
+// A reversal owed to the student for a money RPC that has already moved their
+// hours, held for the window in which no lesson row exists yet. See the
+// pendingCompensation declaration inside the handler for the invariant.
+type PendingCompensation =
+  | { kind: 'refund'; trainingId: string; studentId: string; hours: number }
+  | {
+      kind: 'unwind'
+      oldLessonId: string
+      trainingId: string
+      studentId: string
+      oldDurationHours: number
+      newDurationHours: number
+    }
+
 // ── POST /api/student/book ────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
@@ -28,6 +42,21 @@ export async function POST(req: NextRequest) {
   // failed when it exists, and a fresh-book retry on another slot books a
   // second real class.
   let committedLessonId: string | null = null
+
+  // Non-null means exactly this: a money RPC has already moved this student's
+  // hours, no reversal has been dispatched, and no lesson row exists. The outer
+  // catch reads it so that a throw in the window between the deduction and the
+  // insert-failure handlers - the Teams call, a transport-level throw at the
+  // insert, anything unexpected inside those handlers - can no longer swallow
+  // the hours with no lesson, no refund and no log naming the training.
+  //
+  // Cleared at the DISPATCH of each existing reversal rather than at its
+  // completion, and again the moment committedLessonId is set. Dispatch, not
+  // completion, because an RPC that throws mid-flight may already have been
+  // applied by the database: re-running it from the catch could refund twice.
+  // Those clears are what make double-compensation impossible by construction
+  // rather than by reasoning about control flow.
+  let pendingCompensation: PendingCompensation | null = null
 
   try {
     const supabase = await createClient()
@@ -450,6 +479,22 @@ export async function POST(req: NextRequest) {
           { status: 500 }
         )
       }
+
+      // Hours have moved: the old lesson is cancelled and the net delta
+      // (new - old) is applied to hours_consumed. Own the reversal from here
+      // until an insert handler dispatches it or the new lesson is committed.
+      // The reversal is unwind_reschedule_atomic with the same four arguments
+      // the insert-failure handler below passes - never refund_hours_atomic
+      // with hoursNeeded, which would refund a gross duration against a
+      // net-delta deduction and hand the student hours they never spent.
+      pendingCompensation = {
+        kind: 'unwind',
+        oldLessonId: rescheduleId,
+        trainingId,
+        studentId,
+        oldDurationHours,
+        newDurationHours: hoursNeeded,
+      }
     } else {
       // Record the booking attempt HERE, not at 2b — same reasoning as the
       // reschedule branch: recording immediately before the money RPC means
@@ -494,6 +539,11 @@ export async function POST(req: NextRequest) {
           { status: 500 }
         )
       }
+
+      // Hours have been deducted. Own the reversal from here until an insert
+      // handler dispatches it or the lesson is committed - the same arguments
+      // the refund in the insert-failure handler below uses.
+      pendingCompensation = { kind: 'refund', trainingId, studentId, hours: hoursNeeded }
     }
 
     // ── 5. MS Graph API – create Teams meeting ────────────────────────────────
@@ -566,6 +616,11 @@ export async function POST(req: NextRequest) {
           new_hours_needed: hoursNeeded,
           error: lessonError,
         })
+        // The reversal is being dispatched here, so the outer catch must not
+        // dispatch a second one - including when this call throws mid-flight,
+        // where the database may already have applied it. The CRITICAL log
+        // below stays the signal for a reversal that comes back failed.
+        pendingCompensation = null
         const { data: unwindRestored, error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
           p_old_lesson_id: rescheduleId,
           p_training_id: trainingId,
@@ -644,6 +699,11 @@ export async function POST(req: NextRequest) {
         }
 
         console.error('Failed to create lesson — refunding deducted hours:', lessonError)
+        // Dispatching the reversal here retires it: the outer catch must not
+        // run a second one, including when this call throws mid-flight. The two
+        // CRITICAL logs below stay the signal for a refund that comes back
+        // failed.
+        pendingCompensation = null
         // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
         const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
           p_training_id: trainingId,
@@ -683,6 +743,10 @@ export async function POST(req: NextRequest) {
     }
 
     committedLessonId = newLesson.id
+    // The lesson exists, so the hours are correctly spent and nothing is owed
+    // back. Second, independent guard on top of the committedLessonId check in
+    // the outer catch.
+    pendingCompensation = null
 
     // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
     // book_class_atomic returned the id of the 'class_booking' ledger row; now
@@ -905,6 +969,97 @@ export async function POST(req: NextRequest) {
       })
       return NextResponse.json({ success: true, lessonId: committedLessonId })
     }
+
+    // No lesson row exists. If a money RPC already moved this student's hours
+    // and no reversal has been dispatched, reverse it here - otherwise the
+    // throw leaves the hours deducted against a class that does not exist, with
+    // nothing in the logs naming the training. Every path that dispatches a
+    // reversal, and the commit itself, null pendingCompensation first, so this
+    // block can never be a second compensation.
+    //
+    // Its own try/catch, and a fresh service-role client: adminClient is scoped
+    // to the try above and may never have been constructed. Whatever happens
+    // here, the 500 below is still returned and this catch never throws.
+    if (pendingCompensation) {
+      const pending = pendingCompensation
+      pendingCompensation = null
+      try {
+        const recoveryClient = createAdminClient()
+        if (pending.kind === 'refund') {
+          const { data: refundData, error: refundError } = await recoveryClient.rpc('refund_hours_atomic', {
+            p_training_id: pending.trainingId,
+            p_hours: pending.hours,
+          })
+          if (refundError) {
+            console.error('CRITICAL: refund_hours_atomic failed after an unexpected throw in /api/student/book. Hours are deducted with no lesson - manual reconciliation required.', {
+              training_id: pending.trainingId,
+              student_id: pending.studentId,
+              lesson_id: null,
+              hours: pending.hours,
+              error: refundError,
+            })
+          } else if (refundData?.success === false) {
+            console.error('CRITICAL: refund_hours_atomic reported failure after an unexpected throw in /api/student/book. Hours are deducted with no lesson - manual reconciliation required.', {
+              training_id: pending.trainingId,
+              student_id: pending.studentId,
+              lesson_id: null,
+              hours: pending.hours,
+              code: refundData.code,
+            })
+          } else {
+            console.error('CRITICAL: hours auto-refunded after an unexpected throw in /api/student/book - no lesson was created.', {
+              training_id: pending.trainingId,
+              hours: pending.hours,
+            })
+          }
+        } else {
+          const { data: unwindRestored, error: unwindError } = await recoveryClient.rpc('unwind_reschedule_atomic', {
+            p_old_lesson_id: pending.oldLessonId,
+            p_training_id: pending.trainingId,
+            p_old_duration_hours: pending.oldDurationHours,
+            p_new_duration_hours: pending.newDurationHours,
+          })
+          if (unwindError) {
+            console.error('CRITICAL: unwind_reschedule_atomic failed after an unexpected throw in /api/student/book. Manual reconciliation required.', {
+              lesson_id: pending.oldLessonId,
+              training_id: pending.trainingId,
+              student_id: pending.studentId,
+              old_duration_hours: pending.oldDurationHours,
+              new_hours_needed: pending.newDurationHours,
+              error: unwindError,
+            })
+          } else if (unwindRestored === false) {
+            // Hours are back but the original lesson could not be restored: its
+            // freed slot was taken. Same state the 409 in the insert handler
+            // reports, except the student is getting a 500 here and will not be
+            // told to rebook, so it is logged CRITICAL rather than left silent.
+            console.error('CRITICAL: reschedule auto-unwound after an unexpected throw in /api/student/book - hours returned but the original lesson could NOT be restored.', {
+              lesson_id: pending.oldLessonId,
+              training_id: pending.trainingId,
+              old_duration_hours: pending.oldDurationHours,
+              new_hours_needed: pending.newDurationHours,
+            })
+          } else {
+            console.error('CRITICAL: reschedule auto-unwound after an unexpected throw in /api/student/book - original lesson restored, no new lesson was created.', {
+              lesson_id: pending.oldLessonId,
+              training_id: pending.trainingId,
+              old_duration_hours: pending.oldDurationHours,
+              new_hours_needed: pending.newDurationHours,
+            })
+          }
+        }
+      } catch (compensationError) {
+        console.error('CRITICAL: compensation threw after an unexpected throw in /api/student/book. Hours may be deducted with no lesson - manual reconciliation required.', {
+          kind: pending.kind,
+          training_id: pending.trainingId,
+          student_id: pending.studentId,
+          lesson_id: pending.kind === 'unwind' ? pending.oldLessonId : null,
+          hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
+          error: compensationError,
+        })
+      }
+    }
+
     console.error('Unexpected error in /api/student/book:', err)
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
   }
