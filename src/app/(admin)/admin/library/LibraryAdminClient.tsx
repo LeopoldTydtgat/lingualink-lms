@@ -848,7 +848,19 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                             {sheet.level}
                           </span>
                         )}
-                        {!material && <DifficultyBars count={sheet.difficulty} />}
+                        {!material && (
+                          <span
+                            className="inline-flex"
+                            title={
+                              sheet.difficulty === 1 ? 'Easy'
+                                : sheet.difficulty === 2 ? 'Medium'
+                                : sheet.difficulty === 3 ? 'Hard'
+                                : undefined
+                            }
+                          >
+                            <DifficultyBars count={sheet.difficulty} />
+                          </span>
+                        )}
                       </div>
                       {sheet.intro_text && (
                         <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
