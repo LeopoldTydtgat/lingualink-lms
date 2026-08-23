@@ -128,8 +128,7 @@ interface RescheduleLesson {
   teacher_id: string
 }
 
-// Identical to the Props BookingClient receives from page.tsx, so Stage D is a
-// one-line import swap.
+// Props passed in by page.tsx.
 interface Props {
   studentId: string
   studentTimezone: string
@@ -1150,15 +1149,34 @@ export default function BookingGridClient({
         }),
       })
 
-      const data = await res.json()
+      // The body is parsed defensively. res.json() used to throw straight into
+      // the outer catch on any non-JSON body (a gateway 502/504 page, an edge
+      // redirect), which showed the generic message but — unlike the 409/400
+      // branch below — left selectedStartIso set, so a pick the server may
+      // already have rejected stayed selected. null means "no usable body",
+      // never a success.
+      let data: { error?: string; message?: string } | null = null
+      try {
+        data = (await res.json()) as { error?: string; message?: string }
+      } catch {
+        data = null
+      }
 
-      if (!res.ok || data.error) {
-        setSubmitError(data.message ?? data.error ?? 'Something went wrong. Please try again.')
+      if (!res.ok || data === null || data.error) {
+        setSubmitError(data?.message ?? data?.error ?? 'Something went wrong. Please try again.')
         setIsSubmitting(false)
         if (res.status === 409 || res.status === 400) {
           // 409: slot conflict. 400: a server rule rejected the pick (24h
           // window, hours, duration), which means the grid was stale too. Both:
           // clear the selection and refetch so the grid reflects the server.
+          setSelectedStartIso(null)
+          setRefetchNonce((n) => n + 1)
+        } else if (!res.ok && data === null) {
+          // Non-ok with an unreadable body: the failure is unattributable, so
+          // the grid may be stale for exactly the reason a 409 is. Fail safe
+          // with the same recovery rather than leaving a possibly-dead pick
+          // selected. Scoped to !res.ok so an ok response whose body will not
+          // parse keeps today's behaviour (generic error, selection untouched).
           setSelectedStartIso(null)
           setRefetchNonce((n) => n + 1)
         }

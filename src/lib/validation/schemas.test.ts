@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { TeacherAvailabilitySchema } from './schemas'
+import { TeacherAvailabilitySchema, TeacherAvailabilityMoveSchema } from './schemas'
 
 // The two cross-field refines on TeacherAvailabilitySchema are the ONLY gate
 // keeping a self-contradicting availability row out of the table: both slot
@@ -76,5 +76,67 @@ describe('TeacherAvailabilitySchema - specific rows keep both polarities', () =>
 
   it('accepts type=specific with is_available=true', () => {
     expect(TeacherAvailabilitySchema.safeParse(datedRow('specific', true)).success).toBe(true)
+  })
+})
+
+// PATCH /api/teacher/availability/[id] body. This schema is the only thing
+// standing between a move request and the two instants the route writes, so
+// both properties below are load-bearing: a backwards range would be written as
+// an invisible 0px block that reconcileSpecific fails closed on (turning a move
+// into a duplicate), and any field beyond the two instants must be STRIPPED,
+// not honoured - the route reads is_available, type and teacher_id off the
+// fetched row precisely so a caller cannot flip a block's polarity, change its
+// kind, or move it onto another teacher's calendar.
+describe('TeacherAvailabilityMoveSchema', () => {
+  const START = '2026-08-24T09:00:00.000Z'
+  const END = '2026-08-24T10:00:00.000Z'
+
+  it('accepts a forward range', () => {
+    const result = TeacherAvailabilityMoveSchema.safeParse({ start_at: START, end_at: END })
+
+    expect(result.success).toBe(true)
+    expect(result.data).toEqual({ start_at: START, end_at: END })
+  })
+
+  it('rejects a zero-length range', () => {
+    const result = TeacherAvailabilityMoveSchema.safeParse({ start_at: START, end_at: START })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0].message).toBe('End must be after start')
+    expect(result.error?.issues[0].path).toEqual(['end_at'])
+  })
+
+  it('rejects a backwards range', () => {
+    const result = TeacherAvailabilityMoveSchema.safeParse({ start_at: END, end_at: START })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0].message).toBe('End must be after start')
+  })
+
+  it('rejects an unparseable instant', () => {
+    const result = TeacherAvailabilityMoveSchema.safeParse({ start_at: 'yesterday', end_at: END })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0].message).toBe('Must be a valid ISO 8601 datetime')
+  })
+
+  it('rejects a missing instant', () => {
+    expect(TeacherAvailabilityMoveSchema.safeParse({ start_at: START }).success).toBe(false)
+    expect(TeacherAvailabilityMoveSchema.safeParse({ end_at: END }).success).toBe(false)
+  })
+
+  it('strips every field except the two instants', () => {
+    const result = TeacherAvailabilityMoveSchema.safeParse({
+      start_at: START,
+      end_at: END,
+      is_available: true,
+      type: 'holiday',
+      teacher_id: TEACHER_ID,
+      source: 'google_sync',
+      id: TEACHER_ID,
+    })
+
+    expect(result.success).toBe(true)
+    expect(Object.keys(result.data ?? {}).sort()).toEqual(['end_at', 'start_at'])
   })
 })

@@ -3,8 +3,6 @@
  *
  * Foundation for the Sunday-first → Monday-first calendar conversion.
  * Consumed by src/app/(dashboard)/schedule/tabs/DayToDay.tsx.
- * BookingClient.tsx still carries its own local Monday-first helpers
- * (consolidation candidate, parked).
  *
  * Scope contract: every function operates on the browser-local calendar,
  * replicating the existing calendars' local-time semantics exactly — only

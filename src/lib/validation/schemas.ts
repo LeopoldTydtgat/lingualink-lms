@@ -448,6 +448,36 @@ export const TeacherAvailabilitySchema = z.object({
 
 export type TeacherAvailabilityInput = z.infer<typeof TeacherAvailabilitySchema>
 
+// ---- Move / resize an existing timed 'specific' row ------------------------
+// PATCH /api/teacher/availability/[id].
+//
+// Deliberately a SEPARATE and much narrower schema than TeacherAvailabilitySchema
+// above rather than a partial of it: the ONLY mutable fields are the two
+// instants. is_available, type and teacher_id are not accepted from the body at
+// all - the route reads each of them off the row it fetched by id - so a move
+// can never flip a block's polarity, change its kind, or hand it to another
+// teacher, no matter what the caller sends. Extra keys are dropped by Zod's
+// default object stripping, so sending them is inert rather than an error.
+export const TeacherAvailabilityIdSchema = uuid
+
+export const TeacherAvailabilityMoveSchema = z
+  .object({
+    start_at: isoDateTime,
+    end_at: isoDateTime,
+  })
+  // A backwards or zero-length block would render as a 0px rectangle and is
+  // invisible to every reader; reconcileSpecific also fails closed on one and
+  // would reconcile nothing, quietly turning a move into a duplicate. Rejected
+  // here so the route never sees it. The route re-derives both instants as
+  // numbers anyway (it needs them for the overlap query and the past-start
+  // guard) and repeats this check on those numbers.
+  .refine((val) => Date.parse(val.end_at) > Date.parse(val.start_at), {
+    error: 'End must be after start',
+    path: ['end_at'],
+  })
+
+export type TeacherAvailabilityMoveInput = z.infer<typeof TeacherAvailabilityMoveSchema>
+
 // ─── Submit Report ────────────────────────────────────────────────────────────
 
 export const SubmitReportSchema = z

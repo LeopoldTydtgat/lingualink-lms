@@ -22,31 +22,65 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
   if (!user) return { success: false, error: 'Not authenticated' }
 
   // Get the student record
-  const { data: student } = await supabase
+  const { data: student, error: studentError } = await supabase
     .from('students')
     .select('id, full_name, email, timezone')
     .eq('auth_user_id', user.id)
-    .single()
+    .maybeSingle()
+  // A read failure and a missing row are different outcomes. Discarding the
+  // error collapsed both into null, so a transient fault told an authenticated
+  // student their account does not exist. Both still fail closed - no
+  // cancellation proceeds - but the student is told which one happened and the
+  // real error reaches the logs.
+  if (studentError) {
+    console.error('[student cancel] students lookup failed:', studentError)
+    return { success: false, error: 'Could not verify your account. Please try again.' }
+  }
   if (!student) return { success: false, error: 'Student not found' }
 
   // Get the lesson — confirm it belongs to this student. Cancellability is now decided
   // by the RPC (the single authority), so no status pre-check here.
-  const { data: lesson } = await supabase
+  const { data: lesson, error: lessonError } = await supabase
     .from('lessons')
     .select('id, student_id, training_id, teacher_id, scheduled_at, duration_minutes, status, teams_meeting_id')
     .eq('id', lessonId)
     .eq('student_id', student.id)
-    .single()
+    .maybeSingle()
 
+  // Same split as the students read above. This is the ownership gate, so a
+  // read it could not complete must never resolve to "not yours" - fail closed
+  // on both, but only the genuinely missing/foreign row says 'Lesson not found'.
+  if (lessonError) {
+    console.error('[student cancel] lesson lookup failed:', {
+      lesson_id: lessonId,
+      error: lessonError,
+    })
+    return { success: false, error: 'Could not load this class. Please try again.' }
+  }
   if (!lesson) return { success: false, error: 'Lesson not found' }
 
   // Fetch teacher profile for email
   const adminClient = createAdminClient()
-  const { data: teacher } = await adminClient
+  const { data: teacher, error: teacherError } = await adminClient
     .from('profiles')
     .select('full_name, email, timezone')
     .eq('id', lesson.teacher_id)
-    .single()
+    .maybeSingle()
+  // Deliberately NOT a fail-closed gate, unlike the two reads above. This row
+  // authorises nothing - it only feeds the notification emails, and that block
+  // is already best-effort by design (teacher?.email, wrapped in try/catch) so
+  // email trouble can never block a cancellation the student is entitled to.
+  // Returning an error here would do exactly that, and would burn the student's
+  // >=24h refund window while they retry a fault that is not theirs. So: log it
+  // and continue. A null teacher skips the teacher email, which is already
+  // today's behaviour when the row is genuinely missing.
+  if (teacherError) {
+    console.error('[student cancel] teacher profile lookup failed - cancelling anyway, teacher email will be skipped:', {
+      teacher_id: lesson.teacher_id,
+      lesson_id: lessonId,
+      error: teacherError,
+    })
+  }
 
   // 24-hour rule — check how far away the class is
   const now = new Date()
