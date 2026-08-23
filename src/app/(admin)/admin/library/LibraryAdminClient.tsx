@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import DifficultyBars from '@/components/study/DifficultyBars'
 import { fileTypeLabel } from '@/lib/study/fileTypeLabel'
 import { Tag, Plus, BookOpen, ClipboardCheck, Lock, Layers, Search, MoreHorizontal, FileText } from 'lucide-react'
 import SheetFormModal from './SheetFormModal'
@@ -73,7 +72,43 @@ type SheetTypeFilter = '' | 'sheet' | 'material'
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 
 // Shared by the table header and its rows — they must never drift apart.
-const GRID_COLUMNS = '3% 40% 10% 7% 9% 14% 5% 12%'
+//
+// Fixed px columns plus one flexible Title track: the model of the working grid
+// in (admin)/admin/classes/ClassesListClient.tsx, which pairs fixed px with fr
+// and no gap. The track list here was previously eight PERCENTAGES summing to
+// exactly 100%, applied with gap-3 — and CSS Grid resolves percentage tracks
+// against the content box and then ADDS the gaps on top, so the grid ran ~79px
+// wider than its container and the card's overflow-hidden clipped ~60px off the
+// right edge at EVERY viewport width. The Actions column was the casualty:
+// below a ~1720px viewport the kebab sat outside the clip and could not be
+// clicked at all.
+//
+// Three rules keep that from coming back:
+//   1. There is no grid gap. Column spacing lives INSIDE each cell as CELL_PAD,
+//      which cannot widen the grid however many columns there are.
+//   2. The Title track is minmax(0, 1fr), not 1fr. A bare 1fr floors at the
+//      cell's min-content, so a narrow viewport would push the fixed columns off
+//      the end again; minmax(0, ...) lets it shrink instead.
+//   3. The fixed columns are minmax(0, Npx), not Npx. Once Title has collapsed
+//      to 0 — below a ~419px viewport, where the sidebar is already hidden —
+//      bare px tracks would overflow the card and clip the kebab all over again,
+//      the original defect relocated to phone widths. With a 0 minimum they
+//      share out whatever is left instead, so the grid CANNOT overflow at any
+//      width. At any width where the tracks fit (~419px up) each one reaches its
+//      max and this is a no-op.
+//
+// Sizing at 1366px: html is 15px (globals.css), so the two w-56 rails are 210px
+// each, NOT 224 — main 946, less the 4px thin-scroll bar, the page's 45px p-6,
+// the card's 2px border and the row's 37.5px px-5, leaves an 857px grid content
+// box. The fixed columns take 330px of it and Title gets the ~527px balance.
+const GRID_COLUMNS = '30px minmax(0, 1fr) minmax(0, 160px) minmax(0, 140px)'
+
+// Column spacing, applied as padding INSIDE the cell rather than as a grid gap
+// (see above). Shared by the header and the rows so the two can never drift
+// apart. The last column (Actions) takes none — the row's own px-5 is its right
+// margin — and neither does the checkbox, whose 30px track already leaves a
+// 17px gutter beside a ~13px control.
+const CELL_PAD = { paddingRight: '12px' }
 
 function rolesToLabel(roles: string[]): string {
   if (!roles || roles.length === 0) return 'All Teachers'
@@ -87,10 +122,6 @@ function rolesPillStyle(roles: string[]): { backgroundColor: string; color: stri
   if (roles.includes('admin') && roles.length === 1) return { backgroundColor: '#FFF3E0', color: '#FF8303' }
   if (roles.includes('teacher_exam') && !roles.includes('teacher')) return { backgroundColor: '#FFF3E0', color: '#FF8303' }
   return { backgroundColor: '#f3f4f6', color: '#4b5563' }
-}
-
-function activityCount(sheet: StudySheet, counts: Record<string, number>): number {
-  return counts[sheet.id] ?? 0
 }
 
 // study_sheets.audience is NOT NULL and defaults to 'staff', and both write
@@ -263,8 +294,9 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       const { data: actRows, error: actError } = await supabase.from('activities').select('id, sheet_id')
 
       if (actError) {
-        // Counts drive both the Activities column and isSheetEmpty. An unknown
-        // count must not be rendered as zero, so the whole list is withheld.
+        // Counts drive isSheetEmpty — which is what disables Assign — and the
+        // Total Activities card. An unknown count must not be rendered as zero,
+        // so the whole list is withheld.
         setActCounts({})
         setLoadError(true)
         return data || []
@@ -733,16 +765,12 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
       ) : (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden" style={{ border: '1px solid #f3f4f6' }}>
 
-          {/* Column headers */}
-          <div className="grid gap-3 px-5 py-3 text-xs font-medium uppercase tracking-wide"
+          {/* Column headers — no grid gap, see GRID_COLUMNS */}
+          <div className="grid px-5 py-3 text-xs font-medium uppercase tracking-wide"
             style={{ gridTemplateColumns: GRID_COLUMNS, backgroundColor: '#f9fafb', borderBottom: '1px solid #f3f4f6', color: '#9ca3af' }}>
             <span />
-            <span>Title</span>
-            <span>Category</span>
-            <span>Level</span>
-            <span>Difficulty</span>
-            <span>Access</span>
-            <span className="text-center">Activities</span>
+            <span style={CELL_PAD}>Title</span>
+            <span style={CELL_PAD}>Access</span>
             <span>Actions</span>
           </div>
 
@@ -755,7 +783,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
               return (
                 <div
                   key={sheet.id}
-                  className="grid gap-3 px-5 py-4 items-center text-sm"
+                  className="grid px-5 py-4 items-center text-sm"
                   style={{
                     gridTemplateColumns: GRID_COLUMNS,
                     borderBottom: '1px solid #f3f4f6',
@@ -773,8 +801,10 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     style={{ accentColor: '#FF8303' }}
                   />
 
-                  {/* Icon tile + title + kind badge + intro */}
-                  <div className="flex items-center gap-3 min-w-0">
+                  {/* Icon tile + title + badge line + intro. overflow-hidden so that
+                      once the Title track has collapsed at phone widths its contents
+                      clip at the cell edge instead of running over the Access column. */}
+                  <div className="flex items-center gap-3 min-w-0 overflow-hidden" style={CELL_PAD}>
                     <span
                       className="flex items-center justify-center rounded-lg flex-shrink-0"
                       style={{ width: '40px', height: '40px', backgroundColor: material ? '#f3f4f6' : '#FFF3E0' }}
@@ -786,101 +816,109 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                     <div className="min-w-0">
                       <p className="font-medium text-gray-900 truncate" title={sheet.title}>{sheet.title}</p>
                       {/* What this row IS, at a glance: a study sheet, or the file type
-                          of the material's first file ('File' when it carries none). */}
-                      <span
-                        className="inline-block mt-0.5 px-2 py-0.5 rounded-full text-xs font-medium"
-                        style={material
-                          ? { backgroundColor: '#f3f4f6', color: '#4b5563' }
-                          : { backgroundColor: '#FFF3E0', color: '#FF8303' }}
-                      >
-                        {material
-                          ? (files.length > 0 ? attLabel(files[0].att) : 'File')
-                          : 'Study sheet'}
-                      </span>
+                          of the material's first file ('File' when it carries none) —
+                          followed by category and level, which used to hold columns of
+                          their own. Both stay filterable from the dropdowns above; a
+                          value the sheet does not carry renders no pill at all, rather
+                          than the placeholder dash the old Category column showed.
+                          flex-wrap, so a narrow viewport stacks these instead of
+                          pushing them out of the cell. */}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span
+                          className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={material
+                            ? { backgroundColor: '#f3f4f6', color: '#4b5563' }
+                            : { backgroundColor: '#FFF3E0', color: '#FF8303' }}
+                        >
+                          {material
+                            ? (files.length > 0 ? attLabel(files[0].att) : 'File')
+                            : 'Study sheet'}
+                        </span>
+                        {sheet.category && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
+                            {sheet.category}
+                          </span>
+                        )}
+                        {sheet.level && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
+                            {sheet.level}
+                          </span>
+                        )}
+                      </div>
                       {sheet.intro_text && (
                         <p className="text-xs text-gray-400 truncate mt-0.5" title={sheet.intro_text}>{sheet.intro_text}</p>
                       )}
                     </div>
                   </div>
 
-                  {/* Category */}
-                  <div>
-                    {sheet.category ? (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium capitalize" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>{sheet.category}</span>
-                    ) : (
-                      <span className="text-xs text-gray-300">-</span>
-                    )}
-                  </div>
-
-                  {/* Level */}
-                  <div>
-                    {sheet.level && (
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: '#FFF3E0', color: '#FF8303' }}>
-                        {sheet.level}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Difficulty — meaningless on a file. The empty span still
-                      occupies the grid cell, so the columns stay aligned. */}
-                  {material ? <span /> : <DifficultyBars count={sheet.difficulty} />}
-
-                  {/* Access */}
-                  <div>
+                  {/* Access — this column stays. It is the only place the result of a
+                      bulk access change is visible, which is exactly what the bulk
+                      failure banner above sends the admin to look at. nowrap because
+                      the longest label ('Teacher+Exam Only', ~121px) must read on one
+                      line inside the 148px this cell leaves it. */}
+                  <div style={CELL_PAD}>
                     <span
-                      className="text-xs font-medium px-2.5 py-0.5 rounded-full inline-block"
+                      className="text-xs font-medium px-2.5 py-0.5 rounded-full inline-block whitespace-nowrap"
                       style={rolesPillStyle(sheet.allowed_roles)}
                     >
                       {rolesToLabel(sheet.allowed_roles)}
                     </span>
                   </div>
 
-                  {/* Activity count */}
-                  <span
-                    className={activityCount(sheet, actCounts) === 0 ? 'text-center' : 'text-center text-gray-600'}
-                    style={activityCount(sheet, actCounts) === 0 ? { color: '#d1d5db' } : undefined}
-                  >
-                    {activityCount(sheet, actCounts)}
-                  </span>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Actions — min-w-0 so the file pill can shrink inside the fixed
+                      140px track; the kebab is flex-shrink-0 and can never be squeezed
+                      out of reach. */}
+                  <div className="flex items-center gap-2 min-w-0">
                     {material ? (
                       // No Assign button at all on a file row: /api/admin/library/assign
                       // rejects any sheet whose audience is not 'student' with a 400, so
-                      // the button could only ever fail. A read-only link per file
-                      // instead — the index is the ORIGINAL position in attachments,
-                      // which is what /api/library-file/[sheetId]/[index] resolves.
+                      // the button could only ever fail. A read-only link instead — the
+                      // index is the ORIGINAL position in attachments, which is what
+                      // /api/library-file/[sheetId]/[index] resolves.
                       files.length === 0 ? (
                         <span
-                          className="text-xs font-medium px-2.5 py-1 rounded-md"
+                          className="text-xs font-medium px-2.5 py-1 rounded-md flex-shrink-0"
                           style={{ backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6' }}
                         >
                           No file
                         </span>
                       ) : (
-                        files.map(({ att, idx: fileIdx }) => (
+                        <>
+                          {/* Only the FIRST file is linked here. The attachment count is
+                              unbounded (the upload input is `multiple`) and this column
+                              is now a fixed track, so one pill per file would overflow it
+                              again from two files up. The rest are reachable WITH their
+                              names on the Edit modal's Files tab, each with its own View
+                              link — which is what the +N tooltip points at. */}
                           <a
-                            key={fileIdx}
-                            href={`/api/library-file/${sheet.id}/${fileIdx}`}
+                            href={`/api/library-file/${sheet.id}/${files[0].idx}`}
                             target="_blank"
                             rel="noreferrer"
-                            title={att.name}
-                            className="text-xs font-medium px-2.5 py-1 rounded-md"
+                            title={files[0].att.name}
+                            className="text-xs font-medium px-2.5 py-1 rounded-md truncate"
                             style={{ backgroundColor: '#FFF0E0', color: '#FF8303', border: '1px solid #FFD9A8', cursor: 'pointer' }}
                             onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#FFE4C4' }}
                             onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#FFF0E0' }}
                           >
-                            {attLabel(att)}
+                            {attLabel(files[0].att)}
                           </a>
-                        ))
+                          {files.length > 1 && (
+                            <span
+                              className="text-xs font-medium flex-shrink-0"
+                              style={{ color: '#9ca3af' }}
+                              title={`${files.length - 1} more ${files.length - 1 === 1 ? 'file' : 'files'} — open this row's Edit menu, Files tab, to see them all`}
+                            >
+                              +{files.length - 1}
+                            </span>
+                          )}
+                        </>
                       )
                     ) : (
                       <button
                         onClick={empty ? undefined : () => { setAssigningSheet(sheet); setShowAssign(true) }}
                         disabled={empty}
                         title={empty ? 'No content yet' : undefined}
-                        className="text-xs font-medium px-2.5 py-1 rounded-md"
+                        className="text-xs font-medium px-2.5 py-1 rounded-md flex-shrink-0"
                         style={
                           empty
                             ? { backgroundColor: '#f9fafb', color: '#d1d5db', border: '1px solid #f3f4f6', cursor: 'not-allowed' }
@@ -893,7 +931,7 @@ export default function LibraryAdminClient({ adminId }: { adminId: string }) {
                       </button>
                     )}
 
-                    <div className="relative" ref={openMenuId === sheet.id ? menuRef : null}>
+                    <div className="relative flex-shrink-0" ref={openMenuId === sheet.id ? menuRef : null}>
                       <button
                         onClick={() => setOpenMenuId(prev => (prev === sheet.id ? null : sheet.id))}
                         className="p-1 rounded text-gray-400 hover:text-gray-600"
