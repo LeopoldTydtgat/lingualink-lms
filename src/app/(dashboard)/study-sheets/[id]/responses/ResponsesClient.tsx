@@ -50,12 +50,13 @@ type Props = {
   // One of the reads the roster depends on failed upstream (assignments,
   // activities or activity_attempts). Distinct from an empty list: every figure
   // would read "Not started", so the rows are withheld and an error card is
-  // rendered INSTEAD of the empty state. Optional to keep the type additive; the
-  // page always passes it explicitly.
-  rosterLoadFailed?: boolean
+  // rendered INSTEAD of the empty state. Required (mirrors PastClassesClient.tsx)
+  // so every caller must decide explicitly rather than silently defaulting to
+  // "loaded fine".
+  rosterLoadFailed: boolean
   // Only the student-name lookup failed. The rows and every figure on them are
   // correct - the labels are not - so the list renders under a warning.
-  namesLoadFailed?: boolean
+  namesLoadFailed: boolean
 }
 
 // Locked portal palette.
@@ -295,8 +296,8 @@ export default function ResponsesClient({
   sheetCategory,
   sheetLevel,
   students,
-  rosterLoadFailed = false,
-  namesLoadFailed = false,
+  rosterLoadFailed,
+  namesLoadFailed,
 }: Props) {
   return (
     <div className="space-y-6">
