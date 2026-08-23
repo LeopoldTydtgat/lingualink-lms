@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction } from 'react'
+import { useState, useEffect, useRef, useMemo, Dispatch, SetStateAction, type MouseEvent as ReactMouseEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { localTimeToUtcMs } from '@/lib/availability'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
@@ -161,6 +161,16 @@ interface SpecificBlock {
   endMin: number
   recordId: string
   source: string | null
+  // Row type of the record this block came from. The red layer mixes timed
+  // 'specific' rows with whole-day 'holiday' ones and only the former may be
+  // selected, moved or resized, so the type has to travel with the block -
+  // the renderer must not have to re-read the availability array to tell them
+  // apart.
+  recordType: string
+  // The record's TRUE start instant, straight off start_at. Past-ness is an
+  // instant comparison and needs no timezone, so it never goes through the
+  // grid's minute frame.
+  startMs: number
 }
 
 interface ClassBlock {
@@ -197,7 +207,7 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date, tz
       for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
         const dayMid = startOfDayLocal(addDays(weekStart, dayIdx))
         if (dayMid >= spanStartSod && dayMid <= spanEndSod) {
-          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id, source: r.source ?? null })
+          blocks.push({ dayIdx, startMin: 0, endMin: 24 * 60, recordId: r.id, source: r.source ?? null, recordType: r.type, startMs: Date.parse(r.start_at) })
         }
       }
       continue
@@ -217,7 +227,7 @@ function expandSpecificBlocks(records: AvailabilityRecord[], weekStart: Date, tz
     const endMin = sameDay
       ? e.hour * 60 + e.minute
       : 24 * 60  // event spans midnight — clamp to end of day
-    blocks.push({ dayIdx, startMin, endMin, recordId: r.id, source: r.source ?? null })
+    blocks.push({ dayIdx, startMin, endMin, recordId: r.id, source: r.source ?? null, recordType: r.type, startMs: Date.parse(r.start_at) })
   }
   return blocks
 }
@@ -294,6 +304,11 @@ interface BlockSegment {
   // Carried from the source record so the red layer can branch on it without
   // re-reading the availability array.
   source: string | null
+  // Same purpose, for the two properties the move/resize gesture gates on: the
+  // record's type ('specific' is editable, 'holiday' is not) and its true start
+  // instant (a block that has already started may be deleted but not moved).
+  recordType: string
+  startMs: number
   dayIdx: number
   startMin: number
   endMin: number
@@ -340,6 +355,8 @@ function subtractClassIntervals(
     .map(g => ({
       recordId: run.recordId,
       source: run.source,
+      recordType: run.recordType,
+      startMs: run.startMs,
       dayIdx: run.dayIdx,
       startMin: g.start,
       endMin: g.end,
@@ -366,6 +383,102 @@ function segmentRadius(s: BlockSegment): string {
   if (s.roundTop) return '8px 8px 0 0'
   if (s.roundBottom) return '0 0 8px 8px'
   return '0'
+}
+
+// THE SINGLE GATE for select / move / resize. A block is editable only when it
+// is a MANUAL, timed 'specific' row:
+//   - google_sync rows belong to Google Calendar. Both the DELETE and the PATCH
+//     route refuse them outright, and the busy-sync cron replaces its own
+//     generation every run, so a move here would be undone within the quarter
+//     hour. They keep exactly the click they have today (the explainer modal).
+//   - 'holiday' rows are spans of calendar DATES painted as full columns; a
+//     30-minute nudge is meaningless for one, PATCH rejects them with a 400,
+//     and they are edited from the Holidays tab. They keep exactly the click
+//     they have today (straight to the delete confirmation).
+// Every gesture entry point and every affordance runs through this one test.
+function isEditableBlock(b: { source: string | null; recordType: string }): boolean {
+  return !isGoogleBlock(b.source) && b.recordType === 'specific'
+}
+
+// Minutes in a grid day. Equal to GRID_HEIGHT because the grid renders at
+// exactly 1px per minute (SLOT_HEIGHT 30px per 30 min), but the two are
+// different units and the move/resize clamps are minute maths, not pixels.
+const DAY_MINUTES = SLOT_COUNT * 30
+
+type BlockDragKind = 'move' | 'resize-top' | 'resize-bottom'
+
+interface BlockDragState {
+  kind: BlockDragKind
+  recordId: string
+  // Polarity of the record being dragged, so the ghost can borrow the same
+  // green/red visual language the drag-create preview uses without looking the
+  // record back up mid-gesture.
+  isAvailable: boolean
+  // The record's FULL range when the gesture began - never a segment's. A run
+  // split by a booked class renders as several segments sharing one recordId,
+  // and dragging any of them moves the whole record.
+  originDayIdx: number
+  originStartMin: number
+  originEndMin: number
+  // Where the pointer was on the grid at mousedown. A move tracks the delta
+  // from this point, so the block keeps the grab offset instead of snapping its
+  // top edge to the cursor.
+  grabDayIdx: number
+  grabMin: number
+  // Live snapped preview.
+  dayIdx: number
+  startMin: number
+  endMin: number
+  // False until the preview actually leaves the origin. A block picked up and
+  // dropped in place sends nothing.
+  changed: boolean
+}
+
+// The response body POST and PATCH /api/teacher/availability both return for a
+// timed 'specific' write: the row that was written, the ids the server
+// reconciled away, and the trimmed remainders it wrote back for the parts of
+// those rows that survived. For a PATCH, removed_ids ALSO carries the moved
+// row's own former id - the server implements a move as supersede/insert/delete
+// rather than an UPDATE, so the block comes back with a new id.
+//
+// Older deploys - and POST's general/holiday branch, which this component never
+// posts to - answer with the bare row instead. Detected on the presence of a
+// `data` key, which no availability row carries; that shape degrades to exactly
+// the pre-envelope behaviour, appending the one returned row and removing
+// nothing.
+//
+// ONE functional update for the whole envelope: a single pass over prev drops
+// the reconciled ids, then the remainders and the new row are appended.
+// filter() already returns a fresh array, so the pushes never mutate prev. The
+// functional form is load-bearing - a second write committed while this one's
+// await was in flight must merge into the LATEST state; the spread-from-closure
+// form resurrected the pre-write array and silently dropped the first block.
+//
+// Returns the written row (null when the payload carried none) so a caller can
+// follow it: after a move the selection has to hop to the new id.
+function applyAvailabilityEnvelope(
+  payload: unknown,
+  onAvailabilityChange: Dispatch<SetStateAction<AvailabilityRecord[]>>
+): AvailabilityRecord | null {
+  const envelope =
+    payload !== null && typeof payload === 'object' && 'data' in payload
+      ? (payload as { data?: AvailabilityRecord | null; removed_ids?: unknown; added?: unknown })
+      : null
+
+  const created = (envelope ? envelope.data : (payload as AvailabilityRecord | null)) ?? null
+  const removedIds: string[] = envelope && Array.isArray(envelope.removed_ids) ? envelope.removed_ids : []
+  const added: AvailabilityRecord[] = envelope && Array.isArray(envelope.added) ? envelope.added : []
+
+  if (!created && removedIds.length === 0 && added.length === 0) return null
+
+  const removed = new Set(removedIds)
+  onAvailabilityChange(prev => {
+    const next = prev.filter(a => !removed.has(a.id))
+    if (added.length > 0) next.push(...added)
+    if (created) next.push(created)
+    return next
+  })
+  return created
 }
 
 export default function DayToDay({ profile, availability, onAvailabilityChange }: Props) {
@@ -405,6 +518,24 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   const [exportMsg, setExportMsg] = useState('')
   const [actionError, setActionError] = useState('')
   const [drag, setDrag] = useState<null | { dayIdx: number; startSlot: number; endSlot: number }>(null)
+  // ─── Select / move / resize an existing manual 'specific' block ─────────────
+  // Selection is the gate for every edit gesture: a block must be selected
+  // before it can be dragged, which is what keeps a mousedown on a block
+  // unambiguous against the drag-create gesture on empty cells.
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
+  // The record whose PATCH is in flight. Doubles as the pending affordance and
+  // as the "ignore further gestures" latch - one availability write at a time.
+  const [movingRecordId, setMovingRecordId] = useState<string | null>(null)
+  // Live gesture. Mirrored into a ref because the window mousemove/mouseup
+  // handlers are attached ONCE per gesture (re-attaching them on every snap
+  // step would be pure churn) and must therefore read the current value rather
+  // than a mount-time closure. The state copy exists only so the ghost renders.
+  const [blockDrag, setBlockDrag] = useState<BlockDragState | null>(null)
+  const blockDragRef = useRef<BlockDragState | null>(null)
+  // One element per day column, filled by callback refs below. Read live at
+  // pointer time so the mapping stays correct while the grid is scrolled, and
+  // so nothing has to assume the grid template.
+  const dayColRefs = useRef<Array<HTMLDivElement | null>>([])
   const [now, setNow] = useState<Date>(() => new Date())
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week')
   const [monthAnchor, setMonthAnchor] = useState<Date>(() => {
@@ -418,12 +549,25 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // so it always fetches the week the user is currently viewing.
   const visibleRangeRef = useRef<{ start: string; end: string } | null>(null)
 
+  // Drop the selection and abandon any in-progress move/resize preview without
+  // writing anything. Called from Esc and from every navigation that changes
+  // which days are on screen - a selection that survived a week change would
+  // point at a block the teacher can no longer see.
+  function clearBlockSelection() {
+    blockDragRef.current = null
+    setBlockDrag(null)
+    setSelectedRecordId(null)
+  }
+
   // Esc clears mode (and any in-flight drag preview).
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         if (googleBlockInfo) { setGoogleBlockInfo(false); return }
         if (classDetail) { setClassDetail(null); return }
+        blockDragRef.current = null
+        setBlockDrag(null)
+        setSelectedRecordId(null)
         setMode(null)
         setDrag(null)
         isDraggingRef.current = false
@@ -504,8 +648,12 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // fire - only a ref reports the current ones.
   const availabilityBusyRef = useRef(false)
   useEffect(() => {
-    availabilityBusyRef.current = isSaving || isDeleting || drag !== null
-  }, [isSaving, isDeleting, drag])
+    // movingRecordId / blockDrag ride the same latch as the create path: a
+    // focus refresh landing mid-move would overwrite the array with rows that
+    // predate the PATCH.
+    availabilityBusyRef.current =
+      isSaving || isDeleting || drag !== null || movingRecordId !== null || blockDrag !== null
+  }, [isSaving, isDeleting, drag, movingRecordId, blockDrag])
 
   // Generation counter: a response is dropped once a newer refresh has started,
   // so two focus events in quick succession cannot land out of order.
@@ -803,6 +951,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   }
 
   function startDrag(dayIdx: number, slotIdx: number) {
+    // Mousedown on an empty cell is "click elsewhere": it drops any selection.
+    // Placed before the mode guard so it also fires with no mode armed, and
+    // before every other line so the drag-create path below is untouched - a
+    // selection is never live while a create drag runs.
+    setSelectedRecordId(null)
     if (!mode) return
     if (slotStartMs(dayIdx, slotIdx) < Date.now()) return
     isDraggingRef.current = true
@@ -878,39 +1031,11 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           }),
         })
         if (res.ok) {
-          const payload = await res.json()
-          // TWO RESPONSE SHAPES, BOTH SUPPORTED. The reconcile-aware route
-          // answers a 'specific' POST with an envelope
-          // { data, removed_ids, added }: the new block, the ids of the manual
-          // rows it superseded, and the trimmed remainders written back for the
-          // parts outside it. Any older deploy (and the general/holiday branch,
-          // which this component never posts) answers with the bare row.
-          // Detected on the presence of a `data` key, which no availability row
-          // carries; the bare shape degrades to exactly the previous behaviour -
-          // append the one returned row and remove nothing.
-          const envelope = payload !== null && typeof payload === 'object' && 'data' in payload
-          const created = (envelope ? payload.data : payload) as AvailabilityRecord | null
-          const removedIds: string[] =
-            envelope && Array.isArray(payload.removed_ids) ? payload.removed_ids : []
-          const added: AvailabilityRecord[] =
-            envelope && Array.isArray(payload.added) ? payload.added : []
-          // Functional update: a second drag committed while this await was in
-          // flight must merge into the LATEST state — the spread-from-closure
-          // form resurrected the pre-add array and silently dropped the first
-          // block. Mirrors GeneralAvailability's pattern.
-          if (created || removedIds.length > 0 || added.length > 0) {
-            const removed = new Set(removedIds)
-            onAvailabilityChange(prev => {
-              // Single pass over prev: drop the rows the server reconciled away,
-              // then append the remainders it wrote back and the new block.
-              // filter() already returns a fresh array, so the pushes never
-              // mutate prev.
-              const next = prev.filter(a => !removed.has(a.id))
-              if (added.length > 0) next.push(...added)
-              if (created) next.push(created)
-              return next
-            })
-          }
+          // Both response shapes handled in one place, shared with the
+          // move/resize commit below - see applyAvailabilityEnvelope. Behaviour
+          // for the bare-row shape is unchanged: append the one returned row,
+          // remove nothing, and skip the update entirely on an empty payload.
+          applyAvailabilityEnvelope(await res.json(), onAvailabilityChange)
         } else {
           const body = await res.json().catch(() => ({}))
           setActionError(body.error ?? 'Failed to save. Please try again.')
@@ -926,6 +1051,205 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     window.addEventListener('mouseup', onMouseUp)
     return () => window.removeEventListener('mouseup', onMouseUp)
   }, [drag, mode, weekDays, displayTz, profile.id, profile.timezone, onAvailabilityChange])
+
+  // ─── Move / resize an existing manual 'specific' block ──────────────────────
+
+  // Map a viewport point onto the grid: the day column under it and the nearest
+  // 30-minute mark. Rects are read live, so the mapping stays correct while the
+  // grid is scrolled and nothing has to assume the grid template. All seven
+  // columns share one grid row, so any mounted column supplies the vertical
+  // origin. Math.round (not floor) snaps at the half-way point of each half
+  // hour, which is what makes the drag feel like it follows the cursor.
+  function pointToGrid(clientX: number, clientY: number): { dayIdx: number; min: number } | null {
+    const rects = dayColRefs.current.map(el => (el ? el.getBoundingClientRect() : null))
+    const anchor = rects.find((r): r is DOMRect => r !== null)
+    if (!anchor) return null
+    let dayIdx = rects.findIndex(r => r !== null && clientX >= r.left && clientX < r.right)
+    // Sideways out of the grid (into the time gutter, or past Sunday): clamp to
+    // the nearest column so the gesture keeps tracking instead of freezing.
+    if (dayIdx === -1) dayIdx = clientX < anchor.left ? 0 : 6
+    return { dayIdx, min: Math.round((clientY - anchor.top) / SLOT_HEIGHT) * 30 }
+  }
+
+  // Start a move or a resize. Every test below is a hard gate, not just an
+  // affordance: isEditableBlock keeps google_sync and holiday rows out
+  // entirely, the selection test makes a block draggable only after it has been
+  // clicked once (which is what keeps this unambiguous against drag-create),
+  // movingRecordId serialises writes, and startMs refuses a block that has
+  // already begun - the PATCH route answers that with a 400.
+  function beginBlockGesture(
+    e: ReactMouseEvent<HTMLDivElement>,
+    kind: BlockDragKind,
+    b: BlockSegment,
+    isAvailable: boolean
+  ) {
+    if (!isEditableBlock(b)) return
+    if (selectedRecordId !== b.recordId) return
+    if (movingRecordId !== null) return
+    if (b.startMs < Date.now()) return
+    const pt = pointToGrid(e.clientX, e.clientY)
+    if (!pt) return
+    // Suppress the native text-drag/selection this gesture would otherwise
+    // start, and keep a resize-handle mousedown from also reading as a move.
+    e.preventDefault()
+    e.stopPropagation()
+    setActionError('')
+    // runStartMin/runEndMin, never the segment's own bounds: a run split by a
+    // booked class renders as several segments sharing one recordId, and
+    // dragging any one of them moves the whole record.
+    const next: BlockDragState = {
+      kind,
+      recordId: b.recordId,
+      isAvailable,
+      originDayIdx: b.dayIdx,
+      originStartMin: b.runStartMin,
+      originEndMin: b.runEndMin,
+      grabDayIdx: pt.dayIdx,
+      grabMin: pt.min,
+      dayIdx: b.dayIdx,
+      startMin: b.runStartMin,
+      endMin: b.runEndMin,
+      changed: false,
+    }
+    blockDragRef.current = next
+    setBlockDrag(next)
+  }
+
+  // PATCH the new range. Deliberately the SAME local->UTC path the create
+  // commit uses: the TARGET column's profile-tz calendar date plus the snapped
+  // wall-clock minutes, converted by localIsoToUtcIso through profile.timezone.
+  // Never toISOString on a local Date, and never the UTC display fallback -
+  // writing through a substitute frame would store shifted instants.
+  async function commitBlockDrag(g: BlockDragState) {
+    const dateStr = toLocalDateStr(weekDays[g.dayIdx])
+    const startStr = `${dateStr}T${pad(Math.floor(g.startMin / 60))}:${pad(g.startMin % 60)}:00`
+    const endStr = `${dateStr}T${pad(Math.floor(g.endMin / 60))}:${pad(g.endMin % 60)}:00`
+
+    let startAtUtc: string
+    let endAtUtc: string
+    try {
+      startAtUtc = localIsoToUtcIso(startStr, profile.timezone)
+      endAtUtc = localIsoToUtcIso(endStr, profile.timezone)
+    } catch {
+      setActionError('Could not save - the timezone on this account is invalid. Please contact admin.')
+      return
+    }
+
+    // Past guard, client side: the same rule startDrag applies to a create. A
+    // block dragged onto an earlier day is the case that reaches here. The
+    // server enforces it too (PATCH answers 400), so this exists to keep the
+    // request from being sent at all, not as the only gate.
+    if (Date.parse(startAtUtc) < Date.now()) {
+      setActionError('That would move the block into the past, so it was not saved.')
+      return
+    }
+
+    setMovingRecordId(g.recordId)
+    try {
+      const res = await fetch(`/api/teacher/availability/${g.recordId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_at: startAtUtc, end_at: endAtUtc }),
+      })
+      if (res.ok) {
+        // removed_ids carries the block's own former id, so the one functional
+        // update drops the old position and appends the new one together.
+        const written = applyAvailabilityEnvelope(await res.json(), onAvailabilityChange)
+        // A move is supersede + insert + delete server side, so the block comes
+        // back under a NEW id. Carry the selection across rather than leaving it
+        // pointing at a row that no longer exists.
+        if (written) setSelectedRecordId(written.id)
+      } else {
+        const body = await res.json().catch(() => ({}))
+        setActionError(body.error ?? 'Failed to move the block. Please try again.')
+      }
+    } catch {
+      setActionError('Failed to move the block. Please try again.')
+    } finally {
+      setMovingRecordId(null)
+    }
+  }
+
+  // Window-level move/up for the block gesture. Attached ONCE per gesture - the
+  // dep is the active flag alone - so a snap step does not re-register
+  // listeners; the handlers read blockDragRef for the live value instead of
+  // closing over state. Nothing else they close over can change mid-gesture:
+  // the mouse is down, so no week navigation or timezone change can land. That
+  // is why exhaustive-deps is suppressed rather than satisfied here - listing
+  // weekDays/profile would re-attach on every render for no gain.
+  const blockDragActive = blockDrag !== null
+  useEffect(() => {
+    if (!blockDragActive) return
+
+    function onMove(e: MouseEvent) {
+      const g = blockDragRef.current
+      if (!g) return
+      const pt = pointToGrid(e.clientX, e.clientY)
+      if (!pt) return
+
+      let dayIdx = g.originDayIdx
+      let startMin = g.originStartMin
+      let endMin = g.originEndMin
+
+      if (g.kind === 'move') {
+        // Duration preserved exactly: the start is clamped into the day and the
+        // end follows it. Horizontal travel is a column delta, so a block can
+        // cross to another day of the displayed week.
+        const duration = g.originEndMin - g.originStartMin
+        dayIdx = Math.max(0, Math.min(6, g.originDayIdx + (pt.dayIdx - g.grabDayIdx)))
+        startMin = Math.max(0, Math.min(DAY_MINUTES - duration, g.originStartMin + (pt.min - g.grabMin)))
+        endMin = startMin + duration
+      } else if (g.kind === 'resize-top') {
+        // Vertical only, same day, far edge fixed, minimum one 30-minute slot.
+        startMin = Math.max(0, Math.min(g.originEndMin - 30, pt.min))
+      } else {
+        endMin = Math.min(DAY_MINUTES, Math.max(g.originStartMin + 30, pt.min))
+      }
+
+      // Snapping means most mousemoves land on the same half hour; bailing here
+      // keeps the re-render count to one per snap step rather than one per pixel.
+      if (dayIdx === g.dayIdx && startMin === g.startMin && endMin === g.endMin) return
+      const next: BlockDragState = {
+        ...g,
+        dayIdx,
+        startMin,
+        endMin,
+        changed:
+          dayIdx !== g.originDayIdx ||
+          startMin !== g.originStartMin ||
+          endMin !== g.originEndMin,
+      }
+      blockDragRef.current = next
+      setBlockDrag(next)
+    }
+
+    function onUp() {
+      const g = blockDragRef.current
+      blockDragRef.current = null
+      setBlockDrag(null)
+      // Picked up and dropped in place: nothing to say to the server.
+      if (!g || !g.changed) return
+      void commitBlockDrag(g)
+    }
+
+    // Alt-tabbing away mid-drag abandons the gesture rather than leaving a
+    // stuck ghost behind, and writes nothing. Same abort contract
+    // GeneralAvailability uses for its drag.
+    function onAbort() {
+      blockDragRef.current = null
+      setBlockDrag(null)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('blur', onAbort)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('blur', onAbort)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockDragActive])
 
   async function confirmDelete() {
     if (!pendingDelete) return
@@ -1014,6 +1338,38 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
     ).length
   }, [dragPreview, mode, classBlocksList])
 
+  // Ghost for a live move/resize: the record's whole prospective range, in the
+  // column it would land in. The real block never leaves its stored position
+  // until the server confirms, so a failed PATCH needs no rollback - clearing
+  // the ghost is the rollback.
+  const blockDragPreview = useMemo(() => {
+    if (!blockDrag) return null
+    const topPx = pxFromMin(blockDrag.startMin)
+    return {
+      dayIdx: blockDrag.dayIdx,
+      topPx,
+      heightPx: pxFromMin(blockDrag.endMin) - topPx,
+      startMin: blockDrag.startMin,
+      endMin: blockDrag.endMin,
+      isAvailable: blockDrag.isAvailable,
+    }
+  }, [blockDrag])
+
+  // Where the selected record's action button hangs. The label-host segment is
+  // the record's largest visible piece, so it is the one with room beside it;
+  // the button itself renders as a sibling of the blocks rather than a child,
+  // because a block sets overflow:hidden and a short one would clip it away.
+  // Null when nothing is selected, or when the selected id has been retired
+  // under us (a delete, or a reconcile from another write).
+  const selectedAnchor = useMemo(() => {
+    if (!selectedRecordId) return null
+    const own = [...availabilitySegments.green, ...availabilitySegments.red]
+      .filter(s => s.recordId === selectedRecordId)
+    if (own.length === 0) return null
+    const host = own.find(s => s.labelHost) ?? own[0]
+    return { dayIdx: host.dayIdx, topPx: pxFromMin(host.startMin) }
+  }, [selectedRecordId, availabilitySegments])
+
   // Now-indicator position from the PROFILE-TZ wall clock, matching the frame
   // the blocks render in.
   const nowMin = nowParts.hour * 60 + nowParts.minute
@@ -1029,12 +1385,14 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   function gotoWeek(delta: number) {
     setDrag(null)
     isDraggingRef.current = false
+    clearBlockSelection()
     setWeekStart(addDays(weekStart, delta))
   }
 
   function goToToday() {
     setDrag(null)
     isDraggingRef.current = false
+    clearBlockSelection()
     setWeekStart(getMondayWeekStart(tzTodayDate(displayTz)))
   }
 
@@ -1053,6 +1411,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   // re-clicking Month while already in month mode does not re-anchor.
   function switchToMonth() {
     if (viewMode === 'month') return
+    clearBlockSelection()
     const today = tzTodayDate(displayTz)
     const todaySod = startOfDayLocal(today)
     const weekStartSod = startOfDayLocal(weekStart)
@@ -1070,6 +1429,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
   function openWeekForDay(day: Date) {
     setDrag(null)
     isDraggingRef.current = false
+    clearBlockSelection()
     setWeekStart(getMondayWeekStart(day))
     setViewMode('week')
   }
@@ -1334,7 +1694,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
           {weekDays.map((_day, dayIdx) => {
             const isToday = dayIdx === todayIdx
             return (
-              <div key={`d-${dayIdx}`} style={{
+              <div key={`d-${dayIdx}`} ref={el => { dayColRefs.current[dayIdx] = el }} style={{
                 gridRow: 2,
                 gridColumn: dayIdx + 2,
                 position: 'relative',
@@ -1400,10 +1760,26 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   const top = pxFromMin(b.startMin)
                   const height = pxFromMin(b.endMin) - top
                   if (height <= 0) return null
+                  // Green holds only type='specific' rows (the memo filters on
+                  // it), so editable here comes down to source - a google_sync
+                  // row keeps its unchanged click-to-delete path below.
+                  const editable = isEditableBlock(b)
+                  const selected = editable && b.recordId === selectedRecordId
+                  const saving = movingRecordId === b.recordId
+                  // Already started: still selectable and deletable, never
+                  // movable. Read off the 60s now tick so a block crossing its
+                  // start time loses the affordance without a reload.
+                  const past = b.startMs < now.getTime()
+                  const draggable = selected && !past && movingRecordId === null
                   return (
                     <div
                       key={`av-${b.recordId}-${i}`}
-                      onClick={() => { setActionError(''); setPendingDelete(b.recordId) }}
+                      onMouseDown={draggable ? e => beginBlockGesture(e, 'move', b, true) : undefined}
+                      onClick={() => {
+                        setActionError('')
+                        if (!editable) { setSelectedRecordId(null); setPendingDelete(b.recordId); return }
+                        setSelectedRecordId(b.recordId)
+                      }}
                       style={{
                         position: 'absolute',
                         top, left: '2px', right: '2px', height,
@@ -1411,13 +1787,35 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         border: '1px solid #BBF7D0',
                         borderLeft: '3px solid #16A34A',
                         borderRadius: segmentRadius(b),
-                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                        boxShadow: selected
+                          ? '0 1px 2px rgba(0,0,0,0.06), 0 0 0 2px #16A34A'
+                          : '0 1px 2px rgba(0,0,0,0.06)',
                         padding: '3px 6px',
-                        cursor: 'pointer',
+                        cursor: saving ? 'progress' : (draggable ? 'grab' : 'pointer'),
+                        opacity: saving ? 0.55 : 1,
                         zIndex: 2,
                         overflow: 'hidden',
                       }}
                     >
+                      {/* Resize handles. Only on a selected, movable block, and
+                          only at an edge that is the RUN's true edge - a
+                          booking cut is not a resizable boundary. */}
+                      {draggable && b.roundTop && (
+                        <div
+                          onMouseDown={e => beginBlockGesture(e, 'resize-top', b, true)}
+                          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '7px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
+                        >
+                          <div style={{ width: '22px', height: '3px', borderRadius: '2px', backgroundColor: '#16A34A', opacity: 0.65 }} />
+                        </div>
+                      )}
+                      {draggable && b.roundBottom && (
+                        <div
+                          onMouseDown={e => beginBlockGesture(e, 'resize-bottom', b, true)}
+                          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '7px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
+                        >
+                          <div style={{ width: '22px', height: '3px', borderRadius: '2px', backgroundColor: '#16A34A', opacity: 0.65 }} />
+                        </div>
+                      )}
                       {b.labelHost && (height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
@@ -1460,14 +1858,26 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   // the label, and where the click goes. Manual blocks render and
                   // behave exactly as before.
                   const isGoogle = isGoogleBlock(b.source)
+                  // The red layer mixes timed 'specific' rows with whole-day
+                  // 'holiday' ones and with google_sync rows. Only the first
+                  // kind is editable; the other two keep the exact click they
+                  // have today (the explainer for google, the delete
+                  // confirmation for a holiday) and get no drag affordance.
+                  const editable = isEditableBlock(b)
+                  const selected = editable && b.recordId === selectedRecordId
+                  const saving = movingRecordId === b.recordId
+                  const past = b.startMs < now.getTime()
+                  const draggable = selected && !past && movingRecordId === null
                   return (
                     <div
                       key={`un-${b.recordId}-${i}`}
                       title={isGoogle ? 'From Google Calendar - manage this event in Google Calendar' : undefined}
+                      onMouseDown={draggable ? e => beginBlockGesture(e, 'move', b, false) : undefined}
                       onClick={() => {
                         setActionError('')
-                        if (isGoogle) { setGoogleBlockInfo(true); return }
-                        setPendingDelete(b.recordId)
+                        if (isGoogle) { setSelectedRecordId(null); setGoogleBlockInfo(true); return }
+                        if (!editable) { setSelectedRecordId(null); setPendingDelete(b.recordId); return }
+                        setSelectedRecordId(b.recordId)
                       }}
                       style={{
                         position: 'absolute',
@@ -1476,12 +1886,30 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                         border: '1px solid #FECACA',
                         borderLeft: '3px solid #DC2626',
                         borderRadius: segmentRadius(b),
+                        boxShadow: selected ? '0 0 0 2px #DC2626' : undefined,
                         padding: '3px 6px',
-                        cursor: 'pointer',
+                        cursor: saving ? 'progress' : (draggable ? 'grab' : 'pointer'),
+                        opacity: saving ? 0.55 : 1,
                         zIndex: 2,
                         overflow: 'hidden',
                       }}
                     >
+                      {draggable && b.roundTop && (
+                        <div
+                          onMouseDown={e => beginBlockGesture(e, 'resize-top', b, false)}
+                          style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '7px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
+                        >
+                          <div style={{ width: '22px', height: '3px', borderRadius: '2px', backgroundColor: '#DC2626', opacity: 0.65 }} />
+                        </div>
+                      )}
+                      {draggable && b.roundBottom && (
+                        <div
+                          onMouseDown={e => beginBlockGesture(e, 'resize-bottom', b, false)}
+                          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '7px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 5 }}
+                        >
+                          <div style={{ width: '22px', height: '3px', borderRadius: '2px', backgroundColor: '#DC2626', opacity: 0.65 }} />
+                        </div>
+                      )}
                       {b.labelHost && (height >= 44 ? (
                         <>
                           <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
@@ -1521,7 +1949,7 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   // the browser frame into profile-tz minutes).
                   const isPastClass = b.endMs < now.getTime()
                   return (
-                    <div key={`cl-${i}`} title={b.studentName} onClick={() => setClassDetail({ studentName: b.studentName, dayIdx: b.dayIdx, startMin: b.startMin, endMin: b.endMin })} style={{
+                    <div key={`cl-${i}`} title={b.studentName} onClick={() => { setSelectedRecordId(null); setClassDetail({ studentName: b.studentName, dayIdx: b.dayIdx, startMin: b.startMin, endMin: b.endMin }) }} style={{
                       position: 'absolute',
                       top, left: '2px', right: '2px', height,
                       backgroundColor: isPastClass ? '#F9FAFB' : '#FFF3E0',
@@ -1574,6 +2002,64 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
                   </div>
                 )}
 
+                {/* Move/resize ghost. Same visual language as the drag-create
+                    preview above, but keyed on the dragged record's own
+                    polarity rather than the armed mode - a move has no mode. */}
+                {blockDragPreview && blockDragPreview.dayIdx === dayIdx && blockDragPreview.heightPx > 0 && (
+                  <div style={{
+                    position: 'absolute',
+                    top: blockDragPreview.topPx,
+                    height: blockDragPreview.heightPx,
+                    left: '2px', right: '2px',
+                    background: blockDragPreview.isAvailable
+                      ? 'rgba(220,252,231,0.85)'
+                      : 'repeating-linear-gradient(45deg, rgba(220,38,38,0.16) 0 6px, rgba(220,38,38,0.04) 6px 12px)',
+                    border: `1px dashed ${blockDragPreview.isAvailable ? '#16A34A' : '#DC2626'}`,
+                    borderRadius: '8px',
+                    pointerEvents: 'none',
+                    zIndex: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: blockDragPreview.isAvailable ? '#15803D' : '#B91C1C',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                  }}>
+                    {timeRangeLabel(blockDragPreview.startMin, blockDragPreview.endMin)}
+                  </div>
+                )}
+
+                {/* Selected block's actions. A sibling of the blocks, not a
+                    child: a block sets overflow:hidden, so a short one (or one
+                    cut down by a booking) would clip the button away and leave
+                    the record undeletable. zIndex 6 clears every layer. */}
+                {selectedAnchor && selectedAnchor.dayIdx === dayIdx && (
+                  <div style={{ position: 'absolute', top: selectedAnchor.topPx + 3, right: '5px', zIndex: 6 }}>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        setActionError('')
+                        if (selectedRecordId) setPendingDelete(selectedRecordId)
+                      }}
+                      disabled={movingRecordId !== null}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #FECACA',
+                        backgroundColor: '#ffffff',
+                        color: '#B91C1C',
+                        fontSize: '10.5px',
+                        fontWeight: 600,
+                        lineHeight: 1.5,
+                        cursor: movingRecordId !== null ? 'progress' : 'pointer',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.10)',
+                      }}
+                    >
+                      {movingRecordId !== null ? 'Saving...' : 'Delete'}
+                    </button>
+                  </div>
+                )}
+
                 {/* Now indicator (today only) - line plus a dot on its left end */}
                 {isToday && nowPx !== null && (
                   <>
@@ -1606,7 +2092,9 @@ export default function DayToDay({ profile, availability, onAvailabilityChange }
       </div>
 
       <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '12px' }}>
-        Click any green or red block to remove it. Booked classes cannot be removed here.
+        Click a green or red block to select it, then drag it to move it or drag its top or bottom edge to resize.
+        Use Delete on the selected block to remove it. Blocks that have already started can be deleted but not moved.
+        Booked classes cannot be removed here.
         {hasGoogleBlock && ' Blocks marked with a lock come from Google Calendar and are managed there.'}
       </p>
         </>
