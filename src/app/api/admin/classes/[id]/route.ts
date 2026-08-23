@@ -6,7 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent, teacherReassignedEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
-import { deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
+import { deleteLessonGoogleEvent, updateLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { getBillability, isCancelledStatus } from '@/lib/billing/billability'
@@ -545,6 +545,32 @@ export async function PATCH(
         console.error('CRITICAL: Teams meeting orphan fallback creation failed', { lesson_id: id, error: graphError })
       }
     }
+  }
+
+  // GCAL REBUILD 2. Move the Google Calendar block onto the new time - or put
+  // one there if this lesson never got one. Non-blocking by construction:
+  // updateLessonGoogleEvent never throws and returns nothing, so there is no
+  // branch here and no failure of it can change what the admin is told.
+  //
+  // GATED ON timeChanged || durationChanged, NOT on needsGraphUpdate, and the
+  // difference is deliberate. needsGraphUpdate also covers a teacher-only swap,
+  // which Teams genuinely must resync because its meeting subject names the
+  // teacher. The Google block does not: buildLessonEventSummary is the
+  // student's first name and nothing else, and updateGoogleEvent sends start
+  // and end and nothing else. Firing on a swap would spend a token refresh and
+  // an API call to PATCH the times the event already has.
+  //
+  // Sits after admin_edit_lesson_atomic because every error branch of that RPC
+  // returns, so reaching this line means the new time and duration are already
+  // committed to the database and the calendar is the only thing left to catch
+  // up.
+  if (timeChanged || durationChanged) {
+    await updateLessonGoogleEvent({
+      lessonId: id,
+      studentName,
+      scheduledAtIso: newScheduledAt,
+      durationMinutes: newDuration,
+    })
   }
 
   if (timeChanged) {

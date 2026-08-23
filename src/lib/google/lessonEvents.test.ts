@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * GCAL REBUILD 2 step 4 regression net for deleteLessonGoogleEvent.
+ * GCAL REBUILD 2 regression net for deleteLessonGoogleEvent (step 4) and
+ * updateLessonGoogleEvent (step 5b).
  *
- * The helper runs on all three cancel paths after the cancellation has already
- * committed, so the properties worth pinning are the ones a caller can never
- * observe: that the no-pointer case costs Google nothing at all, that the
- * pointer is cleared ONLY once Google has confirmed the delete, and that a
- * failure anywhere in here stays a log line instead of a thrown error.
+ * Both helpers run after their caller's database change has already committed,
+ * so the properties worth pinning are the ones a caller can never observe: that
+ * the no-pointer cases cost Google nothing at all, that the pointer is written
+ * or cleared ONLY when Google has confirmed the write, and that a failure
+ * anywhere in here stays a log line instead of a thrown error.
  */
 
 // -- Fake service-role client ------------------------------------------------
@@ -28,6 +29,24 @@ const store = vi.hoisted(() => ({
   refreshCalls: [] as string[],
   deleteCalls: [] as Array<{ accessToken: string; eventId: string }>,
   deleteResult: { ok: true } as { ok: true } | { ok: false; error: string },
+  createCalls: [] as Array<{
+    accessToken: string
+    summary: string
+    startIso: string
+    endIso: string
+    timezone: string
+  }>,
+  createResult: { ok: true, eventId: 'evt-new' } as
+    | { ok: true; eventId: string }
+    | { ok: false; error: string },
+  updateEventCalls: [] as Array<{
+    accessToken: string
+    eventId: string
+    startIso: string
+    endIso: string
+    timezone: string
+  }>,
+  updateEventResult: { ok: true } as { ok: true } | { ok: false; error: string },
 }))
 
 vi.mock('@/lib/supabase/admin', () => {
@@ -106,8 +125,26 @@ vi.mock('@/lib/google/oauth', () => ({
 }))
 
 vi.mock('@/lib/google/calendar', () => ({
-  // Imported by the module under test; unused on the delete path.
-  createGoogleEvent: vi.fn(),
+  createGoogleEvent: (options: {
+    accessToken: string
+    summary: string
+    startIso: string
+    endIso: string
+    timezone: string
+  }) => {
+    store.createCalls.push(options)
+    return Promise.resolve(store.createResult)
+  },
+  updateGoogleEvent: (options: {
+    accessToken: string
+    eventId: string
+    startIso: string
+    endIso: string
+    timezone: string
+  }) => {
+    store.updateEventCalls.push(options)
+    return Promise.resolve(store.updateEventResult)
+  },
   deleteGoogleEvent: (options: { accessToken: string; eventId: string }) => {
     store.deleteCalls.push(options)
     return Promise.resolve(store.deleteResult)
@@ -115,9 +152,13 @@ vi.mock('@/lib/google/calendar', () => ({
 }))
 
 // Import AFTER the mocks are registered.
-import { deleteLessonGoogleEvent } from './lessonEvents'
+import { deleteLessonGoogleEvent, updateLessonGoogleEvent } from './lessonEvents'
 
 const LESSON_ID = 'lesson-1'
+// One hour, chosen so the end instant is obvious by eye in every assertion.
+const NEW_START_ISO = '2026-09-01T10:00:00.000Z'
+const NEW_END_ISO = '2026-09-01T11:00:00.000Z'
+const NEW_DURATION = 60
 
 describe('deleteLessonGoogleEvent', () => {
   beforeEach(() => {
@@ -244,5 +285,191 @@ describe('deleteLessonGoogleEvent', () => {
     expect(store.deleteCalls).toEqual([])
     expect(store.updates).toEqual([])
     expect(console.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateLessonGoogleEvent', () => {
+  beforeEach(() => {
+    store.lesson = { id: LESSON_ID, google_event_id: 'evt-123' }
+    store.lessonError = null
+    store.lessonSelects = []
+    store.connections = [{ id: 'conn-1', refresh_token: 'refresh-abc' }]
+    store.connectionSelects = []
+    store.updates = []
+    store.updateError = null
+    store.updateRows = [{ id: LESSON_ID }]
+    store.refreshCalls = []
+    store.createCalls = []
+    store.createResult = { ok: true, eventId: 'evt-new' }
+    store.updateEventCalls = []
+    store.updateEventResult = { ok: true }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('moves the stored event and leaves the pointer alone', async () => {
+    await updateLessonGoogleEvent({
+      lessonId: LESSON_ID,
+      studentName: 'Marta Ruiz',
+      scheduledAtIso: NEW_START_ISO,
+      durationMinutes: NEW_DURATION,
+    })
+
+    expect(store.updateEventCalls).toEqual([
+      {
+        accessToken: 'access-token-abc',
+        eventId: 'evt-123',
+        startIso: NEW_START_ISO,
+        endIso: NEW_END_ISO,
+        timezone: 'UTC',
+      },
+    ])
+    // The event id has not changed, so there is nothing to write back - and a
+    // create here would put a SECOND block on her calendar for one class.
+    expect(store.createCalls).toEqual([])
+    expect(store.updates).toEqual([])
+    // Explicit column lists on both reads — no select('*') on lessons.
+    expect(store.lessonSelects).toEqual(['id, google_event_id'])
+    expect(store.connectionSelects).toEqual(['id, refresh_token'])
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it('keeps the pointer when Google refuses the move', async () => {
+    store.updateEventResult = { ok: false, error: 'Google Calendar returned HTTP 404' }
+
+    await expect(
+      updateLessonGoogleEvent({
+        lessonId: LESSON_ID,
+        studentName: 'Marta Ruiz',
+        scheduledAtIso: NEW_START_ISO,
+        durationMinutes: NEW_DURATION,
+      })
+    ).resolves.toBeUndefined()
+
+    expect(store.updateEventCalls).toHaveLength(1)
+    // The block is still sitting at its OLD time and this id is the only handle
+    // on it. Nulling it would strand it there permanently.
+    expect(store.updates).toEqual([])
+    expect(store.createCalls).toEqual([])
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('creates the block and persists the new id when the lesson has no pointer', async () => {
+    store.lesson = { id: LESSON_ID, google_event_id: null }
+
+    await updateLessonGoogleEvent({
+      lessonId: LESSON_ID,
+      studentName: 'Marta Ruiz',
+      scheduledAtIso: NEW_START_ISO,
+      durationMinutes: NEW_DURATION,
+    })
+
+    expect(store.updateEventCalls).toEqual([])
+    expect(store.createCalls).toEqual([
+      {
+        accessToken: 'access-token-abc',
+        // First name only, from the one shared title builder.
+        summary: 'English class - Marta',
+        startIso: NEW_START_ISO,
+        endIso: NEW_END_ISO,
+        timezone: 'UTC',
+      },
+    ])
+    expect(store.updates).toEqual([
+      {
+        values: { google_event_id: 'evt-new' },
+        eqs: [['id', LESSON_ID]],
+        returning: ['id'],
+      },
+    ])
+  })
+
+  it('creates the block when the stored event id is blank', async () => {
+    store.lesson = { id: LESSON_ID, google_event_id: '   ' }
+
+    await updateLessonGoogleEvent({
+      lessonId: LESSON_ID,
+      studentName: 'Marta Ruiz',
+      scheduledAtIso: NEW_START_ISO,
+      durationMinutes: NEW_DURATION,
+    })
+
+    expect(store.updateEventCalls).toEqual([])
+    expect(store.createCalls).toHaveLength(1)
+    expect(store.updates).toHaveLength(1)
+  })
+
+  it('makes no Google request at all when the timing is unusable', async () => {
+    await updateLessonGoogleEvent({
+      lessonId: LESSON_ID,
+      studentName: 'Marta Ruiz',
+      scheduledAtIso: 'not-a-date',
+      durationMinutes: NEW_DURATION,
+    })
+
+    // The guard sits above the lesson read, so not even the database is
+    // touched: new Date(NaN).toISOString() would otherwise throw only after a
+    // read and a token refresh had been spent on it.
+    expect(store.lessonSelects).toEqual([])
+    expect(store.connectionSelects).toEqual([])
+    expect(store.refreshCalls).toEqual([])
+    expect(store.updateEventCalls).toEqual([])
+    expect(store.createCalls).toEqual([])
+    expect(store.updates).toEqual([])
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('makes no Google request when the duration is not a positive number', async () => {
+    await updateLessonGoogleEvent({
+      lessonId: LESSON_ID,
+      studentName: 'Marta Ruiz',
+      scheduledAtIso: NEW_START_ISO,
+      durationMinutes: 0,
+    })
+
+    expect(store.lessonSelects).toEqual([])
+    expect(store.updateEventCalls).toEqual([])
+    expect(store.createCalls).toEqual([])
+  })
+
+  it('does not throw and makes no Google request when the lesson row is gone', async () => {
+    store.lesson = null
+
+    await expect(
+      updateLessonGoogleEvent({
+        lessonId: LESSON_ID,
+        studentName: 'Marta Ruiz',
+        scheduledAtIso: NEW_START_ISO,
+        durationMinutes: NEW_DURATION,
+      })
+    ).resolves.toBeUndefined()
+
+    expect(store.refreshCalls).toEqual([])
+    expect(store.updateEventCalls).toEqual([])
+    expect(store.createCalls).toEqual([])
+    expect(store.updates).toEqual([])
+    // A missing row straight after a successful edit IS anomalous — logged.
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('does not throw when the create-if-missing pointer UPDATE errors', async () => {
+    store.lesson = { id: LESSON_ID, google_event_id: null }
+    store.updateError = { message: 'update exploded' }
+
+    await expect(
+      updateLessonGoogleEvent({
+        lessonId: LESSON_ID,
+        studentName: 'Marta Ruiz',
+        scheduledAtIso: NEW_START_ISO,
+        durationMinutes: NEW_DURATION,
+      })
+    ).resolves.toBeUndefined()
+
+    expect(store.createCalls).toHaveLength(1)
+    expect(store.updates).toHaveLength(1)
+    expect(console.error).toHaveBeenCalled()
   })
 })

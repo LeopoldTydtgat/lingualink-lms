@@ -1,23 +1,25 @@
 // Outbound Google Calendar writes for one lesson (GCAL REBUILD 2).
 //
-// Two helpers, five callers: the admin create-class route and the student
+// Three helpers, seven call sites: the admin create-class route and the student
 // book/reschedule route mirror a new lesson onto the calendar; the teacher,
-// student and admin cancel paths take it back off. Every one of them is a
-// user-facing request path that has ALREADY committed the lesson row and
-// already moved hours by the time this runs, so the contract here is narrow and
-// absolute: never throw, never block, never change what the caller returns. A
-// Google outage must cost a calendar block, never a paying student's booking
+// student and admin cancel paths - plus the student reschedule, taking the old
+// row's block off - clear it again; the admin class edit moves it. Every one of
+// them is a user-facing request path that has ALREADY committed the lesson row
+// and already moved hours by the time this runs, so the contract here is narrow
+// and absolute: never throw, never block, never change what the caller returns.
+// A Google outage must cost a calendar block, never a paying student's booking
 // and never a cancellation.
 //
-// CREATE AND DELETE ONLY. Nothing here MOVES an event: the reschedule's
-// old-event update is a separate commit with its own failure modes.
+// CREATE, UPDATE AND DELETE. The update moves an existing block onto a new time
+// and writes a missing one; nothing here ever moves an event BETWEEN lessons -
+// every helper works only on the id stored on the lesson row it was handed.
 //
 // Server-only. It reads google_calendar_connections through the service role
 // and holds a live bearer token; nothing here may reach the browser bundle.
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { refreshGoogleAccessToken } from '@/lib/google/oauth'
-import { createGoogleEvent, deleteGoogleEvent } from '@/lib/google/calendar'
+import { createGoogleEvent, deleteGoogleEvent, updateGoogleEvent } from '@/lib/google/calendar'
 
 /**
  * The ONE place the block's title is built.
@@ -42,8 +44,9 @@ function buildLessonEventSummary(studentName: string): string {
  * A live bearer token for the one connected calendar, or null when there is
  * nothing to write to.
  *
- * The ONE place the connection is resolved, so the create and delete helpers
- * can never disagree about whose calendar a lesson belongs on. Never throws:
+ * The ONE place the connection is resolved, so the create, update and
+ * delete helpers can never disagree about whose calendar a lesson belongs
+ * on. Never throws:
  * every null is either already logged here or a deliberate silence, and the
  * caller's only correct response to any of them is to return.
  *
@@ -125,6 +128,52 @@ async function resolveGoogleAccessToken(lessonId: string): Promise<string | null
 }
 
 /**
+ * Writes a freshly created event's id onto the lesson row.
+ *
+ * The ONE place the pointer is set, shared by createLessonGoogleEvent and the
+ * create-if-missing branch of updateLessonGoogleEvent, so the two can never
+ * disagree about what an orphan is or how it is reported.
+ *
+ * The event id is the ONLY handle on the block. Service role: lessons grants
+ * INSERT/UPDATE to service_role and postgres only.
+ *
+ * Never throws on its own account, and both callers hold it inside their outer
+ * catch regardless. Every failure here is a CRITICAL line naming both ids.
+ */
+async function writeLessonEventPointer(
+  supabase: ReturnType<typeof createAdminClient>,
+  lessonId: string,
+  eventId: string
+): Promise<void> {
+  const { data: updated, error: updateError } = await supabase
+    .from('lessons')
+    .update({ google_event_id: eventId })
+    .eq('id', lessonId)
+    .select('id')
+
+  if (updateError) {
+    // The event EXISTS on her calendar and nothing in the database points at
+    // it, so no cancellation or reschedule cleanup can ever find it. This log
+    // line is the only pointer that exists - it must name both ids.
+    console.error(
+      'CRITICAL: orphaned Google Calendar event - created but the lesson pointer could not be written:',
+      { google_event_id: eventId, lesson_id: lessonId, error: updateError }
+    )
+    return
+  }
+
+  if (!updated || updated.length === 0) {
+    // Same orphan, different cause: the UPDATE ran but matched no row (the
+    // lesson was deleted from under us). Nothing to self-heal against, so
+    // again the log is the only record.
+    console.error(
+      'CRITICAL: orphaned Google Calendar event - the lesson pointer UPDATE matched 0 rows:',
+      { google_event_id: eventId, lesson_id: lessonId }
+    )
+  }
+}
+
+/**
  * Mirrors one lesson onto the connected Google Calendar as a private
  * time-block, then stores the event id on the lesson row.
  *
@@ -199,41 +248,164 @@ export async function createLessonGoogleEvent(options: {
     }
 
     // ---- 4. The pointer -----------------------------------------------------
-    // The event id is the ONLY handle on the block. Service role: lessons
-    // grants INSERT/UPDATE to service_role and postgres only.
-    const supabase = createAdminClient()
-    const { data: updated, error: updateError } = await supabase
-      .from('lessons')
-      .update({ google_event_id: created.eventId })
-      .eq('id', lessonId)
-      .select('id')
-
-    if (updateError) {
-      // The event EXISTS on her calendar and nothing in the database points at
-      // it, so no cancellation or reschedule cleanup can ever find it. This log
-      // line is the only pointer that exists - it must name both ids.
-      console.error(
-        'CRITICAL: orphaned Google Calendar event - created but the lesson pointer could not be written:',
-        { google_event_id: created.eventId, lesson_id: lessonId, error: updateError }
-      )
-      return
-    }
-
-    if (!updated || updated.length === 0) {
-      // Same orphan, different cause: the UPDATE ran but matched no row (the
-      // lesson was deleted from under us). Nothing to self-heal against, so
-      // again the log is the only record.
-      console.error(
-        'CRITICAL: orphaned Google Calendar event - the lesson pointer UPDATE matched 0 rows:',
-        { google_event_id: created.eventId, lesson_id: lessonId }
-      )
-    }
+    await writeLessonEventPointer(createAdminClient(), lessonId, created.eventId)
   } catch (unexpected) {
     // The outer guarantee. Anything unforeseen in here dies quietly rather than
     // reaching a caller whose lesson is already committed and whose hours have
     // already moved.
     console.error(
       `[google/lessonEvents] unexpected failure while creating the event for lesson ${lessonId}:`,
+      unexpected
+    )
+  }
+}
+
+/**
+ * Moves the Google Calendar block for an edited lesson onto its new time, and
+ * puts one there if the lesson has never had one.
+ *
+ * Same contract as its two siblings: NEVER THROWS, returns nothing, and the
+ * admin edit route calls it without branching. By the time this runs
+ * admin_edit_lesson_atomic has already committed the new time and duration, so
+ * a Google outage must cost a block left at the old time and nothing else.
+ *
+ * The title is built ONLY on the create-if-missing branch. updateGoogleEvent
+ * deliberately never resends a summary, so a block she has renamed on her own
+ * calendar keeps her wording through every edit.
+ */
+export async function updateLessonGoogleEvent(options: {
+  lessonId: string
+  studentName: string
+  /** The lesson's NEW scheduled_at - a UTC instant, not a local wall time. */
+  scheduledAtIso: string
+  durationMinutes: number
+}): Promise<void> {
+  const { lessonId, studentName, scheduledAtIso, durationMinutes } = options
+
+  try {
+    // The create path's timing guard, unchanged and for the same reason: the
+    // caller passes an ISO instant and a Zod-validated duration, so this is
+    // defence in depth - but new Date(NaN).toISOString() THROWS, and without it
+    // the outer catch below would swallow that only after spending a database
+    // read and a token refresh on it.
+    const startMs = Date.parse(scheduledAtIso)
+    if (
+      !Number.isFinite(startMs) ||
+      !Number.isFinite(durationMinutes) ||
+      durationMinutes <= 0
+    ) {
+      console.error(
+        `[google/lessonEvents] unusable timing for lesson ${lessonId}; no event moved:`,
+        { scheduledAtIso, durationMinutes }
+      )
+      return
+    }
+
+    const supabase = createAdminClient()
+
+    // ---- 1. Is there a block to move ----------------------------------------
+    // Explicit columns, the same read the delete path makes. The admin edit
+    // MUTATES the lesson in place rather than replacing it, so a google_event_id
+    // written at booking time is still on this row and still names the right
+    // event.
+    const { data: lesson, error: lessonError } = await supabase
+      .from('lessons')
+      .select('id, google_event_id')
+      .eq('id', lessonId)
+      .maybeSingle()
+
+    if (lessonError) {
+      console.error(
+        `[google/lessonEvents] lesson lookup failed for lesson ${lessonId}; any Google event was left at its old time:`,
+        lessonError
+      )
+      return
+    }
+
+    if (!lesson) {
+      // Genuinely anomalous, and worth a line. The caller reaches here
+      // immediately after admin_edit_lesson_atomic reported success on this
+      // exact id, so the row existed moments ago; something deleted it from
+      // under us and took the only pointer to the calendar block with it.
+      console.error(
+        `[google/lessonEvents] no lesson row for ${lessonId} straight after a successful edit; any Google event is now unreachable`
+      )
+      return
+    }
+
+    // Resolved ONCE, above the branch. Both halves below need a bearer token
+    // and neither may spend a second refresh on the same request.
+    const accessToken = await resolveGoogleAccessToken(lessonId)
+    if (!accessToken) return
+
+    // Both edges re-serialised from the parsed epoch ms, exactly as on the
+    // create path, so Google receives RFC3339-with-Z whichever branch runs.
+    const startIso = new Date(startMs).toISOString()
+    const endIso = new Date(startMs + durationMinutes * 60 * 1000).toISOString()
+
+    const eventId = lesson.google_event_id
+    if (typeof eventId === 'string' && eventId.trim().length > 0) {
+      // ---- 2. Move it -------------------------------------------------------
+      // start and end only - see updateGoogleEvent. 'UTC' means here exactly
+      // what it means on the create path and is NOT a claim about anybody's
+      // timezone: the 'Z' above already pins the instant, and her calendar
+      // renders it in her own local time no matter what is sent.
+      const moved = await updateGoogleEvent({
+        accessToken,
+        eventId,
+        startIso,
+        endIso,
+        timezone: 'UTC',
+      })
+
+      if (!moved.ok) {
+        // The pointer is DELIBERATELY LEFT IN PLACE, same rule as the delete
+        // path. The event still EXISTS, at its old time, and this id is the
+        // only handle on it; clearing it here would strand a block that now
+        // contradicts the lesson with nothing left to find it by. A later edit
+        // or the cancellation will try again against the same id.
+        console.error(
+          `[google/lessonEvents] event update failed for lesson ${lessonId} (google_event_id ${eventId}); the block is still at its old time and the pointer is kept: ${moved.error}`
+        )
+      }
+
+      // Nothing to write on the success path either: the event id has not
+      // changed, so the row already says everything true about the block.
+      return
+    }
+
+    // ---- 3. Create if missing -----------------------------------------------
+    // No pointer on the row: either the lesson predates the column or its
+    // create failed at booking time. An edit is the natural moment to put the
+    // block on the calendar rather than leave the class invisible on it for
+    // good. The title comes from the one builder above, so a block written here
+    // is indistinguishable from one written at booking - and, exactly as there,
+    // no attendees and no reminders may ever be added to this call.
+    const created = await createGoogleEvent({
+      accessToken,
+      summary: buildLessonEventSummary(studentName),
+      startIso,
+      endIso,
+      timezone: 'UTC',
+    })
+
+    if (!created.ok) {
+      // createGoogleEvent has already logged the HTTP status and Google's own
+      // message; this line is what ties that to a lesson.
+      console.error(
+        `[google/lessonEvents] event create failed for lesson ${lessonId}: ${created.error}`
+      )
+      return
+    }
+
+    // ---- 4. The pointer -----------------------------------------------------
+    await writeLessonEventPointer(supabase, lessonId, created.eventId)
+  } catch (unexpected) {
+    // The outer guarantee, exactly as on the other two paths. Anything
+    // unforeseen dies quietly rather than reaching a caller whose lesson edit
+    // is already committed and whose hours have already moved.
+    console.error(
+      `[google/lessonEvents] unexpected failure while updating the event for lesson ${lessonId}:`,
       unexpected
     )
   }
