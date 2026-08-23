@@ -21,11 +21,15 @@ export default async function StudySheetsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('role')
     .eq('id', user.id)
     .maybeSingle()
+
+  if (profileError) {
+    console.error('[dashboard/study-sheets] profiles lookup failed:', profileError)
+  }
 
   // House rule: a null profile is NOT an unauthenticated user - never redirect.
   // Render a plain fallback instead.
@@ -43,11 +47,24 @@ export default async function StudySheetsPage() {
   const isAdmin = profile.role === 'admin'
 
   // Existing user-scoped sheet fetch - unchanged.
-  const { data: studySheets } = await supabase
+  const { data: studySheets, error: studySheetsError } = await supabase
     .from('study_sheets')
     .select('id, title, category, level, difficulty, is_active, created_at, audience, owner_id, attachments')
     .eq('is_active', true)
     .order('created_at', { ascending: false })
+
+  // FATAL: every figure and both lists on this page derive from this one read.
+  // Absorbed into `?? []` it would render "0 resources / 0 worksheets" over two
+  // empty-state cards, byte-identical to a brand-new teacher's real library -
+  // there is nothing left to degrade. Surfaced in-page rather than thrown: there
+  // is no (dashboard) error boundary, so a throw renders app/error.tsx and blanks
+  // the whole portal shell (see (dashboard)/layout.tsx:46-48 on that hazard).
+  if (studySheetsError) {
+    console.error('[dashboard/study-sheets] study_sheets lookup failed:', studySheetsError)
+    return (
+      <div className="p-8 text-gray-500">Unable to load your library. Please refresh the page.</div>
+    )
+  }
 
   const sheets = studySheets ?? []
 
@@ -58,6 +75,11 @@ export default async function StudySheetsPage() {
   // rows the teacher personally assigned, so a user-scoped read here would be
   // blind to admin-assigned worksheets and to other teachers' assignments.
   const adminClient = createAdminClient()
+  // KNOWN GAP (separate commit): getTeacherScopedStudentIds swallows the errors of
+  // its own lessons/reports/trainings reads and returns [] on failure, which lands
+  // on the same false empty state every flag below exists to prevent - silently, and
+  // for the roster as well as the figures. That fix belongs in lib/access/bookedClass.ts
+  // and has five callers. Recorded here to match [id]/responses/page.tsx:98-100.
   const scopedStudentIds = await getTeacherScopedStudentIds(adminClient, user.id, isAdmin)
 
   // Assignable roster for the "Assign to Students" modal. RLS blocks the teacher
@@ -65,21 +87,37 @@ export default async function StudySheetsPage() {
   // read, scoped to the teacher's Condition-B set (admin = all current students;
   // a teacher with an empty scoped set fetches nothing). full_name is the students
   // name column (verified: students has full_name NOT NULL, no first/last split).
+  //
+  // Roster-only failure: nothing else on the page reads it, so this DEGRADES the
+  // assign modal rather than the page. Absorbed into `?? []` it makes the modal
+  // claim "You have no students to assign to yet." - a positive statement about
+  // the teacher's roster that a failed read must never make. A teacher whose
+  // scoped set is legitimately empty runs neither branch, so the flag stays
+  // false: no query ran, so no query failed.
+  let rosterLoadFailed = false
   let assignableStudents: AssignableStudent[] = []
   if (scopedStudentIds === null) {
-    const { data } = await adminClient
+    const { data, error: rosterError } = await adminClient
       .from('students')
       .select('id, full_name, email')
       .eq('status', 'current')
       .order('full_name')
+    if (rosterError) {
+      console.error('[dashboard/study-sheets] students lookup failed (all current):', rosterError)
+      rosterLoadFailed = true
+    }
     assignableStudents = (data ?? []) as AssignableStudent[]
   } else if (scopedStudentIds.length > 0) {
-    const { data } = await adminClient
+    const { data, error: rosterError } = await adminClient
       .from('students')
       .select('id, full_name, email')
       .in('id', scopedStudentIds)
       .eq('status', 'current')
       .order('full_name')
+    if (rosterError) {
+      console.error('[dashboard/study-sheets] students lookup failed (scoped):', rosterError)
+      rosterLoadFailed = true
+    }
     assignableStudents = (data ?? []) as AssignableStudent[]
   }
 
@@ -94,6 +132,16 @@ export default async function StudySheetsPage() {
   // A teacher with no booked-class students ([]) reads nothing; admin (null) is unfiltered.
   const hasScopeRows = scopedStudentIds === null || scopedStudentIds.length > 0
 
+  // ONE flag across the three reads that feed the worksheet progress figures.
+  // They fail asymmetrically and that is the whole hazard: `assignments` supplies
+  // assignedCount, while `activities` and `activity_attempts` supply the evidence
+  // of completion. Lose either of the latter and buildAssignmentCompletion silently
+  // degrades to the marked_done_at arm alone, so a fully-completed worksheet still
+  // renders its denominator but asserts "Completed 0 / Pending N" over a 0% bar -
+  // a wrong number rather than an absent one. Any one failure therefore suppresses
+  // the whole progress claim, and the client shows an error card in its place.
+  let progressLoadFailed = false
+
   let assignmentRows: AssignmentRow[] = []
   if (studentSheetIds.length > 0 && hasScopeRows) {
     let q = adminClient
@@ -101,7 +149,11 @@ export default async function StudySheetsPage() {
       .select('id, study_sheet_id, student_id, assigned_at, marked_done_at')
       .in('study_sheet_id', studentSheetIds)
     if (scopedStudentIds !== null) q = q.in('student_id', scopedStudentIds)
-    const { data } = await q
+    const { data, error: assignmentsError } = await q
+    if (assignmentsError) {
+      console.error('[dashboard/study-sheets] assignments lookup failed:', assignmentsError)
+      progressLoadFailed = true
+    }
     assignmentRows = (data ?? []) as AssignmentRow[]
   }
 
@@ -111,19 +163,27 @@ export default async function StudySheetsPage() {
   // table lists id, sheet_id, position, type, title, content, answer_key, timestamps).
   let activityRows: ActivityRow[] = []
   if (studentSheetIds.length > 0) {
-    const { data } = await adminClient
+    const { data, error: activitiesError } = await adminClient
       .from('activities')
       .select('id, sheet_id')
       .in('sheet_id', studentSheetIds)
+    if (activitiesError) {
+      console.error('[dashboard/study-sheets] activities lookup failed:', activitiesError)
+      progressLoadFailed = true
+    }
     activityRows = (data ?? []) as ActivityRow[]
   }
 
   let attemptRows: AttemptRow[] = []
   if (assignmentIds.length > 0) {
-    const { data: atts } = await adminClient
+    const { data: atts, error: attemptsError } = await adminClient
       .from('activity_attempts')
       .select('activity_id, assignment_id, created_at')
       .in('assignment_id', assignmentIds)
+    if (attemptsError) {
+      console.error('[dashboard/study-sheets] activity_attempts lookup failed:', attemptsError)
+      progressLoadFailed = true
+    }
     attemptRows = (atts ?? []) as AttemptRow[]
   }
 
@@ -132,6 +192,11 @@ export default async function StudySheetsPage() {
   // attempts in the teacher's Condition-B scope whose activity is a writing_task
   // (assignment-independent — attempts can carry a null assignment_id, so the
   // assignment-scoped attemptRows above cannot be reused).
+  // Its own flag: the count is a badge, not a figure the teacher acts on here,
+  // and the button beside it stays live either way - it is a route to the truth
+  // rather than a claim about it. Either read failing zeroes the count (a missing
+  // writing_task set drops every row at the filter below), so both set the flag.
+  let reviewCountLoadFailed = false
   let pendingReviewCount = 0
   if (hasScopeRows) {
     let rq = adminClient
@@ -139,15 +204,23 @@ export default async function StudySheetsPage() {
       .select('id, activity_id')
       .eq('needs_review', true)
     if (scopedStudentIds !== null) rq = rq.in('student_id', scopedStudentIds)
-    const { data: reviewData } = await rq
+    const { data: reviewData, error: reviewError } = await rq
+    if (reviewError) {
+      console.error('[dashboard/study-sheets] activity_attempts (needs_review) lookup failed:', reviewError)
+      reviewCountLoadFailed = true
+    }
     const pendingRows = (reviewData ?? []) as { id: string; activity_id: string }[]
     if (pendingRows.length > 0) {
       const pendingActivityIds = [...new Set(pendingRows.map(r => r.activity_id))]
-      const { data: wtData } = await adminClient
+      const { data: wtData, error: writingTaskError } = await adminClient
         .from('activities')
         .select('id')
         .in('id', pendingActivityIds)
         .eq('type', 'writing_task')
+      if (writingTaskError) {
+        console.error('[dashboard/study-sheets] activities (writing_task) lookup failed:', writingTaskError)
+        reviewCountLoadFailed = true
+      }
       const writingTaskIds = new Set(((wtData ?? []) as { id: string }[]).map(a => a.id))
       pendingReviewCount = pendingRows.filter(r => writingTaskIds.has(r.activity_id)).length
     }
@@ -199,15 +272,21 @@ export default async function StudySheetsPage() {
     assignmentRows.filter(a => a.marked_done_at && new Date(a.marked_done_at).getTime() >= weekAgoMs).length +
     attemptRows.filter(t => new Date(t.created_at).getTime() >= weekAgoMs).length
 
+  // The three derived figures cross as null, not as their computed 0: both stat
+  // cards and the review badge are counts a teacher reads as fact, and 0 is a
+  // fact. Nulled at the boundary rather than in the client so the prop type
+  // itself carries the distinction and no consumer can render the 0 by accident.
   return (
     <StudySheetsClient
       studySheets={sheets}
       currentUserId={user.id}
       progressBySheet={progressBySheet}
-      assignedThisWeek={assignedThisWeek}
-      newSubmissions={newSubmissions}
+      assignedThisWeek={progressLoadFailed ? null : assignedThisWeek}
+      newSubmissions={progressLoadFailed ? null : newSubmissions}
       assignableStudents={assignableStudents}
-      pendingReviewCount={pendingReviewCount}
+      pendingReviewCount={reviewCountLoadFailed ? null : pendingReviewCount}
+      progressLoadFailed={progressLoadFailed}
+      rosterLoadFailed={rosterLoadFailed}
     />
   )
 }
