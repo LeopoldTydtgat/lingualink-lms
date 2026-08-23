@@ -13,7 +13,7 @@
 import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Check, Plus, Lightbulb, type LucideIcon } from 'lucide-react'
+import { User, ChevronLeft, ChevronRight, X, Star, Clock, Calendar, Wallet, ChartNoAxesColumn, Info, Lock, Plus, Lightbulb, type LucideIcon } from 'lucide-react'
 import { addDaysToDateKey, getLocalDateKey, localToUtc, utcInstantToTzParts } from '@/lib/utils/timezone'
 import { isBookableStart } from '@/lib/bookingGrid'
 import {
@@ -43,7 +43,9 @@ const CELL_GREY_BG = '#EEEDEA'
 // Blocked cells in a column the week returned NO slots for at all: a day the
 // teacher never offers (a weekend, a day off) rather than one whose openings
 // are taken. A shade quieter than CELL_GREY_BG so an untouched column recedes
-// instead of reading as seven hours of individually-refused times.
+// instead of reading as seven hours of individually-refused times. The
+// two-tone was near-invisible in grey, which is why it works here and did
+// not in red.
 const CELL_EMPTY_COLUMN_BG = '#F7F6F4'
 // Hairline drawn across the top edge of every whole-hour row, so the axis has
 // a visible beat at :00 without a full gridline every 30 minutes.
@@ -61,8 +63,8 @@ const GHOST_GLYPH_COLOR = '#9A5203'
 // brand-orange left accent carried by every cell so the run still reads as
 // one continuous event. The run's label and duration line are painted in the
 // same dark neutrals as the teacher block, not white.
-const CELL_SELECTED_BG = '#FFF3E0'
-const CELL_SELECTED_BORDER = '1px solid #FFD9A8'
+const CELL_SELECTED_BG = '#FFD9A8'
+const CELL_SELECTED_BORDER = '1px solid #FFC078'
 const CELL_SELECTED_ACCENT = '3px solid #FF8303'
 // Selected-teacher pill ring — green family derived from CELL_BOOKABLE_BG
 // (border a stronger green of the same hue, bg a slightly lighter tint).
@@ -854,7 +856,7 @@ export default function BookingGridClient({
   // Chrome for a cell inside the selected run, so the run reads as ONE
   // continuous event block. Applied on the AVAILABLE-cell branch only: every
   // 30-min step of a valid run is available by construction, so a grey cell can
-  // never fall inside one. A single 1px #FFD9A8 outline around the block (top
+  // never fall inside one. A single 1px #FFC078 outline around the block (top
   // edge only on the first cell, bottom edge only on the last, right edge on
   // all), a 3px solid
   // #FF8303 left accent on every run cell (teacher Day-to-Day event style),
@@ -1347,13 +1349,87 @@ export default function BookingGridClient({
     <div>
       {/* ── Row 0: title + timezone line, desktop summary header ── */}
       <div className="flex lg:items-end gap-4" style={{ marginBottom: '10px' }}>
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 flex items-end justify-between gap-4">
           {/* The timezone line used to sit here; it now closes the left column
               as a quiet footer under the grid, where it answers the question it
               actually raises ("what clock are these cells on?"). */}
           <h1 style={{ fontSize: '16px', fontWeight: '700', color: '#111827', marginBottom: '4px' }}>
             {isReschedule ? 'Reschedule Class' : 'Book a Class'}
           </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+          <div className="shadow-[0_1px_2px_rgba(0,0,0,0.04),0_2px_5px_rgba(0,0,0,0.05)]" style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, backgroundColor: '#ffffff', border: '1px solid #E0DFDC', borderRadius: '10px', padding: '4px 6px' }}>
+        <button
+          onClick={goBack}
+          disabled={isPrevDisabled}
+          aria-label="Previous week"
+          style={{
+            height: '36px',
+            padding: '0 10px',
+            border: 'none',
+            borderRadius: '6px',
+            backgroundColor: '#ffffff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: isPrevDisabled ? 'not-allowed' : 'pointer',
+            opacity: isPrevDisabled ? 0.4 : 1,
+          }}
+        >
+          <ChevronLeft size={16} color="#4b5563" />
+        </button>
+          {/* Fixed min-width sized to the widest realistic cross-month label
+              ("28 Sept – 4 Oct 2026") at 14px, text centred, so week
+              navigation never shifts the arrows. */}
+          <span
+            style={{
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#111827',
+              display: 'inline-block',
+              minWidth: '150px',
+              textAlign: 'center',
+            }}
+          >
+            {weekLabel}
+          </span>
+        <button
+          onClick={goForward}
+          aria-label="Next week"
+          style={{
+            height: '36px',
+            padding: '0 10px',
+            border: 'none',
+            borderRadius: '6px',
+            backgroundColor: '#ffffff',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          <ChevronRight size={16} color="#4b5563" />
+        </button>
+          </div>
+          {/* Today now lives outside the pill as plain text, so the pill
+              itself never changes size across the current-week disabled state. */}
+          <button
+            onClick={goThisWeek}
+            disabled={isCurrentWeek}
+            style={{
+              fontSize: '13px',
+              fontWeight: '500',
+              color: isCurrentWeek ? '#c9c7c2' : '#374151',
+              background: 'none',
+              border: 'none',
+              padding: '0',
+              cursor: isCurrentWeek ? 'default' : 'pointer',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Today
+          </button>
+          </div>
         </div>
         {/* Desktop summary header — width mirrors the aside so their tops align
             (display comes from the classes; never set it inline here) */}
@@ -1452,15 +1528,15 @@ export default function BookingGridClient({
       <div className="flex flex-col lg:flex-row lg:items-start gap-4">
       {/* ── Left column: toolbar, grid ── */}
       <div className="flex-1 min-w-0">
-      {/* ── Toolbar card: teacher · duration · week groups on ONE nowrap row,
-          centred as a single unit. The Teacher group NEVER scrolls, clips, or
-          truncates — the space is freed by compact Duration ("30/60/90"
-          pills) and a compact Week group instead. ── */}
+      {/* ── Toolbar card: teacher · duration groups only — week navigation
+          lives in the page header row now. The Teacher group NEVER scrolls,
+          clips, or truncates; if it alone overflows the card wraps rather
+          than clips. ── */}
       <div
         className="shadow-sm"
         style={{
           display: 'flex',
-          flexWrap: 'nowrap',
+          flexWrap: 'wrap',
           alignItems: 'center',
           justifyContent: 'center',
           gap: '20px',
@@ -1471,6 +1547,7 @@ export default function BookingGridClient({
           padding: '10px 14px',
         }}
       >
+        <div style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: '20px', flexShrink: 0 }}>
         {/* ── Teacher group — hidden entirely (label included) for
             single-teacher trainings; full names, no squeeze ── */}
         {teachers.length > 1 && (
@@ -1616,7 +1693,7 @@ export default function BookingGridClient({
                   : undefined
               }
               style={{
-                minWidth: '76px',
+                minWidth: '68px',
                 padding: '8px 16px',
                 borderRadius: '8px',
                 border: '2px solid',
@@ -1641,96 +1718,6 @@ export default function BookingGridClient({
         })}
           </div>
         </div>
-
-        {/* Divider between the two groups — a standalone 40px rule rather
-            than the Week group's old full-height borderLeft, so it stays
-            centred on the row whichever group happens to be taller.
-            Decorative. */}
-        <div
-          aria-hidden="true"
-          style={{ width: '1px', height: '40px', backgroundColor: '#E0DFDC', flexShrink: 0 }}
-        />
-
-        {/* ── Week group — prev · label · Today · next; fixed width, nothing
-            shifts or appears/disappears on navigation ── */}
-        <div style={{ flexShrink: 0 }}>
-          <p style={toolbarGroupLabel}>
-            Week
-          </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <button
-          onClick={goBack}
-          disabled={isPrevDisabled}
-          aria-label="Previous week"
-          style={{
-            height: '36px',
-            padding: '0 10px',
-            border: '1px solid #E0DFDC',
-            borderRadius: '8px',
-            backgroundColor: '#ffffff',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: isPrevDisabled ? 'not-allowed' : 'pointer',
-            opacity: isPrevDisabled ? 0.4 : 1,
-          }}
-        >
-          <ChevronLeft size={16} color="#4b5563" />
-        </button>
-          {/* Fixed min-width sized to the widest realistic cross-month label
-              ("28 Sept – 4 Oct 2026") at 14px, text centred, so week
-              navigation never shifts the arrows or the Today button. */}
-          <span
-            style={{
-              fontSize: '14px',
-              fontWeight: '600',
-              color: '#111827',
-              display: 'inline-block',
-              minWidth: '170px',
-              textAlign: 'center',
-            }}
-          >
-            {weekLabel}
-          </span>
-          {/* Always rendered at constant width ("Today" matches the teacher
-              calendar); on the current week it dims and disables but stays
-              mounted, so the Week group never changes size. */}
-          <button
-            onClick={goThisWeek}
-            disabled={isCurrentWeek}
-            style={{
-              height: '36px',
-              padding: '0 14px',
-              border: '1px solid #E0DFDC',
-              borderRadius: '8px',
-              backgroundColor: '#ffffff',
-              fontSize: '12px',
-              fontWeight: '500',
-              color: '#4b5563',
-              cursor: isCurrentWeek ? 'default' : 'pointer',
-              opacity: isCurrentWeek ? 0.5 : 1,
-            }}
-          >
-            Today
-          </button>
-        <button
-          onClick={goForward}
-          aria-label="Next week"
-          style={{
-            height: '36px',
-            padding: '0 10px',
-            border: '1px solid #E0DFDC',
-            borderRadius: '8px',
-            backgroundColor: '#ffffff',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          <ChevronRight size={16} color="#4b5563" />
-        </button>
-          </div>
         </div>
       </div>
 
@@ -1803,7 +1790,7 @@ export default function BookingGridClient({
                   pointerEvents: isRefreshing ? 'none' : undefined,
                 }}
               >
-              {visibleColumns.length === 0 && (
+              {visibleColumns.length === 0 && !isRefreshing && (
                 <div style={{ textAlign: 'center', padding: '32px 16px' }}>
                   <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '6px' }}>
                     No {selectedDuration}-minute openings {isCurrentWeek ? 'this week' : `the week of ${weekLabel}`}.
@@ -2281,12 +2268,9 @@ export default function BookingGridClient({
                               }}
                             >
                               {isRunFirst && selectedRangeLabel !== null && (
-                                <>
-                                  <Check size={11} strokeWidth={3} aria-hidden="true" style={{ color: '#FF8303', flexShrink: 0 }} />
-                                  <span aria-hidden="true" style={runLabelStyle}>
-                                    {selectedRangeLabel}
-                                  </span>
-                                </>
+                                <span aria-hidden="true" style={runLabelStyle}>
+                                  {selectedRangeLabel}
+                                </span>
                               )}
                               {isRunLast && !isRunFirst && (
                                 <span aria-hidden="true" style={runSubLabelStyle}>
@@ -2370,6 +2354,7 @@ export default function BookingGridClient({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    minHeight: '90px',
                     pointerEvents: 'none',
                     fontSize: '13px',
                     fontWeight: '600',
