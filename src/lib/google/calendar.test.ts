@@ -21,6 +21,11 @@ const ORGANISER = 'Admin@LingualinkOnline.onmicrosoft.com'
 const WINDOW_START = Date.parse('2026-09-01T00:00:00.000Z')
 const WINDOW_END = Date.parse('2026-10-31T00:00:00.000Z')
 
+// "This teacher has no class blocks on this calendar" - the state every case
+// below assumes unless it is testing the id echo filter itself. Frozen into a
+// constant so no case can mutate it for another.
+const NO_CLASS_EVENTS: ReadonlySet<string> = new Set<string>()
+
 function event(overrides: Partial<GoogleCalendarEvent>): GoogleCalendarEvent {
   return {
     id: 'evt',
@@ -32,10 +37,11 @@ function event(overrides: Partial<GoogleCalendarEvent>): GoogleCalendarEvent {
   }
 }
 
-function build(events: GoogleCalendarEvent[]) {
+function build(events: GoogleCalendarEvent[], classEventIds: Set<string> = new Set()) {
   return buildBusyIntervals(events, {
     timezone: TZ,
     organiserEmail: ORGANISER,
+    classEventIds,
     windowStartMs: WINDOW_START,
     windowEndMs: WINDOW_END,
   })
@@ -232,6 +238,70 @@ describe('buildBusyIntervals filters', () => {
     expect(result.skipped.ownTeamsInvite).toBe(0)
   })
 
+  it('skips an event whose id is one of our own class blocks', () => {
+    // The outbound sync wrote this event onto her calendar for a LinguaLink
+    // class. Mirroring it back would block the slot the platform booked.
+    const result = build([event({ id: 'evt-class-1' })], new Set(['evt-class-1']))
+
+    expect(result.intervals).toEqual([])
+    expect(result.skipped.ownClassEvent).toBe(1)
+  })
+
+  it('keeps an event whose id is not one of our class blocks', () => {
+    const result = build([event({ id: 'evt-hers' })], new Set(['evt-class-1']))
+
+    expect(result.intervals).toHaveLength(1)
+    expect(result.skipped.ownClassEvent).toBe(0)
+  })
+
+  it('lets an event with no usable id through untouched, even with a populated set', () => {
+    // An event we cannot identify is somebody else's commitment until proven
+    // otherwise: over-blocking is this sync's safe direction.
+    const result = build(
+      [event({ id: undefined }), event({ id: null })],
+      new Set(['evt-class-1'])
+    )
+
+    expect(result.intervals).toHaveLength(1) // the two overlap and merge into one row
+    expect(result.skipped.ownClassEvent).toBe(0)
+  })
+
+  it('counts an event matching both echo filters exactly once, under the organiser check', () => {
+    // Check 4 runs first and `continue`s, so check 5 never sees this event. The
+    // point is that the two filters cannot double-count the same skip.
+    const result = build(
+      [event({ id: 'evt-class-1', organizer: { email: ORGANISER } })],
+      new Set(['evt-class-1'])
+    )
+
+    expect(result.intervals).toEqual([])
+    expect(result.skipped.ownTeamsInvite).toBe(1)
+    expect(result.skipped.ownClassEvent).toBe(0)
+  })
+
+  it('skips only the class block in a mixed batch', () => {
+    const result = build(
+      [
+        event({
+          id: 'evt-class-1',
+          start: { dateTime: '2026-09-10T09:00:00+02:00' },
+          end: { dateTime: '2026-09-10T10:00:00+02:00' },
+        }),
+        event({
+          id: 'evt-dentist',
+          start: { dateTime: '2026-09-10T14:00:00+02:00' },
+          end: { dateTime: '2026-09-10T15:00:00+02:00' },
+        }),
+      ],
+      new Set(['evt-class-1'])
+    )
+
+    expect(result.intervals.map((i) => [iso(i.startMs), iso(i.endMs)])).toEqual([
+      ['2026-09-10T12:00:00.000Z', '2026-09-10T13:00:00.000Z'],
+    ])
+    expect(result.skipped.ownClassEvent).toBe(1)
+  })
+
   it('skips events with unusable or zero-width times', () => {
     const result = build([
       event({ start: { dateTime: 'not-a-date' } }),
@@ -257,6 +327,7 @@ describe('buildBusyIntervals filters', () => {
       {
         timezone: TZ,
         organiserEmail: ORGANISER,
+        classEventIds: new Set(NO_CLASS_EVENTS),
         windowStartMs,
         windowEndMs: WINDOW_END,
       }

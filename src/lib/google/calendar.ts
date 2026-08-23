@@ -194,6 +194,7 @@ export interface BusySkipCounts {
   allDay: number
   transparent: number
   ownTeamsInvite: number
+  ownClassEvent: number
   unusableTimes: number
   outsideWindow: number
 }
@@ -323,11 +324,20 @@ export function buildBusyIntervals(
     timezone: string
     /** The platform's M365 organiser account, for the echo filter. */
     organiserEmail: string
+    /**
+     * Every google_event_id currently stored on this teacher's lessons - the
+     * ids of the blocks our own outbound sync wrote to her calendar.
+     *
+     * REQUIRED, and deliberately not optional with an empty-set default: a
+     * caller that forgets it must be a type error, never a silently disabled
+     * echo filter. An empty set is a caller SAYING there is nothing to skip.
+     */
+    classEventIds: Set<string>
     windowStartMs: number
     windowEndMs: number
   }
 ): BusyBuildResult {
-  const { timezone, organiserEmail, windowStartMs, windowEndMs } = options
+  const { timezone, organiserEmail, classEventIds, windowStartMs, windowEndMs } = options
   const organiser = organiserEmail.trim().toLowerCase()
 
   const skipped: BusySkipCounts = {
@@ -335,6 +345,7 @@ export function buildBusyIntervals(
     allDay: 0,
     transparent: 0,
     ownTeamsInvite: 0,
+    ownClassEvent: 0,
     unusableTimes: 0,
     outsideWindow: 0,
   }
@@ -389,6 +400,25 @@ export function buildBusyIntervals(
       organizerEmail.trim().toLowerCase() === organiser
     ) {
       skipped.ownTeamsInvite++
+      continue
+    }
+
+    // 5. ECHO FILTER, second half - by stored event id.
+    //    These are the platform's OWN class time-blocks, written onto this same
+    //    calendar by the outbound sync at the bottom of this file, and their
+    //    ids are the ones we stored on lessons.google_event_id. They carry no
+    //    organiser identity that check 4 could catch: she created them herself,
+    //    through us. Mirroring one back would block the very slot the platform
+    //    itself booked - and worse, a cancellation frees the slot in LinguaLink
+    //    the moment it happens, so an echo block that outlived it would keep
+    //    that freed slot closed for one more cycle, against a class that no
+    //    longer exists.
+    //    A missing, null or non-string id falls through untouched: an event we
+    //    cannot identify is somebody else's commitment until proven otherwise,
+    //    and over-blocking is this sync's safe direction.
+    const eventId = event.id
+    if (typeof eventId === 'string' && classEventIds.has(eventId)) {
+      skipped.ownClassEvent++
       continue
     }
 
