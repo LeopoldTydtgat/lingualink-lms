@@ -1,22 +1,23 @@
-// Outbound Google Calendar writes for a newly created lesson (GCAL REBUILD 2).
+// Outbound Google Calendar writes for one lesson (GCAL REBUILD 2).
 //
-// One helper, two callers: the admin create-class route and the student
-// book/reschedule route. Both are user-facing request paths that have ALREADY
-// committed a lesson row and already moved hours by the time this runs, so the
-// contract here is narrow and absolute: never throw, never block, never change
-// what the caller returns. A Google outage must cost a calendar block, never a
-// paying student's booking.
+// Two helpers, five callers: the admin create-class route and the student
+// book/reschedule route mirror a new lesson onto the calendar; the teacher,
+// student and admin cancel paths take it back off. Every one of them is a
+// user-facing request path that has ALREADY committed the lesson row and
+// already moved hours by the time this runs, so the contract here is narrow and
+// absolute: never throw, never block, never change what the caller returns. A
+// Google outage must cost a calendar block, never a paying student's booking
+// and never a cancellation.
 //
-// CREATION ONLY. Nothing here updates or deletes an event: cancellation cleanup
-// and the reschedule's old-event delete are separate commits with their own
-// failure modes.
+// CREATE AND DELETE ONLY. Nothing here MOVES an event: the reschedule's
+// old-event update is a separate commit with its own failure modes.
 //
 // Server-only. It reads google_calendar_connections through the service role
 // and holds a live bearer token; nothing here may reach the browser bundle.
 
 import { createAdminClient } from '@/lib/supabase/admin'
 import { refreshGoogleAccessToken } from '@/lib/google/oauth'
-import { createGoogleEvent } from '@/lib/google/calendar'
+import { createGoogleEvent, deleteGoogleEvent } from '@/lib/google/calendar'
 
 /**
  * The ONE place the block's title is built.
@@ -35,6 +36,92 @@ import { createGoogleEvent } from '@/lib/google/calendar'
 function buildLessonEventSummary(studentName: string): string {
   const firstWord = studentName.trim().split(/\s+/)[0] ?? ''
   return `English class - ${firstWord || 'Student'}`
+}
+
+/**
+ * A live bearer token for the one connected calendar, or null when there is
+ * nothing to write to.
+ *
+ * The ONE place the connection is resolved, so the create and delete helpers
+ * can never disagree about whose calendar a lesson belongs on. Never throws:
+ * every null is either already logged here or a deliberate silence, and the
+ * caller's only correct response to any of them is to return.
+ *
+ * `lessonId` is carried in purely so every line logged from here names the
+ * lesson that provoked it.
+ */
+async function resolveGoogleAccessToken(lessonId: string): Promise<string | null> {
+  const supabase = createAdminClient()
+
+  // ---- 1. Which calendar ----------------------------------------------------
+  // public.google_calendar_connections is deny-all to anon and authenticated
+  // (RLS with zero policies + REVOKE from both roles), so the service role is
+  // the only role that can read it at all - this is not a convenience.
+  //
+  // Explicit columns, and refresh_token is the ONLY token pulled: this
+  // refreshes unconditionally below, exactly like the busy-sync cron, so the
+  // cached access_token has no reader here and putting it in scope would only
+  // invite one. id rides along for the log lines.
+  const { data: connectionRows, error: connectionError } = await supabase
+    .from('google_calendar_connections')
+    .select('id, refresh_token')
+
+  if (connectionError) {
+    console.error(
+      `[google/lessonEvents] connection lookup failed for lesson ${lessonId}:`,
+      connectionError
+    )
+    return null
+  }
+
+  const connections = connectionRows ?? []
+
+  // NOT A FAILURE, AND NOT WORTH A WORD. Nobody has connected a calendar,
+  // which is the normal state of a platform where this feature is unused.
+  // This code runs on every booking, so a log line here would be pure noise
+  // in front of whoever is reading the logs for a real problem.
+  if (connections.length === 0) return null
+
+  if (connections.length > 1) {
+    // Single-connection model, the same rule the busy-sync cron enforces.
+    // More than one row means the model moved and this helper would have to
+    // GUESS whose calendar a given class belongs on. Refuse rather than
+    // guess: a missing block is recoverable at any time, a class written onto
+    // the wrong person's personal calendar is not.
+    console.error(
+      `[google/lessonEvents] expected at most 1 Google Calendar connection, found ${connections.length}; no calendar write for lesson ${lessonId}`
+    )
+    return null
+  }
+
+  const connection = connections[0]
+  const refreshToken = connection.refresh_token
+  if (typeof refreshToken !== 'string' || refreshToken.trim().length === 0) {
+    console.error(
+      `[google/lessonEvents] connection ${connection.id} carries no refresh token; no calendar write for lesson ${lessonId}`
+    )
+    return null
+  }
+
+  // ---- 2. Token -------------------------------------------------------------
+  const refresh = await refreshGoogleAccessToken(refreshToken)
+
+  // Every non-'refreshed' outcome ends here, INCLUDING 'revoked', and
+  // DELIBERATELY WITHOUT WRITING ANY settings KEY. The busy-sync cron is the
+  // single writer of google_busy_sync_failures / _last_error / _revoked, and
+  // those keys drive the admin's sync-health banner. A second writer sitting
+  // on the booking path would march the consecutive-failure counter on
+  // traffic the cron never saw, so the banner would describe a sync state
+  // that never happened. The cron re-discovers a revoked grant on its own
+  // within 15 minutes, which is what that banner is for.
+  if (refresh.outcome !== 'refreshed' || !refresh.accessToken) {
+    console.error(
+      `[google/lessonEvents] token refresh returned '${refresh.outcome}' for lesson ${lessonId}: ${refresh.error ?? 'unknown error'}`
+    )
+    return null
+  }
+
+  return refresh.accessToken
 }
 
 /**
@@ -73,75 +160,8 @@ export async function createLessonGoogleEvent(options: {
       return
     }
 
-    const supabase = createAdminClient()
-
-    // ---- 1. Which calendar --------------------------------------------------
-    // public.google_calendar_connections is deny-all to anon and authenticated
-    // (RLS with zero policies + REVOKE from both roles), so the service role is
-    // the only role that can read it at all - this is not a convenience.
-    //
-    // Explicit columns, and refresh_token is the ONLY token pulled: this
-    // refreshes unconditionally below, exactly like the busy-sync cron, so the
-    // cached access_token has no reader here and putting it in scope would only
-    // invite one. id rides along for the log lines.
-    const { data: connectionRows, error: connectionError } = await supabase
-      .from('google_calendar_connections')
-      .select('id, refresh_token')
-
-    if (connectionError) {
-      console.error(
-        `[google/lessonEvents] connection lookup failed for lesson ${lessonId}:`,
-        connectionError
-      )
-      return
-    }
-
-    const connections = connectionRows ?? []
-
-    // NOT A FAILURE, AND NOT WORTH A WORD. Nobody has connected a calendar,
-    // which is the normal state of a platform where this feature is unused.
-    // This code runs on every booking, so a log line here would be pure noise
-    // in front of whoever is reading the logs for a real problem.
-    if (connections.length === 0) return
-
-    if (connections.length > 1) {
-      // Single-connection model, the same rule the busy-sync cron enforces.
-      // More than one row means the model moved and this helper would have to
-      // GUESS whose calendar a given class belongs on. Refuse rather than
-      // guess: a missing block is recoverable at any time, a class written onto
-      // the wrong person's personal calendar is not.
-      console.error(
-        `[google/lessonEvents] expected at most 1 Google Calendar connection, found ${connections.length}; no event created for lesson ${lessonId}`
-      )
-      return
-    }
-
-    const connection = connections[0]
-    const refreshToken = connection.refresh_token
-    if (typeof refreshToken !== 'string' || refreshToken.trim().length === 0) {
-      console.error(
-        `[google/lessonEvents] connection ${connection.id} carries no refresh token; no event created for lesson ${lessonId}`
-      )
-      return
-    }
-
-    // ---- 2. Token -----------------------------------------------------------
-    const refresh = await refreshGoogleAccessToken(refreshToken)
-
-    // Every non-'refreshed' outcome ends here, INCLUDING 'revoked', and
-    // DELIBERATELY WITHOUT WRITING ANY settings KEY. The busy-sync cron is the
-    // single writer of google_busy_sync_failures / _last_error / _revoked, and
-    // those keys drive the admin's sync-health banner. A second writer sitting
-    // on the booking path would march the consecutive-failure counter on
-    // traffic the cron never saw, so the banner would describe a sync state
-    // that never happened. The cron re-discovers a revoked grant on its own
-    // within 15 minutes, which is what that banner is for.
-    if (refresh.outcome !== 'refreshed' || !refresh.accessToken) {
-      console.error(
-        `[google/lessonEvents] token refresh returned '${refresh.outcome}' for lesson ${lessonId}: ${refresh.error ?? 'unknown error'}`
-      )
-      return
-    }
+    const accessToken = await resolveGoogleAccessToken(lessonId)
+    if (!accessToken) return
 
     // ---- 3. The event -------------------------------------------------------
     // No attendees, no sendUpdates, no reminders - createGoogleEvent sends a
@@ -150,7 +170,7 @@ export async function createLessonGoogleEvent(options: {
     // never an invitation; meeting invites belong to the Teams integration and
     // go out under the platform organiser account.
     const created = await createGoogleEvent({
-      accessToken: refresh.accessToken,
+      accessToken,
       summary: buildLessonEventSummary(studentName),
       // Both edges re-serialised from the parsed epoch ms, so Google receives
       // RFC3339-with-Z whatever shape the caller passed in.
@@ -181,6 +201,7 @@ export async function createLessonGoogleEvent(options: {
     // ---- 4. The pointer -----------------------------------------------------
     // The event id is the ONLY handle on the block. Service role: lessons
     // grants INSERT/UPDATE to service_role and postgres only.
+    const supabase = createAdminClient()
     const { data: updated, error: updateError } = await supabase
       .from('lessons')
       .update({ google_event_id: created.eventId })
@@ -213,6 +234,117 @@ export async function createLessonGoogleEvent(options: {
     // already moved.
     console.error(
       `[google/lessonEvents] unexpected failure while creating the event for lesson ${lessonId}:`,
+      unexpected
+    )
+  }
+}
+
+/**
+ * Takes the Google Calendar block for a cancelled lesson back off the calendar,
+ * then clears the pointer that named it.
+ *
+ * Same contract as createLessonGoogleEvent, deliberately: NEVER THROWS, returns
+ * nothing, and the three cancel paths call it without branching. By the time
+ * this runs cancel_lesson_atomic has already committed and any refund has
+ * already moved, so a Google outage must cost a stale calendar block and
+ * nothing else.
+ */
+export async function deleteLessonGoogleEvent(lessonId: string): Promise<void> {
+  try {
+    const supabase = createAdminClient()
+
+    // ---- 1. Is there anything to delete -------------------------------------
+    // Explicit columns. google_event_id is the only handle that exists; id
+    // rides along so a missing row is distinguishable from a null pointer.
+    const { data: lesson, error: lessonError } = await supabase
+      .from('lessons')
+      .select('id, google_event_id')
+      .eq('id', lessonId)
+      .maybeSingle()
+
+    if (lessonError) {
+      console.error(
+        `[google/lessonEvents] lesson lookup failed for lesson ${lessonId}; any Google event was left on the calendar:`,
+        lessonError
+      )
+      return
+    }
+
+    if (!lesson) {
+      // Genuinely anomalous, and worth a line. Every caller reaches here
+      // immediately after cancel_lesson_atomic reported success on this exact
+      // id, so the row existed moments ago; something deleted it from under us
+      // and took the only pointer to the calendar block with it.
+      console.error(
+        `[google/lessonEvents] no lesson row for ${lessonId} straight after a successful cancel; any Google event is now unreachable`
+      )
+      return
+    }
+
+    const eventId = lesson.google_event_id
+    // NOT A FAILURE, AND NOT WORTH A WORD. This is the normal state for every
+    // lesson booked before this feature existed and every booking made while no
+    // calendar was connected. It runs on every cancellation, so a log line here
+    // would be pure noise in front of whoever is reading the logs for a real
+    // problem.
+    if (typeof eventId !== 'string' || eventId.trim().length === 0) return
+
+    const accessToken = await resolveGoogleAccessToken(lessonId)
+    if (!accessToken) return
+
+    // ---- 2. The delete ------------------------------------------------------
+    // deleteGoogleEvent already treats 404 and 410 as success, so an event that
+    // is ALREADY gone from her calendar takes the ok branch below and clears the
+    // pointer, rather than stranding a dead id on the lesson forever.
+    const deleted = await deleteGoogleEvent({ accessToken, eventId })
+
+    if (!deleted.ok) {
+      // The pointer is DELIBERATELY LEFT IN PLACE. The block is still sitting on
+      // her calendar and this id is the only way anything will ever find it
+      // again; nulling it here would make the stale block permanently
+      // unreachable. Same reasoning as the Teams teardown, which keeps
+      // teams_meeting_id on a failed Graph call so the sweeper can still find
+      // the meeting.
+      console.error(
+        `[google/lessonEvents] event delete failed for lesson ${lessonId} (google_event_id ${eventId}); the pointer is kept so the stale block stays findable: ${deleted.error}`
+      )
+      return
+    }
+
+    // ---- 3. The pointer -----------------------------------------------------
+    // Only once Google has confirmed the block is gone. Service role: lessons
+    // grants INSERT/UPDATE to service_role and postgres only.
+    const { data: updated, error: updateError } = await supabase
+      .from('lessons')
+      .update({ google_event_id: null })
+      .eq('id', lessonId)
+      .select('id')
+
+    if (updateError) {
+      // The block is gone but the lesson still names it. Harmless to the
+      // calendar, and self-healing on any later delete (404 counts as success),
+      // but it leaves a dead id on the row - so it is logged with both ids.
+      console.error(
+        'CRITICAL: Google Calendar event deleted but the lesson pointer could not be cleared:',
+        { google_event_id: eventId, lesson_id: lessonId, error: updateError }
+      )
+      return
+    }
+
+    if (!updated || updated.length === 0) {
+      // Same stale pointer, different cause: the UPDATE ran but matched no row
+      // (the lesson was deleted from under us between the read above and here).
+      console.error(
+        'CRITICAL: Google Calendar event deleted but the pointer UPDATE matched 0 rows:',
+        { google_event_id: eventId, lesson_id: lessonId }
+      )
+    }
+  } catch (unexpected) {
+    // The outer guarantee, exactly as on the create path. Anything unforeseen
+    // dies quietly rather than reaching a caller whose lesson is already
+    // cancelled and whose refund has already moved.
+    console.error(
+      `[google/lessonEvents] unexpected failure while deleting the event for lesson ${lessonId}:`,
       unexpected
     )
   }

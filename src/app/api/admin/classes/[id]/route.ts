@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent, teacherReassignedEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
+import { deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { getBillability, isCancelledStatus } from '@/lib/billing/billability'
@@ -178,6 +179,8 @@ export async function PATCH(
         })
       }
     }
+
+    await deleteLessonGoogleEvent(id)
 
     // Resolve teacher + student once, ahead of both cancellation-email blocks below —
     // mirrors the reschedule branch's up-front fetch. Widened to include teacher
