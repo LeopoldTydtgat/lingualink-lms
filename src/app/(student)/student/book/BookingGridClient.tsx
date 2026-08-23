@@ -128,8 +128,7 @@ interface RescheduleLesson {
   teacher_id: string
 }
 
-// Identical to the Props BookingClient receives from page.tsx, so Stage D is a
-// one-line import swap.
+// Props passed in by page.tsx.
 interface Props {
   studentId: string
   studentTimezone: string

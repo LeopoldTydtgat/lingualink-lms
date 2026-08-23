@@ -309,4 +309,4 @@ export function snapToValidStart(
 
 // Re-exported so grid consumers can share the row/step granularity constant
 // instead of hard-coding 30 again.
-export { SLOT_MINUTES, SLOT_MS }
+export { SLOT_MINUTES }
