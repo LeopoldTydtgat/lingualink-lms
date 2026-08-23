@@ -236,6 +236,43 @@ export async function GET(request: Request) {
     )
   }
 
+  // ---- A2. The ids of our own class blocks on this calendar ---------------
+  // Every google_event_id we have written onto one of this teacher's lessons.
+  // buildBusyIntervals skips these, so a class block the outbound sync put on
+  // her calendar can never come back through this sync as a busy row over the
+  // slot the platform itself booked.
+  //
+  // Read BEFORE the token refresh deliberately: a database failure here must
+  // exit before spending a Google round trip on a run that is going to abort
+  // anyway.
+  //
+  // Subject to PostgREST's max-rows cap (1000). Truncation is tolerable in this
+  // one direction only, and it is the direction that happens: a missing id
+  // leaves one of our own events unskipped, which over-blocks a slot that is
+  // ALREADY booked by the class that event represents. That costs nothing real.
+  // The opposite failure - a class event mirrored back over a freed slot - is
+  // what this filter exists to prevent, and truncation cannot cause it.
+  const { data: classEventRows, error: classEventError } = await supabase
+    .from('lessons')
+    .select('google_event_id')
+    .eq('teacher_id', profileRow.id)
+    .not('google_event_id', 'is', null)
+
+  if (classEventError) {
+    // Same incomplete-picture rule as every other read in this route: without
+    // the full id list the echo filter is partial, so nothing is written and
+    // the previous generation of blocks survives untouched.
+    return fail(`Class event id lookup failed: ${classEventError.message}`)
+  }
+
+  const classEventIds = new Set<string>()
+  for (const row of classEventRows ?? []) {
+    const eventId: unknown = row.google_event_id
+    // Non-empty strings only. A whitespace-only pointer matches no Google id
+    // and would only sit in the set forever.
+    if (typeof eventId === 'string' && eventId.trim().length > 0) classEventIds.add(eventId)
+  }
+
   // ---- B. Token refresh, every run, unconditionally ----------------------
   // No "is the stored access token still valid?" branch. The token lives ~60
   // minutes and this cron runs far more often, so a conditional-reuse path
@@ -317,6 +354,9 @@ export async function GET(request: Request) {
     // Never a second hardcoded copy: if the organiser account moves, it moves
     // in one place and this filter follows it.
     organiserEmail: ORGANISER_UPN,
+    // The second half of the echo filter: our own outbound class blocks, by the
+    // ids we stored when we wrote them.
+    classEventIds,
     windowStartMs,
     windowEndMs,
   })
@@ -411,6 +451,7 @@ export async function GET(request: Request) {
       `${intervals.length} block(s) written, ${rowsDeleted} superseded row(s) deleted; ` +
       `skipped ${skipped.notConfirmed} unconfirmed, ${skipped.allDay} all-day, ` +
       `${skipped.transparent} free, ${skipped.ownTeamsInvite} own-invite, ` +
+      `${skipped.ownClassEvent} own-class-block, ` +
       `${skipped.unusableTimes} unusable, ${skipped.outsideWindow} out-of-window`
   )
 
