@@ -15,6 +15,12 @@ import ResponsesClient, {
 // student set - identical scoping to the C1 aggregates. The activity_attempts RLS
 // teacher policy is deliberately NOT relied on: its trainings scope diverges from
 // Condition B and would show a different student set than the worksheet cards.
+//
+// Every read below BINDS its error. A discarded error arrives as `data: null`,
+// which the fallbacks here absorb into an empty array - and an empty array on this
+// page is a POSITIVE claim a teacher acts on ("nobody has this worksheet", "nobody
+// has started it"). A failed read must never make that claim, so each error either
+// stops the page or flags the roster.
 export default async function WorksheetResponsesPage({
   params,
 }: {
@@ -26,13 +32,20 @@ export default async function WorksheetResponsesPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('role')
     .eq('id', user.id)
     .maybeSingle()
 
+  if (profileError) {
+    console.error('[dashboard/study-sheets/[id]/responses] profiles lookup failed:', profileError)
+  }
+
   // House rule: a null profile is NOT an unauthenticated user - never redirect.
+  // A failed read lands in this same branch, and that is correct here: no role
+  // means no gate, and this page runs entirely on the service-role client, so it
+  // must fail CLOSED rather than fall through to the authorisation check below.
   if (!profile) {
     return (
       <div className="p-6 max-w-5xl mx-auto">
@@ -53,11 +66,23 @@ export default async function WorksheetResponsesPage({
 
   // Sheet eligibility mirrors the C2 assign route exactly: an active, admin-published
   // student worksheet (audience='student', owner_id IS NULL). Anything else 404s.
-  const { data: sheet } = await adminClient
+  const { data: sheet, error: sheetError } = await adminClient
     .from('study_sheets')
     .select('id, title, category, level, is_active, audience, owner_id')
     .eq('id', id)
     .maybeSingle()
+
+  // A query error is NOT a missing row. 404ing on a transient failure tells the
+  // teacher this worksheet does not exist, one click after they opened it from the
+  // library. Surfaced in-page rather than thrown: there is no (dashboard) error
+  // boundary, so a throw renders app/error.tsx and blanks the whole portal shell
+  // (see (dashboard)/layout.tsx and upcoming-classes/page.tsx on that hazard).
+  if (sheetError) {
+    console.error(`[dashboard/study-sheets/[id]/responses] study_sheets lookup failed (sheet ${id}):`, sheetError)
+    return (
+      <div className="p-8 text-gray-500">Unable to load this worksheet. Please refresh the page.</div>
+    )
+  }
 
   if (
     !sheet ||
@@ -70,8 +95,18 @@ export default async function WorksheetResponsesPage({
 
   // Condition-B scope: null = admin (no student filter); [] = a teacher with no
   // booked-class students (can have no in-scope assignments -> empty state).
+  // KNOWN GAP (separate commit): getTeacherScopedStudentIds swallows the errors of
+  // its own lessons/reports/trainings reads and returns [] on failure, which lands
+  // on the same false empty state. That fix belongs in lib/access/bookedClass.ts.
   const scopedStudentIds = await getTeacherScopedStudentIds(adminClient, user.id, isAdmin)
   const hasScopeRows = scopedStudentIds === null || scopedStudentIds.length > 0
+
+  // Set by ANY read whose failure would falsify the roster: assignments (who holds
+  // the sheet), activities (the denominator, and every question) and
+  // activity_attempts (the answers themselves). Losing any one of them turns every
+  // row into "Not started" with no way for the teacher to tell, so the roster is
+  // suppressed entirely and the client shows an error card in its place.
+  let rosterLoadFailed = false
 
   // Assignments for this sheet, scoped to the teacher's students.
   type AssignmentRow = { id: string; student_id: string; assigned_at: string; marked_done_at: string | null }
@@ -82,20 +117,28 @@ export default async function WorksheetResponsesPage({
       .select('id, student_id, assigned_at, marked_done_at')
       .eq('study_sheet_id', id)
     if (scopedStudentIds !== null) q = q.in('student_id', scopedStudentIds)
-    const { data } = await q
+    const { data, error: assignmentsError } = await q
+    if (assignmentsError) {
+      console.error(`[dashboard/study-sheets/[id]/responses] assignments lookup failed (sheet ${id}):`, assignmentsError)
+      rosterLoadFailed = true
+    }
     assignmentRows = (data ?? []) as AssignmentRow[]
   }
 
   const studentIds = [...new Set(assignmentRows.map(a => a.student_id))]
 
-  // Empty state: no in-scope student has this worksheet.
-  if (assignmentRows.length === 0 || studentIds.length === 0) {
+  // Empty state: no in-scope student has this worksheet. A FAILED assignments read
+  // exits here too - same shell, same header - but flagged, so the client renders
+  // its error card INSTEAD of the empty state. The two must never look alike.
+  if (rosterLoadFailed || assignmentRows.length === 0 || studentIds.length === 0) {
     return (
       <ResponsesClient
         sheetTitle={sheet.title}
         sheetCategory={sheet.category}
         sheetLevel={sheet.level}
         students={[]}
+        rosterLoadFailed={rosterLoadFailed}
+        namesLoadFailed={false}
       />
     )
   }
@@ -114,18 +157,30 @@ export default async function WorksheetResponsesPage({
     content: unknown
     answer_key: unknown
   }
-  const { data: activityData } = await adminClient
+  const { data: activityData, error: activitiesError } = await adminClient
     .from('activities')
     .select('id, position, type, title, content, answer_key')
     .eq('sheet_id', id)
     .order('position', { ascending: true })
+  if (activitiesError) {
+    console.error(`[dashboard/study-sheets/[id]/responses] activities lookup failed (sheet ${id}):`, activitiesError)
+    rosterLoadFailed = true
+  }
   const activityRows = (activityData ?? []) as ActivityRow[]
 
   // Student names (service-role read; teacher role cannot read students directly).
-  const { data: studentData } = await adminClient
+  // Display-only: every figure on the page stays correct without them, so this
+  // failure DEGRADES the list rather than suppressing it. The ?? 'Student' fallback
+  // below is kept, and the flag stops the client presenting it as a real name.
+  let namesLoadFailed = false
+  const { data: studentData, error: studentsError } = await adminClient
     .from('students')
     .select('id, full_name')
     .in('id', studentIds)
+  if (studentsError) {
+    console.error(`[dashboard/study-sheets/[id]/responses] students lookup failed (sheet ${id}):`, studentsError)
+    namesLoadFailed = true
+  }
   const nameById = new Map<string, string>()
   for (const s of ((studentData ?? []) as { id: string; full_name: string }[])) {
     nameById.set(s.id, s.full_name)
@@ -139,10 +194,14 @@ export default async function WorksheetResponsesPage({
     score: number | null
     created_at: string
   }
-  const { data: atts } = await adminClient
+  const { data: atts, error: attemptsError } = await adminClient
     .from('activity_attempts')
     .select('activity_id, assignment_id, answers, score, created_at')
     .in('assignment_id', assignmentIds)
+  if (attemptsError) {
+    console.error(`[dashboard/study-sheets/[id]/responses] activity_attempts lookup failed (sheet ${id}):`, attemptsError)
+    rosterLoadFailed = true
+  }
   const attemptRows = (atts ?? []) as AttemptRow[]
 
   // Shared bimodal completion rule (single-sourced with the C1 aggregates).
@@ -315,12 +374,17 @@ export default async function WorksheetResponsesPage({
     })
     .sort((a, b) => a.studentName.localeCompare(b.studentName))
 
+  // Belt and braces on the roster: the client already renders its error card ahead
+  // of the list, and the rows are emptied here too, so a failed activities or
+  // activity_attempts read can never put a "Not started" row on screen.
   return (
     <ResponsesClient
       sheetTitle={sheet.title}
       sheetCategory={sheet.category}
       sheetLevel={sheet.level}
-      students={students}
+      students={rosterLoadFailed ? [] : students}
+      rosterLoadFailed={rosterLoadFailed}
+      namesLoadFailed={namesLoadFailed}
     />
   )
 }

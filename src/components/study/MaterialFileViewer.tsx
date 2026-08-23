@@ -37,6 +37,10 @@ type Props = {
   // Absent -> no button rendered (student parity).
   onRemove?: (idx: number) => void
   removingName?: string | null
+  // Passed straight through to PdfViewer/AnnotatablePdf. Optional — omitted,
+  // both keep PdfViewer's own 80vh default, so every call site but the one that
+  // explicitly sets this is unchanged.
+  maxHeightVh?: number
 }
 
 export default function MaterialFileViewer({
@@ -50,6 +54,7 @@ export default function MaterialFileViewer({
   cardStyle = { border: '1px solid #f3f4f6' },
   onRemove,
   removingName,
+  maxHeightVh,
 }: Props) {
   const containerRefs = useRef<(HTMLDivElement | null)[]>([])
   const [fullscreenIdx, setFullscreenIdx] = useState<number | null>(null)
@@ -147,11 +152,12 @@ export default function MaterialFileViewer({
                   attachmentName={att.name}
                   initialAnnotations={annotationsByName?.[att.name]}
                   seedLessonId={liveLessonId ?? null}
+                  maxHeightVh={maxHeightVh}
                 />
               ) : (
                 // PdfViewer replaces the native <iframe>: it renders the PDF through
                 // the same proxy with its own toolbar and carries NO download/print.
-                <PdfViewer fileUrl={fileUrl} readOnly />
+                <PdfViewer fileUrl={fileUrl} readOnly maxHeightVh={maxHeightVh} />
               )
             ) : isImage ? (
               <img

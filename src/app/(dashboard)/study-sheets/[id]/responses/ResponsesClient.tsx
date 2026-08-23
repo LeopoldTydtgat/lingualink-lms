@@ -47,6 +47,16 @@ type Props = {
   sheetCategory: string | null
   sheetLevel: string | null
   students: StudentResponses[]
+  // One of the reads the roster depends on failed upstream (assignments,
+  // activities or activity_attempts). Distinct from an empty list: every figure
+  // would read "Not started", so the rows are withheld and an error card is
+  // rendered INSTEAD of the empty state. Required (mirrors PastClassesClient.tsx)
+  // so every caller must decide explicitly rather than silently defaulting to
+  // "loaded fine".
+  rosterLoadFailed: boolean
+  // Only the student-name lookup failed. The rows and every figure on them are
+  // correct - the labels are not - so the list renders under a warning.
+  namesLoadFailed: boolean
 }
 
 // Locked portal palette.
@@ -281,7 +291,14 @@ function StudentRow({ student }: { student: StudentResponses }) {
   )
 }
 
-export default function ResponsesClient({ sheetTitle, sheetCategory, sheetLevel, students }: Props) {
+export default function ResponsesClient({
+  sheetTitle,
+  sheetCategory,
+  sheetLevel,
+  students,
+  rosterLoadFailed,
+  namesLoadFailed,
+}: Props) {
   return (
     <div className="space-y-6">
       <div>
@@ -320,7 +337,18 @@ export default function ResponsesClient({ sheetTitle, sheetCategory, sheetLevel,
         </div>
       </div>
 
-      {students.length === 0 ? (
+      {rosterLoadFailed ? (
+        // Rendered INSTEAD of the empty state: a failed read must never read as
+        // "no student has this worksheet assigned yet". Checked FIRST so no
+        // half-resolved row can reach the list behind it. Same card as the teacher
+        // Past Classes page (past-classes/PastClassesClient.tsx).
+        <div
+          className="rounded-xl p-4 text-sm"
+          style={{ backgroundColor: '#FFEEE6', color: '#B91C1C', border: '1px solid #FECACA' }}
+        >
+          Student responses could not be loaded. Please refresh the page to try again.
+        </div>
+      ) : students.length === 0 ? (
         <div
           className="rounded-xl px-6 py-12 text-center text-sm shadow-sm"
           style={{ backgroundColor: '#ffffff', border: '1px solid #f3f4f6', color: '#9ca3af' }}
@@ -329,6 +357,18 @@ export default function ResponsesClient({ sheetTitle, sheetCategory, sheetLevel,
         </div>
       ) : (
         <div className="space-y-3">
+          {namesLoadFailed && (
+            // Names are display-only, so the list still renders: the figures below
+            // are correct, the labels are not. Same card, above the list rather
+            // than instead of it.
+            <div
+              className="rounded-xl p-4 text-sm"
+              style={{ backgroundColor: '#FFEEE6', color: '#B91C1C', border: '1px solid #FECACA' }}
+            >
+              Student names could not be loaded, so the rows below are labelled with a
+              placeholder instead of real names. The progress figures shown are correct.
+            </div>
+          )}
           {students.map(s => (
             <StudentRow key={s.studentId} student={s} />
           ))}

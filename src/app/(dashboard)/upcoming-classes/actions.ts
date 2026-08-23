@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByTeacherEmailContent, studentCancellationByAdminEmailContent, teacherCancellationEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
+import { deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import type { CancelResult } from '@/lib/types/cancel'
 import { requireTz } from '@/lib/time/requireTz'
 import * as Sentry from '@sentry/nextjs'
@@ -102,6 +103,8 @@ export async function teacherCancelLesson(
       })
     }
   }
+
+  await deleteLessonGoogleEvent(lessonId)
 
   // Send email to student
   try {

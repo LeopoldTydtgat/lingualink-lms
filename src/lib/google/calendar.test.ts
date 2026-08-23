@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildBusyIntervals,
+  createGoogleEvent,
+  deleteGoogleEvent,
   fetchGoogleCalendarEvents,
+  GOOGLE_CALENDAR_EVENTS_ENDPOINT,
   mergeIntervalsWithinLocalDays,
   splitAtLocalMidnights,
+  updateGoogleEvent,
   type GoogleCalendarEvent,
 } from './calendar'
 import { getLocalDateKey } from '@/lib/utils/timezone'
@@ -364,5 +368,279 @@ describe('fetchGoogleCalendarEvents', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+// ---- Outbound writes --------------------------------------------------------
+
+const TOKEN = 'ya29.test-access-token'
+
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+/**
+ * Stubs fetch and hands the mock back, because for these helpers the REQUEST is
+ * the thing under test: the no-attendees rule and the header-only token live in
+ * what we send, not in what comes back.
+ */
+function stubFetch(respond: (url: string, init: RequestInit) => Response) {
+  const fetchMock = vi.fn(async (url: string, init: RequestInit) => respond(url, init))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+/** The one request the helper made - the call count is also the no-retry check. */
+function requestOf(fetchMock: ReturnType<typeof stubFetch>) {
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  const [url, init] = fetchMock.mock.calls[0]
+  return { url, init }
+}
+
+function bodyOf(init: RequestInit): Record<string, unknown> {
+  return JSON.parse(String(init.body)) as Record<string, unknown>
+}
+
+function authOf(init: RequestInit): string | undefined {
+  return (init.headers as Record<string, string> | undefined)?.Authorization
+}
+
+describe('Google Calendar outbound writes', () => {
+  // console.error is this module's failure channel and the rejection cases below
+  // drive it on purpose; silencing keeps the run readable. unstubAllGlobals puts
+  // the real fetch back after every case.
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  describe('createGoogleEvent', () => {
+    const create = () =>
+      createGoogleEvent({
+        accessToken: TOKEN,
+        summary: 'LinguaLink class - Maria',
+        startIso: '2026-09-10T09:00:00+02:00',
+        endIso: '2026-09-10T10:00:00+02:00',
+        timezone: TZ,
+      })
+
+    it('returns the created event id', async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ id: 'evt-created-123' }, 200))
+
+      expect(await create()).toEqual({ ok: true, eventId: 'evt-created-123' })
+
+      const { url, init } = requestOf(fetchMock)
+      expect(url).toBe(GOOGLE_CALENDAR_EVENTS_ENDPOINT)
+      expect(init.method).toBe('POST')
+      expect(bodyOf(init)).toEqual({
+        summary: 'LinguaLink class - Maria',
+        start: { dateTime: '2026-09-10T09:00:00+02:00', timeZone: TZ },
+        end: { dateTime: '2026-09-10T10:00:00+02:00', timeZone: TZ },
+      })
+      // The 10s abort signal is attached to every request, not just the reads.
+      expect(init.signal).toBeInstanceOf(AbortSignal)
+    })
+
+    it('sends NO attendees and nothing else that could notify anybody', async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ id: 'evt-created-123' }, 200))
+
+      await create()
+
+      const { url, init } = requestOf(fetchMock)
+      const body = bodyOf(init)
+
+      // THE rule: this event is a private block on one person's own calendar.
+      // Any of these fields turns it into an invitation and mails a student or
+      // a teacher from her personal Google account.
+      expect(body).not.toHaveProperty('attendees')
+      for (const field of [
+        'sendUpdates',
+        'sendNotifications',
+        'guestsCanModify',
+        'guestsCanInviteOthers',
+        'guestsCanSeeOtherGuests',
+      ]) {
+        expect(body).not.toHaveProperty(field)
+      }
+      // sendUpdates is a QUERY parameter on this endpoint rather than a body
+      // field, so a bare URL is what proves it is not being set.
+      expect(url).toBe(GOOGLE_CALENDAR_EVENTS_ENDPOINT)
+      expect(url).not.toContain('?')
+
+      // Omitted reminders means the calendar's own defaults apply.
+      expect(body).not.toHaveProperty('reminders')
+
+      // Token in the Authorization header, never in the URL.
+      expect(authOf(init)).toBe(`Bearer ${TOKEN}`)
+      expect(url).not.toContain(TOKEN)
+    })
+
+    it('returns the error shape when Google rejects the insert', async () => {
+      const fetchMock = stubFetch(() =>
+        jsonResponse({ error: { message: 'Insufficient Permission' } }, 403)
+      )
+
+      const result = await create()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected createGoogleEvent to fail')
+      expect(result.error).toBe('Google Calendar returned HTTP 403: Insufficient Permission')
+      // One request, then report - no retry inside a user-facing path.
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports a failure when the insert answers without an id', async () => {
+      stubFetch(() => jsonResponse({ summary: 'created but unidentifiable' }, 200))
+
+      const result = await create()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected createGoogleEvent to fail')
+      expect(result.error).toContain('no id')
+    })
+
+    it('reports a network failure instead of throwing', async () => {
+      stubFetch(() => {
+        throw new Error('socket hang up')
+      })
+
+      const result = await create()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected createGoogleEvent to fail')
+      expect(result.error).toContain('network or timeout')
+    })
+  })
+
+  describe('updateGoogleEvent', () => {
+    const update = (eventId = 'evt-123') =>
+      updateGoogleEvent({
+        accessToken: TOKEN,
+        eventId,
+        startIso: '2026-09-11T15:00:00+02:00',
+        endIso: '2026-09-11T16:00:00+02:00',
+        timezone: TZ,
+      })
+
+    it('patches start and end, and nothing else', async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ id: 'evt-123' }, 200))
+
+      expect(await update()).toEqual({ ok: true })
+
+      const { url, init } = requestOf(fetchMock)
+      expect(init.method).toBe('PATCH')
+      expect(url).toBe(`${GOOGLE_CALENDAR_EVENTS_ENDPOINT}/evt-123`)
+
+      const body = bodyOf(init)
+      // Exactly two keys. A summary here would overwrite a rename she made on
+      // her own calendar; attendees would mail somebody.
+      expect(Object.keys(body).sort()).toEqual(['end', 'start'])
+      expect(body).toEqual({
+        start: { dateTime: '2026-09-11T15:00:00+02:00', timeZone: TZ },
+        end: { dateTime: '2026-09-11T16:00:00+02:00', timeZone: TZ },
+      })
+      expect(authOf(init)).toBe(`Bearer ${TOKEN}`)
+    })
+
+    it('percent-encodes the event id into the path', async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ id: 'x' }, 200))
+
+      await update('evt 123/456')
+
+      const { url } = requestOf(fetchMock)
+      expect(url).toBe(`${GOOGLE_CALENDAR_EVENTS_ENDPOINT}/evt%20123%2F456`)
+    })
+
+    it('treats a missing event as a real failure, unlike delete', async () => {
+      stubFetch(() => jsonResponse({ error: { message: 'Not Found' } }, 404))
+
+      const result = await update()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected updateGoogleEvent to fail')
+      expect(result.error).toBe('Google Calendar returned HTTP 404: Not Found')
+    })
+
+    it('reports a network failure instead of throwing', async () => {
+      stubFetch(() => {
+        throw new Error('socket hang up')
+      })
+
+      const result = await update()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected updateGoogleEvent to fail')
+      expect(result.error).toContain('network or timeout')
+    })
+  })
+
+  describe('deleteGoogleEvent', () => {
+    const remove = () => deleteGoogleEvent({ accessToken: TOKEN, eventId: 'evt-123' })
+
+    it('deletes the event', async () => {
+      // Google answers 204 No Content: nothing may be parsed on this path.
+      const fetchMock = stubFetch(() => new Response(null, { status: 204 }))
+
+      expect(await remove()).toEqual({ ok: true })
+
+      const { url, init } = requestOf(fetchMock)
+      expect(init.method).toBe('DELETE')
+      expect(url).toBe(`${GOOGLE_CALENDAR_EVENTS_ENDPOINT}/evt-123`)
+      expect(init.body).toBeUndefined()
+      expect(authOf(init)).toBe(`Bearer ${TOKEN}`)
+      expect(url).not.toContain(TOKEN)
+    })
+
+    it('treats 404 as success - the event is already gone', async () => {
+      stubFetch(() => jsonResponse({ error: { message: 'Not Found' } }, 404))
+
+      expect(await remove()).toEqual({ ok: true })
+    })
+
+    it('treats 410 as success - the event was already deleted', async () => {
+      stubFetch(() => jsonResponse({ error: { message: 'Resource has been deleted' } }, 410))
+
+      expect(await remove()).toEqual({ ok: true })
+    })
+
+    it('surfaces a real error rather than pretending the event is gone', async () => {
+      const fetchMock = stubFetch(() => jsonResponse({ error: { message: 'Backend Error' } }, 500))
+
+      const result = await remove()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected deleteGoogleEvent to fail')
+      expect(result.error).toBe('Google Calendar returned HTTP 500: Backend Error')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('surfaces a permission failure, which says nothing about the event', async () => {
+      stubFetch(() => jsonResponse({ error: { message: 'Insufficient Permission' } }, 403))
+
+      const result = await remove()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected deleteGoogleEvent to fail')
+      expect(result.error).toBe('Google Calendar returned HTTP 403: Insufficient Permission')
+    })
+
+    it('reports a network failure instead of throwing', async () => {
+      stubFetch(() => {
+        throw new Error('socket hang up')
+      })
+
+      const result = await remove()
+
+      expect(result.ok).toBe(false)
+      if (result.ok) throw new Error('expected deleteGoogleEvent to fail')
+      expect(result.error).toContain('network or timeout')
+    })
   })
 })

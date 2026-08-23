@@ -16,6 +16,7 @@ import { isSlotAvailable } from '@/lib/availability'
 import { checkStudentBookingLimit, recordStudentBookingAttempt } from '@/lib/rateLimit'
 import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { createLessonGoogleEvent, deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 
 // ── POST /api/student/book ────────────────────────────────────────────────────
@@ -789,6 +790,46 @@ export async function POST(req: NextRequest) {
         lesson_id: newLesson.id,
         error: pendingReportError,
       })
+    }
+
+    // ── 6c. Mirror the class onto the connected Google Calendar ─────────
+    // GCAL REBUILD 2. Writes a private time-block on the connected account's
+    // own calendar and stores the event id on this lesson row. Non-blocking by
+    // construction - createLessonGoogleEvent never throws and returns nothing,
+    // so there is no branch here and no failure of it can change what the
+    // student is told. Awaited rather than fired and forgotten because the
+    // serverless function can be frozen the instant the response is returned,
+    // which would silently drop a dangling promise mid-request.
+    //
+    // The RESCHEDULE path lands here too, and that is intended: the insert
+    // above created a NEW lesson row, so it needs its own event. The OLD row's
+    // event is taken back off the calendar by the gated delete immediately
+    // below.
+    await createLessonGoogleEvent({
+      lessonId: newLesson.id,
+      teacherId,
+      studentName: studentRow.full_name,
+      scheduledAtIso: startTime.toISOString(),
+      durationMinutes,
+    })
+
+    // Now take the OLD block back off the calendar. ORDER IS LOAD-BEARING: the
+    // new event is created FIRST and the old one deleted after. Reversed, a
+    // create that fails would leave the class with no block on her calendar at
+    // all - the exact failure this rebuild exists to remove. This way round the
+    // worst case is a stale block sitting on the old time, which is visible to
+    // her and recoverable.
+    //
+    // Gated on rescheduleId because a fresh booking has no old row to clean up.
+    //
+    // Deliberately OUTSIDE the if (oldTeamsMeetingId) block above: the Google
+    // event exists independently of any Teams meeting, so nesting it there
+    // would skip a lesson booked before that integration existed.
+    //
+    // Unreachable on the unwind path - every branch of the insert-failure block
+    // returns, so this line only runs once the new lesson row is committed.
+    if (rescheduleId) {
+      await deleteLessonGoogleEvent(rescheduleId)
     }
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────

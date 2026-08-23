@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import resend from '@/lib/email/client'
 import { buildEmailTemplate, studentCancellationByAdminEmailContent, studentRescheduledEmailContent, teacherRescheduledEmailContent, teacherCancellationEmailContent, teacherReassignedEmailContent } from '@/lib/email/templates'
 import { cancelTeamsMeeting, createTeamsMeeting, updateTeamsMeeting } from '@/lib/microsoft/graph'
+import { deleteLessonGoogleEvent, updateLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { adminClassesPatchSchema } from '@/lib/validation/schemas'
 import { recomputeInvoiceAmountsForTeacher } from '@/lib/billing/recomputeAmounts'
 import { getBillability, isCancelledStatus } from '@/lib/billing/billability'
@@ -178,6 +179,8 @@ export async function PATCH(
         })
       }
     }
+
+    await deleteLessonGoogleEvent(id)
 
     // Resolve teacher + student once, ahead of both cancellation-email blocks below —
     // mirrors the reschedule branch's up-front fetch. Widened to include teacher
@@ -542,6 +545,38 @@ export async function PATCH(
         console.error('CRITICAL: Teams meeting orphan fallback creation failed', { lesson_id: id, error: graphError })
       }
     }
+  }
+
+  // GCAL REBUILD 2. Move the Google Calendar block onto the new time - or put
+  // one there if this lesson never got one - and, on a reassignment, move it
+  // off the outgoing teacher's calendar and onto the new one's. Non-blocking by
+  // construction: updateLessonGoogleEvent never throws and returns nothing, so
+  // there is no branch here and no failure of it can change what the admin is
+  // told.
+  //
+  // A TEACHER SWAP IS HANDLED HERE, and not for the reason Teams resyncs on
+  // one. Teams resends its subject because that subject names the teacher; the
+  // Google block's title does not - buildLessonEventSummary is the student's
+  // first name and nothing else. What changed is OWNERSHIP. Every calendar
+  // write is scoped to the lesson's own teacher, so after this edit the block
+  // is sitting on the calendar of somebody who no longer teaches the class: it
+  // has to come off theirs, and the incoming teacher (if she has connected a
+  // calendar at all) needs one of her own. previousTeacherId is what tells the
+  // helper which calendar to take the old block off; it is passed ONLY on a
+  // real swap, so a time- or duration-only edit still just moves the event.
+  //
+  // Sits after admin_edit_lesson_atomic because every error branch of that RPC
+  // returns, so reaching this line means the new time, duration and teacher are
+  // already committed to the database and the calendar is the only thing left
+  // to catch up.
+  if (timeChanged || durationChanged || teacherChanged) {
+    await updateLessonGoogleEvent({
+      lessonId: id,
+      studentName,
+      scheduledAtIso: newScheduledAt,
+      durationMinutes: newDuration,
+      previousTeacherId: teacherChanged ? existing.teacher_id : undefined,
+    })
   }
 
   if (timeChanged) {

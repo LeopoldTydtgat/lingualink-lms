@@ -15,6 +15,7 @@ import { localToUtc } from '@/lib/utils/timezone'
 import { requireTz } from '@/lib/time/requireTz'
 import { CANCELLED_STATUSES, NO_SHOW_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
+import { createLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { adminClassesPostSchema } from '@/lib/validation/schemas'
 import { localMidnightToUtc } from '@/lib/billing/monthRange'
 
@@ -558,6 +559,21 @@ export async function POST(request: NextRequest) {
       error: pendingReportError,
     })
   }
+
+  // GCAL REBUILD 2: mirror the class onto the connected Google Calendar as a
+  // private time-block and store the event id on the lesson row. Non-blocking
+  // by construction - createLessonGoogleEvent never throws and returns nothing,
+  // so there is no branch here and no failure of it can change the 201 below.
+  // Awaited rather than fired and forgotten because the serverless function can
+  // be frozen the instant the response is returned, which would silently drop a
+  // dangling promise mid-request.
+  await createLessonGoogleEvent({
+    lessonId: lesson.id,
+    teacherId: teacher_id,
+    studentName: studentEmailData?.full_name ?? 'Student',
+    scheduledAtIso: scheduledAtUtc,
+    durationMinutes: duration_minutes,
+  })
 
   // Send confirmation emails to teacher and student
   try {

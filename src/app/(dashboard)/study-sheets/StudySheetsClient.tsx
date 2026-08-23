@@ -56,10 +56,15 @@ type Props = {
   studySheets: StudySheet[]
   currentUserId: string
   progressBySheet: Record<string, SheetProgress>
-  assignedThisWeek: number
-  newSubmissions: number
+  // null = the read behind this figure failed. Every load-failure prop below is
+  // REQUIRED and every count is nullable: an optional flag defaulting to false,
+  // or a number that cannot be null, is itself an assertion that the data loaded.
+  assignedThisWeek: number | null
+  newSubmissions: number | null
   assignableStudents: AssignableStudent[]
-  pendingReviewCount: number
+  pendingReviewCount: number | null
+  progressLoadFailed: boolean
+  rosterLoadFailed: boolean
 }
 
 type TabKey = 'teaching' | 'student'
@@ -69,6 +74,9 @@ type SortKey = 'recent' | 'title'
 const LEVELS = ['All', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2']
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const MIDDOT = String.fromCharCode(183)
+// Stands in for a count whose read failed. Char code, not a literal: this file is
+// ASCII-only and the full-file write path decodes literal non-ASCII silently.
+const EMDASH = String.fromCharCode(8212)
 
 // UTC parts only: deterministic across the SSR/CSR boundary (no hydration drift)
 // and avoids the banned toISOString / toLocale* date APIs.
@@ -247,7 +255,9 @@ function StatCard({
 }: {
   icon: typeof GraduationCap
   label: string
-  value: number
+  // null = the read behind this figure failed. Rendered as a dash, never as 0:
+  // 0 is a fact about the teacher's week, and a failed read has no facts.
+  value: number | null
   caption: string
 }) {
   return (
@@ -261,7 +271,9 @@ function StatCard({
         </span>
         <span className="text-sm font-medium" style={{ color: '#4b5563' }}>{label}</span>
       </div>
-      <p className="text-3xl font-semibold" style={{ color: '#111827' }}>{value}</p>
+      <p className="text-3xl font-semibold" style={{ color: value === null ? '#9ca3af' : '#111827' }}>
+        {value === null ? EMDASH : value}
+      </p>
       <p className="text-xs mt-1" style={{ color: '#9ca3af' }}>{caption}</p>
     </div>
   )
@@ -412,10 +424,14 @@ function WorksheetCard({
   sheet,
   progress,
   students,
+  progressLoadFailed,
+  rosterLoadFailed,
 }: {
   sheet: StudySheet
   progress?: SheetProgress
   students: AssignableStudent[]
+  progressLoadFailed: boolean
+  rosterLoadFailed: boolean
 }) {
   const router = useRouter()
   const Icon = sheetIcon(sheet)
@@ -440,14 +456,20 @@ function WorksheetCard({
           <Icon className="w-5 h-5" style={{ color: '#FF8303' }} />
         </span>
         <div className="flex items-center gap-2">
-          <span
-            className="px-2 py-0.5 rounded-full text-xs font-medium"
-            style={isAssigned
-              ? { backgroundColor: '#FFF3E0', color: '#FF8303' }
-              : { backgroundColor: '#f3f4f6', color: '#9ca3af' }}
-          >
-            {isAssigned ? 'Assigned' : 'Not Assigned'}
-          </span>
+          {/* Withheld under progressLoadFailed: isAssigned is derived from the same
+              assignments read as the figures below, so the badge is that same claim
+              in miniature - "Not Assigned" on a worksheet half the class is working
+              through. No badge at all is the only honest state. */}
+          {!progressLoadFailed && (
+            <span
+              className="px-2 py-0.5 rounded-full text-xs font-medium"
+              style={isAssigned
+                ? { backgroundColor: '#FFF3E0', color: '#FF8303' }
+                : { backgroundColor: '#f3f4f6', color: '#9ca3af' }}
+            >
+              {isAssigned ? 'Assigned' : 'Not Assigned'}
+            </span>
+          )}
           <DuplicateMenu sheetId={sheet.id} />
         </div>
       </div>
@@ -479,8 +501,22 @@ function WorksheetCard({
         )}
       </div>
 
-      {/* Progress block: only when the worksheet is assigned to at least one student */}
-      {isAssigned && (
+      {/* Progress block: only when the worksheet is assigned to at least one student.
+          Checked FIRST, so no half-resolved figure can reach the card behind it: a
+          failed activities or activity_attempts read leaves assignedCount intact and
+          the completion evidence gone, which renders as "Completed 0 / Pending N"
+          over a 0% bar on a worksheet everyone finished. Same card as the teacher
+          Past Classes page (past-classes/PastClassesClient.tsx). */}
+      {progressLoadFailed ? (
+        <div className="mb-3">
+          <div
+            className="rounded-xl p-4 text-sm"
+            style={{ backgroundColor: '#FFEEE6', color: '#B91C1C', border: '1px solid #FECACA' }}
+          >
+            Assignment progress could not be loaded. Please refresh the page to try again.
+          </div>
+        </div>
+      ) : isAssigned && (
         <div className="mb-3">
           <div className="text-xs mb-1.5">
             <span style={{ color: '#4b5563' }}>
@@ -538,6 +574,7 @@ function WorksheetCard({
           sheetId={sheet.id}
           sheetTitle={sheet.title}
           students={students}
+          rosterLoadFailed={rosterLoadFailed}
           onClose={() => setShowAssign(false)}
           onSaved={() => router.refresh()}
         />
@@ -643,6 +680,8 @@ export default function StudySheetsClient({
   newSubmissions,
   assignableStudents,
   pendingReviewCount,
+  progressLoadFailed,
+  rosterLoadFailed,
 }: Props) {
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<TabKey>('teaching')
@@ -710,7 +749,10 @@ export default function StudySheetsClient({
               onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFF0E0')}
             >
               Review queue
-              {pendingReviewCount > 0 && (
+              {/* Button stays live when the count is null: it is a route to the
+                  queue, not a claim about what is in it. Only the badge - which
+                  IS a claim - is withheld. */}
+              {pendingReviewCount !== null && pendingReviewCount > 0 && (
                 <span
                   className="px-1.5 py-0.5 rounded-full text-xs font-semibold"
                   style={{ backgroundColor: '#FF8303', color: 'white' }}
@@ -850,6 +892,8 @@ export default function StudySheetsClient({
                   sheet={sheet}
                   progress={progressBySheet[sheet.id]}
                   students={assignableStudents}
+                  progressLoadFailed={progressLoadFailed}
+                  rosterLoadFailed={rosterLoadFailed}
                 />
               ))}
             </div>

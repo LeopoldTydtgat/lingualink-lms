@@ -1,4 +1,5 @@
-// Google Calendar API read helpers for the busy-sync cron (GCAL REBUILD 1).
+// Google Calendar API helpers - the read side that feeds the busy-sync cron
+// (GCAL REBUILD 1), and the outbound event writes at the bottom of the file.
 //
 // Lives here rather than in the route so the interval maths - the part that
 // decides what does and does not block a real teacher's calendar - is pure and
@@ -9,7 +10,8 @@
 // browser bundle.
 //
 // NO SDK. Native fetch against the REST endpoint, deliberately: googleapis is a
-// very large dependency for three query parameters and a page loop.
+// very large dependency for three query parameters, a page loop and three
+// single-event writes.
 
 import { addDaysToDateKey, getLocalDateKey, wallTimeToUtcMs } from '@/lib/utils/timezone'
 
@@ -416,4 +418,233 @@ export function buildBusyIntervals(
 
   const split = clamped.flatMap((interval) => splitAtLocalMidnights(interval, timezone))
   return { intervals: mergeIntervalsWithinLocalDays(split, timezone), skipped }
+}
+
+// ---- Outbound writes --------------------------------------------------------
+//
+// The mirror image of the sync above: instead of reading Google's busy time
+// into LinguaLink, these put a LinguaLink class onto the connected person's own
+// primary calendar as a plain time-block.
+//
+// NO ATTENDEES, EVER. This is the hardest rule in the file. The event is a
+// private block on ONE person's own calendar, not an invitation: the moment an
+// `attendees` array (or `sendUpdates`, or `guestsCanModify`) appears in any
+// request below, Google emails a student or a teacher FROM HER PERSONAL GOOGLE
+// ACCOUNT, from an address they have never seen, about a class the platform has
+// already told them about. Meeting invitations belong to the Teams integration
+// (src/lib/microsoft/graph.ts) and go out under the platform organiser account.
+// Nothing in this section may notify anybody.
+//
+// `reminders` is left off every request body for the same kind of reason:
+// omitted means the calendar's own default reminders apply, which is what she
+// has already chosen for herself. Sending overrides would silently retune her
+// own notifications from inside a booking flow.
+//
+// NO RETRIES. Unlike the cron above, these run inside user-facing request
+// paths, so a retry loop would spend somebody's page load on it. One request,
+// then a result the caller decides about.
+
+export type GoogleEventCreateResult =
+  | { ok: true; eventId: string }
+  | { ok: false; error: string }
+
+/** Update and delete have nothing to hand back but the outcome. */
+export type GoogleEventWriteResult = { ok: true } | { ok: false; error: string }
+
+/**
+ * `ok` here means the request completed - NOT that Google accepted it. The
+ * status is still the caller's to read.
+ */
+type GoogleEventRequestAttempt =
+  | { ok: true; response: Response }
+  | { ok: false; error: string }
+
+/**
+ * The single-event URL, built from the one endpoint constant so that
+ * 'calendars/primary' exists exactly once in this codebase.
+ *
+ * The id is percent-encoded: it is opaque, caller-stored data and must never be
+ * able to reshape the path it is pasted into.
+ */
+function singleEventUrl(eventId: string): string {
+  return `${GOOGLE_CALENDAR_EVENTS_ENDPOINT}/${encodeURIComponent(eventId)}`
+}
+
+/** One request, one 10s timeout, no retry. Never throws. */
+async function sendEventRequest(
+  action: string,
+  url: string,
+  init: RequestInit
+): Promise<GoogleEventRequestAttempt> {
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      cache: 'no-store',
+    })
+    return { ok: true, response }
+  } catch (networkError) {
+    console.error(`[google/calendar] ${action} request failed:`, networkError)
+    return { ok: false, error: `Google Calendar ${action} failed (network or timeout)` }
+  }
+}
+
+/**
+ * Google's own message off a rejected response, or null.
+ *
+ * Only that one field is kept - a full event payload carries the summary of
+ * somebody's private appointment and has no business in a log line. A body that
+ * is not JSON at all is unremarkable on a failing response, so the parse error
+ * is swallowed here; the status is logged by the caller either way.
+ */
+async function readRejectionMessage(response: Response): Promise<string | null> {
+  const body: unknown = await response.json().catch(() => null)
+  return readErrorMessage(body)
+}
+
+/** The shared non-2xx branch, so the three helpers cannot report differently. */
+function eventRequestRejected(
+  action: string,
+  status: number,
+  message: string | null
+): { ok: false; error: string } {
+  console.error(`[google/calendar] ${action} rejected:`, status, message)
+  return {
+    ok: false,
+    error: `Google Calendar returned HTTP ${status}${message ? `: ${message}` : ''}`,
+  }
+}
+
+/**
+ * Creates the time-block and returns its id, which the caller MUST store: it is
+ * the only handle on the event afterwards.
+ *
+ * Never throws. A rejection from Google is an expected outcome here, not an
+ * exception.
+ */
+export async function createGoogleEvent(options: {
+  accessToken: string
+  summary: string
+  startIso: string
+  endIso: string
+  timezone: string
+}): Promise<GoogleEventCreateResult> {
+  const attempt = await sendEventRequest('event create', GOOGLE_CALENDAR_EVENTS_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      // Header only. A bearer token in a query string ends up in proxy logs,
+      // browser history and Referer headers.
+      Authorization: `Bearer ${options.accessToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    // Three fields, and nothing else by design - see the section header.
+    // Google treats the offset inside an RFC3339 dateTime as authoritative and
+    // falls back to timeZone only when the string carries none, so sending both
+    // is safe in either direction: they cannot disagree about the instant.
+    body: JSON.stringify({
+      summary: options.summary,
+      start: { dateTime: options.startIso, timeZone: options.timezone },
+      end: { dateTime: options.endIso, timeZone: options.timezone },
+    }),
+  })
+  if (!attempt.ok) return attempt
+
+  const body: unknown = await attempt.response.json().catch(() => null)
+
+  if (!attempt.response.ok) {
+    return eventRequestRejected('event create', attempt.response.status, readErrorMessage(body))
+  }
+
+  const eventId = (body as { id?: unknown } | null)?.id
+  if (typeof eventId !== 'string' || eventId.trim().length === 0) {
+    // The event almost certainly EXISTS on her calendar at this point - we just
+    // cannot hand the caller a handle for it. That is a failure, not a success:
+    // a caller told "ok" would record nothing and could never update or delete
+    // the block again.
+    console.error('[google/calendar] event create returned no usable id')
+    return { ok: false, error: 'Google Calendar created the event but returned no id' }
+  }
+
+  return { ok: true, eventId }
+}
+
+/**
+ * Moves an existing block. PATCH, not PUT, and start/end only: every field left
+ * out of the body stays as it is on Google's side.
+ *
+ * The summary is deliberately NOT resent. If she has renamed the block on her
+ * own calendar, that rename is hers and a reschedule must not quietly undo it.
+ *
+ * Unlike the delete below, a 404 here is a REAL failure: the block did not
+ * move, and a caller told otherwise would record a time the calendar does not
+ * show.
+ */
+export async function updateGoogleEvent(options: {
+  accessToken: string
+  eventId: string
+  startIso: string
+  endIso: string
+  timezone: string
+}): Promise<GoogleEventWriteResult> {
+  const attempt = await sendEventRequest('event update', singleEventUrl(options.eventId), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${options.accessToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      start: { dateTime: options.startIso, timeZone: options.timezone },
+      end: { dateTime: options.endIso, timeZone: options.timezone },
+    }),
+  })
+  if (!attempt.ok) return attempt
+
+  if (attempt.response.ok) return { ok: true }
+
+  return eventRequestRejected(
+    'event update',
+    attempt.response.status,
+    await readRejectionMessage(attempt.response)
+  )
+}
+
+/**
+ * Deletes the block.
+ *
+ * 404 AND 410 ARE SUCCESS, deliberately. Both mean the event is already gone -
+ * 404 for an id Google no longer recognises, 410 for one it knows was deleted -
+ * and "gone" is precisely the end state the caller asked for. Reporting failure
+ * would strand a cleanup path on an event that can never be deleted a second
+ * time, leaving a cancelled class holding a dead event id it is never allowed
+ * to clear. Same reasoning as cancelTeamsMeeting's 404 branch in
+ * src/lib/microsoft/graph.ts.
+ *
+ * Every other rejection (401, 403, 5xx) is still reported: those say nothing
+ * about whether the event survived, and the caller can act on them.
+ */
+export async function deleteGoogleEvent(options: {
+  accessToken: string
+  eventId: string
+}): Promise<GoogleEventWriteResult> {
+  const attempt = await sendEventRequest('event delete', singleEventUrl(options.eventId), {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${options.accessToken}`,
+      Accept: 'application/json',
+    },
+  })
+  if (!attempt.ok) return attempt
+
+  // Google answers 204 No Content, so nothing is parsed on the success path.
+  if (attempt.response.ok) return { ok: true }
+
+  if (attempt.response.status === 404 || attempt.response.status === 410) return { ok: true }
+
+  return eventRequestRejected(
+    'event delete',
+    attempt.response.status,
+    await readRejectionMessage(attempt.response)
+  )
 }

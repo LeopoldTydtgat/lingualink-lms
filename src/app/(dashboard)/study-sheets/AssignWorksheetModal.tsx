@@ -9,6 +9,9 @@ type Props = {
   sheetId: string
   sheetTitle: string
   students: Student[]
+  // REQUIRED, with no default: an optional flag falling back to false would assert
+  // the roster loaded fine, which is exactly the claim this prop exists to retract.
+  rosterLoadFailed: boolean
   onClose: () => void
   onSaved: () => void
 }
@@ -19,6 +22,7 @@ export default function AssignWorksheetModal({
   sheetId,
   sheetTitle,
   students,
+  rosterLoadFailed,
   onClose,
   onSaved,
 }: Props) {
@@ -158,7 +162,18 @@ export default function AssignWorksheetModal({
 
             {/* Student list */}
             <div className="flex-1 overflow-y-auto px-6 py-3 thin-scroll">
-              {students.length === 0 ? (
+              {rosterLoadFailed ? (
+                // Rendered INSTEAD of the empty state: a failed read must never
+                // read as "you have no students". Checked FIRST so no partially
+                // loaded roster can reach the list behind it. Same card as the
+                // teacher Past Classes page (past-classes/PastClassesClient.tsx).
+                <div
+                  className="rounded-xl p-4 text-sm"
+                  style={{ backgroundColor: '#FFEEE6', color: '#B91C1C', border: '1px solid #FECACA' }}
+                >
+                  Your student list could not be loaded. Please refresh the page to try again.
+                </div>
+              ) : students.length === 0 ? (
                 <p className="text-sm text-center py-8" style={{ color: '#9ca3af' }}>
                   You have no students to assign to yet.
                 </p>

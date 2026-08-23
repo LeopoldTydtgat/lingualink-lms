@@ -10,6 +10,7 @@ import {
   teacherCancellationEmailContent,
 } from '@/lib/email/templates'
 import { cancelTeamsMeeting } from '@/lib/microsoft/graph'
+import { deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import type { CancelResult } from '@/lib/types/cancel'
 import { requireTz } from '@/lib/time/requireTz'
 
@@ -95,6 +96,8 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
       })
     }
   }
+
+  await deleteLessonGoogleEvent(lessonId)
 
   // Send cancellation emails — failures must not block the cancellation
   try {
