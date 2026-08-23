@@ -569,6 +569,7 @@ export async function POST(request: NextRequest) {
   // dangling promise mid-request.
   await createLessonGoogleEvent({
     lessonId: lesson.id,
+    teacherId: teacher_id,
     studentName: studentEmailData?.full_name ?? 'Student',
     scheduledAtIso: scheduledAtUtc,
     durationMinutes: duration_minutes,

@@ -41,19 +41,26 @@ function buildLessonEventSummary(studentName: string): string {
 }
 
 /**
- * A live bearer token for the one connected calendar, or null when there is
- * nothing to write to.
+ * A live bearer token for the calendar connected by THE LESSON'S OWN TEACHER,
+ * or null when there is nothing to write to.
  *
- * The ONE place the connection is resolved, so the create, update and
- * delete helpers can never disagree about whose calendar a lesson belongs
- * on. Never throws:
- * every null is either already logged here or a deliberate silence, and the
- * caller's only correct response to any of them is to return.
+ * The ONE place the connection is resolved, so the create, update and delete
+ * helpers can never disagree about whose calendar a lesson belongs on. The
+ * lookup is FILTERED ON THAT TEACHER'S profile_id, and that filter is what
+ * makes a class taught by anybody else structurally incapable of reaching her
+ * calendar: without it a single connected account would collect the blocks of
+ * every teacher on the platform.
+ *
+ * Never throws: every null is either already logged here or a deliberate
+ * silence, and the caller's only correct response to any of them is to return.
  *
  * `lessonId` is carried in purely so every line logged from here names the
  * lesson that provoked it.
  */
-async function resolveGoogleAccessToken(lessonId: string): Promise<string | null> {
+async function resolveGoogleAccessToken(
+  teacherId: string,
+  lessonId: string
+): Promise<string | null> {
   const supabase = createAdminClient()
 
   // ---- 1. Which calendar ----------------------------------------------------
@@ -65,9 +72,14 @@ async function resolveGoogleAccessToken(lessonId: string): Promise<string | null
   // refreshes unconditionally below, exactly like the busy-sync cron, so the
   // cached access_token has no reader here and putting it in scope would only
   // invite one. id rides along for the log lines.
+  //
+  // The profile_id filter is the ownership guarantee. It is not a narrowing of
+  // a broader query - it IS the rule, and there is no second check anywhere
+  // downstream.
   const { data: connectionRows, error: connectionError } = await supabase
     .from('google_calendar_connections')
     .select('id, refresh_token')
+    .eq('profile_id', teacherId)
 
   if (connectionError) {
     console.error(
@@ -79,20 +91,27 @@ async function resolveGoogleAccessToken(lessonId: string): Promise<string | null
 
   const connections = connectionRows ?? []
 
-  // NOT A FAILURE, AND NOT WORTH A WORD. Nobody has connected a calendar,
-  // which is the normal state of a platform where this feature is unused.
-  // This code runs on every booking, so a log line here would be pure noise
-  // in front of whoever is reading the logs for a real problem.
+  // NOT A FAILURE, AND NOT WORTH A WORD. This lesson's teacher has not
+  // connected a calendar, which is the normal state for every teacher on a
+  // platform where one person uses the feature - so this branch is now the
+  // COMMON case, not the empty-platform case it used to be.
+  //
+  // It is also the whole ownership rule, stated as behaviour: a lesson whose
+  // own teacher has no connection row must never touch ANYBODY's calendar.
+  // Falling back to "the one connection that exists" is exactly the defect the
+  // filter above removes. This code runs on every booking, cancellation and
+  // edit, so a log line here would be pure noise in front of whoever is reading
+  // the logs for a real problem.
   if (connections.length === 0) return null
 
   if (connections.length > 1) {
-    // Single-connection model, the same rule the busy-sync cron enforces.
-    // More than one row means the model moved and this helper would have to
-    // GUESS whose calendar a given class belongs on. Refuse rather than
-    // guess: a missing block is recoverable at any time, a class written onto
-    // the wrong person's personal calendar is not.
+    // One connection per teacher, the same single-connection model the
+    // busy-sync cron enforces. More than one row FOR THIS ONE PROFILE means the
+    // model moved and this helper would have to GUESS which of her calendars a
+    // given class belongs on. Refuse rather than guess: a missing block is
+    // recoverable at any time, a class written onto the wrong calendar is not.
     console.error(
-      `[google/lessonEvents] expected at most 1 Google Calendar connection, found ${connections.length}; no calendar write for lesson ${lessonId}`
+      `[google/lessonEvents] expected at most 1 Google Calendar connection for profile ${teacherId}, found ${connections.length}; no calendar write for lesson ${lessonId}`
     )
     return null
   }
@@ -174,8 +193,8 @@ async function writeLessonEventPointer(
 }
 
 /**
- * Mirrors one lesson onto the connected Google Calendar as a private
- * time-block, then stores the event id on the lesson row.
+ * Mirrors one lesson onto its own teacher's connected Google Calendar as a
+ * private time-block, then stores the event id on the lesson row.
  *
  * NEVER THROWS and returns nothing: callers await it and move on without
  * branching. Every failure is a log line, because the only correct response to
@@ -183,12 +202,17 @@ async function writeLessonEventPointer(
  */
 export async function createLessonGoogleEvent(options: {
   lessonId: string
+  /**
+   * The lesson's teacher. The ONLY calendar this block may ever land on: if
+   * that teacher has no connection row, nothing is written at all.
+   */
+  teacherId: string
   studentName: string
   /** The lesson's scheduled_at - a UTC instant, not a local wall time. */
   scheduledAtIso: string
   durationMinutes: number
 }): Promise<void> {
-  const { lessonId, studentName, scheduledAtIso, durationMinutes } = options
+  const { lessonId, teacherId, studentName, scheduledAtIso, durationMinutes } = options
 
   try {
     // Timing guard, ahead of every round trip. Both callers pass a value that
@@ -209,7 +233,7 @@ export async function createLessonGoogleEvent(options: {
       return
     }
 
-    const accessToken = await resolveGoogleAccessToken(lessonId)
+    const accessToken = await resolveGoogleAccessToken(teacherId, lessonId)
     if (!accessToken) return
 
     // ---- 3. The event -------------------------------------------------------
@@ -261,15 +285,18 @@ export async function createLessonGoogleEvent(options: {
 }
 
 /**
- * Moves the Google Calendar block for an edited lesson onto its new time, and
- * puts one there if the lesson has never had one.
+ * Moves the Google Calendar block for an edited lesson onto its new time, puts
+ * one there if the lesson has never had one, and - when the edit handed the
+ * class to a different teacher - moves the block off the outgoing teacher's
+ * calendar and onto the new one's.
  *
  * Same contract as its two siblings: NEVER THROWS, returns nothing, and the
  * admin edit route calls it without branching. By the time this runs
- * admin_edit_lesson_atomic has already committed the new time and duration, so
- * a Google outage must cost a block left at the old time and nothing else.
+ * admin_edit_lesson_atomic has already committed the new time, duration and
+ * teacher, so a Google outage must cost a block left at the old time - or left
+ * on the old teacher's calendar - and nothing else.
  *
- * The title is built ONLY on the create-if-missing branch. updateGoogleEvent
+ * The title is built ONLY where an event is created. updateGoogleEvent
  * deliberately never resends a summary, so a block she has renamed on her own
  * calendar keeps her wording through every edit.
  */
@@ -279,8 +306,14 @@ export async function updateLessonGoogleEvent(options: {
   /** The lesson's NEW scheduled_at - a UTC instant, not a local wall time. */
   scheduledAtIso: string
   durationMinutes: number
+  /**
+   * The teacher this lesson belonged to BEFORE the edit, and ONLY when the edit
+   * actually reassigned it. Absent - or equal to the row's current teacher_id -
+   * means no swap, and this helper behaves exactly as it always has.
+   */
+  previousTeacherId?: string
 }): Promise<void> {
-  const { lessonId, studentName, scheduledAtIso, durationMinutes } = options
+  const { lessonId, studentName, scheduledAtIso, durationMinutes, previousTeacherId } = options
 
   try {
     // The create path's timing guard, unchanged and for the same reason: the
@@ -303,14 +336,16 @@ export async function updateLessonGoogleEvent(options: {
 
     const supabase = createAdminClient()
 
-    // ---- 1. Is there a block to move ----------------------------------------
+    // ---- 1. Is there a block to move, and whose is it -----------------------
     // Explicit columns, the same read the delete path makes. The admin edit
     // MUTATES the lesson in place rather than replacing it, so a google_event_id
     // written at booking time is still on this row and still names the right
-    // event.
+    // event. teacher_id rides along because it decides WHICH calendar the block
+    // belongs on - and on a swap it has already been updated to the new owner
+    // by admin_edit_lesson_atomic.
     const { data: lesson, error: lessonError } = await supabase
       .from('lessons')
-      .select('id, google_event_id')
+      .select('id, teacher_id, google_event_id')
       .eq('id', lessonId)
       .maybeSingle()
 
@@ -333,73 +368,217 @@ export async function updateLessonGoogleEvent(options: {
       return
     }
 
-    // Resolved ONCE, above the branch. Both halves below need a bearer token
-    // and neither may spend a second refresh on the same request.
-    const accessToken = await resolveGoogleAccessToken(lessonId)
-    if (!accessToken) return
+    // CAPTURED BEFORE ANY BRANCH, and load-bearing on the swap path below: the
+    // new owner's create OVERWRITES google_event_id on this row, so after that
+    // point this local is the only thing left that knows which event has to
+    // come off the OLD owner's calendar.
+    const inheritedEventId = lesson.google_event_id
+
+    // The lesson's CURRENT teacher - already the new one on a swap.
+    const currentTeacherId = lesson.teacher_id
+    if (typeof currentTeacherId !== 'string' || currentTeacherId.trim().length === 0) {
+      // Anomalous: lessons.teacher_id is NOT NULL. Without it there is no
+      // calendar to resolve at all, so nothing is touched and this line is the
+      // only record of why.
+      console.error(
+        `[google/lessonEvents] lesson ${lessonId} carries no teacher_id; no calendar was touched for this edit`
+      )
+      return
+    }
 
     // Both edges re-serialised from the parsed epoch ms, exactly as on the
     // create path, so Google receives RFC3339-with-Z whichever branch runs.
     const startIso = new Date(startMs).toISOString()
     const endIso = new Date(startMs + durationMinutes * 60 * 1000).toISOString()
 
-    const eventId = lesson.google_event_id
-    if (typeof eventId === 'string' && eventId.trim().length > 0) {
-      // ---- 2. Move it -------------------------------------------------------
-      // start and end only - see updateGoogleEvent. 'UTC' means here exactly
-      // what it means on the create path and is NOT a claim about anybody's
-      // timezone: the 'Z' above already pins the instant, and her calendar
-      // renders it in her own local time no matter what is sent.
-      const moved = await updateGoogleEvent({
+    // Trimmed once into a plain string, so the swap test below and every later
+    // use read the same value.
+    const previousOwnerId =
+      typeof previousTeacherId === 'string' ? previousTeacherId.trim() : ''
+    const swappedTeacher = previousOwnerId.length > 0 && previousOwnerId !== currentTeacherId
+
+    if (!swappedTeacher) {
+      // ---- 2. Same teacher: move the block, or put one there ----------------
+      // Resolved ONCE, above the branch. Both halves below need a bearer token
+      // and neither may spend a second refresh on the same request.
+      const accessToken = await resolveGoogleAccessToken(currentTeacherId, lessonId)
+      if (!accessToken) return
+
+      const eventId = inheritedEventId
+      if (typeof eventId === 'string' && eventId.trim().length > 0) {
+        // start and end only - see updateGoogleEvent. 'UTC' means here exactly
+        // what it means on the create path and is NOT a claim about anybody's
+        // timezone: the 'Z' above already pins the instant, and her calendar
+        // renders it in her own local time no matter what is sent.
+        const moved = await updateGoogleEvent({
+          accessToken,
+          eventId,
+          startIso,
+          endIso,
+          timezone: 'UTC',
+        })
+
+        if (!moved.ok) {
+          // The pointer is DELIBERATELY LEFT IN PLACE, same rule as the delete
+          // path. The event still EXISTS, at its old time, and this id is the
+          // only handle on it; clearing it here would strand a block that now
+          // contradicts the lesson with nothing left to find it by. A later edit
+          // or the cancellation will try again against the same id.
+          console.error(
+            `[google/lessonEvents] event update failed for lesson ${lessonId} (google_event_id ${eventId}); the block is still at its old time and the pointer is kept: ${moved.error}`
+          )
+        }
+
+        // Nothing to write on the success path either: the event id has not
+        // changed, so the row already says everything true about the block.
+        return
+      }
+
+      // ---- 3. Create if missing ---------------------------------------------
+      // No pointer on the row: either the lesson predates the column or its
+      // create failed at booking time. An edit is the natural moment to put the
+      // block on the calendar rather than leave the class invisible on it for
+      // good. The title comes from the one builder above, so a block written
+      // here is indistinguishable from one written at booking - and, exactly as
+      // there, no attendees and no reminders may ever be added to this call.
+      const created = await createGoogleEvent({
         accessToken,
-        eventId,
+        summary: buildLessonEventSummary(studentName),
         startIso,
         endIso,
         timezone: 'UTC',
       })
 
-      if (!moved.ok) {
-        // The pointer is DELIBERATELY LEFT IN PLACE, same rule as the delete
-        // path. The event still EXISTS, at its old time, and this id is the
-        // only handle on it; clearing it here would strand a block that now
-        // contradicts the lesson with nothing left to find it by. A later edit
-        // or the cancellation will try again against the same id.
+      if (!created.ok) {
+        // createGoogleEvent has already logged the HTTP status and Google's own
+        // message; this line is what ties that to a lesson.
         console.error(
-          `[google/lessonEvents] event update failed for lesson ${lessonId} (google_event_id ${eventId}); the block is still at its old time and the pointer is kept: ${moved.error}`
+          `[google/lessonEvents] event create failed for lesson ${lessonId}: ${created.error}`
         )
+        return
       }
 
-      // Nothing to write on the success path either: the event id has not
-      // changed, so the row already says everything true about the block.
+      // ---- 4. The pointer ---------------------------------------------------
+      await writeLessonEventPointer(supabase, lessonId, created.eventId)
       return
     }
 
-    // ---- 3. Create if missing -----------------------------------------------
-    // No pointer on the row: either the lesson predates the column or its
-    // create failed at booking time. An edit is the natural moment to put the
-    // block on the calendar rather than leave the class invisible on it for
-    // good. The title comes from the one builder above, so a block written here
-    // is indistinguishable from one written at booking - and, exactly as there,
-    // no attendees and no reminders may ever be added to this call.
-    const created = await createGoogleEvent({
-      accessToken,
-      summary: buildLessonEventSummary(studentName),
-      startIso,
-      endIso,
-      timezone: 'UTC',
-    })
+    // ---- 5. The class changed hands -----------------------------------------
+    // CREATE FIRST, DELETE SECOND, and the order is load-bearing - the same rule
+    // the student reschedule follows. Taking the old block off first and then
+    // failing the create would leave the class with no block on anybody's
+    // calendar, which is precisely the invisible-class failure this rebuild
+    // exists to remove; this way round a failed create leaves a visible stale
+    // block on the old owner's calendar instead, which she can see and which is
+    // recoverable at any time.
+    //
+    // Step 1 OVERWRITES google_event_id with the new owner's event, which is
+    // exactly why inheritedEventId was captured above the branch: the old
+    // event's only handle is held in memory across that overwrite, so the
+    // pointer swap can never orphan it.
+    //
+    // This runs because OWNERSHIP changed, not to resend a title. The block
+    // itself is unchanged - buildLessonEventSummary is the student's first name
+    // and nothing else - but it is now on the wrong person's calendar.
+    let newPointerWritten = false
 
-    if (!created.ok) {
-      // createGoogleEvent has already logged the HTTP status and Google's own
-      // message; this line is what ties that to a lesson.
+    const newOwnerToken = await resolveGoogleAccessToken(currentTeacherId, lessonId)
+    if (newOwnerToken) {
+      // A fresh block for the new owner, at the times this edit committed. No
+      // attendees and no reminders, exactly as everywhere else in this file.
+      const created = await createGoogleEvent({
+        accessToken: newOwnerToken,
+        summary: buildLessonEventSummary(studentName),
+        startIso,
+        endIso,
+        timezone: 'UTC',
+      })
+
+      if (created.ok) {
+        await writeLessonEventPointer(supabase, lessonId, created.eventId)
+        newPointerWritten = true
+      } else {
+        // createGoogleEvent has already logged the HTTP status and Google's own
+        // message; this line is what ties that to a lesson.
+        console.error(
+          `[google/lessonEvents] event create failed for lesson ${lessonId}: ${created.error}`
+        )
+      }
+    }
+    // No token for the new owner is SILENT: she has simply not connected a
+    // calendar, which resolveGoogleAccessToken has already decided is the normal
+    // case. The old owner's block still has to come off below regardless - a
+    // class she no longer teaches must not stay on her calendar just because her
+    // replacement does not use the integration.
+
+    // Nothing was ever on the old owner's calendar, so the swap is finished.
+    if (typeof inheritedEventId !== 'string' || inheritedEventId.trim().length === 0) return
+
+    const previousOwnerToken = await resolveGoogleAccessToken(previousOwnerId, lessonId)
+    if (!previousOwnerToken) {
+      // NOTHING can delete that event now: the id is only meaningful against the
+      // account it was created on, and there is no token for it any more. Error
+      // level, naming all three identifiers, so the stranded block is findable
+      // by hand - this is the one failure here with no self-healing path.
       console.error(
-        `[google/lessonEvents] event create failed for lesson ${lessonId}: ${created.error}`
+        `[google/lessonEvents] no Google connection for the previous teacher of lesson ${lessonId}; google_event_id ${inheritedEventId} is stranded on the calendar of profile ${previousOwnerId}`
       )
       return
     }
 
-    // ---- 4. The pointer -----------------------------------------------------
-    await writeLessonEventPointer(supabase, lessonId, created.eventId)
+    // DELIBERATELY NOT deleteLessonGoogleEvent. That helper re-reads the pointer
+    // off the row, which step 1 may already have replaced with the NEW owner's
+    // event id - it would delete the block this edit has just created, on the
+    // wrong calendar. The id goes in directly, from memory.
+    //
+    // deleteGoogleEvent already treats 404 and 410 as success, so an event that
+    // is ALREADY gone from her calendar takes the ok branch below.
+    const deleted = await deleteGoogleEvent({
+      accessToken: previousOwnerToken,
+      eventId: inheritedEventId,
+    })
+
+    if (!deleted.ok) {
+      // The pointer is left exactly as it stands - either still naming this
+      // stale block (so it stays findable, same rule as the delete path), or
+      // already replaced by step 1's new event, which must not be disturbed.
+      console.error(
+        `[google/lessonEvents] event delete failed for lesson ${lessonId} (google_event_id ${inheritedEventId}); the block is still on the previous teacher's calendar: ${deleted.error}`
+      )
+      return
+    }
+
+    // The pointer is cleared ONLY when it still names the event just deleted. If
+    // step 1 created a replacement it has already overwritten google_event_id,
+    // and that id denotes a live block on the new owner's calendar - nulling it
+    // would strand exactly the event this edit put there.
+    if (newPointerWritten) return
+
+    const { data: cleared, error: clearError } = await supabase
+      .from('lessons')
+      .update({ google_event_id: null })
+      .eq('id', lessonId)
+      .select('id')
+
+    if (clearError) {
+      // The block is gone but the lesson still names it. Harmless to the
+      // calendar, and self-healing on any later delete (404 counts as success),
+      // but it leaves a dead id on the row - so it is logged with both ids.
+      console.error(
+        'CRITICAL: Google Calendar event deleted but the lesson pointer could not be cleared:',
+        { google_event_id: inheritedEventId, lesson_id: lessonId, error: clearError }
+      )
+      return
+    }
+
+    if (!cleared || cleared.length === 0) {
+      // Same stale pointer, different cause: the UPDATE ran but matched no row
+      // (the lesson was deleted from under us between the read above and here).
+      console.error(
+        'CRITICAL: Google Calendar event deleted but the pointer UPDATE matched 0 rows:',
+        { google_event_id: inheritedEventId, lesson_id: lessonId }
+      )
+    }
   } catch (unexpected) {
     // The outer guarantee, exactly as on the other two paths. Anything
     // unforeseen dies quietly rather than reaching a caller whose lesson edit
@@ -420,17 +599,21 @@ export async function updateLessonGoogleEvent(options: {
  * this runs cancel_lesson_atomic has already committed and any refund has
  * already moved, so a Google outage must cost a stale calendar block and
  * nothing else.
+ *
+ * Takes the lesson id alone: whose calendar the block sits on is read off the
+ * row, never passed in, so no caller can get it wrong.
  */
 export async function deleteLessonGoogleEvent(lessonId: string): Promise<void> {
   try {
     const supabase = createAdminClient()
 
-    // ---- 1. Is there anything to delete -------------------------------------
+    // ---- 1. Is there anything to delete, and whose is it --------------------
     // Explicit columns. google_event_id is the only handle that exists; id
-    // rides along so a missing row is distinguishable from a null pointer.
+    // rides along so a missing row is distinguishable from a null pointer;
+    // teacher_id says which calendar that handle is meaningful against.
     const { data: lesson, error: lessonError } = await supabase
       .from('lessons')
-      .select('id, google_event_id')
+      .select('id, teacher_id, google_event_id')
       .eq('id', lessonId)
       .maybeSingle()
 
@@ -461,7 +644,25 @@ export async function deleteLessonGoogleEvent(lessonId: string): Promise<void> {
     // problem.
     if (typeof eventId !== 'string' || eventId.trim().length === 0) return
 
-    const accessToken = await resolveGoogleAccessToken(lessonId)
+    // THE INVARIANT THAT MAKES READING teacher_id OFF THE ROW CORRECT: a stored
+    // google_event_id always denotes an event on the CURRENT teacher's calendar.
+    // A booking writes it under the teacher the class was booked with, and a
+    // teacher swap does NOT carry the old id forward - updateLessonGoogleEvent's
+    // previousTeacherId branch deletes the outgoing owner's event at swap time
+    // and replaces the pointer with the new owner's. So the row as it stands now
+    // can never send this delete at the wrong person's calendar.
+    const teacherId = lesson.teacher_id
+    if (typeof teacherId !== 'string' || teacherId.trim().length === 0) {
+      // Anomalous: lessons.teacher_id is NOT NULL. Without it there is no
+      // calendar to resolve, so the block stays where it is and this line names
+      // both ids so it can still be found by hand.
+      console.error(
+        `[google/lessonEvents] lesson ${lessonId} carries no teacher_id; google_event_id ${eventId} was left on the calendar`
+      )
+      return
+    }
+
+    const accessToken = await resolveGoogleAccessToken(teacherId, lessonId)
     if (!accessToken) return
 
     // ---- 2. The delete ------------------------------------------------------

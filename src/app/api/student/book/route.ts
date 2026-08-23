@@ -807,6 +807,7 @@ export async function POST(req: NextRequest) {
     // below.
     await createLessonGoogleEvent({
       lessonId: newLesson.id,
+      teacherId,
       studentName: studentRow.full_name,
       scheduledAtIso: startTime.toISOString(),
       durationMinutes,
