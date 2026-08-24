@@ -277,6 +277,20 @@ export async function POST(request: NextRequest) {
   // means the insert was never reached, so there is nothing to verify.
   let insertStartedAtIso: string | null = null
 
+  // The natural key of the row the insert tried to write, captured at the same
+  // instant as the floor above and for the same reason: the outer catch cannot
+  // see the parsed body. teacher_id, student_id, training_id, scheduledAtUtc and
+  // duration_minutes are all const INSIDE the try, so a throw AT the insert
+  // reaches the catch with no way to describe the row it needs to read back.
+  // Null means the insert was never reached.
+  let insertNaturalKey: {
+    teacherId: string
+    studentId: string
+    trainingId: string
+    scheduledAtIso: string
+    durationMinutes: number
+  } | null = null
+
   try {
   const supabase = await createClient()
 
@@ -525,6 +539,13 @@ export async function POST(request: NextRequest) {
   // millisecond of slack widens the window in which somebody else's booking
   // could be mistaken for ours.
   insertStartedAtIso = new Date().toISOString()
+  insertNaturalKey = {
+    teacherId: teacher_id,
+    studentId: student_id,
+    trainingId: training_id,
+    scheduledAtIso: scheduledAtUtc,
+    durationMinutes: duration_minutes,
+  }
 
   // Create the lesson record
   const { data: lesson, error: lessonError } = await adminClient
@@ -903,6 +924,155 @@ export async function POST(request: NextRequest) {
         error: err,
       })
       return NextResponse.json({ lesson_id: committedLessonId }, { status: 201 })
+    }
+
+    // A throw AT the insert - a transport abort, a client that threw instead of
+    // returning an error - lands here with the refund still armed and no lesson
+    // id, and the refund block below would then act blind. The insert was
+    // REACHED (both trackers are non-null only from the line before it) and the
+    // throw carries no SQLSTATE, so committed and rolled-back are
+    // indistinguishable without a read. A null insertStartedAtIso means the
+    // throw came before the insert: no row can exist, and the refund below is
+    // correct exactly as it stands.
+    //
+    // Nothing in this block can throw. createAdminClient is wrapped below, and
+    // verifyLessonCommitted and raiseReconciliationTask never throw by
+    // contract - so the refund block, the orphan cancel and the 500 at the end
+    // of this catch all stay reachable on the fall-through path.
+    if (pendingRefund && insertNaturalKey && insertStartedAtIso && !isRollbackProven(err)) {
+      // Copied into consts before the awaits below, the same reason the refund
+      // block does const pending = pendingRefund: these are handler-scope
+      // bindings that this block itself sets back to null.
+      const pending = pendingRefund
+      const key = insertNaturalKey
+      const requestStartIso = insertStartedAtIso
+
+      // The route's own adminClient is scoped to the try and may never have been
+      // constructed, so the read-back builds its own. If it cannot even be built
+      // there is no read to be had - which IS an unresolved verdict, never a
+      // licence to fall through and refund against a class that may be live.
+      let verifyClient: ReturnType<typeof createAdminClient> | null = null
+      let verifyClientError: unknown = null
+      try {
+        verifyClient = createAdminClient()
+      } catch (clientError) {
+        verifyClientError = clientError
+      }
+
+      const verdict = verifyClient
+        ? await verifyLessonCommitted(verifyClient, {
+            teamsMeetingId,
+            teacherId: key.teacherId,
+            studentId: key.studentId,
+            trainingId: key.trainingId,
+            scheduledAtIso: key.scheduledAtIso,
+            durationMinutes: key.durationMinutes,
+            requestStartIso,
+          })
+        : ({ outcome: 'unresolved', reason: 'verify_failed', detail: verifyClientError } as const)
+
+      if (verdict.outcome === 'committed') {
+        // The class SUCCEEDED and only the reply died. Nothing is owed back, so
+        // no refund; and the meeting must survive, because the committed row
+        // carries its id and it is now this student's live join link. Retiring
+        // both trackers is what stops the refund block and the orphan cancel
+        // below running behind us.
+        pendingRefund = null
+        teamsMeetingId = null
+
+        console.error('CRITICAL: lesson insert committed but its response was lost (admin-created class, outer catch) - returning success without refunding:', {
+          lesson_id: verdict.lessonId,
+          training_id: pending.trainingId,
+          student_id: pending.studentId,
+          error: err,
+        })
+
+        // Everything the DATABASE owed this row is already done. Both
+        // trg_create_pending_report and trg_snapshot_lesson_rate fire AFTER
+        // INSERT on lessons, inside the row's own transaction, so a row that
+        // committed carries its pending report and its rate snapshot even
+        // when the response was lost. Nothing to recreate from here - only
+        // the route-side follow-ups below the success path were missed, and
+        // those are named on the reconciliation task.
+
+        // hours is null, not pending.hours: the class exists, so the hours are
+        // correctly spent and there is no exposure to reconcile. The task is
+        // raised for the follow-ups that were skipped, not for money.
+        //
+        // The three revalidatePath calls were skipped too and are
+        // deliberately NOT listed: they are cache invalidations no human can
+        // action, and every target re-renders per request anyway.
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: verdict.lessonId,
+          hours: null,
+          context: 'lesson insert committed but response lost (admin-created class, outer catch)',
+          errorDetail: {
+            note: 'Hours are correct and the class exists - no reversal owed. The pending report and teacher rate snapshot were written by AFTER INSERT triggers on lessons and need no action. Only the items below did not run.',
+            skipped: [
+              'the class_booking hours_log row was not linked to the new lesson, so hours_log.lesson_id is still null',
+              'no Google Calendar event for the new class',
+              'no booking confirmation email to the teacher or the student',
+            ],
+          },
+        })
+
+        // Same shape as the normal success return. A 500 here would invite a
+        // retry that books a second real class.
+        return NextResponse.json({ lesson_id: verdict.lessonId }, { status: 201 })
+      }
+
+      if (verdict.outcome === 'unresolved') {
+        // Neither state is proven, and the dangerous half of the pair is a
+        // committed row: refunding or cancelling the meeting would each act on
+        // a class that may be live. So nothing is written at all and a human
+        // decides. Both trackers are retired for that reason - not because
+        // either has been dispatched, but so the refund block and the orphan
+        // cancel below cannot run in our place. The meeting is deliberately
+        // left ALIVE in Microsoft and named below.
+        pendingRefund = null
+        const unresolvedMeetingId = teamsMeetingId
+        teamsMeetingId = null
+
+        console.error('CRITICAL: lesson insert verdict unresolved (admin-created class, outer catch) - no refund, no Teams cancel. Manual check required.', {
+          training_id: pending.trainingId,
+          student_id: pending.studentId,
+          scheduled_at: key.scheduledAtIso,
+          teams_meeting_id: unresolvedMeetingId,
+          hours_requested: pending.hours,
+          reason: verdict.reason,
+          detail: verdict.detail,
+          error: err,
+        })
+
+        // hours is the full deduction this request made, so it is the student's
+        // exact exposure if the insert rolled back.
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: null,
+          hours: pending.hours,
+          context: 'lesson insert verdict unresolved - manual check required (admin-created class, outer catch)',
+          // Field order is load-bearing: raiseReconciliationTask JSON-renders
+          // this and hard-truncates at 500 chars. A Graph event id is long,
+          // and this is the one path that leaves a meeting alive in
+          // Microsoft with no row pointing at it, so it goes FIRST and the
+          // open-ended verdict detail goes last where truncation can only
+          // eat what the CRITICAL log above already carries in full.
+          errorDetail: {
+            teamsMeetingId: unresolvedMeetingId,
+            reason: verdict.reason,
+            scheduledAt: key.scheduledAtIso,
+            detail: verdict.detail,
+          },
+        })
+
+        console.error('POST /api/admin/classes error:', err)
+        return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+      }
+
+      // 'not_committed': no row exists, the hours are genuinely owed back, and the refund below is correct. Fall through unchanged.
     }
 
     // No lesson row exists. If the deduction already moved this student's hours
