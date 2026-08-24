@@ -731,21 +731,6 @@ export async function POST(req: NextRequest) {
         // falls through to the generic 500 below; the CRITICAL log above flags
         // genuine unwind failures for manual reconciliation.
       } else {
-        if (teamsMeetingId) {
-          // Retired before dispatch so the outer catch cannot cancel it a second time.
-          const orphanMeetingId = teamsMeetingId
-          teamsMeetingId = null
-          try {
-            await cancelTeamsMeeting(orphanMeetingId)
-          } catch (cancelError) {
-            console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
-              teams_meeting_id: orphanMeetingId,
-              lesson_id: null,
-              error: cancelError,
-            })
-          }
-        }
-
         console.error('Failed to create lesson — refunding deducted hours:', lessonError)
         // Dispatching the reversal here retires it: the outer catch must not
         // run a second one, including when this call throws mid-flight. The two
@@ -798,6 +783,23 @@ export async function POST(req: NextRequest) {
             context: 'refund_hours_atomic reported failure after lesson insert error (student booking)',
             errorDetail: refundData.code,
           })
+        }
+
+        // Deliberately AFTER the refund dispatch above: cancelTeamsMeeting has no
+        // timeout, and a hung Graph DELETE must never strand deducted hours.
+        if (teamsMeetingId) {
+          // Retired before dispatch so the outer catch cannot cancel it a second time.
+          const orphanMeetingId = teamsMeetingId
+          teamsMeetingId = null
+          try {
+            await cancelTeamsMeeting(orphanMeetingId)
+          } catch (cancelError) {
+            console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
+              teams_meeting_id: orphanMeetingId,
+              lesson_id: null,
+              error: cancelError,
+            })
+          }
         }
 
         // Both branches above mean the hours were NOT returned. A 409 asserts

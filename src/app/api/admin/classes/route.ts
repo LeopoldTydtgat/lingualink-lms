@@ -516,21 +516,6 @@ export async function POST(request: NextRequest) {
       isSlotConflict &&
       `${lessonError.message} ${lessonError.details}`.includes('no_student_overlap')
 
-    if (teamsMeetingId) {
-      // Retired before dispatch so the catch cannot cancel it a second time.
-      const orphanMeetingId = teamsMeetingId
-      teamsMeetingId = null
-      try {
-        await cancelTeamsMeeting(orphanMeetingId)
-      } catch (cancelError) {
-        console.error('CRITICAL: orphan Teams meeting after admin-create insert failure:', {
-          teams_meeting_id: orphanMeetingId,
-          lesson_id: null,
-          error: cancelError,
-        })
-      }
-    }
-
     // Dispatching the refund here retires it: the catch must not run a second
     // one, including when the RPC throws mid-flight. The two CRITICAL branches
     // below stay the signal for a refund that comes back failed.
@@ -586,6 +571,23 @@ export async function POST(request: NextRequest) {
         context: 'refund_hours_atomic reported failure after lesson insert error (admin-created class)',
         errorDetail: refundData.code,
       })
+    }
+
+    // Deliberately AFTER the refund dispatch above: cancelTeamsMeeting has no
+    // timeout, and a hung Graph DELETE must never strand deducted hours.
+    if (teamsMeetingId) {
+      // Retired before dispatch so the catch cannot cancel it a second time.
+      const orphanMeetingId = teamsMeetingId
+      teamsMeetingId = null
+      try {
+        await cancelTeamsMeeting(orphanMeetingId)
+      } catch (cancelError) {
+        console.error('CRITICAL: orphan Teams meeting after admin-create insert failure:', {
+          teams_meeting_id: orphanMeetingId,
+          lesson_id: null,
+          error: cancelError,
+        })
+      }
     }
 
     // Both branches above mean the hours were NOT returned, so a slot-conflict
