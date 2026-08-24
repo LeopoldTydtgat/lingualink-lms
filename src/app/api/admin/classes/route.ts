@@ -474,17 +474,25 @@ export async function POST(request: NextRequest) {
   // Fetch teacher + student full names for the Teams meeting subject and,
   // later, the confirmation emails — hoisted here so both call sites share
   // this single pair of queries instead of fetching twice.
-  const { data: teacherEmailProfile } = await adminClient
+  const { data: teacherEmailProfile, error: teacherEmailProfileError } = await adminClient
     .from('profiles')
     .select('full_name, email, timezone')
     .eq('id', teacher_id)
     .single()
 
-  const { data: studentEmailData } = await adminClient
+  if (teacherEmailProfileError) {
+    console.error('[admin create class] teacher email profile lookup failed - class created, teacher email will be skipped:', { teacher_id, error: teacherEmailProfileError })
+  }
+
+  const { data: studentEmailData, error: studentEmailDataError } = await adminClient
     .from('students')
     .select('full_name, email, timezone')
     .eq('id', student_id)
     .single()
+
+  if (studentEmailDataError) {
+    console.error('[admin create class] student email data lookup failed - class created, student email will be skipped:', { student_id, error: studentEmailDataError })
+  }
 
   // Create Teams meeting before inserting the lesson so the URL is available immediately
   let teamsJoinUrl: string | null = null
