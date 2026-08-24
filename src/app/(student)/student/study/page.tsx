@@ -282,6 +282,34 @@ export default async function StudyPage() {
     return !!acts && acts.length > 0 && acts.every((id) => selfPracticedActivityIds.has(id))
   })
 
+  // PARTIAL practice state - the sibling of practicedSheetIds above, off the same
+  // selfPracticedActivityIds set: at least one activity attempted with
+  // assignment_id === null, but not all of them. Disjoint from practicedSheetIds
+  // by construction (attempted < acts.length), so a sheet is never both, and
+  // zero-activity sheets are excluded exactly as they are there.
+  const inProgressSheetIds = allSheetIds.filter((sheetId) => {
+    const acts = activityIdsBySheet.get(sheetId)
+    if (!acts || acts.length === 0) return false
+    const attempted = acts.filter((id) => selfPracticedActivityIds.has(id)).length
+    return attempted > 0 && attempted < acts.length
+  })
+
+  // Practice progress ratio, IN-PROGRESS SHEETS ONLY - the "3 of 8" the Continue
+  // section renders. Derived from the SAME selfPracticedActivityIds set as the
+  // two lists above, so the numerator can never disagree with the section a
+  // sheet lands in. Not-started and completed sheets deliberately get no entry:
+  // 0-of-n and n-of-n say nothing their section heading has not already said,
+  // and a MISSING entry is what the client reads as "render no ratio".
+  const practiceProgress: Record<string, { done: number; total: number }> = {}
+  for (const sheetId of inProgressSheetIds) {
+    const acts = activityIdsBySheet.get(sheetId)
+    if (!acts || acts.length === 0) continue
+    practiceProgress[sheetId] = {
+      done: acts.filter((id) => selfPracticedActivityIds.has(id)).length,
+      total: acts.length,
+    }
+  }
+
   // Flatten Supabase nested joins (they return arrays, not single objects)
   const assignments = assignmentsList.map((a) => ({
     id: a.id as string,
@@ -299,6 +327,8 @@ export default async function StudyPage() {
       completedAssignmentIds={completedAssignmentIds}
       assignmentScores={assignmentScores}
       practicedSheetIds={practicedSheetIds}
+      inProgressSheetIds={inProgressSheetIds}
+      practiceProgress={practiceProgress}
       library={library}
       materialAssignments={materialAssignments}
       sheetTopicTags={sheetTopicTags}

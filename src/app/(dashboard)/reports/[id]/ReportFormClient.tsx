@@ -8,7 +8,7 @@ import PdfViewer, { type Annotation } from '@/components/pdf/PdfViewer'
 import AssignStudySheetsModal from '@/components/shared/AssignStudySheetsModal'
 import AssignMaterialModal from '@/app/(dashboard)/study-sheets/[id]/AssignMaterialModal'
 import { submitReport } from '../actions'
-import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS, computeOverallLevel, listUnassessedSkillLabels } from '@/lib/levels/levelData'
+import { CEFR_LEVELS, SKILL_FORM_LABELS, SKILL_KEYS, computeOverallLevel, hasUsableLevelData, listUnassessedSkillLabels } from '@/lib/levels/levelData'
 
 // --- Types ---
 
@@ -68,6 +68,13 @@ type Props = {
   // page gates on it, so it is never null and never a 'UTC' stand-in. An admin
   // reading a teacher's report sees the times in the ADMIN's zone.
   viewerTimezone: string
+  // Levels carried over from this student's most recent COMPLETE previous
+  // assessment, and the date that assessment was made, already formatted in the
+  // viewer's zone by the server page. Both are seed values for the form's
+  // initial state ONLY — nothing here is saved unless the teacher submits.
+  // Optional with null defaults so no call site can break.
+  prefilledLevelData?: Record<string, string> | null
+  prefilledLevelFromLabel?: string | null
 }
 
 // --- Helpers: timestamps in the viewer's timezone ---
@@ -249,7 +256,7 @@ function LevelTrack({
   )
 }
 
-export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets, annotatedPdfs, viewerTimezone }: Props) {
+export default function ReportFormClient({ report, profile, isAdmin, assignedSheetIds, assignedSheets, materialSheets, annotatedPdfs, viewerTimezone, prefilledLevelData = null, prefilledLevelFromLabel = null }: Props) {
   const router = useRouter()
 
   const lesson = report.lesson
@@ -267,7 +274,23 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
   const [noShowType, setNoShowType] = useState<string>(report.no_show_type ?? '')
   const [feedbackText, setFeedbackText] = useState(report.feedback_text ?? '')
   const [additionalDetails, setAdditionalDetails] = useState(report.additional_details ?? '')
-  const [levelData, setLevelData] = useState<Record<string, string>>(report.level_data ?? {})
+  // The report's OWN saved assessment always wins over the carried-over prefill:
+  // a reopened report that was already graded must reload exactly what was
+  // saved, never a neighbouring lesson's levels. The prefill applies only when
+  // this report has no usable assessment of its own.
+  //
+  // INITIAL STATE ONLY, deliberately with no useEffect syncing it afterwards: a
+  // later sync would clobber the teacher's in-progress edits every time the
+  // props re-arrived.
+  const [levelData, setLevelData] = useState<Record<string, string>>(
+    hasUsableLevelData(report.level_data)
+      ? (report.level_data as Record<string, string>)
+      : (prefilledLevelData ?? {})
+  )
+  // Computed once at init from the same two inputs the initialiser read, so it
+  // records what actually happened there. Not state and not recomputed per
+  // keystroke: it must not flip as the teacher edits levelData.
+  const usedPrefill = !hasUsableLevelData(report.level_data) && !!prefilledLevelData
   // Fail-safe direction: the attestation must be actively given, never fabricated by
   // a default; also preserves a saved false on reopened reports.
   const [studentConfirmed, setStudentConfirmed] = useState<boolean>(
@@ -630,6 +653,13 @@ export default function ReportFormClient({ report, profile, isAdmin, assignedShe
           <section className={cardClass} style={cardStyle}>
             <SectionHeader>Student Level Assessment</SectionHeader>
             <p className="text-xs text-gray-500 mb-4">Select a CEFR level for each skill.</p>
+            {usedPrefill && isEditable && (
+              <p className="text-xs text-gray-500 mb-4">
+                {prefilledLevelFromLabel
+                  ? `Carried over from the assessment on ${prefilledLevelFromLabel}. Check each skill and update anything that has changed.`
+                  : 'Carried over from the last assessment. Check each skill and update anything that has changed.'}
+              </p>
+            )}
 
             {/* Collapsible CEFR guide */}
             <div className="mb-5">

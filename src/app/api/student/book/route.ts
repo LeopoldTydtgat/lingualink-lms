@@ -18,6 +18,7 @@ import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { createLessonGoogleEvent, deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
+import { raiseReconciliationTask } from '@/lib/admin/raiseReconciliationTask'
 
 // A reversal owed to the student for a money RPC that has already moved their
 // hours, held for the window in which no lesson row exists yet. See the
@@ -57,6 +58,21 @@ export async function POST(req: NextRequest) {
   // Those clears are what make double-compensation impossible by construction
   // rather than by reasoning about control flow.
   let pendingCompensation: PendingCompensation | null = null
+
+  // Non-null means a Teams meeting exists in Microsoft that no committed lesson
+  // row points at. Declared out here, alongside the two above, because the outer
+  // catch could not see it while it lived inside the try: a transport-level throw
+  // at the lesson insert reversed the hours correctly but left the meeting alive
+  // with no lesson row carrying its id, and the orphan sweeper matches on
+  // lessons.teams_meeting_id, so nothing could ever find it again.
+  //
+  // Retired to null at the DISPATCH of each cancel below, and the moment the
+  // lesson is committed. Dispatch, not success, mirrors pendingCompensation: a
+  // cancel that already failed is CRITICAL-logged, and re-running it from the
+  // catch would act on a meeting Graph may already have removed. The commit
+  // retirement is the important one - past that point the meeting IS the
+  // student's live join link and must never be cancelled.
+  let teamsMeetingId: string | null = null
 
   try {
     const supabase = await createClient()
@@ -533,7 +549,18 @@ export async function POST(req: NextRequest) {
             { status: 400 }
           )
         }
-        console.error('book_class_atomic failed:', deductError)
+        // Fall-through = neither insufficient_hours nor training_not_active, so this
+        // is a transport/unknown failure and the RPC may have committed the deduction
+        // before the response leg failed. Not auto-refunded: refund_hours_atomic has
+        // no "was never deducted" guard, so a refund here could credit hours that
+        // were never spent. Naming the row instead so hours_log can be checked by
+        // hand. CRITICAL because this is the one deduction path with no compensation.
+        console.error('CRITICAL: book_class_atomic failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
+          training_id: trainingId,
+          student_id: studentId,
+          hours: hoursNeeded,
+          error: deductError,
+        })
         return NextResponse.json(
           { error: 'Failed to reserve hours. Please try again.' },
           { status: 500 }
@@ -551,7 +578,6 @@ export async function POST(req: NextRequest) {
     // The join URL is tied to the lesson slot – not the teacher –
     // so teacher swaps never break the student's link.
     let teamsJoinUrl: string | null = null
-    let teamsMeetingId: string | null = null
 
     try {
       const meeting = await createTeamsMeeting({
@@ -621,12 +647,24 @@ export async function POST(req: NextRequest) {
         // where the database may already have applied it. The CRITICAL log
         // below stays the signal for a reversal that comes back failed.
         pendingCompensation = null
-        const { data: unwindRestored, error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
-          p_old_lesson_id: rescheduleId,
-          p_training_id: trainingId,
-          p_old_duration_hours: oldDurationHours,
-          p_new_duration_hours: hoursNeeded,
-        })
+        // A reversal RPC that rejects at the network level never returns an
+        // { error } to destructure, so the CRITICAL log and the admin task
+        // below would both be skipped on that path. Both channels are funnelled
+        // into unwindError so a failed reversal is reported either way.
+        let unwindRestored: boolean | null = null
+        let unwindError: unknown = null
+        try {
+          const unwindResult = await adminClient.rpc('unwind_reschedule_atomic', {
+            p_old_lesson_id: rescheduleId,
+            p_training_id: trainingId,
+            p_old_duration_hours: oldDurationHours,
+            p_new_duration_hours: hoursNeeded,
+          })
+          unwindRestored = unwindResult.data
+          unwindError = unwindResult.error
+        } catch (caughtErr) {
+          unwindError = caughtErr
+        }
         if (unwindError) {
           console.error('CRITICAL: unwind_reschedule_atomic failed. Manual reconciliation required.', {
             lesson_id: rescheduleId,
@@ -636,13 +674,31 @@ export async function POST(req: NextRequest) {
             new_hours_needed: hoursNeeded,
             error: unwindError,
           })
+          // The log above is only visible in Vercel. Raise the same failure as
+          // an admin task so it is visible to whoever reconciles hours. Cannot
+          // throw and returns void - control flow below is unchanged.
+          // hours here is deliberately the GROSS new duration, not the net reschedule
+          // delta: a failed unwind leaves hours_consumed at old + (new - old) = the
+          // full new duration with zero lessons held, so gross IS the student's
+          // exposure. Do not "correct" this to the net delta - that would report 0.
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: rescheduleId,
+            hours: hoursNeeded,
+            context: 'unwind_reschedule_atomic failed after lesson insert error (student reschedule)',
+            errorDetail: unwindError,
+          })
         }
         if (teamsMeetingId) {
+          // Retired before dispatch so the outer catch cannot cancel it a second time.
+          const orphanMeetingId = teamsMeetingId
+          teamsMeetingId = null
           try {
-            await cancelTeamsMeeting(teamsMeetingId)
+            await cancelTeamsMeeting(orphanMeetingId)
           } catch (cancelError) {
             console.error('CRITICAL: orphan Teams meeting after reschedule unwind:', {
-              teams_meeting_id: teamsMeetingId,
+              teams_meeting_id: orphanMeetingId,
               lesson_id: rescheduleId,
               error: cancelError,
             })
@@ -686,18 +742,6 @@ export async function POST(req: NextRequest) {
         // falls through to the generic 500 below; the CRITICAL log above flags
         // genuine unwind failures for manual reconciliation.
       } else {
-        if (teamsMeetingId) {
-          try {
-            await cancelTeamsMeeting(teamsMeetingId)
-          } catch (cancelError) {
-            console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
-              teams_meeting_id: teamsMeetingId,
-              lesson_id: null,
-              error: cancelError,
-            })
-          }
-        }
-
         console.error('Failed to create lesson — refunding deducted hours:', lessonError)
         // Dispatching the reversal here retires it: the outer catch must not
         // run a second one, including when this call throws mid-flight. The two
@@ -705,16 +749,35 @@ export async function POST(req: NextRequest) {
         // failed.
         pendingCompensation = null
         // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
-        const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-          p_training_id: trainingId,
-          p_hours: hoursNeeded,
-        })
+        // A throw from the RPC never yields an { error } to destructure; it is
+        // funnelled into refundError so the CRITICAL log and the admin task
+        // below are reached on that path too.
+        let refundData: { success?: boolean; code?: string } | null = null
+        let refundError: unknown = null
+        try {
+          const refundResult = await adminClient.rpc('refund_hours_atomic', {
+            p_training_id: trainingId,
+            p_hours: hoursNeeded,
+          })
+          refundData = refundResult.data
+          refundError = refundResult.error
+        } catch (caughtErr) {
+          refundError = caughtErr
+        }
         if (refundError) {
           console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', {
             training_id: trainingId,
             student_id: studentId,
             lesson_id: null,
             error: refundError,
+          })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: null,
+            hours: hoursNeeded,
+            context: 'refund_hours_atomic failed after lesson insert error (student booking)',
+            errorDetail: refundError,
           })
         } else if (refundData?.success === false) {
           console.error('CRITICAL: refund_hours_atomic reported failure after lesson insert error:', {
@@ -723,16 +786,58 @@ export async function POST(req: NextRequest) {
             lesson_id: null,
             code: refundData.code,
           })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: null,
+            hours: hoursNeeded,
+            context: 'refund_hours_atomic reported failure after lesson insert error (student booking)',
+            errorDetail: refundData.code,
+          })
         }
 
-        if (isStudentSlotConflict) {
+        // Deliberately AFTER the refund dispatch above: cancelTeamsMeeting has no
+        // timeout, and a hung Graph DELETE must never strand deducted hours.
+        if (teamsMeetingId) {
+          // Retired before dispatch so the outer catch cannot cancel it a second time.
+          const orphanMeetingId = teamsMeetingId
+          teamsMeetingId = null
+          try {
+            await cancelTeamsMeeting(orphanMeetingId)
+          } catch (cancelError) {
+            console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
+              teams_meeting_id: orphanMeetingId,
+              lesson_id: null,
+              error: cancelError,
+            })
+          }
+        }
+
+        // Both branches above mean the hours were NOT returned. A 409 asserts
+        // the slot is gone and the hours are safe: BookingGridClient clears the
+        // selection and refetches the grid on it, steering the student straight
+        // into a rebook. Only make that assertion when the refund actually
+        // landed; otherwise fall through to the generic 500, which leaves the
+        // pick in place and does not refetch.
+        //
+        // This NARROWS the window, it does not close it - the Confirm button
+        // still re-enables on the 500, and what actually stops a second
+        // book_class_atomic is this route's own pre-checks (isSlotAvailable and
+        // the clash checks above), not the status code. It also keeps the
+        // invariant that a 409 is never returned alongside an open
+        // reconciliation task for the same request: the predicate below is the
+        // same pair the two CRITICAL branches test.
+        // Mirrors the reschedule branch's !unwindError gate above.
+        const refundSucceeded = !refundError && refundData?.success !== false
+
+        if (isStudentSlotConflict && refundSucceeded) {
           return NextResponse.json(
             { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
             { status: 409 }
           )
         }
 
-        if (isSlotConflict) {
+        if (isSlotConflict && refundSucceeded) {
           return NextResponse.json(
             { error: 'SLOT_NOT_AVAILABLE', message: 'This slot was just booked by another student. Please choose a different time.' },
             { status: 409 }
@@ -747,6 +852,10 @@ export async function POST(req: NextRequest) {
     // back. Second, independent guard on top of the committedLessonId check in
     // the outer catch.
     pendingCompensation = null
+    // The lesson row now carries this meeting id, so it is no longer an orphan -
+    // it is the student's live join link. Retiring it here stops the outer catch
+    // from cancelling a meeting for a class that exists.
+    teamsMeetingId = null
 
     // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
     // book_class_atomic returned the id of the 'class_booking' ledger row; now
@@ -898,30 +1007,24 @@ export async function POST(req: NextRequest) {
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────
     const isReschedule = !!rescheduleId
-    try {
-    const studentTimezone = requireTz(studentRow.timezone, 'book:student')
-    const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
-
     const newScheduledAtIso = startTime.toISOString()
 
-    const studentSubject = isReschedule
-      ? 'Lingualink Online - Your class has been rescheduled'
-      : 'Lingualink Online - Your class is confirmed'
+    // One try per recipient. Previously both guards were hoisted above a single
+    // Promise.allSettled, so a null timezone on either side threw before either
+    // send was built and the route still returned 200 - silent loss of both
+    // confirmations on a booking that had already committed.
+    try {
+      const studentTimezone = requireTz(studentRow.timezone, 'book:student')
 
-    const studentBodyHtml = isReschedule
-      ? studentRescheduledEmailContent(oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
-      : studentBookingConfirmationEmailContent(newScheduledAtIso, durationMinutes, studentTimezone)
+      const studentSubject = isReschedule
+        ? 'Lingualink Online - Your class has been rescheduled'
+        : 'Lingualink Online - Your class is confirmed'
 
-    const teacherSubject = isReschedule
-      ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`
-      : `Lingualink Online - New class booked with ${studentRow.full_name}`
+      const studentBodyHtml = isReschedule
+        ? studentRescheduledEmailContent(oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
+        : studentBookingConfirmationEmailContent(newScheduledAtIso, durationMinutes, studentTimezone)
 
-    const teacherBodyHtml = isReschedule
-      ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, teacherTimezone, 'student')
-      : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
-
-    await Promise.allSettled([
-      resend.emails.send({
+      await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: studentRow.email,
         subject: studentSubject,
@@ -932,8 +1035,23 @@ export async function POST(req: NextRequest) {
           bodyHtml: studentBodyHtml,
           contactEmail: 'support@lingualinkonline.com',
         }),
-      }),
-      resend.emails.send({
+      })
+    } catch (emailErr) {
+      console.error('[Email] Student booking/reschedule email failed - lesson still created:', { lesson_id: newLesson.id, error: emailErr })
+    }
+
+    try {
+      const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
+
+      const teacherSubject = isReschedule
+        ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`
+        : `Lingualink Online - New class booked with ${studentRow.full_name}`
+
+      const teacherBodyHtml = isReschedule
+        ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, teacherTimezone, 'student')
+        : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
+
+      await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
         subject: teacherSubject,
@@ -944,10 +1062,9 @@ export async function POST(req: NextRequest) {
           bodyHtml: teacherBodyHtml,
           contactEmail: 'teachers@lingualinkonline.com',
         }),
-      }),
-    ])
+      })
     } catch (emailErr) {
-      console.error('[Email] Booking/reschedule confirmation emails failed - lesson still created:', emailErr)
+      console.error('[Email] Teacher booking/reschedule email failed - lesson still created:', { lesson_id: newLesson.id, error: emailErr })
     }
 
     revalidatePath('/upcoming-classes')
@@ -998,6 +1115,14 @@ export async function POST(req: NextRequest) {
               hours: pending.hours,
               error: refundError,
             })
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: null,
+              hours: pending.hours,
+              context: 'refund_hours_atomic failed after an unexpected throw in /api/student/book',
+              errorDetail: refundError,
+            })
           } else if (refundData?.success === false) {
             console.error('CRITICAL: refund_hours_atomic reported failure after an unexpected throw in /api/student/book. Hours are deducted with no lesson - manual reconciliation required.', {
               training_id: pending.trainingId,
@@ -1005,6 +1130,14 @@ export async function POST(req: NextRequest) {
               lesson_id: null,
               hours: pending.hours,
               code: refundData.code,
+            })
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: null,
+              hours: pending.hours,
+              context: 'refund_hours_atomic reported failure after an unexpected throw in /api/student/book',
+              errorDetail: refundData.code,
             })
           } else {
             console.error('CRITICAL: hours auto-refunded after an unexpected throw in /api/student/book - no lesson was created.', {
@@ -1027,6 +1160,18 @@ export async function POST(req: NextRequest) {
               old_duration_hours: pending.oldDurationHours,
               new_hours_needed: pending.newDurationHours,
               error: unwindError,
+            })
+            // hours here is deliberately the GROSS new duration, not the net reschedule
+            // delta: a failed unwind leaves hours_consumed at old + (new - old) = the
+            // full new duration with zero lessons held, so gross IS the student's
+            // exposure. Do not "correct" this to the net delta - that would report 0.
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: pending.oldLessonId,
+              hours: pending.newDurationHours,
+              context: 'unwind_reschedule_atomic failed after an unexpected throw in /api/student/book',
+              errorDetail: unwindError,
             })
           } else if (unwindRestored === false) {
             // Hours are back but the original lesson could not be restored: its
@@ -1056,6 +1201,35 @@ export async function POST(req: NextRequest) {
           lesson_id: pending.kind === 'unwind' ? pending.oldLessonId : null,
           hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
           error: compensationError,
+        })
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: pending.kind === 'unwind' ? pending.oldLessonId : null,
+          hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
+          context: 'compensation threw after an unexpected throw in /api/student/book',
+          errorDetail: compensationError,
+        })
+      }
+    }
+
+    // A Teams meeting was created and no lesson row was ever committed, so
+    // nothing in the database points at it. Best-effort cancel. Placed after the
+    // compensation block so a slow or hanging Graph call can never delay the
+    // student's hours reversal, and wrapped in its own try/catch because
+    // cancelTeamsMeeting swallows a 404 as success but rethrows every other Graph
+    // failure - this catch must not throw, the 500 below is still returned either
+    // way.
+    if (teamsMeetingId) {
+      const orphanMeetingId = teamsMeetingId
+      teamsMeetingId = null
+      try {
+        await cancelTeamsMeeting(orphanMeetingId)
+      } catch (cancelError) {
+        console.error('CRITICAL: orphan Teams meeting after an unexpected throw in /api/student/book - no lesson row references it:', {
+          teams_meeting_id: orphanMeetingId,
+          lesson_id: null,
+          error: cancelError,
         })
       }
     }

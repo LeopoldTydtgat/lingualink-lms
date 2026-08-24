@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarDays, CheckCircle, Clock, FileText, Search } from 'lucide-react'
+import { CalendarDays, CheckCircle, ChevronDown, Clock, FileText, Search } from 'lucide-react'
 import { EmptyStudy } from '@/components/EmptyStudy'
 import { categoryBadgeStyle } from '@/lib/study/categoryBadge'
 import DifficultyBars from '@/components/study/DifficultyBars'
@@ -49,6 +49,19 @@ interface Props {
    */
   assignmentScores: Record<string, number>
   practicedSheetIds: string[]
+  /**
+   * Sheets with SOME but not all of their activities attempted in practice
+   * context. Disjoint from practicedSheetIds by construction (see
+   * study/page.tsx) - a sheet is never in both lists.
+   */
+  inProgressSheetIds: string[]
+  /**
+   * sheet id -> practice ratio, present ONLY for sheets in inProgressSheetIds
+   * (see study/page.tsx). A MISSING entry means "there is no ratio to show" -
+   * the Continue card then renders no pill and no bar rather than a broken
+   * "0 of 0". Never read a missing entry as zero progress.
+   */
+  practiceProgress: Record<string, { done: number; total: number }>
   library: StudySheet[]
   materialAssignments: MaterialAssignment[]
   /**
@@ -166,16 +179,19 @@ function StatCard({
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function StudyClient({ studentId, assignments, completedAssignmentIds, assignmentScores, practicedSheetIds, library, materialAssignments, sheetTopicTags }: Props) {
+export default function StudyClient({ studentId, assignments, completedAssignmentIds, assignmentScores, practicedSheetIds, inProgressSheetIds, practiceProgress, library, materialAssignments, sheetTopicTags }: Props) {
   const router = useRouter()
   const [activeSection, setActiveSection] = useState<'assigned' | 'practice'>('assigned')
   const [searchQuery, setSearchQuery] = useState('')
   const [filterLevel, setFilterLevel] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterTag, setFilterTag] = useState('')
+  // Only the Completed section collapses; Continue and Not started are always open.
+  const [showCompleted, setShowCompleted] = useState(false)
 
   const completedAssignmentIdSet = new Set(completedAssignmentIds)
   const practicedSheetIdSet = new Set(practicedSheetIds)
+  const inProgressSheetIdSet = new Set(inProgressSheetIds)
 
   // Separate pending vs completed assignments.
   // Pending on a deactivated sheet is hidden entirely; completed on a
@@ -213,6 +229,23 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
     return matchesSearch && matchesLevel && matchesCategory && matchesTag
   })
 
+  // Three labelled sections over the SAME filtered set. Ordering alone was not
+  // enough: in a 20-plus sheet grid a finished sheet still reads as lost, so
+  // each state gets its own heading and count instead.
+  //
+  // Membership is mutually exclusive and exhaustive - done WINS over in
+  // progress, so a sheet that somehow landed in both sets appears once, under
+  // Completed - which is what lets the three lengths sum to filteredLibrary and
+  // keeps the existing empty state correct. No sort anywhere: .filter preserves
+  // order, so the server's title ascending (study/page.tsx) survives in each.
+  const inProgressSheets = filteredLibrary.filter(
+    (s) => inProgressSheetIdSet.has(s.id) && !practicedSheetIdSet.has(s.id)
+  )
+  const notStartedSheets = filteredLibrary.filter(
+    (s) => !inProgressSheetIdSet.has(s.id) && !practicedSheetIdSet.has(s.id)
+  )
+  const completedSheets = filteredLibrary.filter((s) => practicedSheetIdSet.has(s.id))
+
   // Navigate to individual sheet — pass assignment id if it's assigned homework
   function openSheet(sheetId: string, assignmentId?: string) {
     const url = assignmentId
@@ -225,6 +258,95 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
   // study_sheet id): the sheet itself is audience='staff' and unreadable here.
   function openMaterial(assignmentId: string) {
     router.push(`/student/study/material/${assignmentId}`)
+  }
+
+  // One practice-library card, rendered identically by all three sections.
+  // `variant` decides ONLY the pill, the progress bar and the button label -
+  // structure, classNames and colours never vary, so the same sheet looks the
+  // same wherever it lands. A plain function (not a component) so key={sheet.id}
+  // stays on the card's own root element, exactly where it was.
+  function practiceCard(sheet: StudySheet, variant: 'in-progress' | 'not-started' | 'completed') {
+    // Only in-progress sheets have an entry (see study/page.tsx); undefined here
+    // means "no ratio to show", never zero.
+    const progress = variant === 'in-progress' ? practiceProgress[sheet.id] : undefined
+    return (
+      <div
+        key={sheet.id}
+        className="flex flex-col rounded-xl bg-white shadow-sm p-4"
+        style={{ border: '1px solid #f3f4f6' }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
+          {variant === 'completed' && (
+            <span
+              className="rounded-full text-xs px-2 py-0.5 font-medium flex-shrink-0"
+              style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
+            >
+              Done
+            </span>
+          )}
+          {progress && (
+            <span
+              className="rounded-full text-xs px-2 py-0.5 font-medium flex-shrink-0"
+              style={{ backgroundColor: '#FFF1D6', color: '#8a5a00' }}
+            >
+              {`${progress.done} of ${progress.total}`}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 mt-2">
+          <CategoryBadge category={sheet.category} />
+          <span className="text-xs text-gray-500">{sheet.level}</span>
+          <DifficultyBars count={sheet.difficulty ?? 1} />
+        </div>
+
+        {/* Progress bar, in-progress cards only. total > 0 is guaranteed by the
+            server derivation and re-checked here so the width can never be a
+            division by zero. */}
+        {progress && progress.total > 0 && (
+          <div className="mt-2" style={{ height: '4px', backgroundColor: '#E0DFDC', borderRadius: '99px' }}>
+            <div
+              style={{
+                height: '4px',
+                width: `${(progress.done / progress.total) * 100}%`,
+                backgroundColor: '#FF8303',
+                borderRadius: '99px',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Topic chips. Neutral grey on purpose: tags are metadata,
+            and orange/green/yellow already mean pending/done/category
+            on this card. */}
+        {(sheetTopicTags[sheet.id] ?? []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {(sheetTopicTags[sheet.id] ?? []).map((t) => (
+              <span
+                key={t}
+                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-auto pt-3">
+          {variant === 'completed' ? (
+            <ReviewButton label="Review" size="sm" onClick={() => openSheet(sheet.id)} />
+          ) : (
+            <StartButton
+              label={variant === 'in-progress' ? 'Continue' : 'Start'}
+              size="sm"
+              onClick={() => openSheet(sheet.id)}
+            />
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -436,70 +558,145 @@ export default function StudyClient({ studentId, assignments, completedAssignmen
             )}
           </div>
 
-          {/* Library card grid */}
+          {/* Practice library, split into three labelled sections. The empty
+              state keys off filteredLibrary because the three arrays partition
+              it exactly - all three empty is the same condition. */}
           {filteredLibrary.length === 0 ? (
             <div className="text-center py-12 text-gray-400">
               <p className="text-sm">No study sheets match your filters.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredLibrary.map((sheet) => {
-                const practiced = practicedSheetIdSet.has(sheet.id)
-                return (
-                  <div
-                    key={sheet.id}
-                    className="flex flex-col rounded-xl bg-white shadow-sm p-4"
-                    style={{ border: '1px solid #f3f4f6' }}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-semibold text-gray-900 text-sm">{sheet.title}</p>
-                      {practiced && (
-                        <span
-                          className="rounded-full text-xs px-2 py-0.5 font-medium flex-shrink-0"
-                          style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}
-                        >
-                          Done
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-3 mt-2">
-                      <CategoryBadge category={sheet.category} />
-                      <span className="text-xs text-gray-500">{sheet.level}</span>
-                      <DifficultyBars count={sheet.difficulty ?? 1} />
-                    </div>
-
-                    {/* Topic chips. Neutral grey on purpose: tags are metadata,
-                        and orange/green/yellow already mean pending/done/category
-                        on this card. */}
-                    {(sheetTopicTags[sheet.id] ?? []).length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {(sheetTopicTags[sheet.id] ?? []).map((t) => (
-                          <span
-                            key={t}
-                            className="px-2 py-0.5 rounded-full text-xs font-medium"
-                            style={{ backgroundColor: '#f3f4f6', color: '#4b5563' }}
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="mt-auto pt-3">
-                      {practiced ? (
-                        <ReviewButton label="Review" size="sm" onClick={() => openSheet(sheet.id)} />
-                      ) : (
-                        <StartButton label="Start" size="sm" onClick={() => openSheet(sheet.id)} />
-                      )}
-                    </div>
+            <div className="space-y-6">
+              {inProgressSheets.length > 0 && (
+                <div>
+                  <PracticeSectionHeading
+                    label="Continue"
+                    count={inProgressSheets.length}
+                    pillBg="#FFF1D6"
+                    pillColor="#8a5a00"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {inProgressSheets.map((sheet) => practiceCard(sheet, 'in-progress'))}
                   </div>
-                )
-              })}
+                </div>
+              )}
+
+              {notStartedSheets.length > 0 && (
+                <div>
+                  <PracticeSectionHeading
+                    label="Not started"
+                    count={notStartedSheets.length}
+                    pillBg="#E0DFDC"
+                    pillColor="#000000"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {notStartedSheets.map((sheet) => practiceCard(sheet, 'not-started'))}
+                  </div>
+                </div>
+              )}
+
+              {/* Finished work collapses by default - it is the pile that makes
+                  a long grid unreadable, and the count alone answers "did I do
+                  it?" without expanding. */}
+              {completedSheets.length > 0 && (
+                <div>
+                  <PracticeSectionHeading
+                    label="Completed"
+                    count={completedSheets.length}
+                    pillBg="#DCFCE7"
+                    pillColor="#15803D"
+                    expanded={showCompleted}
+                    onToggle={() => setShowCompleted((v) => !v)}
+                  />
+                  {showCompleted && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {completedSheets.map((sheet) => practiceCard(sheet, 'completed'))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Practice section heading ──────────────────────────────────────────────────
+
+/**
+ * Heading for one practice section: name on the left, count pill beside it,
+ * hairline under the row.
+ *
+ * Passing `onToggle` turns the whole row into a disclosure button with a
+ * rotating chevron. Only the Completed section passes it, so the other two
+ * headings stay plain, non-interactive rows and cannot be collapsed shut.
+ */
+function PracticeSectionHeading({
+  label,
+  count,
+  pillBg,
+  pillColor,
+  expanded,
+  onToggle,
+}: {
+  label: string
+  count: number
+  pillBg: string
+  pillColor: string
+  expanded?: boolean
+  onToggle?: () => void
+}) {
+  const contents = (
+    <>
+      <span style={{ fontSize: '15px', fontWeight: 500, color: '#000000' }}>{label}</span>
+      <span
+        className="flex-shrink-0"
+        style={{
+          fontSize: '12px',
+          padding: '2px 9px',
+          borderRadius: '99px',
+          backgroundColor: pillBg,
+          color: pillColor,
+        }}
+      >
+        {count}
+      </span>
+      {onToggle && (
+        <ChevronDown
+          size={16}
+          className="ml-auto"
+          style={{
+            color: '#6b7280',
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 120ms',
+          }}
+        />
+      )}
+    </>
+  )
+
+  if (onToggle) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex items-center gap-2 w-full text-left pb-2 mb-3"
+        style={{ borderBottom: '1px solid #E0DFDC' }}
+      >
+        {contents}
+      </button>
+    )
+  }
+
+  return (
+    <div
+      className="flex items-center gap-2 pb-2 mb-3"
+      style={{ borderBottom: '1px solid #E0DFDC' }}
+    >
+      {contents}
     </div>
   )
 }
