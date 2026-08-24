@@ -59,6 +59,21 @@ export async function POST(req: NextRequest) {
   // rather than by reasoning about control flow.
   let pendingCompensation: PendingCompensation | null = null
 
+  // Non-null means a Teams meeting exists in Microsoft that no committed lesson
+  // row points at. Declared out here, alongside the two above, because the outer
+  // catch could not see it while it lived inside the try: a transport-level throw
+  // at the lesson insert reversed the hours correctly but left the meeting alive
+  // with no lesson row carrying its id, and the orphan sweeper matches on
+  // lessons.teams_meeting_id, so nothing could ever find it again.
+  //
+  // Retired to null at the DISPATCH of each cancel below, and the moment the
+  // lesson is committed. Dispatch, not success, mirrors pendingCompensation: a
+  // cancel that already failed is CRITICAL-logged, and re-running it from the
+  // catch would act on a meeting Graph may already have removed. The commit
+  // retirement is the important one - past that point the meeting IS the
+  // student's live join link and must never be cancelled.
+  let teamsMeetingId: string | null = null
+
   try {
     const supabase = await createClient()
 
@@ -552,7 +567,6 @@ export async function POST(req: NextRequest) {
     // The join URL is tied to the lesson slot – not the teacher –
     // so teacher swaps never break the student's link.
     let teamsJoinUrl: string | null = null
-    let teamsMeetingId: string | null = null
 
     try {
       const meeting = await createTeamsMeeting({
@@ -666,11 +680,14 @@ export async function POST(req: NextRequest) {
           })
         }
         if (teamsMeetingId) {
+          // Retired before dispatch so the outer catch cannot cancel it a second time.
+          const orphanMeetingId = teamsMeetingId
+          teamsMeetingId = null
           try {
-            await cancelTeamsMeeting(teamsMeetingId)
+            await cancelTeamsMeeting(orphanMeetingId)
           } catch (cancelError) {
             console.error('CRITICAL: orphan Teams meeting after reschedule unwind:', {
-              teams_meeting_id: teamsMeetingId,
+              teams_meeting_id: orphanMeetingId,
               lesson_id: rescheduleId,
               error: cancelError,
             })
@@ -715,11 +732,14 @@ export async function POST(req: NextRequest) {
         // genuine unwind failures for manual reconciliation.
       } else {
         if (teamsMeetingId) {
+          // Retired before dispatch so the outer catch cannot cancel it a second time.
+          const orphanMeetingId = teamsMeetingId
+          teamsMeetingId = null
           try {
-            await cancelTeamsMeeting(teamsMeetingId)
+            await cancelTeamsMeeting(orphanMeetingId)
           } catch (cancelError) {
             console.error('CRITICAL: orphan Teams meeting after fresh-booking insert failure:', {
-              teams_meeting_id: teamsMeetingId,
+              teams_meeting_id: orphanMeetingId,
               lesson_id: null,
               error: cancelError,
             })
@@ -819,6 +839,10 @@ export async function POST(req: NextRequest) {
     // back. Second, independent guard on top of the committedLessonId check in
     // the outer catch.
     pendingCompensation = null
+    // The lesson row now carries this meeting id, so it is no longer an orphan -
+    // it is the student's live join link. Retiring it here stops the outer catch
+    // from cancelling a meeting for a class that exists.
+    teamsMeetingId = null
 
     // ── 6a. Backfill hours_log.lesson_id (NEW257) ─────────────────────────────
     // book_class_atomic returned the id of the 'class_booking' ledger row; now
@@ -1164,6 +1188,27 @@ export async function POST(req: NextRequest) {
           hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
           context: 'compensation threw after an unexpected throw in /api/student/book',
           errorDetail: compensationError,
+        })
+      }
+    }
+
+    // A Teams meeting was created and no lesson row was ever committed, so
+    // nothing in the database points at it. Best-effort cancel. Placed after the
+    // compensation block so a slow or hanging Graph call can never delay the
+    // student's hours reversal, and wrapped in its own try/catch because
+    // cancelTeamsMeeting swallows a 404 as success but rethrows every other Graph
+    // failure - this catch must not throw, the 500 below is still returned either
+    // way.
+    if (teamsMeetingId) {
+      const orphanMeetingId = teamsMeetingId
+      teamsMeetingId = null
+      try {
+        await cancelTeamsMeeting(orphanMeetingId)
+      } catch (cancelError) {
+        console.error('CRITICAL: orphan Teams meeting after an unexpected throw in /api/student/book - no lesson row references it:', {
+          teams_meeting_id: orphanMeetingId,
+          lesson_id: null,
+          error: cancelError,
         })
       }
     }
