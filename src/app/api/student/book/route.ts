@@ -1007,30 +1007,24 @@ export async function POST(req: NextRequest) {
 
     // ── 7. Send confirmation emails ───────────────────────────────────────────
     const isReschedule = !!rescheduleId
-    try {
-    const studentTimezone = requireTz(studentRow.timezone, 'book:student')
-    const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
-
     const newScheduledAtIso = startTime.toISOString()
 
-    const studentSubject = isReschedule
-      ? 'Lingualink Online - Your class has been rescheduled'
-      : 'Lingualink Online - Your class is confirmed'
+    // One try per recipient. Previously both guards were hoisted above a single
+    // Promise.allSettled, so a null timezone on either side threw before either
+    // send was built and the route still returned 200 - silent loss of both
+    // confirmations on a booking that had already committed.
+    try {
+      const studentTimezone = requireTz(studentRow.timezone, 'book:student')
 
-    const studentBodyHtml = isReschedule
-      ? studentRescheduledEmailContent(oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
-      : studentBookingConfirmationEmailContent(newScheduledAtIso, durationMinutes, studentTimezone)
+      const studentSubject = isReschedule
+        ? 'Lingualink Online - Your class has been rescheduled'
+        : 'Lingualink Online - Your class is confirmed'
 
-    const teacherSubject = isReschedule
-      ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`
-      : `Lingualink Online - New class booked with ${studentRow.full_name}`
+      const studentBodyHtml = isReschedule
+        ? studentRescheduledEmailContent(oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, studentTimezone, 'student')
+        : studentBookingConfirmationEmailContent(newScheduledAtIso, durationMinutes, studentTimezone)
 
-    const teacherBodyHtml = isReschedule
-      ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, teacherTimezone, 'student')
-      : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
-
-    await Promise.allSettled([
-      resend.emails.send({
+      await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: studentRow.email,
         subject: studentSubject,
@@ -1041,8 +1035,23 @@ export async function POST(req: NextRequest) {
           bodyHtml: studentBodyHtml,
           contactEmail: 'support@lingualinkonline.com',
         }),
-      }),
-      resend.emails.send({
+      })
+    } catch (emailErr) {
+      console.error('[Email] Student booking/reschedule email failed - lesson still created:', { lesson_id: newLesson.id, error: emailErr })
+    }
+
+    try {
+      const teacherTimezone = requireTz(teacher.timezone, 'book:teacher')
+
+      const teacherSubject = isReschedule
+        ? `Lingualink Online - Class rescheduled by ${studentRow.full_name}`
+        : `Lingualink Online - New class booked with ${studentRow.full_name}`
+
+      const teacherBodyHtml = isReschedule
+        ? teacherRescheduledEmailContent(studentRow.full_name, oldScheduledAt, oldDurationMinutes, newScheduledAtIso, durationMinutes, teacherTimezone, 'student')
+        : teacherNewBookingEmailContent(studentRow.full_name, newScheduledAtIso, durationMinutes, teacherTimezone)
+
+      await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
         to: teacher.email,
         subject: teacherSubject,
@@ -1053,10 +1062,9 @@ export async function POST(req: NextRequest) {
           bodyHtml: teacherBodyHtml,
           contactEmail: 'teachers@lingualinkonline.com',
         }),
-      }),
-    ])
+      })
     } catch (emailErr) {
-      console.error('[Email] Booking/reschedule confirmation emails failed - lesson still created:', emailErr)
+      console.error('[Email] Teacher booking/reschedule email failed - lesson still created:', { lesson_id: newLesson.id, error: emailErr })
     }
 
     revalidatePath('/upcoming-classes')
