@@ -133,58 +133,59 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
 
   await deleteLessonGoogleEvent(lessonId)
 
-  // Send cancellation emails — failures must not block the cancellation
+  // Send cancellation emails - failures must not block the cancellation.
+  // Each recipient gets its own try/catch and its own timezone guard. They were
+  // previously in one block, so a missing or unreadable teacher row - which the
+  // teacher read above deliberately tolerates - threw at the teacher guard
+  // BEFORE the student send was reached, silently swallowing both emails.
   try {
     const studentTimezone = requireTz(student.timezone, 'cancel-by-student:student')
-    const teacherTimezone = requireTz(teacher?.timezone, 'cancel-by-student:teacher')
+    await resend.emails.send({
+      from: 'Lingualink Online <no-reply@lingualinkonline.com>',
+      to: student.email,
+      subject: 'Lingualink Online - Your class has been cancelled',
+      html: buildEmailTemplate({
+        recipientName: student.full_name,
+        recipientFallback: 'Student',
+        subject: 'Your class has been cancelled',
+        bodyHtml: studentCancellationByStudentEmailContent(
+          lesson.scheduled_at,
+          lesson.duration_minutes,
+          refunded ? hoursToRefund : 0,
+          studentTimezone
+        ),
+        contactEmail: 'support@lingualinkonline.com',
+      }),
+    })
+  } catch (emailErr) {
+    console.error('[Email] Student cancellation email failed:', { lesson_id: lessonId, error: emailErr })
+  }
 
-    const emailPromises: Promise<unknown>[] = [
-      resend.emails.send({
+  if (teacher?.email) {
+    try {
+      const teacherTimezone = requireTz(teacher.timezone, 'cancel-by-student:teacher')
+      await resend.emails.send({
         from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-        to: student.email,
-        subject: 'Lingualink Online - Your class has been cancelled',
+        to: teacher.email,
+        subject: `Lingualink Online - Class cancelled by ${student.full_name}`,
         html: buildEmailTemplate({
-          recipientName: student.full_name,
-          recipientFallback: 'Student',
-          subject: 'Your class has been cancelled',
-          bodyHtml: studentCancellationByStudentEmailContent(
+          recipientName: teacher.full_name ?? 'Teacher',
+          recipientFallback: 'Teacher',
+          subject: 'Class cancelled by student',
+          bodyHtml: teacherCancellationEmailContent(
+            student.full_name,
             lesson.scheduled_at,
             lesson.duration_minutes,
-            refunded ? hoursToRefund : 0,
-            studentTimezone
+            teacherTimezone,
+            'student',
+            !isRefundable
           ),
-          contactEmail: 'support@lingualinkonline.com',
+          contactEmail: 'teachers@lingualinkonline.com',
         }),
-      }),
-    ]
-
-    if (teacher?.email) {
-      emailPromises.push(
-        resend.emails.send({
-          from: 'Lingualink Online <no-reply@lingualinkonline.com>',
-          to: teacher.email,
-          subject: `Lingualink Online - Class cancelled by ${student.full_name}`,
-          html: buildEmailTemplate({
-            recipientName: teacher.full_name ?? 'Teacher',
-            recipientFallback: 'Teacher',
-            subject: 'Class cancelled by student',
-            bodyHtml: teacherCancellationEmailContent(
-              student.full_name,
-              lesson.scheduled_at,
-              lesson.duration_minutes,
-              teacherTimezone,
-              'student',
-              !isRefundable
-            ),
-            contactEmail: 'teachers@lingualinkonline.com',
-          }),
-        })
-      )
+      })
+    } catch (emailErr) {
+      console.error('[Email] Teacher cancellation email failed:', { lesson_id: lessonId, teacher_id: lesson.teacher_id, error: emailErr })
     }
-
-    await Promise.allSettled(emailPromises)
-  } catch (emailErr) {
-    console.error('[Email] Cancellation emails failed:', emailErr)
   }
 
   revalidatePath('/upcoming-classes')
