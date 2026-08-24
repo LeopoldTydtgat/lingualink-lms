@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { redirect, notFound } from 'next/navigation'
 import { isValidTimeZone } from '@/lib/utils/timezone'
+import { formatDateInTz } from '@/lib/exportTime'
+import { computeOverallLevel, hasUsableLevelData } from '@/lib/levels/levelData'
 import ReportFormClient from './ReportFormClient'
 import type { Annotation } from '@/components/pdf/PdfViewer'
 
@@ -150,6 +152,78 @@ export default async function ReportPage({ params }: Props) {
   // backstop against a hand-typed URL, not the primary scoping.
   if (teacher?.id !== user.id) {
     redirect('/reports')
+  }
+
+  // --- Level assessment prefill -------------------------------------------
+  // Seeds the form with the levels from this student's most recent COMPLETE
+  // previous assessment, so a teacher no longer retypes seven unchanged skills
+  // every lesson. NOTHING is written here: this only supplies the form's
+  // initial state, and the levels reach the database only if the teacher
+  // submits the report through the unchanged save path.
+  //
+  // Placed AFTER the ownership guard above deliberately - that guard is what
+  // authorises this teacher to read this student's data at all, so this lookup
+  // must never run ahead of it.
+  //
+  // There is NO teacher filter on the query. Cross-teacher carry-over is
+  // intended and matches the existing "last time's recap" behaviour in
+  // (dashboard)/upcoming-classes/page.tsx: a substitute teacher inherits the
+  // prior teacher's assessment rather than starting from a blank grid.
+  let prefilledLevelData: Record<string, string> | null = null
+  let prefilledLevelFromLabel: string | null = null
+
+  // Query-skip conditions only. The status test mirrors isEditable in
+  // ReportFormClient, which gates the display independently - if the two ever
+  // drift the worst case is no prefill, which is the safe direction. A report
+  // that already carries its own assessment is never prefilled.
+  const wantsLevelPrefill =
+    (report.status === 'pending' || report.status === 'reopened') &&
+    hasUsableLevelData(report.level_data) === false &&
+    typeof student?.id === 'string' &&
+    student.id.length > 0 &&
+    typeof lesson?.scheduled_at === 'string' &&
+    lesson.scheduled_at.length > 0
+
+  if (wantsLevelPrefill) {
+    const prefillAdminClient = createAdminClient()
+    const { data: priorLessons, error: prefillError } = await prefillAdminClient
+      .from('lessons')
+      .select('id, scheduled_at, reports ( level_data )')
+      .eq('student_id', student!.id)
+      // The current lesson can never be its own source.
+      .lt('scheduled_at', lesson.scheduled_at)
+      .order('scheduled_at', { ascending: false })
+      .limit(20)
+
+    if (prefillError) {
+      // Fail soft: a failed prefill leaves both props null. It must never break
+      // the page, block the form, or throw.
+      console.error('[reports/[id]] level prefill', prefillError.message, { reportId: id, studentId: student!.id })
+    } else {
+      // Newest-first walk; the FIRST row carrying a COMPLETE assessment wins.
+      // The completeness test is computeOverallLevel, NOT hasUsableLevelData:
+      // hasUsableLevelData is true when a single skill is graded, so a partial
+      // legacy row would seed 3 of 7 skills and the teacher would then be
+      // blocked by the server's "All seven skills must be graded" validation.
+      // computeOverallLevel returns null unless all seven are graded, so this
+      // carries over a complete assessment or nothing at all. Rows that fail
+      // the test are skipped and the walk continues; rows are never merged.
+      for (const priorLesson of (priorLessons ?? []) as any[]) {
+        const priorReport = Array.isArray(priorLesson.reports)
+          ? priorLesson.reports[0]
+          : priorLesson.reports
+        if (computeOverallLevel(priorReport?.level_data) === null) continue
+
+        prefilledLevelData = priorReport.level_data as Record<string, string>
+        // Formatted server-side in the viewer's own zone with the shared pure
+        // helper, so the client never formats a date of its own.
+        prefilledLevelFromLabel =
+          typeof priorLesson.scheduled_at === 'string' && priorLesson.scheduled_at.length > 0
+            ? formatDateInTz(priorLesson.scheduled_at, viewerTimezone)
+            : null
+        break
+      }
+    }
   }
 
   // Fetch study sheets already assigned for this lesson. reports.lesson_id is
@@ -331,6 +405,8 @@ export default async function ReportPage({ params }: Props) {
       materialSheets={materialSheets}
       annotatedPdfs={annotatedPdfs}
       viewerTimezone={viewerTimezone}
+      prefilledLevelData={prefilledLevelData}
+      prefilledLevelFromLabel={prefilledLevelFromLabel}
     />
   )
 }
