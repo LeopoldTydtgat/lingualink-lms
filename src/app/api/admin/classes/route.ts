@@ -451,7 +451,18 @@ export async function POST(request: NextRequest) {
     if (msg.includes('training_not_active')) {
       return NextResponse.json({ error: 'This training is no longer active.' }, { status: 400 })
     }
-    console.error('book_class_atomic failed:', deductError)
+    // Fall-through = neither insufficient_hours nor training_not_active, so this
+    // is a transport/unknown failure and the RPC may have committed the deduction
+    // before the response leg failed. Not auto-refunded: refund_hours_atomic has
+    // no "was never deducted" guard, so a refund here could credit hours that
+    // were never spent. Naming the row instead so hours_log can be checked by
+    // hand. CRITICAL because this is the one deduction path with no compensation.
+    console.error('CRITICAL: book_class_atomic failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
+      training_id,
+      student_id,
+      hours: hoursRequested,
+      error: deductError,
+    })
     return NextResponse.json({ error: 'Failed to reserve hours. Please try again.' }, { status: 500 })
   }
 
