@@ -234,9 +234,39 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ lessons: flattened, total: count ?? 0, page, pageSize })
 }
 
+// A refund owed for a book_class_atomic deduction that has already moved a
+// student's hours, held for the window in which no lesson row exists yet. The
+// admin POST has no reschedule path, so unlike the student route this is the
+// refund shape only. See the pendingRefund declaration inside the handler.
+type PendingRefund = { trainingId: string; studentId: string; hours: number }
+
 // POST /api/admin/classes
 // Admin creates a class manually, bypassing the 24hr and availability restrictions
 export async function POST(request: NextRequest) {
+  // Set the moment the lesson row is committed. Everything after that point is
+  // documented non-blocking, so the catch below must report success once this is
+  // non-null - a 500 there tells the admin a booking failed when it exists, and
+  // BookingFlowClient leaves Confirm enabled with the selection intact, so a
+  // retry on another slot books a second real class.
+  let committedLessonId: string | null = null
+
+  // Non-null means exactly this: book_class_atomic has moved this student's
+  // hours, no refund has been dispatched, and no lesson row exists. Everything
+  // it needs is captured here because training_id, student_id, hoursRequested
+  // and adminClient are all const INSIDE the try and unreachable from the catch.
+  //
+  // Cleared at the DISPATCH of the existing refund rather than at its completion,
+  // and again the moment committedLessonId is set. Dispatch, not completion,
+  // because an RPC that throws mid-flight may already have been applied by the
+  // database: re-running it from the catch could refund twice.
+  let pendingRefund: PendingRefund | null = null
+
+  // Non-null means a Teams meeting exists in Microsoft that no committed lesson
+  // row points at. Same retirement discipline as pendingRefund. The commit
+  // retirement is the important one - past that point the meeting IS the
+  // student's live join link and must never be cancelled.
+  let teamsMeetingId: string | null = null
+
   try {
   const supabase = await createClient()
 
@@ -425,6 +455,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to reserve hours. Please try again.' }, { status: 500 })
   }
 
+  // Hours have been deducted. Own the refund from here until the insert-failure
+  // handler dispatches it or the lesson is committed - the same three arguments
+  // that handler's refund_hours_atomic call uses.
+  pendingRefund = { trainingId: training_id, studentId: student_id, hours: hoursRequested }
+
   // Fetch teacher + student full names for the Teams meeting subject and,
   // later, the confirmation emails — hoisted here so both call sites share
   // this single pair of queries instead of fetching twice.
@@ -442,7 +477,6 @@ export async function POST(request: NextRequest) {
 
   // Create Teams meeting before inserting the lesson so the URL is available immediately
   let teamsJoinUrl: string | null = null
-  let teamsMeetingId: string | null = null
   try {
     console.log('[Teams] Creating meeting — AZURE_TENANT_ID set:', !!process.env.AZURE_TENANT_ID, '| AZURE_CLIENT_ID set:', !!process.env.AZURE_CLIENT_ID, '| AZURE_CLIENT_SECRET set:', !!process.env.AZURE_CLIENT_SECRET)
     const meeting = await createTeamsMeeting({
@@ -483,16 +517,24 @@ export async function POST(request: NextRequest) {
       `${lessonError.message} ${lessonError.details}`.includes('no_student_overlap')
 
     if (teamsMeetingId) {
+      // Retired before dispatch so the catch cannot cancel it a second time.
+      const orphanMeetingId = teamsMeetingId
+      teamsMeetingId = null
       try {
-        await cancelTeamsMeeting(teamsMeetingId)
+        await cancelTeamsMeeting(orphanMeetingId)
       } catch (cancelError) {
         console.error('CRITICAL: orphan Teams meeting after admin-create insert failure:', {
-          teams_meeting_id: teamsMeetingId,
+          teams_meeting_id: orphanMeetingId,
           lesson_id: null,
           error: cancelError,
         })
       }
     }
+
+    // Dispatching the refund here retires it: the catch must not run a second
+    // one, including when the RPC throws mid-flight. The two CRITICAL branches
+    // below stay the signal for a refund that comes back failed.
+    pendingRefund = null
 
     console.error('Create lesson error — refunding deducted hours:', lessonError)
     // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
@@ -574,6 +616,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
   }
+
+  // The lesson exists, so the hours are correctly spent and nothing is owed
+  // back, and the meeting id is now carried by a real row - it is the student's
+  // live join link, not an orphan. Everything below here is documented
+  // non-blocking, which is what makes the catch's success return correct.
+  committedLessonId = lesson.id
+  pendingRefund = null
+  teamsMeetingId = null
 
   // NEW257: backfill hours_log.lesson_id. book_class_atomic returned the id of
   // the 'class_booking' ledger row; now that the lesson exists, link the two.
@@ -671,6 +721,110 @@ export async function POST(request: NextRequest) {
   revalidatePath('/admin/classes')
   return NextResponse.json({ lesson_id: lesson.id }, { status: 201 })
   } catch (err) {
+    if (committedLessonId) {
+      // The lesson exists and the hours are correctly spent. Whatever threw was
+      // one of the documented non-blocking follow-ups (ledger backfill, pending
+      // report, Google mirror, emails, revalidate). Report success so the admin
+      // is not invited to retry and book a second real class; the CRITICAL log
+      // is the signal for manual follow-up.
+      console.error('CRITICAL: post-commit step threw in POST /api/admin/classes - lesson committed, returning success:', {
+        lesson_id: committedLessonId,
+        error: err,
+      })
+      return NextResponse.json({ lesson_id: committedLessonId }, { status: 201 })
+    }
+
+    // No lesson row exists. If the deduction already moved this student's hours
+    // and no refund has been dispatched, reverse it here. Its own try/catch and
+    // a fresh service-role client: adminClient is scoped to the try above and
+    // may never have been constructed. Whatever happens, the 500 below is still
+    // returned and this catch never throws.
+    if (pendingRefund) {
+      const pending = pendingRefund
+      pendingRefund = null
+      try {
+        const recoveryClient = createAdminClient()
+        const { data: refundData, error: refundError } = await recoveryClient.rpc('refund_hours_atomic', {
+          p_training_id: pending.trainingId,
+          p_hours: pending.hours,
+        })
+        if (refundError) {
+          console.error('CRITICAL: refund_hours_atomic failed after an unexpected throw in POST /api/admin/classes. Hours are deducted with no lesson - manual reconciliation required.', {
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            lesson_id: null,
+            hours: pending.hours,
+            error: refundError,
+          })
+          await raiseReconciliationTask({
+            studentId: pending.studentId,
+            trainingId: pending.trainingId,
+            lessonId: null,
+            hours: pending.hours,
+            context: 'refund_hours_atomic failed after an unexpected throw (admin-created class)',
+            errorDetail: refundError,
+          })
+        } else if (refundData?.success === false) {
+          console.error('CRITICAL: refund_hours_atomic reported failure after an unexpected throw in POST /api/admin/classes. Hours are deducted with no lesson - manual reconciliation required.', {
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            lesson_id: null,
+            hours: pending.hours,
+            code: refundData.code,
+          })
+          await raiseReconciliationTask({
+            studentId: pending.studentId,
+            trainingId: pending.trainingId,
+            lessonId: null,
+            hours: pending.hours,
+            context: 'refund_hours_atomic reported failure after an unexpected throw (admin-created class)',
+            errorDetail: refundData.code,
+          })
+        } else {
+          console.error('CRITICAL: hours auto-refunded after an unexpected throw in POST /api/admin/classes - no lesson was created.', {
+            training_id: pending.trainingId,
+            hours: pending.hours,
+          })
+        }
+      } catch (compensationError) {
+        console.error('CRITICAL: compensation threw after an unexpected throw in POST /api/admin/classes. Hours may be deducted with no lesson - manual reconciliation required.', {
+          training_id: pending.trainingId,
+          student_id: pending.studentId,
+          lesson_id: null,
+          hours: pending.hours,
+          error: compensationError,
+        })
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: null,
+          hours: pending.hours,
+          context: 'compensation threw after an unexpected throw (admin-created class)',
+          errorDetail: compensationError,
+        })
+      }
+    }
+
+    // A Teams meeting was created and no lesson row was ever committed, so
+    // nothing in the database points at it. Best-effort cancel. Placed after the
+    // refund block so a slow or hanging Graph call can never delay the hours
+    // reversal, and wrapped in its own try/catch because cancelTeamsMeeting
+    // swallows a 404 as success but rethrows every other Graph failure - this
+    // catch must not throw.
+    if (teamsMeetingId) {
+      const orphanMeetingId = teamsMeetingId
+      teamsMeetingId = null
+      try {
+        await cancelTeamsMeeting(orphanMeetingId)
+      } catch (cancelError) {
+        console.error('CRITICAL: orphan Teams meeting after an unexpected throw in POST /api/admin/classes - no lesson row references it:', {
+          teams_meeting_id: orphanMeetingId,
+          lesson_id: null,
+          error: cancelError,
+        })
+      }
+    }
+
     console.error('POST /api/admin/classes error:', err)
     return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
