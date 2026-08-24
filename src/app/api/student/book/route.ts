@@ -622,12 +622,24 @@ export async function POST(req: NextRequest) {
         // where the database may already have applied it. The CRITICAL log
         // below stays the signal for a reversal that comes back failed.
         pendingCompensation = null
-        const { data: unwindRestored, error: unwindError } = await adminClient.rpc('unwind_reschedule_atomic', {
-          p_old_lesson_id: rescheduleId,
-          p_training_id: trainingId,
-          p_old_duration_hours: oldDurationHours,
-          p_new_duration_hours: hoursNeeded,
-        })
+        // A reversal RPC that rejects at the network level never returns an
+        // { error } to destructure, so the CRITICAL log and the admin task
+        // below would both be skipped on that path. Both channels are funnelled
+        // into unwindError so a failed reversal is reported either way.
+        let unwindRestored: boolean | null = null
+        let unwindError: unknown = null
+        try {
+          const unwindResult = await adminClient.rpc('unwind_reschedule_atomic', {
+            p_old_lesson_id: rescheduleId,
+            p_training_id: trainingId,
+            p_old_duration_hours: oldDurationHours,
+            p_new_duration_hours: hoursNeeded,
+          })
+          unwindRestored = unwindResult.data
+          unwindError = unwindResult.error
+        } catch (caughtErr) {
+          unwindError = caughtErr
+        }
         if (unwindError) {
           console.error('CRITICAL: unwind_reschedule_atomic failed. Manual reconciliation required.', {
             lesson_id: rescheduleId,
@@ -717,10 +729,21 @@ export async function POST(req: NextRequest) {
         // failed.
         pendingCompensation = null
         // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
-        const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-          p_training_id: trainingId,
-          p_hours: hoursNeeded,
-        })
+        // A throw from the RPC never yields an { error } to destructure; it is
+        // funnelled into refundError so the CRITICAL log and the admin task
+        // below are reached on that path too.
+        let refundData: { success?: boolean; code?: string } | null = null
+        let refundError: unknown = null
+        try {
+          const refundResult = await adminClient.rpc('refund_hours_atomic', {
+            p_training_id: trainingId,
+            p_hours: hoursNeeded,
+          })
+          refundData = refundResult.data
+          refundError = refundResult.error
+        } catch (caughtErr) {
+          refundError = caughtErr
+        }
         if (refundError) {
           console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', {
             training_id: trainingId,

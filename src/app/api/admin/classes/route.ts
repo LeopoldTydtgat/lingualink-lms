@@ -496,10 +496,21 @@ export async function POST(request: NextRequest) {
 
     console.error('Create lesson error — refunding deducted hours:', lessonError)
     // The RPC signals TRAINING_NOT_FOUND / LESSON_NOT_FOUND / ALREADY_REFUNDED in its jsonb payload, not as an error, so both channels must be checked.
-    const { data: refundData, error: refundError } = await adminClient.rpc('refund_hours_atomic', {
-      p_training_id: training_id,
-      p_hours: hoursRequested,
-    })
+    // A throw from the RPC never yields an { error } to destructure; it is
+    // funnelled into refundError so the CRITICAL log and the admin task below
+    // are reached on that path too.
+    let refundData: { success?: boolean; code?: string } | null = null
+    let refundError: unknown = null
+    try {
+      const refundResult = await adminClient.rpc('refund_hours_atomic', {
+        p_training_id: training_id,
+        p_hours: hoursRequested,
+      })
+      refundData = refundResult.data
+      refundError = refundResult.error
+    } catch (caughtErr) {
+      refundError = caughtErr
+    }
     if (refundError) {
       console.error('CRITICAL: refund_hours_atomic failed after lesson insert error:', {
         training_id,
