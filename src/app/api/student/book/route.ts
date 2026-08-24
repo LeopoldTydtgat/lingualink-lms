@@ -18,6 +18,7 @@ import { requireTz } from '@/lib/time/requireTz'
 import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { createLessonGoogleEvent, deleteLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { CANCELLED_STATUSES, toPostgrestInList } from '@/lib/billing/billability'
+import { raiseReconciliationTask } from '@/lib/admin/raiseReconciliationTask'
 
 // A reversal owed to the student for a money RPC that has already moved their
 // hours, held for the window in which no lesson row exists yet. See the
@@ -636,6 +637,17 @@ export async function POST(req: NextRequest) {
             new_hours_needed: hoursNeeded,
             error: unwindError,
           })
+          // The log above is only visible in Vercel. Raise the same failure as
+          // an admin task so it is visible to whoever reconciles hours. Cannot
+          // throw and returns void - control flow below is unchanged.
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: rescheduleId,
+            hours: hoursNeeded,
+            context: 'unwind_reschedule_atomic failed after lesson insert error (student reschedule)',
+            errorDetail: unwindError,
+          })
         }
         if (teamsMeetingId) {
           try {
@@ -716,12 +728,28 @@ export async function POST(req: NextRequest) {
             lesson_id: null,
             error: refundError,
           })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: null,
+            hours: hoursNeeded,
+            context: 'refund_hours_atomic failed after lesson insert error (student booking)',
+            errorDetail: refundError,
+          })
         } else if (refundData?.success === false) {
           console.error('CRITICAL: refund_hours_atomic reported failure after lesson insert error:', {
             training_id: trainingId,
             student_id: studentId,
             lesson_id: null,
             code: refundData.code,
+          })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: null,
+            hours: hoursNeeded,
+            context: 'refund_hours_atomic reported failure after lesson insert error (student booking)',
+            errorDetail: refundData.code,
           })
         }
 
@@ -998,6 +1026,14 @@ export async function POST(req: NextRequest) {
               hours: pending.hours,
               error: refundError,
             })
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: null,
+              hours: pending.hours,
+              context: 'refund_hours_atomic failed after an unexpected throw in /api/student/book',
+              errorDetail: refundError,
+            })
           } else if (refundData?.success === false) {
             console.error('CRITICAL: refund_hours_atomic reported failure after an unexpected throw in /api/student/book. Hours are deducted with no lesson - manual reconciliation required.', {
               training_id: pending.trainingId,
@@ -1005,6 +1041,14 @@ export async function POST(req: NextRequest) {
               lesson_id: null,
               hours: pending.hours,
               code: refundData.code,
+            })
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: null,
+              hours: pending.hours,
+              context: 'refund_hours_atomic reported failure after an unexpected throw in /api/student/book',
+              errorDetail: refundData.code,
             })
           } else {
             console.error('CRITICAL: hours auto-refunded after an unexpected throw in /api/student/book - no lesson was created.', {
@@ -1027,6 +1071,14 @@ export async function POST(req: NextRequest) {
               old_duration_hours: pending.oldDurationHours,
               new_hours_needed: pending.newDurationHours,
               error: unwindError,
+            })
+            await raiseReconciliationTask({
+              studentId: pending.studentId,
+              trainingId: pending.trainingId,
+              lessonId: pending.oldLessonId,
+              hours: pending.newDurationHours,
+              context: 'unwind_reschedule_atomic failed after an unexpected throw in /api/student/book',
+              errorDetail: unwindError,
             })
           } else if (unwindRestored === false) {
             // Hours are back but the original lesson could not be restored: its
@@ -1056,6 +1108,14 @@ export async function POST(req: NextRequest) {
           lesson_id: pending.kind === 'unwind' ? pending.oldLessonId : null,
           hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
           error: compensationError,
+        })
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: pending.kind === 'unwind' ? pending.oldLessonId : null,
+          hours: pending.kind === 'refund' ? pending.hours : pending.newDurationHours,
+          context: 'compensation threw after an unexpected throw in /api/student/book',
+          errorDetail: compensationError,
         })
       }
     }

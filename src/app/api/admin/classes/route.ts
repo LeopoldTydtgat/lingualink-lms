@@ -18,6 +18,7 @@ import { createPendingReport } from '@/lib/reports/createPendingReport'
 import { createLessonGoogleEvent } from '@/lib/google/lessonEvents'
 import { adminClassesPostSchema } from '@/lib/validation/schemas'
 import { localMidnightToUtc } from '@/lib/billing/monthRange'
+import { raiseReconciliationTask } from '@/lib/admin/raiseReconciliationTask'
 
 // GET /api/admin/classes
 // Returns paginated, filtered list of all lessons with teacher and student info
@@ -506,12 +507,31 @@ export async function POST(request: NextRequest) {
         lesson_id: null,
         error: refundError,
       })
+      // The log above is only visible in Vercel. Raise the same failure as an
+      // admin task so it is visible to whoever reconciles hours. Cannot throw
+      // and returns void - control flow below is unchanged.
+      await raiseReconciliationTask({
+        studentId: student_id,
+        trainingId: training_id,
+        lessonId: null,
+        hours: hoursRequested,
+        context: 'refund_hours_atomic failed after lesson insert error (admin-created class)',
+        errorDetail: refundError,
+      })
     } else if (refundData?.success === false) {
       console.error('CRITICAL: refund_hours_atomic reported failure after admin-create lesson insert error:', {
         training_id,
         student_id,
         lesson_id: null,
         code: refundData.code,
+      })
+      await raiseReconciliationTask({
+        studentId: student_id,
+        trainingId: training_id,
+        lessonId: null,
+        hours: hoursRequested,
+        context: 'refund_hours_atomic reported failure after lesson insert error (admin-created class)',
+        errorDetail: refundData.code,
       })
     }
 
