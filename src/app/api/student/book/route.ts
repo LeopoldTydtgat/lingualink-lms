@@ -77,12 +77,26 @@ export async function POST(req: NextRequest) {
 
   // The instant captured immediately before the lessons insert, used as the
   // created_at floor when a lost insert response has to be resolved by reading
-  // the row back. Only the reschedule handler reads it today; it is declared out
-  // here with the three above rather than as a const beside the insert because
-  // the outer catch needs the same value when it gains the same verification,
-  // and a const inside the try would be invisible to it. Null means the insert
-  // was never reached, so there is nothing to verify.
+  // the row back. Both insert-failure gates - the reschedule one and the fresh
+  // booking one - and the outer catch read it; it is declared out here with the
+  // three above rather than as a const beside the insert because the outer catch
+  // could not otherwise see it: a const inside the try is invisible to it. Null
+  // means the insert was never reached, so there is nothing to verify.
   let insertStartedAtIso: string | null = null
+
+  // The natural key of the row the insert tried to write, captured at the same
+  // instant as the floor above and for the same reason: the outer catch cannot
+  // see the parsed body. teacherId, studentId, trainingId, startTime and
+  // durationMinutes are all const INSIDE the try, so a throw AT the insert
+  // reaches the catch with no way to describe the row it needs to read back.
+  // Null means the insert was never reached.
+  let insertNaturalKey: {
+    teacherId: string
+    studentId: string
+    trainingId: string
+    scheduledAtIso: string
+    durationMinutes: number
+  } | null = null
 
   try {
     const supabase = await createClient()
@@ -612,6 +626,13 @@ export async function POST(req: NextRequest) {
     // millisecond of slack widens the window in which somebody else's booking
     // could be mistaken for ours.
     insertStartedAtIso = new Date().toISOString()
+    insertNaturalKey = {
+      teacherId,
+      studentId,
+      trainingId,
+      scheduledAtIso: startTime.toISOString(),
+      durationMinutes,
+    }
 
     const { data: newLesson, error: lessonError } = await adminClient
       .from('lessons')
@@ -1371,6 +1392,199 @@ export async function POST(req: NextRequest) {
         error: err,
       })
       return NextResponse.json({ success: true, lessonId: committedLessonId })
+    }
+
+    // A throw AT the insert - a transport abort, a client that threw instead of
+    // returning an error - lands here with the compensation still armed and no
+    // lesson id, and the compensation block below would then act blind. The
+    // insert was REACHED (both trackers are non-null only from the line before
+    // it) and the throw carries no SQLSTATE, so committed and rolled-back are
+    // indistinguishable without a read. A null insertStartedAtIso means the
+    // throw came before the insert: no row can exist, and the compensation below
+    // is correct exactly as it stands.
+    //
+    // Nothing in this block can throw. createAdminClient is wrapped below, and
+    // verifyLessonCommitted and raiseReconciliationTask never throw by
+    // contract - so the compensation block, the orphan cancel and the 500 at the
+    // end of this catch all stay reachable on the fall-through path.
+    if (pendingCompensation && insertNaturalKey && insertStartedAtIso && !isRollbackProven(err)) {
+      // Copied into consts before the awaits below, the same reason the
+      // compensation block does const pending = pendingCompensation: these are
+      // handler-scope bindings that this block itself sets back to null.
+      const pending = pendingCompensation
+      const key = insertNaturalKey
+      const requestStartIso = insertStartedAtIso
+
+      // The route's own adminClient is scoped to the try and may never have been
+      // constructed, so the read-back builds its own. If it cannot even be built
+      // there is no read to be had - which IS an unresolved verdict, never a
+      // licence to fall through and compensate against a class that may be live.
+      let verifyClient: ReturnType<typeof createAdminClient> | null = null
+      let verifyClientError: unknown = null
+      try {
+        verifyClient = createAdminClient()
+      } catch (clientError) {
+        verifyClientError = clientError
+      }
+
+      const verdict = verifyClient
+        ? await verifyLessonCommitted(verifyClient, {
+            teamsMeetingId,
+            teacherId: key.teacherId,
+            studentId: key.studentId,
+            trainingId: key.trainingId,
+            scheduledAtIso: key.scheduledAtIso,
+            durationMinutes: key.durationMinutes,
+            requestStartIso,
+          })
+        : ({ outcome: 'unresolved', reason: 'verify_failed', detail: verifyClientError } as const)
+
+      if (verdict.outcome === 'committed') {
+        // The class SUCCEEDED and only the reply died. Nothing is owed back, so
+        // no unwind and no refund; and the meeting must survive, because the
+        // committed row carries its id and it is now this student's live join
+        // link. Retiring both trackers is what stops the compensation block and
+        // the orphan cancel below running behind us.
+        pendingCompensation = null
+        teamsMeetingId = null
+
+        if (pending.kind === 'unwind') {
+          console.error('CRITICAL: lesson insert committed but its response was lost (student reschedule, outer catch) - returning success without unwinding:', {
+            lesson_id: verdict.lessonId,
+            old_lesson_id: pending.oldLessonId,
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            error: err,
+          })
+        } else {
+          console.error('CRITICAL: lesson insert committed but its response was lost (student booking, outer catch) - returning success without refunding:', {
+            lesson_id: verdict.lessonId,
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            error: err,
+          })
+        }
+
+        // Everything the DATABASE owed this row is already done. Both
+        // trg_create_pending_report and trg_snapshot_lesson_rate fire AFTER
+        // INSERT on lessons, inside the row's own transaction, so a row that
+        // committed carries its pending report and its rate snapshot even
+        // when the response was lost. Nothing to recreate from here - only
+        // the route-side follow-ups below the success path were missed, and
+        // those are named on the reconciliation task.
+
+        // hours is null, not the pending amount: the class exists, so the hours
+        // are correctly spent and there is no exposure to reconcile. The task is
+        // raised for the follow-ups that were skipped, not for money.
+        //
+        // The three revalidatePath calls were skipped too and are
+        // deliberately NOT listed: they are cache invalidations no human can
+        // action, and every target re-renders per request anyway.
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: verdict.lessonId,
+          hours: null,
+          context:
+            pending.kind === 'unwind'
+              ? 'lesson insert committed but response lost (student reschedule, outer catch)'
+              : 'lesson insert committed but response lost (student booking, outer catch)',
+          errorDetail: {
+            note: 'Hours are correct and the class exists - no reversal owed. The pending report and teacher rate snapshot were written by AFTER INSERT triggers on lessons and need no action. Only the items below did not run.',
+            skipped:
+              pending.kind === 'unwind'
+                ? [
+                    'the old lesson row still holds live Teams columns and its Microsoft meeting was not cancelled',
+                    'no Google Calendar event for the new class, and the old one was not removed',
+                    'no reschedule email to the student or the teacher',
+                  ]
+                : [
+                    'the class_booking hours_log row was not linked to the new lesson, so hours_log.lesson_id is still null',
+                    'no Google Calendar event for the new class',
+                    'no booking confirmation email to the student or the teacher',
+                  ],
+          },
+        })
+
+        // Same shape as the normal success return. A 500 here would invite a
+        // retry that books the student a second real class.
+        return NextResponse.json({ success: true, lessonId: verdict.lessonId })
+      }
+
+      if (verdict.outcome === 'unresolved') {
+        // Neither state is proven, and the dangerous half of the pair is a
+        // committed row: unwinding, refunding or cancelling the meeting would
+        // each act on a class that may be live. So nothing is written at all and
+        // a human decides. Both trackers are retired for that reason - not
+        // because either has been dispatched, but so the compensation block and
+        // the orphan cancel below cannot run in our place. The meeting is
+        // deliberately left ALIVE in Microsoft and named below.
+        pendingCompensation = null
+        const unresolvedMeetingId = teamsMeetingId
+        teamsMeetingId = null
+
+        if (pending.kind === 'unwind') {
+          console.error('CRITICAL: lesson insert verdict unresolved (student reschedule, outer catch) - no unwind, no refund, no Teams cancel. Manual check required.', {
+            old_lesson_id: pending.oldLessonId,
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            scheduled_at: key.scheduledAtIso,
+            teams_meeting_id: unresolvedMeetingId,
+            old_duration_hours: pending.oldDurationHours,
+            new_hours_needed: pending.newDurationHours,
+            reason: verdict.reason,
+            detail: verdict.detail,
+            error: err,
+          })
+        } else {
+          console.error('CRITICAL: lesson insert verdict unresolved (student booking, outer catch) - no refund, no Teams cancel. Manual check required.', {
+            training_id: pending.trainingId,
+            student_id: pending.studentId,
+            scheduled_at: key.scheduledAtIso,
+            teams_meeting_id: unresolvedMeetingId,
+            hours_needed: pending.hours,
+            reason: verdict.reason,
+            detail: verdict.detail,
+            error: err,
+          })
+        }
+
+        // hours is deliberately the GROSS new duration on the unwind kind, matching
+        // the failed-unwind site above: if the insert did roll back, hours_consumed
+        // sits at old + (new - old) = the full new duration with zero lessons held,
+        // so gross IS the student's exposure. Do not "correct" this to the net delta
+        // - that would report 0.
+        //
+        // On the refund kind hours is the full deduction this request made, so it is
+        // the student's exact exposure if the insert rolled back.
+        await raiseReconciliationTask({
+          studentId: pending.studentId,
+          trainingId: pending.trainingId,
+          lessonId: pending.kind === 'unwind' ? pending.oldLessonId : null,
+          hours: pending.kind === 'unwind' ? pending.newDurationHours : pending.hours,
+          context:
+            pending.kind === 'unwind'
+              ? 'lesson insert verdict unresolved - manual check required (student reschedule, outer catch)'
+              : 'lesson insert verdict unresolved - manual check required (student booking, outer catch)',
+          // Field order is load-bearing: raiseReconciliationTask JSON-renders
+          // this and hard-truncates at 500 chars. A Graph event id is long,
+          // and this is the one path that leaves a meeting alive in
+          // Microsoft with no row pointing at it, so it goes FIRST and the
+          // open-ended verdict detail goes last where truncation can only
+          // eat what the CRITICAL log above already carries in full.
+          errorDetail: {
+            teamsMeetingId: unresolvedMeetingId,
+            reason: verdict.reason,
+            scheduledAt: key.scheduledAtIso,
+            detail: verdict.detail,
+          },
+        })
+
+        console.error('Unexpected error in /api/student/book:', err)
+        return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 })
+      }
+
+      // 'not_committed': no row exists, the hours are genuinely owed back, and the compensation below is correct. Fall through unchanged.
     }
 
     // No lesson row exists. If a money RPC already moved this student's hours
