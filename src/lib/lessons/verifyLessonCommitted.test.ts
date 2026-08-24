@@ -131,7 +131,7 @@ const BASE: VerifyLessonCommittedParams = {
 // isRollbackProven
 // ---------------------------------------------------------------------------
 
-describe('isRollbackProven - only a real SQLSTATE proves a rollback', () => {
+describe('isRollbackProven - only a statement-level SQLSTATE proves a rollback', () => {
   it('is true for 23P01 (exclusion violation - the slot-conflict constraint)', () => {
     expect(isRollbackProven({ code: '23P01', message: 'conflicting key value' })).toBe(true)
   })
@@ -142,6 +142,41 @@ describe('isRollbackProven - only a real SQLSTATE proves a rollback', () => {
 
   it('is true for 23503 (foreign key violation)', () => {
     expect(isRollbackProven({ code: '23503', message: 'training_id not present' })).toBe(true)
+  })
+
+  // 57014 vs 57P01 is THE distinction this pair exists to hold open. Both are
+  // class 57 and only one of them proves anything:
+  //
+  //   57014 query_canceled  - a statement_timeout fired. The backend was alive,
+  //                           it rejected OUR statement and answered. TRUE.
+  //   57P01 admin_shutdown  - the backend itself was terminated. A COMMIT may
+  //                           already have landed unacknowledged. FALSE.
+  //
+  // Do not collapse these into a whole-class-57 rule in either direction:
+  // excluding all of 57 buys a pointless read-back on every timeout, and
+  // dropping the 57P guard re-opens compensating against a live class.
+  it('is true for 57014 (query_canceled - a statement timeout IS a statement-level rejection)', () => {
+    expect(isRollbackProven({ code: '57014', message: 'canceling statement due to statement timeout' })).toBe(true)
+  })
+
+  it('is FALSE for 57P01 (admin_shutdown - the backend was terminated, a commit may have landed)', () => {
+    expect(isRollbackProven({ code: '57P01', message: 'terminating connection due to administrator command' })).toBe(false)
+  })
+
+  it('is FALSE for 57P03 (cannot_connect_now)', () => {
+    expect(isRollbackProven({ code: '57P03', message: 'the database system is starting up' })).toBe(false)
+  })
+
+  it('is FALSE for 08006 (connection_failure - the link died, the commit may not have)', () => {
+    expect(isRollbackProven({ code: '08006', message: 'connection failure' })).toBe(false)
+  })
+
+  it('is FALSE for 08003 (connection_does_not_exist)', () => {
+    expect(isRollbackProven({ code: '08003', message: 'connection does not exist' })).toBe(false)
+  })
+
+  it('is FALSE for 08001 (sqlclient_unable_to_establish_sqlconnection)', () => {
+    expect(isRollbackProven({ code: '08001', message: 'could not connect to server' })).toBe(false)
   })
 
   it('is FALSE for PGRST116 - a PostgREST client code says nothing about the transaction', () => {

@@ -59,20 +59,46 @@ export type VerifyLessonCommittedParams = {
 // ('PGRST116', 'PGRST301') are longer and prefixed, so they fail the length test
 // already; the explicit prefix guard below covers the bare 'PGRST', which is
 // five uppercase characters and would otherwise slip through.
+//
+// HAVING a code is not the same as having been REJECTED, and only rejection
+// proves a rollback. The proof is that Postgres received the statement, refused
+// it, and answered - a STATEMENT-level rejection. A CONNECTION-level failure
+// carries a SQLSTATE too and proves nothing at all: the link or the backend
+// died, which is precisely the moment a COMMIT can have landed while its
+// acknowledgement was lost. Reading those as proof would skip the read-back and
+// let a caller compensate against a live class - the exact bug this module
+// exists to prevent.
+//
+// So the check below is a narrow allowlist BY BEHAVIOUR, not a test for "has a
+// code", and the two connection-level families are excluded by prefix:
+//
+//   08*   connection exception - 08006 connection_failure, 08003
+//         connection_does_not_exist, 08001 unable_to_establish. The link went
+//         away; the server's fate is unknowable from this side.
+//   57P*  operator intervention - 57P01 admin_shutdown, 57P02 crash_shutdown,
+//         57P03 cannot_connect_now. The BACKEND itself was terminated.
+//
+// 57P, never 57. 57014 (query_canceled - a statement_timeout firing) stays
+// PROVEN and must not be swept up with its neighbours: there the backend was
+// alive, cancelled OUR statement and told us so, which is a statement-level
+// rejection like any other. Excluding the whole of class 57 would flatten that
+// distinction and buy a read-back on every timeout for nothing.
 const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/
 
 /**
  * Does this error PROVE the insert's transaction rolled back?
  *
- * A SQLSTATE means the statement reached Postgres and Postgres rejected it. For
- * a single-statement INSERT that is conclusive: the statement is its own
- * transaction, a rejected statement rolls that transaction back, and no row
- * exists. The caller can compensate immediately, with no read-back.
+ * A STATEMENT-level SQLSTATE means the statement reached Postgres and Postgres
+ * rejected it. For a single-statement INSERT that is conclusive: the statement
+ * is its own transaction, a rejected statement rolls that transaction back, and
+ * no row exists. The caller can compensate immediately, with no read-back.
  *
  * Everything else is UNPROVEN, not "committed": a thrown TypeError from fetch, a
- * timeout, a null error paired with a null row, a PGRST* code the client raised
- * after the fact. Unproven is the case this whole module exists to resolve, so
- * false must never be read as "the insert succeeded" - it means "go and look".
+ * client-side timeout with no code at all, a null error paired with a null row,
+ * a PGRST* code the client raised after the fact, and the connection-level
+ * SQLSTATEs excluded above. Unproven is the case this whole module exists to
+ * resolve, so false must never be read as "the insert succeeded" - it means "go
+ * and look".
  */
 export function isRollbackProven(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
@@ -80,8 +106,15 @@ export function isRollbackProven(error: unknown): boolean {
   const code = (error as { code?: unknown }).code
   if (typeof code !== 'string') return false
   if (!SQLSTATE_PATTERN.test(code)) return false
+  if (code.startsWith('PGRST')) return false
 
-  return !code.startsWith('PGRST')
+  // Connection-level, not statement-level - see the families listed above the
+  // pattern. The link or the backend died, which is exactly when a commit can
+  // have landed unacknowledged, so these prove nothing and must fall through to
+  // a read-back. '57P' and never '57': 57014 is a real rejection and stays true.
+  if (code.startsWith('08') || code.startsWith('57P')) return false
+
+  return true
 }
 
 /**
