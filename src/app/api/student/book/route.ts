@@ -652,6 +652,10 @@ export async function POST(req: NextRequest) {
           // The log above is only visible in Vercel. Raise the same failure as
           // an admin task so it is visible to whoever reconciles hours. Cannot
           // throw and returns void - control flow below is unchanged.
+          // hours here is deliberately the GROSS new duration, not the net reschedule
+          // delta: a failed unwind leaves hours_consumed at old + (new - old) = the
+          // full new duration with zero lessons held, so gross IS the student's
+          // exposure. Do not "correct" this to the net delta - that would report 0.
           await raiseReconciliationTask({
             studentId,
             trainingId,
@@ -776,14 +780,31 @@ export async function POST(req: NextRequest) {
           })
         }
 
-        if (isStudentSlotConflict) {
+        // Both branches above mean the hours were NOT returned. A 409 asserts
+        // the slot is gone and the hours are safe: BookingGridClient clears the
+        // selection and refetches the grid on it, steering the student straight
+        // into a rebook. Only make that assertion when the refund actually
+        // landed; otherwise fall through to the generic 500, which leaves the
+        // pick in place and does not refetch.
+        //
+        // This NARROWS the window, it does not close it - the Confirm button
+        // still re-enables on the 500, and what actually stops a second
+        // book_class_atomic is this route's own pre-checks (isSlotAvailable and
+        // the clash checks above), not the status code. It also keeps the
+        // invariant that a 409 is never returned alongside an open
+        // reconciliation task for the same request: the predicate below is the
+        // same pair the two CRITICAL branches test.
+        // Mirrors the reschedule branch's !unwindError gate above.
+        const refundSucceeded = !refundError && refundData?.success !== false
+
+        if (isStudentSlotConflict && refundSucceeded) {
           return NextResponse.json(
             { error: 'SLOT_NOT_AVAILABLE', message: 'You already have a class booked at this time.' },
             { status: 409 }
           )
         }
 
-        if (isSlotConflict) {
+        if (isSlotConflict && refundSucceeded) {
           return NextResponse.json(
             { error: 'SLOT_NOT_AVAILABLE', message: 'This slot was just booked by another student. Please choose a different time.' },
             { status: 409 }
@@ -1095,6 +1116,10 @@ export async function POST(req: NextRequest) {
               new_hours_needed: pending.newDurationHours,
               error: unwindError,
             })
+            // hours here is deliberately the GROSS new duration, not the net reschedule
+            // delta: a failed unwind leaves hours_consumed at old + (new - old) = the
+            // full new duration with zero lessons held, so gross IS the student's
+            // exposure. Do not "correct" this to the net delta - that would report 0.
             await raiseReconciliationTask({
               studentId: pending.studentId,
               trainingId: pending.trainingId,

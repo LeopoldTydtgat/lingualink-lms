@@ -546,7 +546,21 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    if (isSlotConflict) {
+    // Both branches above mean the hours were NOT returned, so a slot-conflict
+    // 409 - which asserts the slot is gone and the hours are safe - would be a
+    // false statement. Only report the conflict when the refund actually landed;
+    // otherwise fall through to the generic 500 below.
+    //
+    // Unlike the student route, this buys no retry protection: BookingFlowClient
+    // neither clears the selection nor refetches, and behaves identically on 409
+    // and 500. What it does buy is the invariant that a 409 is never returned
+    // alongside an open reconciliation task for the same request - the predicate
+    // below is the same pair the two CRITICAL branches test. The cost is message
+    // specificity on the failed-refund path (the ternary below is replaced by the
+    // generic wording). Mirrors the student route's refundSucceeded gate.
+    const refundSucceeded = !refundError && refundData?.success !== false
+
+    if (isSlotConflict && refundSucceeded) {
       return NextResponse.json(
         {
           error: 'SLOT_NOT_AVAILABLE',
