@@ -123,11 +123,17 @@ async function recordSuccess(): Promise<void> {
   // successful run PROVES the grant is live, so 'false' is always the right
   // value here, and one idempotent write beats a read/write pair that could
   // race with itself.
+  //
+  // LAST_ERROR_KEY is cleared here too: a last-error value that survives a
+  // success describes a failure that is over, and misreports the cause if
+  // anything ever reads it directly. Cleared to '' rather than deleted, so the
+  // key's presence and the settings row shape stay unchanged.
   const { error } = await supabase.from('settings').upsert(
     [
       { key: FAILURE_KEY, value: '0', updated_at: stamp },
       { key: LAST_SUCCESS_KEY, value: stamp, updated_at: stamp },
       { key: REVOKED_KEY, value: 'false', updated_at: stamp },
+      { key: LAST_ERROR_KEY, value: '', updated_at: stamp },
     ],
     { onConflict: 'key' }
   )
