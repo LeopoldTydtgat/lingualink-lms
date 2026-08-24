@@ -683,9 +683,11 @@ export async function POST(request: NextRequest) {
     durationMinutes: duration_minutes,
   })
 
-  // Send confirmation emails to teacher and student
-  try {
-    if (teacherEmailProfile?.email) {
+  // One try per recipient. Both sends previously shared a try, so a null
+  // teacher timezone threw at the teacher guard and the student never got
+  // their confirmation for a class that had already been booked and paid for.
+  if (teacherEmailProfile?.email) {
+    try {
       const teacherBody = teacherNewBookingEmailContent(
         studentEmailData?.full_name ?? 'Your student',
         scheduledAtUtc,
@@ -704,9 +706,13 @@ export async function POST(request: NextRequest) {
           contactEmail: 'teachers@lingualinkonline.com',
         }),
       })
+    } catch (emailErr) {
+      console.error('[Email] Teacher booking confirmation email failed - lesson still created:', { lesson_id: lesson.id, error: emailErr })
     }
+  }
 
-    if (studentEmailData?.email) {
+  if (studentEmailData?.email) {
+    try {
       const studentBody = studentBookingConfirmationEmailContent(
         scheduledAtUtc,
         duration_minutes,
@@ -724,9 +730,9 @@ export async function POST(request: NextRequest) {
           contactEmail: 'support@lingualinkonline.com',
         }),
       })
+    } catch (emailErr) {
+      console.error('[Email] Student booking confirmation email failed - lesson still created:', { lesson_id: lesson.id, error: emailErr })
     }
-  } catch (emailErr) {
-    console.error('[Email] Booking confirmation emails failed — lesson still created:', emailErr)
   }
 
   revalidatePath('/upcoming-classes')
