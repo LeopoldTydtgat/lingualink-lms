@@ -826,4 +826,70 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'An unexpected error occurred. Please try again.' })
   })
+
+  it('fresh book, not_committed: the refund is owed and IS dispatched, through a fresh client, 500', async () => {
+    // Both halves are needed to reach the compensation block from the outer
+    // catch: the insert must REJECT (so no insert-handler verdict runs) and the
+    // read-back must then prove no row exists.
+    store.lessonInsert = { reject: new TypeError('fetch failed') }
+    scriptVerifier(() => ({ data: [], error: null }))
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(store.lessonInsertCalls).toHaveLength(1)
+    expect(verifierCalls()).toHaveLength(1)
+
+    // The specific behaviour this test exists to reach: the route's own
+    // adminClient is scoped to the try and may never have been constructed, so
+    // both the read-back and the reversal below build their own.
+    expect(store.adminClientCount).toBeGreaterThan(1)
+
+    // The NAME matters more than the count: unwind_reschedule_atomic here would
+    // reverse a reschedule that never happened.
+    expect(rpcNames()).toEqual(['book_class_atomic', 'refund_hours_atomic'])
+    expect(rpcArgs('refund_hours_atomic')).toEqual([
+      { p_training_id: TRAINING_ID, p_hours: HOURS_NEEDED },
+    ])
+
+    // No row points at the meeting, so the orphan is cancelled.
+    expect(vi.mocked(cancelTeamsMeeting)).toHaveBeenCalledWith(TEAMS_MEETING_ID)
+    // The refund landed, so nothing is owed to a human.
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'An unexpected error occurred. Please try again.' })
+  })
+
+  it('reschedule, not_committed: the unwind is owed and IS dispatched, through a fresh client, 500', async () => {
+    store.lessonInsert = { reject: new TypeError('fetch failed') }
+    scriptVerifier(() => ({ data: [], error: null }))
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(store.lessonInsertCalls).toHaveLength(1)
+    expect(verifierCalls()).toHaveLength(1)
+    expect(store.adminClientCount).toBeGreaterThan(1)
+
+    // The assertion that matters most on this path. refund_hours_atomic here
+    // would reverse a GROSS duration against a net-delta deduction and hand the
+    // student a full hour they never spent - and a count-only assertion would
+    // not see it, because both reversals are exactly one RPC.
+    expect(rpcNames()).toEqual(['reschedule_class_atomic', 'unwind_reschedule_atomic'])
+    expect(rpcArgs('unwind_reschedule_atomic')).toEqual([
+      {
+        p_old_lesson_id: OLD_LESSON_ID,
+        p_training_id: TRAINING_ID,
+        p_old_duration_hours: HOURS_NEEDED,
+        p_new_duration_hours: HOURS_NEEDED,
+      },
+    ])
+
+    // Only the NEW meeting is cancelled; the original lesson keeps its own.
+    expect(vi.mocked(cancelTeamsMeeting)).toHaveBeenCalledWith(TEAMS_MEETING_ID)
+    // The unwind landed, so nothing is owed to a human.
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'An unexpected error occurred. Please try again.' })
+  })
 })

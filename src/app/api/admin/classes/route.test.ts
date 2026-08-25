@@ -550,4 +550,36 @@ describe('POST /api/admin/classes - a throw AT the insert is resolved in the out
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'Internal error' })
   })
+
+  it('not_committed: the refund is owed and IS dispatched, through a fresh client, 500', async () => {
+    // Both halves are needed to reach the refund block from the outer catch:
+    // the insert must REJECT (so no insert-handler verdict runs) and the
+    // read-back must then prove no row exists.
+    store.lessonInsert = { reject: new TypeError('fetch failed') }
+    scriptVerifier(() => ({ data: [], error: null }))
+
+    const res = await POST(makeRequest())
+
+    expect(store.lessonInsertCalls).toHaveLength(1)
+    expect(verifierCalls()).toHaveLength(1)
+
+    // The specific behaviour this test exists to reach: the route's own
+    // adminClient is scoped to the try and may never have been constructed, so
+    // both the read-back and the refund below build their own.
+    expect(store.adminClientCount).toBeGreaterThan(1)
+
+    expect(refundCalls()).toHaveLength(1)
+    expect(refundCalls()[0].args).toEqual({
+      p_training_id: TRAINING_ID,
+      p_hours: HOURS_REQUESTED,
+    })
+
+    // No row points at the meeting, so the orphan is cancelled.
+    expect(vi.mocked(cancelTeamsMeeting)).toHaveBeenCalledWith(TEAMS_MEETING_ID)
+    // The refund landed, so nothing is owed to a human.
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Internal error' })
+  })
 })
