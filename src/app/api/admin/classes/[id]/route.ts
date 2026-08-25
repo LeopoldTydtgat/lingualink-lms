@@ -184,7 +184,21 @@ export async function PATCH(
           error: rpcError,
           retry_error: retry.error,
         })
-        return NextResponse.json({ error: 'Failed to cancel lesson' }, { status: 500 })
+        // BOTH attempts lost their response, so the cancellation may or may
+        // not have committed and nothing in hand can say which. 'Failed to
+        // cancel' would be a claim about the outcome that this branch cannot
+        // make, and an admin who reads it as "nothing happened" clicks Cancel
+        // again - a fresh key, a genuine second attempt. So the message states
+        // the ambiguity as the fact it is and points at the one action that
+        // settles it: a refresh shows the true status, from which the admin
+        // either sees it cancelled or cancels it for real. The 500 is
+        // unchanged - the request genuinely did not complete.
+        return NextResponse.json(
+          {
+            error: 'We could not confirm whether this class was cancelled. Refresh the page to check before trying again.',
+          },
+          { status: 500 }
+        )
       }
       rpcResult = retry.data
     }

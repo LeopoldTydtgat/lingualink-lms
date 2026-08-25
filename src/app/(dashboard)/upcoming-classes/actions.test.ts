@@ -285,7 +285,10 @@ describe('teacher cancel - a lost response is settled by a same-key retry', () =
       ),
     ).toHaveLength(1)
 
-    expect(result).toEqual({ success: false, error: 'Failed to cancel lesson' })
+    expect(result).toEqual({
+      success: false,
+      error: 'We could not confirm whether this class was cancelled. Refresh the page to check before trying again.',
+    })
   })
 })
 

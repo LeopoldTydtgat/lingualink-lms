@@ -138,7 +138,18 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
         error: rpcError,
         retry_error: retry.error,
       })
-      return { success: false, error: 'Failed to cancel lesson' }
+      // BOTH attempts lost their response, so the cancellation may or may not
+      // have committed and nothing in hand can say which. 'Failed to cancel'
+      // would be a claim about the outcome that this branch cannot make, and
+      // a student who reads it as "nothing happened" clicks Cancel again -
+      // a fresh key, a genuine second attempt. So the message states the
+      // ambiguity as the fact it is and points at the one action that settles
+      // it: a refresh shows the true status, from which the student either
+      // sees it cancelled or cancels it for real.
+      return {
+        success: false,
+        error: 'We could not confirm whether this class was cancelled. Refresh the page to check before trying again.',
+      }
     }
     rpcResult = retry.data
   }

@@ -356,7 +356,9 @@ describe('PATCH cancel - a lost response is settled by a same-key retry', () => 
     ).toHaveLength(1)
 
     expect(res.status).toBe(500)
-    expect(await res.json()).toEqual({ error: 'Failed to cancel lesson' })
+    expect(await res.json()).toEqual({
+      error: 'We could not confirm whether this class was cancelled. Refresh the page to check before trying again.',
+    })
   })
 })
 
