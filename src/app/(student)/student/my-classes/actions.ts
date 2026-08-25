@@ -1,5 +1,6 @@
 'use server'
 
+import { randomUUID } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { revalidatePath } from 'next/cache'
@@ -95,23 +96,59 @@ export async function cancelLessonAction(lessonId: string): Promise<CancelResult
   // Cancel atomically — the RPC flips status, nulls teams_join_url, and conditionally
   // refunds hours in ONE transaction. It deliberately does NOT touch teams_meeting_id;
   // Graph teardown happens here AFTER the commit.
-  const { data: result, error: rpcError } = await adminClient.rpc('cancel_lesson_atomic', {
+  const cancelIdempotencyKey = randomUUID()
+  const { data: result, error: rpcError } = await adminClient.rpc('cancel_lesson_atomic_keyed', {
     p_lesson_id: lessonId,
     p_cancelled_by: 'student',
     p_cancellation_reason: 'Cancelled by student',
     p_should_refund: isRefundable,
+    p_idempotency_key: cancelIdempotencyKey,
   })
+  // An rpcError is a lost round trip, so the cancellation may or may not have
+  // committed. Here the same-key retry IS the probe: ONE more call carrying
+  // cancelIdempotencyKey settles it whichever way the first call went. If the
+  // first call committed, the replay guard matches the stored key and returns
+  // replayed:true with the stored hours_refunded - no second cancellation and
+  // no second refund. If the first call rolled back, the retry performs the
+  // cancellation, which is exactly the outcome the student asked for. If a
+  // DIFFERENT actor cancelled the lesson in between, the stored key is theirs,
+  // not ours, and the function answers LESSON_NOT_CANCELLABLE - a real failure
+  // that must stay a failure.
+  //
+  // That is also why there is no hold-and-raise gate here, unlike the booking
+  // and reschedule routes: there, a retry that actually performs the work is a
+  // second deduction, so an unresolved probe has to hold; here, a retry that
+  // actually performs the work is the correct result. Only rpcError is
+  // retried - a structured { success: false } means the database answered, so
+  // nothing is ambiguous and there is nothing to probe. Exactly one attempt,
+  // never a loop, never a second key.
+  let rpcResult = result
   if (rpcError) {
-    console.error('CRITICAL: cancel_lesson_atomic RPC failed:', { lesson_id: lessonId, error: rpcError })
-    return { success: false, error: 'Failed to cancel lesson' }
+    const retry = await adminClient.rpc('cancel_lesson_atomic_keyed', {
+      p_lesson_id: lessonId,
+      p_cancelled_by: 'student',
+      p_cancellation_reason: 'Cancelled by student',
+      p_should_refund: isRefundable,
+      p_idempotency_key: cancelIdempotencyKey,
+    })
+    if (retry.error) {
+      console.error('CRITICAL: cancel_lesson_atomic_keyed RPC failed after retry', {
+        lesson_id: lessonId,
+        idempotency_key: cancelIdempotencyKey,
+        error: rpcError,
+        retry_error: retry.error,
+      })
+      return { success: false, error: 'Failed to cancel lesson' }
+    }
+    rpcResult = retry.data
   }
-  const r = result as { success: boolean; code?: string; refunded?: boolean; remaining_hours?: number }
+  const r = rpcResult as { success: boolean; code?: string; refunded?: boolean; remaining_hours?: number; replayed?: boolean }
   if (!r.success) {
     if (r.code === 'LESSON_NOT_FOUND') return { success: false, error: 'Lesson not found' }
     if (r.code === 'LESSON_NOT_CANCELLABLE') {
       return { success: false, error: 'This lesson can no longer be cancelled. Please refresh and try again.', code: 'LESSON_NOT_CANCELLABLE' }
     }
-    console.error('cancel_lesson_atomic unexpected failure:', { lesson_id: lessonId, code: r.code })
+    console.error('[student cancel] cancel_lesson_atomic_keyed unexpected failure:', { lesson_id: lessonId, code: r.code })
     return { success: false, error: 'Failed to cancel lesson' }
   }
   const refunded = r.refunded === true
