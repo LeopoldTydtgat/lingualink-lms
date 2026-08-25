@@ -216,12 +216,12 @@ export async function POST(req: NextRequest) {
 
     // FRESH BOOKINGS ONLY. A reschedule consumes no ADDITIONAL hours: the
     // duration lock further down pins durationMinutes to the old lesson's
-    // duration, so reschedule_class_atomic's net delta (new - old) is always
-    // zero. This absolute check demands a full duration of free balance, so
-    // running it on the reschedule branch 400s a fully-consumed student trying
-    // to move their last lesson - a move the RPC itself would allow.
+    // duration, so reschedule_class_atomic_keyed's net delta (new - old) is
+    // always zero. This absolute check demands a full duration of free balance,
+    // so running it on the reschedule branch 400s a fully-consumed student
+    // trying to move their last lesson - a move the RPC itself would allow.
     //
-    // Nothing is lost by skipping it here. reschedule_class_atomic is the
+    // Nothing is lost by skipping it here. reschedule_class_atomic_keyed is the
     // authoritative gate on that branch: it takes FOR UPDATE on the training
     // row and raises insufficient_hours on (consumed + net > total), which the
     // reschedule branch already maps to this same 400 message. That check is
@@ -382,7 +382,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4c. Atomic hours reservation ──────────────────────────────────────────
-    // Reschedule path uses reschedule_class_atomic, which cancels the old
+    // Reschedule path uses reschedule_class_atomic_keyed, which cancels the old
     // lesson, refunds its hours, and deducts the new hours in a single
     // transaction. Fresh-booking path uses book_class_atomic_keyed, which only
     // deducts. Both take row-level locks and re-validate state inside the
@@ -489,13 +489,30 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      const { error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic', {
+      // Minted per REQUEST, same as the fresh-book branch below: if the RPC's
+      // transaction commits but its response leg dies, a retry of THAT call
+      // carrying THIS key replays the stored result instead of moving hours a
+      // second time. A client that resubmits arrives with no key and gets a
+      // fresh reschedule - a user-level retry needs a client-supplied key,
+      // which is a later step.
+      const idempotencyKey = randomUUID()
+
+      const { data: rescheduleData, error: rescheduleError } = await adminClient.rpc('reschedule_class_atomic_keyed', {
         p_old_lesson_id: rescheduleId,
         p_student_id: studentId,
         p_training_id: trainingId,
         p_old_duration_hours: oldDurationHours,
         p_new_duration_hours: hoursNeeded,
+        p_idempotency_key: idempotencyKey,
       })
+
+      // The payload the gates below read. Mutable because the ambiguous-failure
+      // probe replaces it with the answer THAT call returned; on every other
+      // path it is the direct response, untouched.
+      let reschedulePayloadRaw: unknown = rescheduleData
+      // True only on the probed path, and gate 2 turns on it: a replay stops
+      // being an impossible state there and becomes the expected one.
+      let resolvedViaProbe = false
 
       if (rescheduleError) {
         const msg = (rescheduleError.message || '').toLowerCase()
@@ -514,11 +531,276 @@ export async function POST(req: NextRequest) {
         if (msg.includes('training_not_found')) {
           return NextResponse.json({ error: 'Training not found.' }, { status: 404 })
         }
-        console.error('reschedule_class_atomic failed:', rescheduleError)
-        return NextResponse.json(
-          { error: 'Failed to reschedule. Please try again.' },
-          { status: 500 }
-        )
+
+        // Fall-through = none of the three named raises. Those are DEFINITE:
+        // each aborts the whole function transaction before or without leaving
+        // a keyed ledger row, nothing is half-done, and none may probe. This is
+        // a transport/unknown failure instead, so the transaction may have
+        // committed before the response leg died - the old lesson may or may not
+        // be cancelled and the hours may or may not have moved, and the error in
+        // hand cannot say which.
+        //
+        // The idempotency key makes that decidable. ONE more call carrying the
+        // SAME key answers it outright:
+        //
+        //   replayed: true  - the first call DID commit. The cancel, the report
+        //                     delete and the hours move all landed together, and
+        //                     the ledger row it wrote comes back here.
+        //   replayed: false - the first call never committed, and this probe has
+        //                     now performed the reschedule itself, cleanly.
+        //
+        // Either answer leaves exactly ONE forward leg on the books, which is
+        // why the booking CONTINUES on both rather than returning.
+        //
+        // Exactly ONE probe - no retry, no delay, no loop.
+        let probeData: unknown = null
+        let probeError: unknown = null
+        try {
+          const probe = await adminClient.rpc('reschedule_class_atomic_keyed', {
+            p_old_lesson_id: rescheduleId,
+            p_student_id: studentId,
+            p_training_id: trainingId,
+            p_old_duration_hours: oldDurationHours,
+            p_new_duration_hours: hoursNeeded,
+            p_idempotency_key: idempotencyKey,
+          })
+          probeData = probe.data
+          probeError = probe.error
+        } catch (probeThrow) {
+          // A transport-level throw is a FAILED probe, not an unhandled error.
+          // Letting it escape would reach the outer catch with pendingCompensation
+          // still unarmed and nothing in the logs naming the key.
+          probeError = probeThrow
+        }
+
+        if (probeError) {
+          const probeMsg =
+            typeof probeError === 'object' &&
+            probeError !== null &&
+            typeof (probeError as { message?: unknown }).message === 'string'
+              ? (probeError as { message: string }).message.toLowerCase()
+              : ''
+
+          // Two probe errors PROVE the first call rolled back, and the proof is
+          // structural: old_lesson_not_reschedulable and insufficient_hours are
+          // both raised BELOW the RPC's replay guard. Had the first call
+          // committed, the guard would have matched this key and returned before
+          // either could fire - so reaching one means no keyed row exists, which
+          // means nothing was committed. The request is answered as the ordinary
+          // rejection it is: no task, no compensation, nothing held.
+          //
+          // training_not_found is deliberately NOT in this pair even though it is
+          // also a named raise: it sits ABOVE the guard, so it fires whether or
+          // not the key is present and proves nothing about the first call. It
+          // falls through and holds.
+          if (probeMsg.includes('old_lesson_not_reschedulable')) {
+            console.warn('reschedule_class_atomic_keyed failed and a same-key probe proved the rollback (old_lesson_not_reschedulable) - nothing was committed:', {
+              training_id: trainingId,
+              student_id: studentId,
+              old_lesson_id: rescheduleId,
+              idempotency_key: idempotencyKey,
+              error: rescheduleError,
+            })
+            return NextResponse.json(
+              { error: 'Original lesson not found or no longer reschedulable.' },
+              { status: 404 }
+            )
+          }
+          if (probeMsg.includes('insufficient_hours')) {
+            console.warn('reschedule_class_atomic_keyed failed and a same-key probe proved the rollback (insufficient_hours) - nothing was committed:', {
+              training_id: trainingId,
+              student_id: studentId,
+              old_lesson_id: rescheduleId,
+              idempotency_key: idempotencyKey,
+              error: rescheduleError,
+            })
+            return NextResponse.json(
+              { error: 'You do not have enough hours remaining for this class.' },
+              { status: 400 }
+            )
+          }
+
+          // Still ambiguous, and nothing may be written on the strength of a
+          // guess: unwind_reschedule_atomic would restore a lesson that may
+          // never have been cancelled and reverse hours that may never have
+          // moved. The idempotency key is what settles it by hand - the
+          // hours_log row carrying it either exists or it does not.
+          console.error('CRITICAL: reschedule_class_atomic_keyed failed - the old lesson MAY be cancelled and hours MAY have moved with no new lesson, check hours_log for this idempotency key:', {
+            training_id: trainingId,
+            student_id: studentId,
+            old_lesson_id: rescheduleId,
+            old_duration_hours: oldDurationHours,
+            new_hours_needed: hoursNeeded,
+            idempotency_key: idempotencyKey,
+            error: rescheduleError,
+            probe_error: probeError,
+          })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: rescheduleId,
+            hours: hoursNeeded,
+            context: 'reschedule_class_atomic_keyed failed and the same-key probe could not resolve it - manual check required (student reschedule)',
+            errorDetail: {
+              idempotencyKey,
+              rescheduleError,
+              probeError,
+            },
+          })
+          return NextResponse.json(
+            { error: 'Failed to reschedule. Please try again.' },
+            { status: 500 }
+          )
+        }
+
+        // Resolved. Hand the probe's payload to the gates below in place of the
+        // failed call's and fall THROUGH - the reschedule continues from here
+        // exactly as it would have had the first call answered. Deliberately
+        // console.warn and not console.error: this is a recovery that completed,
+        // and nothing on it needs a human.
+        reschedulePayloadRaw = probeData
+        resolvedViaProbe = true
+        console.warn('reschedule_class_atomic_keyed failed but a same-key probe resolved it - exactly one forward leg stands and the booking continues:', {
+          training_id: trainingId,
+          student_id: studentId,
+          old_lesson_id: rescheduleId,
+          idempotency_key: idempotencyKey,
+          // true = the failed call had committed after all; false = it had not,
+          // and the probe itself performed the reschedule.
+          replayed:
+            probeData !== null && typeof probeData === 'object'
+              ? ((probeData as { replayed?: unknown }).replayed ?? null)
+              : null,
+          error: rescheduleError,
+        })
+      }
+
+      // Every gate below is HOLD-AND-RAISE, and the hold is the point. None of
+      // them may write anything: no lesson is inserted, pendingCompensation is
+      // deliberately NOT armed, and unwind_reschedule_atomic is deliberately NOT
+      // called - it would restore a lesson that may never have been cancelled
+      // and reverse hours that may never have moved.
+      //
+      // hours on every task below is the GROSS new duration, matching every
+      // other reschedule task site in this route: if the forward leg DID commit
+      // with no new lesson, hours_consumed sits at old + (new - old) = the full
+      // new duration with zero lessons held, so gross IS the exposure. Do not
+      // "correct" this to the net delta - that would report 0.
+      const reschedulePayload =
+        reschedulePayloadRaw !== null && typeof reschedulePayloadRaw === 'object'
+          ? (reschedulePayloadRaw as { log_id?: unknown; replayed?: unknown; lesson_id?: unknown })
+          : null
+
+      // Gate 1 - malformed payload. reschedule_class_atomic_keyed contracts to
+      // return { log_id, replayed, lesson_id }. Anything else means the RPC did
+      // not answer in its contracted shape, so the forward leg may or may not
+      // have landed and nothing in hand proves which. Applies to the probed
+      // payload exactly as it does to the direct one.
+      if (
+        reschedulePayload === null ||
+        typeof reschedulePayload.log_id !== 'string' ||
+        reschedulePayload.log_id.length === 0
+      ) {
+        console.error('CRITICAL: reschedule_class_atomic_keyed returned a malformed payload - the old lesson MAY be cancelled and hours MAY have moved with no new lesson, check hours_log for this idempotency key:', {
+          training_id: trainingId,
+          student_id: studentId,
+          old_lesson_id: rescheduleId,
+          old_duration_hours: oldDurationHours,
+          new_hours_needed: hoursNeeded,
+          idempotency_key: idempotencyKey,
+          resolved_via_probe: resolvedViaProbe,
+          reschedule_data: reschedulePayloadRaw,
+        })
+        await raiseReconciliationTask({
+          studentId,
+          trainingId,
+          lessonId: rescheduleId,
+          hours: hoursNeeded,
+          context: 'reschedule_class_atomic_keyed returned a malformed payload - manual check required (student reschedule)',
+          errorDetail: {
+            idempotencyKey,
+            rescheduleData: reschedulePayloadRaw,
+          },
+        })
+        return NextResponse.json({ error: 'Failed to reschedule. Please try again.' }, { status: 500 })
+      }
+
+      // Gate 2 - an UNPROBED replay. The key is minted per request and this was
+      // its first and only use, so a replay is unreachable by construction.
+      // Reaching it means a key collision or an RPC contract drift, and neither
+      // is something to reschedule on top of.
+      //
+      // Deliberately NO "return the existing booking" success path. Replays only
+      // become reachable once the client supplies the key, and answering 200
+      // with a lesson id this route did not verify is the kind of guess that
+      // hands the student a second real class.
+      if (reschedulePayload.replayed === true && !resolvedViaProbe) {
+        console.error('CRITICAL: reschedule_class_atomic_keyed replayed a per-request idempotency key - key collision or contract drift, reschedule held with no new lesson and no unwind:', {
+          training_id: trainingId,
+          student_id: studentId,
+          old_lesson_id: rescheduleId,
+          old_duration_hours: oldDurationHours,
+          new_hours_needed: hoursNeeded,
+          idempotency_key: idempotencyKey,
+          log_id: reschedulePayload.log_id,
+          lesson_id: reschedulePayload.lesson_id ?? null,
+        })
+        await raiseReconciliationTask({
+          studentId,
+          trainingId,
+          lessonId: rescheduleId,
+          hours: hoursNeeded,
+          context: 'reschedule_class_atomic_keyed replayed a per-request idempotency key - manual check required (student reschedule)',
+          errorDetail: {
+            idempotencyKey,
+            logId: reschedulePayload.log_id,
+            lessonId: reschedulePayload.lesson_id ?? null,
+          },
+        })
+        return NextResponse.json({ error: 'Failed to reschedule. Please try again.' }, { status: 500 })
+      }
+
+      // Gate 3 - the ledger row the probe named must be THIS reschedule's.
+      //
+      // This is the inverse of the fresh-book branch's third gate and the
+      // difference is the RPC contract, not a style choice. book_class_atomic_keyed
+      // leaves lesson_id null and lets the route backfill it, so there a non-null
+      // value is the anomaly. reschedule_class_atomic_keyed stamps lesson_id with
+      // p_old_lesson_id inside the transaction, unconditionally, on every
+      // successful path including a zero-net same-length move - so here the row
+      // MUST come back carrying exactly the lesson this request asked to move. A
+      // null or foreign value means the key found somebody else's row, which a
+      // key minted inside this request cannot legitimately do.
+      //
+      // Checked on both probed outcomes, not only on a replay: on replayed=false
+      // the equality holds by construction, so this can only ever fire on real
+      // contract drift.
+      if (resolvedViaProbe && reschedulePayload.lesson_id !== rescheduleId) {
+        console.error('CRITICAL: reschedule_class_atomic_keyed same-key probe named a ledger row for a different lesson - reschedule held with no new lesson and no unwind:', {
+          training_id: trainingId,
+          student_id: studentId,
+          old_lesson_id: rescheduleId,
+          old_duration_hours: oldDurationHours,
+          new_hours_needed: hoursNeeded,
+          idempotency_key: idempotencyKey,
+          log_id: reschedulePayload.log_id,
+          ledger_lesson_id: reschedulePayload.lesson_id ?? null,
+        })
+        await raiseReconciliationTask({
+          studentId,
+          trainingId,
+          // The lesson this request asked to move is the row a human acts on.
+          // The foreign id the ledger named is carried in the detail below.
+          lessonId: rescheduleId,
+          hours: hoursNeeded,
+          context: 'reschedule_class_atomic_keyed same-key probe named a ledger row for a different lesson - manual check required (student reschedule)',
+          errorDetail: {
+            idempotencyKey,
+            logId: reschedulePayload.log_id,
+            ledgerLessonId: reschedulePayload.lesson_id ?? null,
+          },
+        })
+        return NextResponse.json({ error: 'Failed to reschedule. Please try again.' }, { status: 500 })
       }
 
       // Hours have moved: the old lesson is cancelled and the net delta

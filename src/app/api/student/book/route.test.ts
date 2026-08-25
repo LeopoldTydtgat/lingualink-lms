@@ -423,7 +423,14 @@ beforeEach(() => {
   store.rpcs = []
   store.rpcResults = {
     book_class_atomic_keyed: { data: { log_id: 'hours-log-1', replayed: false, lesson_id: null }, error: null },
-    reschedule_class_atomic: { data: null, error: null },
+    // Contract-valid by default: { log_id, replayed, lesson_id }, with
+    // lesson_id the OLD lesson id because the RPC stamps its ledger row with
+    // p_old_lesson_id. The previous { data: null } would now trip gate 1 in
+    // every reschedule test.
+    reschedule_class_atomic_keyed: {
+      data: { log_id: 'hours-log-resched-1', replayed: false, lesson_id: OLD_LESSON_ID },
+      error: null,
+    },
     refund_hours_atomic: { data: { success: true }, error: null },
     // data true = the original lesson was restored, so the reschedule failure
     // paths take their restored-original branch rather than the null
@@ -547,7 +554,7 @@ describe('POST /api/student/book - a proven rollback still short-circuits', () =
 
     // refund_hours_atomic here would refund a GROSS duration against a
     // net-delta deduction and hand the student hours they never spent.
-    expect(rpcNames()).toEqual(['reschedule_class_atomic', 'unwind_reschedule_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed', 'unwind_reschedule_atomic'])
     expect(rpcArgs('unwind_reschedule_atomic')).toEqual([
       {
         p_old_lesson_id: OLD_LESSON_ID,
@@ -1016,6 +1023,496 @@ describe('POST /api/student/book - an ambiguous deduction failure is resolved by
 })
 
 // ---------------------------------------------------------------------------
+// Reschedule - the forward leg ERRORS ambiguously and a same-key probe decides it
+// ---------------------------------------------------------------------------
+//
+// The reschedule fall-through - anything that is none of the three named raises
+// - is worse than the fresh-book one, because the forward leg is not a single
+// deduction. reschedule_class_atomic_keyed cancels the old lesson, deletes its
+// pending report and moves the net hours in ONE transaction, so an unknown
+// failure leaves all three in doubt at once: the student may have no class at
+// all and hours already spent on a lesson that was never created.
+//
+// The per-request idempotency key makes it decidable, and ONE more call carrying
+// the SAME key is the whole mechanism:
+//
+//   replayed: true  - the first call committed. Cancel, report delete and hours
+//                     move all landed together; the probe just names the row.
+//   replayed: false - the first call never committed, and the probe has now
+//                     performed the reschedule itself.
+//
+// Both answers leave exactly ONE forward leg on the books, so the booking
+// continues on both.
+//
+// What has no counterpart on the fresh-book branch is the pair of probe errors
+// that PROVE a rollback. old_lesson_not_reschedulable and insufficient_hours are
+// raised BELOW the RPC's replay guard, so a committed first call would have been
+// caught by the guard and returned before either could fire - reaching one means
+// no keyed row exists, which means nothing committed, and the request is
+// answered as the ordinary rejection it is. training_not_found sits ABOVE the
+// guard and therefore proves nothing, which is why it holds instead. Those three
+// are the reason this block asserts the TASK COUNT on every path: the difference
+// between a proven rollback and an unresolved one is precisely whether a human
+// is called.
+
+describe('POST /api/student/book - an ambiguous reschedule failure is resolved by a same-key probe', () => {
+  it('probe replays (the first call HAD committed): the reschedule continues on the existing ledger row, 200', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // lesson_id is the OLD lesson id, not the new one: the RPC stamps its ledger
+    // row with p_old_lesson_id inside the transaction, so that is what gate 3
+    // requires the probe to come back carrying.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-resched-probe-replay', replayed: true, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+    store.lessonInsert = { data: { id: 'lesson-resched-probe-replay' }, error: null }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    // Exactly TWO calls, and the second must carry the FIRST one's key. A freshly
+    // minted key would perform a SECOND reschedule instead of answering the
+    // question the first one left open.
+    const deductArgs = rpcArgs('reschedule_class_atomic_keyed') as Array<Record<string, unknown>>
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(deductArgs).toHaveLength(2)
+    expect(typeof deductArgs[0].p_idempotency_key).toBe('string')
+    expect(deductArgs[1]).toEqual(deductArgs[0])
+
+    // The reschedule really did continue: a meeting was minted and the new
+    // lesson row was written.
+    expect(vi.mocked(createTeamsMeeting)).toHaveBeenCalled()
+    expect(store.lessonInsertCalls).toHaveLength(1)
+
+    // One forward leg stands, so nothing is reversed, nothing is orphaned and
+    // nobody has to look at it. unwind_reschedule_atomic in particular would
+    // restore a lesson that IS legitimately cancelled.
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+    expect(vi.mocked(console.warn)).toHaveBeenCalledTimes(1)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, lessonId: 'lesson-resched-probe-replay' })
+  })
+
+  it('probe does NOT replay (the first call never committed): the probe performs the reschedule, 200', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // replayed: false is the RPC's normal return, and it stamps lesson_id with
+    // p_old_lesson_id on that path too - so gate 3 holds by construction here.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-resched-probe-fresh', replayed: false, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+    store.lessonInsert = { data: { id: 'lesson-resched-probe-fresh' }, error: null }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    const deductArgs = rpcArgs('reschedule_class_atomic_keyed') as Array<Record<string, unknown>>
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(deductArgs).toHaveLength(2)
+    expect(typeof deductArgs[0].p_idempotency_key).toBe('string')
+    expect(deductArgs[1]).toEqual(deductArgs[0])
+
+    expect(vi.mocked(createTeamsMeeting)).toHaveBeenCalled()
+    expect(store.lessonInsertCalls).toHaveLength(1)
+
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+    expect(vi.mocked(console.warn)).toHaveBeenCalledTimes(1)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, lessonId: 'lesson-resched-probe-fresh' })
+  })
+
+  it('probe errors with a message that proves nothing: still ambiguous, so nothing is written, 500', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // A transport error names neither of the two raises that sit below the
+    // replay guard, so it settles nothing: the first call may still have
+    // committed.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'connection reset', code: 'PGRST301' },
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    // The probe was attempted exactly once - no retry, no loop.
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+
+    // Nothing is booked on top of an unknown forward leg, and
+    // unwind_reschedule_atomic is NOT dispatched: it would restore a lesson that
+    // may never have been cancelled and reverse hours that may never have moved.
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    // The branch returns before section 5, so no meeting is ever minted.
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    // GROSS hours against the OLD lesson id: if the forward leg DID commit with
+    // no new lesson, hours_consumed sits at old + (new - old) = the full new
+    // duration with zero lessons held, and the old lesson is the only row a
+    // human can act on.
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('probe errors with old_lesson_not_reschedulable: the rollback is PROVEN, so nobody is called, 404', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // This raise sits BELOW the RPC's replay guard. Had the first call
+    // committed, the guard would have matched this key and returned before the
+    // lessons UPDATE could find zero rows - so reaching it proves no keyed row
+    // exists, which proves nothing committed. That is what turns an ambiguous
+    // failure into an ordinary rejection: no task, no hold, no CRITICAL.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'old_lesson_not_reschedulable', code: 'P0001' },
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    // The assertion this test exists for. A task here would page a human for a
+    // state that is provably clean.
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({
+      error: 'Original lesson not found or no longer reschedulable.',
+    })
+  })
+
+  it('probe errors with insufficient_hours: the rollback is PROVEN, so nobody is called, 400', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // Same structural proof as the test above: insufficient_hours is raised
+    // below the replay guard, so it cannot fire on a key that already committed.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'insufficient_hours', code: 'P0001' },
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'You do not have enough hours remaining for this class.',
+    })
+  })
+
+  it('probe errors with training_not_found: that raise sits ABOVE the guard and proves nothing, so it HOLDS, 500', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // Deliberately NOT paired with the two tests above. training_not_found is
+    // raised before the replay guard is ever reached, so it fires whether or not
+    // the key is present and says nothing about whether the first call
+    // committed. Treating it as a proven rollback would answer 404 to a student
+    // whose class may already have been cancelled and whose hours may already
+    // have moved.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'training_not_found', code: 'P0001' },
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('probe THROWS: the transport error is handled as a failed probe, not left to escape, 500', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    store.rpcRetryResults.reschedule_class_atomic_keyed = { reject: new TypeError('fetch failed') }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    // The 'Failed to reschedule' body is the proof the throw was handled INSIDE
+    // the reschedule branch: escaping to the outer catch would have produced
+    // 'An unexpected error occurred. Please try again.' instead.
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('probe replays a ledger row for a DIFFERENT lesson: gate 3 holds it, 500', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // The RPC stamps lesson_id with p_old_lesson_id inside the transaction, so a
+    // key minted inside THIS request cannot legitimately name another lesson.
+    // A foreign id means the key found somebody else's row, and rescheduling on
+    // top of that is how a student ends up with a class they never asked for.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: {
+        log_id: 'hours-log-resched-probe-foreign',
+        replayed: true,
+        lesson_id: 'some-other-lesson',
+      },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    // The task names the lesson this request asked to move, not the foreign id -
+    // that is the row a human can act on. The foreign id rides in errorDetail.
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('probe replays a ledger row with a NULL lesson_id: gate 3 holds it too, 500', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'socket hang up' },
+    }
+    // Null is not a benign "not linked yet" here, unlike on the fresh-book
+    // branch: this RPC stamps the id unconditionally on every successful path,
+    // including a zero-net same-length move, so a null can only mean contract
+    // drift or somebody else's row.
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-resched-probe-null', replayed: true, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual([
+      'reschedule_class_atomic_keyed',
+      'reschedule_class_atomic_keyed',
+    ])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('an UNPROBED replay: gate 2 holds it, exactly ONE call, 500', async () => {
+    // No error at all, so no probe runs - and yet the RPC reports a replay on a
+    // key minted seconds ago inside this request. That is a key collision or a
+    // contract drift, and neither is something to reschedule on top of.
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-resched-replay', replayed: true, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    // ONE call. Gate 2 is reached without probing, because nothing failed.
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  it('a malformed payload: gate 1 holds it, exactly ONE call, 500', async () => {
+    // data null with error null. The RPC answered, but not in its contracted
+    // shape, so the forward leg may or may not have landed and nothing in hand
+    // proves which.
+    store.rpcResults.reschedule_class_atomic_keyed = { data: null, error: null }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('unwind_reschedule_atomic')
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe(OLD_LESSON_ID)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reschedule. Please try again.' })
+  })
+
+  // The three DEFINITE errors. Each aborts the whole function transaction
+  // before or without leaving a keyed ledger row, so none of them may probe -
+  // and each test scripts a valid-looking SUCCESS as the retry result
+  // deliberately. If a definite branch ever grew a probe, that script would
+  // resolve it into a completed reschedule and the one-call assertion would fail
+  // loudly, rather than the route silently moving a student's class on the back
+  // of an RPC that had already refused it.
+
+  it('insufficient_hours is DEFINITE and never probes: exactly ONE call, 400', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'insufficient_hours' },
+    }
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-must-never-be-used', replayed: false, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'You do not have enough hours remaining for this class.',
+    })
+  })
+
+  it('old_lesson_not_reschedulable is DEFINITE and never probes: exactly ONE call, 404', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'old_lesson_not_reschedulable' },
+    }
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-must-never-be-used', replayed: false, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({
+      error: 'Original lesson not found or no longer reschedulable.',
+    })
+  })
+
+  it('training_not_found is DEFINITE and never probes: exactly ONE call, 404', async () => {
+    store.rpcResults.reschedule_class_atomic_keyed = {
+      data: null,
+      error: { message: 'training_not_found' },
+    }
+    store.rpcRetryResults.reschedule_class_atomic_keyed = {
+      data: { log_id: 'hours-log-must-never-be-used', replayed: false, lesson_id: OLD_LESSON_ID },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(RESCHEDULE_BODY))
+
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'Training not found.' })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Reschedule - the insert RETURNS an unproven error
 // ---------------------------------------------------------------------------
 
@@ -1037,7 +1534,7 @@ describe('POST /api/student/book - reschedule, an unproven insert error is resol
     ])
     // The reschedule SUCCEEDED and only the reply died: restoring the old
     // lesson would sit it alongside a live new one.
-    expect(rpcNames()).toEqual(['reschedule_class_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -1055,7 +1552,7 @@ describe('POST /api/student/book - reschedule, an unproven insert error is resol
     const res = await POST(makeRequest(RESCHEDULE_BODY))
 
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['reschedule_class_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     // The money assertion. If the insert DID roll back, hours_consumed sits at
@@ -1078,7 +1575,7 @@ describe('POST /api/student/book - reschedule, an unproven insert error is resol
     const res = await POST(makeRequest(RESCHEDULE_BODY))
 
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['reschedule_class_atomic', 'unwind_reschedule_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed', 'unwind_reschedule_atomic'])
     expect(rpcArgs('unwind_reschedule_atomic')).toEqual([
       {
         p_old_lesson_id: OLD_LESSON_ID,
@@ -1152,7 +1649,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
 
     expect(store.lessonInsertCalls).toHaveLength(1)
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['reschedule_class_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -1171,7 +1668,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
 
     expect(store.lessonInsertCalls).toHaveLength(1)
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['reschedule_class_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     // Same money assertion as the insert-error twin above: GROSS, not the net
@@ -1231,7 +1728,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
     // would reverse a GROSS duration against a net-delta deduction and hand the
     // student a full hour they never spent - and a count-only assertion would
     // not see it, because both reversals are exactly one RPC.
-    expect(rpcNames()).toEqual(['reschedule_class_atomic', 'unwind_reschedule_atomic'])
+    expect(rpcNames()).toEqual(['reschedule_class_atomic_keyed', 'unwind_reschedule_atomic'])
     expect(rpcArgs('unwind_reschedule_atomic')).toEqual([
       {
         p_old_lesson_id: OLD_LESSON_ID,
