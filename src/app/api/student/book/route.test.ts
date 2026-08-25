@@ -395,7 +395,7 @@ beforeEach(() => {
   store.updates = []
   store.rpcs = []
   store.rpcResults = {
-    book_class_atomic: { data: 'hours-log-1', error: null },
+    book_class_atomic_keyed: { data: { log_id: 'hours-log-1', replayed: false, lesson_id: null }, error: null },
     reschedule_class_atomic: { data: null, error: null },
     refund_hours_atomic: { data: { success: true }, error: null },
     // data true = the original lesson was restored, so the reschedule failure
@@ -481,7 +481,7 @@ describe('POST /api/student/book - a proven rollback still short-circuits', () =
 
     // The NAME matters more than the count: unwind_reschedule_atomic here would
     // reverse a reschedule that never happened.
-    expect(rpcNames()).toEqual(['book_class_atomic', 'refund_hours_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'refund_hours_atomic'])
     expect(rpcArgs('refund_hours_atomic')).toEqual([
       { p_training_id: TRAINING_ID, p_hours: HOURS_NEEDED },
     ])
@@ -562,7 +562,7 @@ describe('POST /api/student/book - fresh book, an unproven insert error is resol
     expect(verifierCalls()).toHaveLength(1)
     // The class exists: reversing the hours would cancel a live class, and the
     // meeting is now that class's join link.
-    expect(rpcNames()).toEqual(['book_class_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -582,7 +582,7 @@ describe('POST /api/student/book - fresh book, an unproven insert error is resol
     expect(verifierCalls()).toHaveLength(1)
     // Neither state is proven and the dangerous half is a committed row, so
     // nothing is written and a human decides.
-    expect(rpcNames()).toEqual(['book_class_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -600,7 +600,7 @@ describe('POST /api/student/book - fresh book, an unproven insert error is resol
     const res = await POST(makeRequest(BASE_BODY))
 
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['book_class_atomic', 'refund_hours_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'refund_hours_atomic'])
     expect(rpcArgs('refund_hours_atomic')).toEqual([
       { p_training_id: TRAINING_ID, p_hours: HOURS_NEEDED },
     ])
@@ -646,7 +646,101 @@ describe('POST /api/student/book - fresh book, an unproven insert error is resol
     expect(call.limits).toEqual([2])
     expect(call.terminal).toBeNull()
 
-    expect(rpcNames()).toEqual(['book_class_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fresh book - book_class_atomic_keyed answers, but not in its contracted shape
+// ---------------------------------------------------------------------------
+//
+// These three sit one step EARLIER than every test above: the RPC does not
+// error, so the deductError fall-through never runs, but its jsonb payload
+// cannot be trusted to say whether the hours moved. Every one of them asserts
+// the same three things, because all three are the ways this path could lose a
+// student money:
+//
+//   - no lessons insert, so nothing is booked on top of an unknown deduction;
+//   - no refund_hours_atomic, because refund_hours_atomic has no "was never
+//     deducted" guard and pendingCompensation must never have been armed. The
+//     exact RPC-name sequence is asserted, not a count, for the reason the file
+//     header gives;
+//   - 500, never a 409 - a 409 asserts the hours are safe, and here nothing
+//     proves that.
+//
+// A reconciliation task is what makes these paths visible to a human, so its
+// presence and the hours it names are asserted too.
+
+describe('POST /api/student/book - a malformed or replayed deduction payload holds the booking', () => {
+  it('replayed: true holds - no lessons insert, no refund, 500', async () => {
+    // lesson_id null is the trap this test exists for. The 6a backfill is
+    // best-effort, so a null stored lesson id does NOT prove no lesson exists -
+    // reading it as "nothing was booked" and refunding would credit hours that
+    // may be paying for a live class.
+    store.rpcResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-replay-1', replayed: true, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    // The gate returns before section 5, so no meeting is ever minted and there
+    // is nothing to orphan.
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+
+  it('data null with error null holds - no lessons insert, no refund, 500', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: null }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+
+  it('a payload with no log_id holds - no lessons insert, no refund, 500', async () => {
+    // replayed: false reads as a fresh deduction, so only the missing log_id
+    // stands between this payload and a booking with an unlinkable ledger row.
+    store.rpcResults.book_class_atomic_keyed = {
+      data: { replayed: false, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -754,7 +848,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
 
     expect(store.lessonInsertCalls).toHaveLength(1)
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['book_class_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -773,7 +867,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
 
     expect(store.lessonInsertCalls).toHaveLength(1)
     expect(verifierCalls()).toHaveLength(1)
-    expect(rpcNames()).toEqual(['book_class_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
     expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
 
     expect(taskCalls()).toHaveLength(1)
@@ -846,7 +940,7 @@ describe('POST /api/student/book - a throw AT the insert is resolved in the oute
 
     // The NAME matters more than the count: unwind_reschedule_atomic here would
     // reverse a reschedule that never happened.
-    expect(rpcNames()).toEqual(['book_class_atomic', 'refund_hours_atomic'])
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'refund_hours_atomic'])
     expect(rpcArgs('refund_hours_atomic')).toEqual([
       { p_training_id: TRAINING_ID, p_hours: HOURS_NEEDED },
     ])
