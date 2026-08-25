@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  *
  * The unit tests in verifyLessonCommitted.test.ts pin the verifier itself. What
  * they cannot see is whether this route WIRES it correctly, and that wiring is
- * the whole money path: between book_class_atomic and the lessons insert the
+ * the whole money path: between book_class_atomic_keyed and the lessons insert
  * route holds hours it must either give back or keep, and it decides which by
  * the verdict. Every test below therefore drives the REAL verifier - it is
  * deliberately not mocked - by scripting only what the lessons read-back
@@ -321,7 +321,7 @@ beforeEach(() => {
   store.updates = []
   store.rpcs = []
   store.rpcResults = {
-    book_class_atomic: { data: 'hours-log-1', error: null },
+    book_class_atomic_keyed: { data: { log_id: 'hours-log-1', replayed: false, lesson_id: null }, error: null },
     refund_hours_atomic: { data: { success: true }, error: null },
   }
   store.lessonInsert = { data: null, error: null }
@@ -500,6 +500,96 @@ describe('POST /api/admin/classes - an unproven insert error is resolved by read
 
     expect(taskCalls()).toHaveLength(1)
     expect(taskCalls()[0][0].hours).toBe(HOURS_REQUESTED)
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// book_class_atomic_keyed answers, but not in its contracted shape
+// ---------------------------------------------------------------------------
+//
+// These three sit one step EARLIER than every test above: the RPC does not
+// error, so the deductError fall-through never runs, but its jsonb payload
+// cannot be trusted to say whether the hours moved. All three assert the same
+// things, because they are the ways this path could lose a student money:
+//
+//   - no lessons insert, so nothing is booked on top of an unknown deduction;
+//   - no refund_hours_atomic, because refund_hours_atomic has no "was never
+//     deducted" guard and pendingRefund must never have been armed;
+//   - 500, never a 409 - a 409 asserts the hours are safe, and here nothing
+//     proves that.
+//
+// The gates return before the Teams call, so no meeting is ever minted and
+// there is nothing to orphan. A reconciliation task is what makes these paths
+// visible to a human, so its presence and the hours it names are asserted too.
+
+describe('POST /api/admin/classes - a malformed or replayed deduction payload holds the booking', () => {
+  it('replayed: true holds - no lessons insert, no refund, 500', async () => {
+    // lesson_id null is the trap this test exists for. The NEW257 backfill is
+    // best-effort, so a null stored lesson id does NOT prove no lesson exists -
+    // reading it as "nothing was booked" and refunding would credit hours that
+    // may be paying for a live class.
+    store.rpcResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-replay-1', replayed: true, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest())
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(refundCalls()).toHaveLength(0)
+    expect(store.rpcs.map((r) => r.fn)).toEqual(['book_class_atomic_keyed'])
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_REQUESTED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+
+  it('data null with error null holds - no lessons insert, no refund, 500', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: null }
+
+    const res = await POST(makeRequest())
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(refundCalls()).toHaveLength(0)
+    expect(store.rpcs.map((r) => r.fn)).toEqual(['book_class_atomic_keyed'])
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_REQUESTED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+
+  it('a payload with no log_id holds - no lessons insert, no refund, 500', async () => {
+    // replayed: false reads as a fresh deduction, so only the missing log_id
+    // stands between this payload and a booking with an unlinkable ledger row.
+    store.rpcResults.book_class_atomic_keyed = {
+      data: { replayed: false, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest())
+
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(refundCalls()).toHaveLength(0)
+    expect(store.rpcs.map((r) => r.fn)).toEqual(['book_class_atomic_keyed'])
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_REQUESTED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
 
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })

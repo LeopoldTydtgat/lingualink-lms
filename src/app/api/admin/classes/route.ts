@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
 import { createClient } from '@/lib/supabase/server'
 import { requireStaff } from '@/lib/auth/requireStaff'
@@ -235,7 +236,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ lessons: flattened, total: count ?? 0, page, pageSize })
 }
 
-// A refund owed for a book_class_atomic deduction that has already moved a
+// A refund owed for a book_class_atomic_keyed deduction that has already moved a
 // student's hours, held for the window in which no lesson row exists yet. The
 // admin POST has no reschedule path, so unlike the student route this is the
 // refund shape only. See the pendingRefund declaration inside the handler.
@@ -251,7 +252,7 @@ export async function POST(request: NextRequest) {
   // retry on another slot books a second real class.
   let committedLessonId: string | null = null
 
-  // Non-null means exactly this: book_class_atomic has moved this student's
+  // Non-null means exactly this: book_class_atomic_keyed has moved this student's
   // hours, no refund has been dispatched, and no lesson row exists. Everything
   // it needs is captured here because training_id, student_id, hoursRequested
   // and adminClient are all const INSIDE the try and unreachable from the catch.
@@ -456,12 +457,19 @@ export async function POST(request: NextRequest) {
   // Atomic hours deduction via RPC — locks the training row, re-checks balance,
   // and increments hours_consumed in a single transaction. Closes the TOCTOU
   // window on the previous read-then-write pattern.
-  // NEW257: book_class_atomic now RETURNS the id of the 'class_booking'
-  // hours_log row it inserted. Capture it for the lesson_id backfill after the
-  // lesson insert succeeds below.
-  const { data: hoursLogId, error: deductError } = await adminClient.rpc('book_class_atomic', {
+
+  // Minted per REQUEST, and that is the whole of what it buys today: if the
+  // RPC's transaction commits but its response leg dies, a retry of THAT call
+  // carrying THIS key replays the stored result instead of deducting a second
+  // time. An admin who resubmits the booking form arrives with no key at all
+  // and still gets a fresh deduction - making a user-level resubmit idempotent
+  // needs a client-supplied key, which is a later step.
+  const idempotencyKey = randomUUID()
+
+  const { data: deductData, error: deductError } = await adminClient.rpc('book_class_atomic_keyed', {
     p_training_id: training_id,
     p_hours_needed: hoursRequested,
+    p_idempotency_key: idempotencyKey,
   })
 
   if (deductError) {
@@ -481,7 +489,7 @@ export async function POST(request: NextRequest) {
     // no "was never deducted" guard, so a refund here could credit hours that
     // were never spent. Naming the row instead so hours_log can be checked by
     // hand. CRITICAL because this is the one deduction path with no compensation.
-    console.error('CRITICAL: book_class_atomic failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
+    console.error('CRITICAL: book_class_atomic_keyed failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
       training_id,
       student_id,
       hours: hoursRequested,
@@ -489,6 +497,88 @@ export async function POST(request: NextRequest) {
     })
     return NextResponse.json({ error: 'Failed to reserve hours. Please try again.' }, { status: 500 })
   }
+
+  // Both gates below are HOLD-AND-RAISE, and the hold is the point. Neither may
+  // write anything: no lesson is inserted, pendingRefund is deliberately NOT
+  // armed, and refund_hours_atomic is deliberately NOT called - it has no "was
+  // never deducted" guard, so a blind refund here could credit hours that were
+  // never spent. Same reasoning as the CRITICAL fall-through above, and the
+  // idempotency key is what a human looks the hours_log row up by.
+  const deductPayload =
+    deductData !== null && typeof deductData === 'object'
+      ? (deductData as { log_id?: unknown; replayed?: unknown; lesson_id?: unknown })
+      : null
+
+  // Gate 1 - malformed payload. book_class_atomic_keyed contracts to return
+  // { log_id, replayed, lesson_id }. Anything else means the RPC did not answer
+  // in its contracted shape, so the hours may or may not have moved and nothing
+  // in hand proves which.
+  if (
+    deductPayload === null ||
+    typeof deductPayload.log_id !== 'string' ||
+    deductPayload.log_id.length === 0
+  ) {
+    console.error('CRITICAL: book_class_atomic_keyed returned a malformed payload - hours MAY have been deducted with no lesson, check hours_log for this idempotency key:', {
+      training_id,
+      student_id,
+      hours: hoursRequested,
+      idempotency_key: idempotencyKey,
+      deduct_data: deductData,
+    })
+    await raiseReconciliationTask({
+      studentId: student_id,
+      trainingId: training_id,
+      lessonId: null,
+      hours: hoursRequested,
+      context: 'book_class_atomic_keyed returned a malformed payload - manual check required (admin-created class)',
+      errorDetail: {
+        idempotencyKey,
+        deductData,
+      },
+    })
+    return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+  }
+
+  // Gate 2 - replay. The key above is minted per request, so this state is
+  // unreachable by construction: reaching it means a key collision or an RPC
+  // contract drift, and neither is something to book on top of. The stored
+  // lesson_id being null does NOT prove no lesson exists - the NEW257 backfill
+  // below the insert is best-effort - so the state is UNKNOWN, not "no class".
+  //
+  // Deliberately NO "return the existing booking" success path. Replays only
+  // become reachable once the caller supplies the key, and answering 201 with a
+  // lesson id this route did not verify is the kind of guess that books a
+  // second real class.
+  if (deductPayload.replayed === true) {
+    console.error('CRITICAL: book_class_atomic_keyed replayed a per-request idempotency key - key collision or contract drift, booking held with no lesson and no refund:', {
+      training_id,
+      student_id,
+      hours: hoursRequested,
+      idempotency_key: idempotencyKey,
+      log_id: deductPayload.log_id,
+      lesson_id: deductPayload.lesson_id ?? null,
+    })
+    await raiseReconciliationTask({
+      studentId: student_id,
+      trainingId: training_id,
+      // The stored lesson id when there is one - it is the only row a human can
+      // act on. Null is not evidence of absence, only of an unlinked row.
+      lessonId: typeof deductPayload.lesson_id === 'string' ? deductPayload.lesson_id : null,
+      hours: hoursRequested,
+      context: 'book_class_atomic_keyed replayed a per-request idempotency key - manual check required (admin-created class)',
+      errorDetail: {
+        idempotencyKey,
+        logId: deductPayload.log_id,
+        lessonId: deductPayload.lesson_id ?? null,
+      },
+    })
+    return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+  }
+
+  // NEW257: the id of the 'class_booking' ledger row the RPC inserted, for the
+  // lesson_id backfill below the insert. Declared only past both gates above, so
+  // it can never carry a value the shape checks would have rejected.
+  const hoursLogId = deductPayload.log_id
 
   // Hours have been deducted. Own the refund from here until the insert-failure
   // handler dispatches it or the lesson is committed - the same three arguments
@@ -811,7 +901,7 @@ export async function POST(request: NextRequest) {
   pendingRefund = null
   teamsMeetingId = null
 
-  // NEW257: backfill hours_log.lesson_id. book_class_atomic returned the id of
+  // NEW257: backfill hours_log.lesson_id. book_class_atomic_keyed returned the id of
   // the 'class_booking' ledger row; now that the lesson exists, link the two.
   // Non-blocking: the booking already succeeded and the ledger row exists, so a
   // failure only leaves the link unset — log it and continue. Uses adminClient
