@@ -82,6 +82,14 @@ const store = vi.hoisted(() => ({
   updates: [] as Array<{ table: string; values: Record<string, unknown> }>,
   rpcs: [] as Array<{ fn: string; args: unknown }>,
   rpcResults: {} as Record<string, Scripted>,
+  // Scripted result for the SECOND and every later call to a named RPC. The one
+  // path that calls the same RPC twice inside a single request is the
+  // ambiguous-deduction probe on the fresh-book branch, and the whole question
+  // there is whether the second answer differs from the first - which a single
+  // scripted value per RPC name cannot express. Left empty by default, so an RPC
+  // with no retry script answers from rpcResults on every call exactly as
+  // before and no existing test changes.
+  rpcRetryResults: {} as Record<string, Scripted>,
   lessonInsert: { data: null, error: null } as Scripted,
   lessonsSelect: (() => ({ data: [], error: null })) as (call: QueryCall) => Scripted,
   assignedTeacher: null as unknown,
@@ -214,8 +222,13 @@ vi.mock('@/lib/supabase/admin', () => {
         return builder
       },
       rpc(fn: string, args: unknown) {
+        // Read BEFORE this call is recorded, so the first call to a name is
+        // never mistaken for its own retry.
+        const isRetry = store.rpcs.some((r) => r.fn === fn)
         store.rpcs.push({ fn, args })
-        const scripted = store.rpcResults[fn] ?? { data: null, error: null }
+        const scripted =
+          (isRetry ? store.rpcRetryResults[fn] : undefined) ??
+          store.rpcResults[fn] ?? { data: null, error: null }
         if ('reject' in scripted) return Promise.reject(scripted.reject)
         return Promise.resolve({ data: scripted.data, error: scripted.error })
       },
@@ -366,6 +379,15 @@ function taskCalls() {
   return vi.mocked(raiseReconciliationTask).mock.calls
 }
 
+// The CRITICAL logs every money path raises when it holds. A resolved probe
+// deliberately raises none, so counting them is how the two success tests below
+// prove the recovery was treated as a recovery rather than as an incident.
+function criticalLogs() {
+  return vi
+    .mocked(console.error)
+    .mock.calls.filter((call) => typeof call[0] === 'string' && call[0].startsWith('CRITICAL'))
+}
+
 // Everything that is not the verifier read-back answers from the fixtures: the
 // two clash checks come back empty so the booking reaches the insert, and the
 // reschedule branch gets its old lesson.
@@ -385,6 +407,11 @@ function scriptVerifier(handler: (call: QueryCall) => Scripted): void {
 
 let errorSpy: { mockRestore: () => void }
 let logSpy: { mockRestore: () => void }
+// console.warn is the channel the RESOLVED probe reports on - deliberately not
+// console.error, because a probe that answered is a recovery that completed and
+// not a state anyone has to act on. Spied to keep the run's output clean, and
+// asserted on in the probe tests below.
+let warnSpy: { mockRestore: () => void }
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -403,6 +430,7 @@ beforeEach(() => {
     // fall-through.
     unwind_reschedule_atomic: { data: true, error: null },
   }
+  store.rpcRetryResults = {}
   store.lessonInsert = { data: null, error: null }
   store.lessonsSelect = defaultLessonsSelect
   store.assignedTeacher = { teacher_id: TEACHER_ID }
@@ -447,6 +475,7 @@ beforeEach(() => {
 
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 afterEach(() => {
@@ -454,6 +483,7 @@ afterEach(() => {
   // implementations set in the vi.mock factories above survive the file.
   errorSpy.mockRestore()
   logSpy.mockRestore()
+  warnSpy.mockRestore()
 })
 
 // ---------------------------------------------------------------------------
@@ -749,6 +779,239 @@ describe('POST /api/student/book - a malformed or replayed deduction payload hol
 
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Fresh book - the deduction ERRORS ambiguously and a same-key probe decides it
+// ---------------------------------------------------------------------------
+//
+// The deductError fall-through - anything that is neither insufficient_hours nor
+// training_not_active - was the one deduction path in the money flow with no
+// compensation: the transaction may have committed before its response leg died,
+// so the hours may or may not have moved and nothing in hand could say which.
+//
+// The per-request idempotency key makes it decidable, and ONE more call carrying
+// the SAME key is the whole mechanism:
+//
+//   replayed: true  - the first call committed. The hours are already deducted
+//                     and the ledger row exists; the probe just names it.
+//   replayed: false - the first call never committed, and the probe has now
+//                     performed the deduction itself.
+//
+// Both answers leave exactly ONE deduction on the books, so the booking
+// continues on both. Every test below therefore pins the NUMBER of
+// book_class_atomic_keyed calls - two on a probed path, one on the definite
+// branches that must never probe - and pins that refund_hours_atomic is never
+// dispatched, because a refund here would have no "was never deducted" guard to
+// lean on and could credit hours that were never spent.
+
+describe('POST /api/student/book - an ambiguous deduction failure is resolved by a same-key probe', () => {
+  it('probe replays (the first call HAD committed): the booking continues on the existing ledger row, 200', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: { message: 'socket hang up' } }
+    // replayed: true is the probe reporting that the lost first call did commit.
+    // lesson_id null is what gate 3 requires and what is true by construction:
+    // that call died before it could ever reach the lessons insert, so its
+    // ledger row cannot already be linked to a class.
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-probe-replay', replayed: true, lesson_id: null },
+      error: null,
+    }
+    store.lessonInsert = { data: { id: 'lesson-probe-replay' }, error: null }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    // Exactly TWO calls, and the second must carry the FIRST one's key. A freshly
+    // minted key would deduct a second time instead of answering the question.
+    const deductArgs = rpcArgs('book_class_atomic_keyed') as Array<Record<string, unknown>>
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'book_class_atomic_keyed'])
+    expect(deductArgs).toHaveLength(2)
+    expect(typeof deductArgs[0].p_idempotency_key).toBe('string')
+    expect(deductArgs[1]).toEqual(deductArgs[0])
+
+    // The booking really did continue: a meeting was minted, the lesson row was
+    // written, and the ledger row the PROBE named carries the new lesson's id.
+    expect(vi.mocked(createTeamsMeeting)).toHaveBeenCalled()
+    expect(store.lessonInsertCalls).toHaveLength(1)
+    expect(store.updates).toContainEqual({
+      table: 'hours_log',
+      values: { lesson_id: 'lesson-probe-replay' },
+    })
+
+    // One deduction stands, so nothing is owed back, nothing is orphaned and
+    // nobody has to look at it.
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+    expect(vi.mocked(console.warn)).toHaveBeenCalledTimes(1)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, lessonId: 'lesson-probe-replay' })
+  })
+
+  it('probe does NOT replay (the first call never committed): the probe performs the deduction, 200', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: { message: 'socket hang up' } }
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-probe-fresh', replayed: false, lesson_id: null },
+      error: null,
+    }
+    store.lessonInsert = { data: { id: 'lesson-probe-fresh' }, error: null }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    const deductArgs = rpcArgs('book_class_atomic_keyed') as Array<Record<string, unknown>>
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'book_class_atomic_keyed'])
+    expect(deductArgs).toHaveLength(2)
+    expect(deductArgs[1]).toEqual(deductArgs[0])
+
+    expect(vi.mocked(createTeamsMeeting)).toHaveBeenCalled()
+    expect(store.lessonInsertCalls).toHaveLength(1)
+    expect(store.updates).toContainEqual({
+      table: 'hours_log',
+      values: { lesson_id: 'lesson-probe-fresh' },
+    })
+
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+    expect(criticalLogs()).toHaveLength(0)
+    expect(vi.mocked(console.warn)).toHaveBeenCalledTimes(1)
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ success: true, lessonId: 'lesson-probe-fresh' })
+  })
+
+  it('probe ERRORS too: still ambiguous, so nothing is booked and nothing is refunded, 500', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: { message: 'socket hang up' } }
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: null,
+      error: { message: 'connection reset', code: 'PGRST301' },
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    // The probe was attempted exactly once - no retry, no loop.
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'book_class_atomic_keyed'])
+
+    // Nothing is booked on top of an unknown deduction, and refund_hours_atomic
+    // is NOT dispatched: it has no "was never deducted" guard, so a blind refund
+    // here could credit hours that were never spent.
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    // The branch returns before section 5, so no meeting is ever minted and
+    // there is nothing to orphan.
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reserve hours. Please try again.' })
+  })
+
+  it('probe THROWS: the transport error is handled as a failed probe, not left to escape, 500', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: { message: 'socket hang up' } }
+    store.rpcRetryResults.book_class_atomic_keyed = { reject: new TypeError('fetch failed') }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'book_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBeNull()
+
+    // The 'Failed to reserve hours' body is the proof the throw was handled
+    // INSIDE the deduction branch: escaping to the outer catch would have
+    // produced 'An unexpected error occurred. Please try again.' instead.
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to reserve hours. Please try again.' })
+  })
+
+  it('probe replays a ledger row that is already linked to a lesson: held, not booked on top of, 500', async () => {
+    store.rpcResults.book_class_atomic_keyed = { data: null, error: { message: 'socket hang up' } }
+    // A key minted inside THIS request cannot name a row that is already linked -
+    // the first call died before the lessons insert - so this is a key collision
+    // or a contract drift, and booking on top of it is how a student ends up
+    // with a second real class.
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: {
+        log_id: 'hours-log-probe-linked',
+        replayed: true,
+        lesson_id: 'already-linked-lesson',
+      },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed', 'book_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(rpcNames()).not.toContain('refund_hours_atomic')
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(vi.mocked(cancelTeamsMeeting)).not.toHaveBeenCalled()
+
+    // The linked lesson is the only row a human can act on, so the task names it.
+    expect(taskCalls()).toHaveLength(1)
+    expect(taskCalls()[0][0].hours).toBe(HOURS_NEEDED)
+    expect(taskCalls()[0][0].lessonId).toBe('already-linked-lesson')
+
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Failed to create booking. Please try again.' })
+  })
+
+  it('insufficient_hours is DEFINITE and never probes: exactly ONE call, 400', async () => {
+    store.rpcResults.book_class_atomic_keyed = {
+      data: null,
+      error: { message: 'insufficient_hours' },
+    }
+    // Scripted deliberately. If a definite branch ever grew a probe, this would
+    // resolve it into a successful deduction and the assertions below would fail
+    // loudly - rather than the route silently charging a student whose RPC had
+    // already refused the booking outright.
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-must-never-be-used', replayed: false, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'You do not have enough hours remaining for this class.',
+    })
+  })
+
+  it('training_not_active is DEFINITE and never probes: exactly ONE call, 400', async () => {
+    store.rpcResults.book_class_atomic_keyed = {
+      data: null,
+      error: { message: 'training_not_active' },
+    }
+    store.rpcRetryResults.book_class_atomic_keyed = {
+      data: { log_id: 'hours-log-must-never-be-used', replayed: false, lesson_id: null },
+      error: null,
+    }
+
+    const res = await POST(makeRequest(BASE_BODY))
+
+    expect(rpcNames()).toEqual(['book_class_atomic_keyed'])
+    expect(store.lessonInsertCalls).toHaveLength(0)
+    expect(vi.mocked(createTeamsMeeting)).not.toHaveBeenCalled()
+    expect(taskCalls()).toHaveLength(0)
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'This training is no longer active.' })
   })
 })
 

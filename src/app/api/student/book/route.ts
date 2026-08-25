@@ -564,6 +564,14 @@ export async function POST(req: NextRequest) {
         p_idempotency_key: idempotencyKey,
       })
 
+      // The payload the gates below read. Mutable because the ambiguous-failure
+      // probe further down replaces it with the answer THAT call returned; on
+      // every other path it is the direct response, untouched.
+      let deductPayloadRaw: unknown = deductData
+      // True only on the probed path, and gate 2 turns on it: a replay stops
+      // being an impossible state there and becomes the expected one.
+      let resolvedViaProbe = false
+
       if (deductError) {
         const msg = (deductError.message || '').toLowerCase()
         if (msg.includes('insufficient_hours')) {
@@ -578,40 +586,126 @@ export async function POST(req: NextRequest) {
             { status: 400 }
           )
         }
-        // Fall-through = neither insufficient_hours nor training_not_active, so this
-        // is a transport/unknown failure and the RPC may have committed the deduction
-        // before the response leg failed. Not auto-refunded: refund_hours_atomic has
-        // no "was never deducted" guard, so a refund here could credit hours that
-        // were never spent. Naming the row instead so hours_log can be checked by
-        // hand. CRITICAL because this is the one deduction path with no compensation.
-        console.error('CRITICAL: book_class_atomic_keyed failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
+        // Fall-through = neither insufficient_hours nor training_not_active. Those
+        // two are DEFINITE: the RPC raised before moving anything, no deduction
+        // happened, and neither may probe. This is a transport/unknown failure
+        // instead, so the transaction may have committed before the response leg
+        // died - the hours may or may not have moved, and the error in hand
+        // cannot say which.
+        //
+        // The idempotency key makes that decidable. ONE more call to
+        // book_class_atomic_keyed carrying the SAME key answers it outright:
+        //
+        //   replayed: true  - the first call DID commit. The hours are already
+        //                     deducted, the ledger row exists, and its log_id
+        //                     comes back here.
+        //   replayed: false - the first call never committed, and this probe has
+        //                     now performed the deduction itself, cleanly.
+        //
+        // Either answer leaves exactly ONE deduction on the books, which is why
+        // the booking CONTINUES on both rather than returning. It is also safe
+        // against the first transaction still committing underneath: the probe's
+        // pre-check misses, it deducts, its hours_log insert trips the partial
+        // unique index on idempotency_key, and the RPC's own unique_violation
+        // handler rolls the probe's deduction back inside its subtransaction and
+        // returns the winner's row.
+        //
+        // Exactly ONE probe - no retry, no delay, no loop. A second attempt could
+        // only repeat the answer this one already has, and looping would hold the
+        // student's request open against a database that is already failing.
+        let probeData: unknown = null
+        let probeError: unknown = null
+        try {
+          const probe = await adminClient.rpc('book_class_atomic_keyed', {
+            p_training_id: trainingId,
+            p_hours_needed: hoursNeeded,
+            p_idempotency_key: idempotencyKey,
+          })
+          probeData = probe.data
+          probeError = probe.error
+        } catch (probeThrow) {
+          // A transport-level throw is a FAILED probe, not an unhandled error.
+          // Letting it escape would reach the outer catch with pendingCompensation
+          // still unarmed and nothing in the logs naming the key.
+          probeError = probeThrow
+        }
+
+        if (probeError) {
+          // Still ambiguous, and nothing may be written on the strength of a
+          // guess: refund_hours_atomic has no "was never deducted" guard, so a
+          // blind refund here could credit hours that were never spent. The
+          // idempotency key is what settles it by hand - the hours_log row
+          // carrying it either exists or it does not.
+          console.error('CRITICAL: book_class_atomic_keyed failed - hours MAY have been deducted with no lesson, check hours_log for this training:', {
+            training_id: trainingId,
+            student_id: studentId,
+            hours: hoursNeeded,
+            idempotency_key: idempotencyKey,
+            error: deductError,
+            probe_error: probeError,
+          })
+          await raiseReconciliationTask({
+            studentId,
+            trainingId,
+            lessonId: null,
+            hours: hoursNeeded,
+            context: 'book_class_atomic_keyed failed and the same-key probe could not resolve it - manual check required (student booking)',
+            errorDetail: {
+              idempotencyKey,
+              deductError,
+              probeError,
+            },
+          })
+          return NextResponse.json(
+            { error: 'Failed to reserve hours. Please try again.' },
+            { status: 500 }
+          )
+        }
+
+        // Resolved. Hand the probe's payload to the gates below in place of the
+        // failed call's and fall THROUGH - the booking continues from here
+        // exactly as it would have had the first call answered. Deliberately
+        // console.warn and not console.error: this is a recovery that completed,
+        // and nothing on it needs a human.
+        deductPayloadRaw = probeData
+        resolvedViaProbe = true
+        console.warn('book_class_atomic_keyed failed but a same-key probe resolved it - exactly one deduction stands and the booking continues:', {
           training_id: trainingId,
           student_id: studentId,
           hours: hoursNeeded,
+          idempotency_key: idempotencyKey,
+          // true = the failed call had committed after all; false = it had not,
+          // and the probe itself performed the deduction.
+          replayed:
+            probeData !== null && typeof probeData === 'object'
+              ? ((probeData as { replayed?: unknown }).replayed ?? null)
+              : null,
           error: deductError,
         })
-        return NextResponse.json(
-          { error: 'Failed to reserve hours. Please try again.' },
-          { status: 500 }
-        )
       }
 
-      // Both gates below are HOLD-AND-RAISE, and the hold is the point. Neither
-      // may write anything: no lesson is inserted, pendingCompensation is
+      // Every gate below is HOLD-AND-RAISE, and the hold is the point. None of
+      // them may write anything: no lesson is inserted, pendingCompensation is
       // deliberately NOT armed, and refund_hours_atomic is deliberately NOT
       // called - it has no "was never deducted" guard, so a blind refund here
-      // could credit hours that were never spent. Same reasoning as the CRITICAL
-      // fall-through above, and the idempotency key is what a human looks the
-      // hours_log row up by.
+      // could credit hours that were never spent. Same reasoning as the
+      // unresolved-probe branch above, and the idempotency key is what a human
+      // looks the hours_log row up by.
+      //
+      // deductPayloadRaw, not deductData: on the probed path the payload that
+      // has to be judged is the probe's answer, and on every other path the two
+      // are the same value.
       const deductPayload =
-        deductData !== null && typeof deductData === 'object'
-          ? (deductData as { log_id?: unknown; replayed?: unknown; lesson_id?: unknown })
+        deductPayloadRaw !== null && typeof deductPayloadRaw === 'object'
+          ? (deductPayloadRaw as { log_id?: unknown; replayed?: unknown; lesson_id?: unknown })
           : null
 
       // Gate 1 - malformed payload. book_class_atomic_keyed contracts to return
       // { log_id, replayed, lesson_id }. Anything else means the RPC did not
       // answer in its contracted shape, so the hours may or may not have moved
-      // and nothing in hand proves which.
+      // and nothing in hand proves which. Applies to the probed payload exactly
+      // as it does to the direct one: a probe that answers in the wrong shape has
+      // resolved nothing.
       if (
         deductPayload === null ||
         typeof deductPayload.log_id !== 'string' ||
@@ -622,7 +716,8 @@ export async function POST(req: NextRequest) {
           student_id: studentId,
           hours: hoursNeeded,
           idempotency_key: idempotencyKey,
-          deduct_data: deductData,
+          resolved_via_probe: resolvedViaProbe,
+          deduct_data: deductPayloadRaw,
         })
         await raiseReconciliationTask({
           studentId,
@@ -632,23 +727,27 @@ export async function POST(req: NextRequest) {
           context: 'book_class_atomic_keyed returned a malformed payload - manual check required (student booking)',
           errorDetail: {
             idempotencyKey,
-            deductData,
+            deductData: deductPayloadRaw,
           },
         })
         return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
       }
 
-      // Gate 2 - replay. The key above is minted per request, so this state is
-      // unreachable by construction: reaching it means a key collision or an RPC
-      // contract drift, and neither is something to book on top of. The stored
-      // lesson_id being null does NOT prove no lesson exists - the 6a backfill
-      // is best-effort - so the state is UNKNOWN, not "no class".
+      // Gate 2 - replay. Two different states reach this flag now, and
+      // resolvedViaProbe is what tells them apart.
+      //
+      // NOT probed: the key above is minted per request and this was its first
+      // and only use, so a replay is unreachable by construction. Reaching it
+      // means a key collision or an RPC contract drift, and neither is something
+      // to book on top of. The stored lesson_id being null does NOT prove no
+      // lesson exists - the 6a backfill is best-effort - so the state is
+      // UNKNOWN, not "no class".
       //
       // Deliberately NO "return the existing booking" success path. Replays only
       // become reachable once the client supplies the key, and answering 200
       // with a lesson id this route did not verify is the kind of guess that
       // hands the student a second real class.
-      if (deductPayload.replayed === true) {
+      if (deductPayload.replayed === true && !resolvedViaProbe) {
         console.error('CRITICAL: book_class_atomic_keyed replayed a per-request idempotency key - key collision or contract drift, booking held with no lesson and no refund:', {
           training_id: trainingId,
           student_id: studentId,
@@ -674,8 +773,46 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
       }
 
+      // Gate 3 - a PROBED replay is the expected, resolved case: the probe
+      // reporting that the first call had committed after all. One guard stands
+      // between it and the booking. The ledger row the probe named was written by
+      // THIS request's first call, which died before it could ever reach the
+      // lessons insert, so that row's lesson_id MUST still be null. A non-null
+      // one says the row is already linked to a committed lesson, which a key
+      // minted inside this request cannot be - so the state is anomalous, and it
+      // is held rather than booked on top of, exactly as the unprobed replay is.
+      if (
+        resolvedViaProbe &&
+        deductPayload.replayed === true &&
+        deductPayload.lesson_id !== null &&
+        deductPayload.lesson_id !== undefined
+      ) {
+        console.error('CRITICAL: book_class_atomic_keyed same-key probe replayed a ledger row that is already linked to a lesson - booking held with no lesson and no refund:', {
+          training_id: trainingId,
+          student_id: studentId,
+          hours: hoursNeeded,
+          idempotency_key: idempotencyKey,
+          log_id: deductPayload.log_id,
+          lesson_id: deductPayload.lesson_id,
+        })
+        await raiseReconciliationTask({
+          studentId,
+          trainingId,
+          // The linked lesson is the row a human acts on, so it is carried here.
+          lessonId: typeof deductPayload.lesson_id === 'string' ? deductPayload.lesson_id : null,
+          hours: hoursNeeded,
+          context: 'book_class_atomic_keyed same-key probe replayed a ledger row already linked to a lesson - manual check required (student booking)',
+          errorDetail: {
+            idempotencyKey,
+            logId: deductPayload.log_id,
+            lessonId: deductPayload.lesson_id,
+          },
+        })
+        return NextResponse.json({ error: 'Failed to create booking. Please try again.' }, { status: 500 })
+      }
+
       // NEW257: the id of the 'class_booking' ledger row the RPC inserted, for
-      // the lesson_id backfill at 6a. Assigned only past both gates above, so it
+      // the lesson_id backfill at 6a. Assigned only past the gates above, so it
       // can never carry a value the shape checks would have rejected.
       hoursLogId = deductPayload.log_id
 
