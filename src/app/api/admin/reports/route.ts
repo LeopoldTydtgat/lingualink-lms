@@ -80,6 +80,19 @@ export async function GET(request: NextRequest) {
         photo_url
       )
     `, { count: 'exact' })
+    // Ordered by the CLASS date - the joined lessons.scheduled_at this list renders in its
+    // "Class Date" column - newest class first. created_at is the WRONG key on its own:
+    // report rows are written by the trg_create_pending_report AFTER INSERT ON lessons
+    // trigger, so created_at records when the lesson was BOOKED, not when the class
+    // happened - a list showing class dates came back in booking order, which looks
+    // random. created_at survives only as the tiebreaker for two classes at the same
+    // instant, which keeps range() pagination deterministic across pages.
+    //
+    // Both .order() calls are TOP level (no referencedTable on either), so postgrest-js
+    // emits a single order param: order=lessons(scheduled_at).desc,created_at.desc -
+    // PostgREST's documented to-one embedded sort syntax. It needs no !inner, so the
+    // lessonsEmbed conditional above is deliberately left alone.
+    .order('lessons(scheduled_at)', { ascending: false })
     .order('created_at', { ascending: false })
     .range(from, to);
 

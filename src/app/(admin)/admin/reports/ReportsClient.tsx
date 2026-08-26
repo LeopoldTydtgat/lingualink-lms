@@ -486,9 +486,13 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       if (page === 1) {
         setReports(rows);
       } else {
-        // Deduplicated by id: the list is ordered newest-first, so reports created since
-        // page 1 loaded shift the window and a later page can re-include rows already on
-        // screen. It can never skip a row, only repeat one.
+        // Deduplicated by id: the list is ordered newest-CLASS-first over an offset
+        // window, so any reschedule between page fetches shifts rows across the page
+        // boundary. A class moved LATER pushes rows down and a later page re-includes
+        // rows already on screen - that is what this dedupe absorbs. A class moved
+        // EARLIER pulls rows up past the offset and a row can be missed entirely.
+        // Accepted rather than fixed: keyset pagination is the only real cure, the
+        // window is 50 rows wide, and any refresh reseeds the list correctly.
         setReports((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.id === r.id))]);
       }
       setTotal(typeof data.total === 'number' ? data.total : null);
