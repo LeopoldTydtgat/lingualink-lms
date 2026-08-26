@@ -103,6 +103,20 @@ export async function clearRateLimit(
 // 24h-on-old-lesson) — cost the student none of their booking-attempt budget,
 // while every request that can actually move hours is still recorded.
 //
+// CEILING, NOT A BUDGET. BOOKING_MAX_ATTEMPTS is not a limit on how much a
+// student may book. The only real bound on that is their hours balance, and it
+// is enforced where it belongs — the atomic RPCs' row-level locks. This number
+// exists solely to cap the blast radius of a runaway or compromised session
+// against external quota: every booking costs one Graph meeting creation and
+// the Resend sends that go with it. 200/hour is deliberately far above any
+// genuine batch — a student booking a full year of weekly classes in one
+// sitting comes to about 52 — so an honest user never reaches it. The previous
+// value of 10 did the opposite: it blocked a real student mid-batch while they
+// were booking a month of classes, which is exactly the failure this ceiling
+// exists to prevent. Raising the ceiling does not change the steady-state
+// growth of booking_attempts either; that is driven by real bookings, not by
+// the cap.
+//
 // ACCEPTED TOCTOU: count and record are no longer one sequenced operation, so
 // concurrent requests can all pass the count before any of them records, and
 // the cap can be exceeded by the degree of concurrency (N requests in flight
@@ -121,7 +135,7 @@ export async function clearRateLimit(
 // — if the attempt cannot be written down, no hours may move.
 
 const BOOKING_WINDOW_MS = 60 * 60 * 1000
-const BOOKING_MAX_ATTEMPTS = 10
+export const BOOKING_MAX_ATTEMPTS = 200
 
 // Phase 1: count only. Writes nothing — see the two-phase note above.
 export async function checkStudentBookingLimit(
