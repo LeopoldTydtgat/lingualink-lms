@@ -5,7 +5,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  *
  * The bug class: checkStudentBookingLimit used to COUNT and INSERT in one call
  * at the top of /api/student/book, so budget was spent before any validation
- * ran — ten stale-grid 409s locked an honest student out for an hour. The
+ * ran — a run of stale-grid 409s could burn the whole cap and lock an honest
+ * student out for an hour without a single class having been booked. The
  * limiter is now two phases: checkStudentBookingLimit counts (and must write
  * NOTHING), recordStudentBookingAttempt inserts (and must fail closed so the
  * route can abort before the money RPC). These tests pin both halves.
@@ -96,19 +97,25 @@ vi.mock('@/lib/supabase/admin', () => {
 })
 
 // Import AFTER the mock is registered.
-import { checkStudentBookingLimit, recordStudentBookingAttempt } from './rateLimit'
+import { BOOKING_MAX_ATTEMPTS, checkStudentBookingLimit, recordStudentBookingAttempt } from './rateLimit'
 
 const STUDENT = 'student-1'
 const OTHER_STUDENT = 'student-2'
 const HOUR_MS = 60 * 60 * 1000
 
-// n attempts, the oldest `oldestMinutesAgo` minutes back, the rest newer.
+// n attempts spread across a fixed 30-second span ending `oldestMinutesAgo` minutes
+// back. The span is deliberately independent of n: spacing rows a fixed interval
+// APART would make a large batch span far enough to cross the window edge, so a
+// "these have aged out" fixture would silently seed rows back inside the window and
+// the window tests would pass for the wrong reason.
+const SEED_SPAN_MS = 30 * 1000
 function seed(studentId: string, n: number, oldestMinutesAgo: number) {
   const oldestMs = Date.now() - oldestMinutesAgo * 60 * 1000
+  const step = n > 1 ? SEED_SPAN_MS / (n - 1) : 0
   for (let i = 0; i < n; i++) {
     store.rows.push({
       student_id: studentId,
-      attempted_at: new Date(oldestMs + i * 1000).toISOString(),
+      attempted_at: new Date(oldestMs + i * step).toISOString(),
     })
   }
 }
@@ -140,17 +147,17 @@ describe('checkStudentBookingLimit (phase 1 — count only)', () => {
   })
 
   it('writes nothing even when it blocks', async () => {
-    seed(STUDENT, 10, 10)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS, 10)
 
     const res = await checkStudentBookingLimit(STUDENT)
 
     expect(res.blocked).toBe(true)
     expect(store.inserts).toBe(0)
-    expect(store.rows).toHaveLength(10)
+    expect(store.rows).toHaveLength(BOOKING_MAX_ATTEMPTS)
   })
 
   it('blocks at the cap and reports when the oldest attempt leaves the window', async () => {
-    seed(STUDENT, 10, 10)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS, 10)
 
     const res = await checkStudentBookingLimit(STUDENT)
 
@@ -161,7 +168,7 @@ describe('checkStudentBookingLimit (phase 1 — count only)', () => {
   })
 
   it('ignores attempts older than the 60-minute window', async () => {
-    seed(STUDENT, 10, 120)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS, 120)
 
     const res = await checkStudentBookingLimit(STUDENT)
 
@@ -169,7 +176,7 @@ describe('checkStudentBookingLimit (phase 1 — count only)', () => {
   })
 
   it('counts only the requested student', async () => {
-    seed(OTHER_STUDENT, 10, 10)
+    seed(OTHER_STUDENT, BOOKING_MAX_ATTEMPTS, 10)
     seed(STUDENT, 1, 10)
 
     const res = await checkStudentBookingLimit(STUDENT)
@@ -225,40 +232,40 @@ describe('recordStudentBookingAttempt (phase 2 — insert only)', () => {
   })
 
   it('does not count: it never blocks, even past the cap', async () => {
-    seed(STUDENT, 20, 10)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS + 10, 10)
 
     const res = await recordStudentBookingAttempt(STUDENT)
 
     expect(res).toEqual({ ok: true })
-    expect(store.rows).toHaveLength(21)
+    expect(store.rows).toHaveLength(BOOKING_MAX_ATTEMPTS + 11)
   })
 })
 
 describe('the two phases together', () => {
   it('spends budget only when an attempt is recorded', async () => {
-    // Ten checks (e.g. ten stale-grid 409s that never reach a money RPC)
-    // leave the student's budget untouched...
-    for (let i = 0; i < 10; i++) {
+    // Checks that never reach a money RPC (e.g. stale-grid 409s) leave the
+    // student's budget untouched...
+    for (let i = 0; i < BOOKING_MAX_ATTEMPTS; i++) {
       const res = await checkStudentBookingLimit(STUDENT)
       expect(res.blocked).toBe(false)
     }
     expect(store.rows).toHaveLength(0)
 
-    // ...whereas ten requests that reach the RPC do fill the window.
-    for (let i = 0; i < 10; i++) {
+    // ...whereas the same number of requests that DO reach the RPC fill the window.
+    for (let i = 0; i < BOOKING_MAX_ATTEMPTS; i++) {
       expect(await recordStudentBookingAttempt(STUDENT)).toEqual({ ok: true })
     }
-    expect(store.rows).toHaveLength(10)
+    expect(store.rows).toHaveLength(BOOKING_MAX_ATTEMPTS)
     expect((await checkStudentBookingLimit(STUDENT)).blocked).toBe(true)
   })
 
   it('a recorded attempt still ages out of the window', async () => {
-    seed(STUDENT, 10, 61)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS, 61)
     expect((await checkStudentBookingLimit(STUDENT)).blocked).toBe(false)
 
     // Sanity: the same rows one minute inside the window do block.
     store.rows = []
-    seed(STUDENT, 10, 59)
+    seed(STUDENT, BOOKING_MAX_ATTEMPTS, 59)
     expect((await checkStudentBookingLimit(STUDENT)).blocked).toBe(true)
   })
 })
