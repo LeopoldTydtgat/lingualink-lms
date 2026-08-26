@@ -91,12 +91,14 @@ export default async function AdminReportsPage({
   // Query 1: reports + lessons + teacher.
   //
   // MIRRORS the GET route's page-1 query for the SEEDED filter state
-  // (src/app/api/admin/reports/route.ts): same select, same created_at DESC order, same 50
-  // rows, same exact count, the same .eq('status', ...) when ?filter= named one, and - on a
-  // plain landing - the same month-to-date bounds on the embedded lessons.scheduled_at,
-  // resolved through the same localMidnightToUtc edges over the same !inner embed. That
-  // match is what lets the client skip its redundant mount fetch - the rows painted here
-  // are the rows that fetch would have returned.
+  // (src/app/api/admin/reports/route.ts): same select, the same CLASS-date order -
+  // lessons(scheduled_at) DESC, with created_at DESC only as the same-instant tiebreaker,
+  // and NOT the created_at DESC this query used to carry, which ordered by booking time -
+  // same 50 rows, same exact count, the same .eq('status', ...) when ?filter= named one,
+  // and - on a plain landing - the same month-to-date bounds on the embedded
+  // lessons.scheduled_at, resolved through the same localMidnightToUtc edges over the same
+  // !inner embed. That match is what lets the client skip its redundant mount fetch - the
+  // rows painted here are the rows that fetch would have returned.
 
   // The date bounds below select on the EMBEDDED lessons.scheduled_at, and filtering an
   // embedded column on a PLAIN embed only nulls the embed - the parent report row still
@@ -134,6 +136,14 @@ export default async function AdminReportsPage({
         photo_url
       )
     `, { count: 'exact' })
+    // Ordered by the CLASS date - the joined lessons.scheduled_at rendered in the "Class
+    // Date" column - newest class first, with created_at only as the same-instant
+    // tiebreaker. created_at alone was wrong for the reason the route spells out: the
+    // trg_create_pending_report AFTER INSERT ON lessons trigger writes it when the lesson
+    // is BOOKED, not when the class happens. Both .order() calls are TOP level, so this
+    // emits the route's exact order param - which is what keeps the MIRRORS claim above
+    // true, and with it the client's seed-skip.
+    .order('lessons(scheduled_at)', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(50);
 

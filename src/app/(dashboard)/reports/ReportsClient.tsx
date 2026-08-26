@@ -71,11 +71,16 @@ export default function ReportsClient({ reports, profile, isAdmin, viewerTimezon
   // Capture a single "now" so every pending check compares against the same instant
   const now = Date.now()
 
-  const pendingReports = reports.filter(
-    r =>
-      (r.status === 'pending' || r.status === 'reopened') &&
-      hasClassStarted(r, now)
-  )
+  // Oldest class FIRST: the oldest un-reported class is the most overdue, so it belongs at
+  // the top. Reuses the same reportSortKey as the completed list below, just ascending.
+  // .filter() returns a fresh array, so the .sort() never mutates the prop.
+  const pendingReports = reports
+    .filter(
+      r =>
+        (r.status === 'pending' || r.status === 'reopened') &&
+        hasClassStarted(r, now)
+    )
+    .sort((a, b) => reportSortKey(a) - reportSortKey(b))
 
   // Submitted and not-submitted reports share one list, newest class first.
   // .filter() returns a fresh array, so the .sort() never mutates the prop.
