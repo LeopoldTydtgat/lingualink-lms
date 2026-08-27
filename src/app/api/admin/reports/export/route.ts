@@ -108,7 +108,7 @@ export async function GET(request: NextRequest) {
     let query = admin
       .from('lessons')
       .select(`
-        id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, teacher_id, student_id,
+        id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, hours_refunded, teacher_id, student_id,
         profiles!lessons_teacher_id_fkey ( full_name, hourly_rate ),
         reports ( status, completed_at, feedback_text, did_class_happen, no_show_type, flagged_at ),
         lesson_join_clicks ( user_type, clicked_at )
@@ -197,6 +197,21 @@ export async function GET(request: NextRequest) {
       else if (st === 'scheduled') outcome = 'Scheduled';
       else outcome = st;
 
+      // Raw outcome label kept for the JS-side outcome filter below, which
+      // compares against the dropdown values exactly. The displayed outcome
+      // may carry a refund suffix; the filter must not see it.
+      const outcomeRaw = outcome;
+      // Refund outcome belongs on the outcome cell so it reads like the old
+      // LearnCube Past Classes export. Only TRUE cancellations carry it.
+      // Reschedule legs (rescheduled_by set) move the hours to the new booking
+      // and refund nothing, so they keep the plain "Rescheduled by ..." label.
+      // hours_refunded is nullable: only literal true reads as refunded.
+      // Display only - getBillability below does not read hours_refunded.
+      const isRescheduleLeg = l.rescheduled_by === 'student' || l.rescheduled_by === 'admin';
+      if (cancelOutcome !== null && !isRescheduleLeg) {
+        outcome = `${outcome} - ${l.hours_refunded === true ? 'refunded' : 'not refunded'}`;
+      }
+
       // Cancellation window: absolute-instant gap between schedule and cancellation (tz-independent).
       let cancellationWindow = '';
       let windowHours: number | null = null;
@@ -276,6 +291,7 @@ export async function GET(request: NextRequest) {
         student: student?.full_name ?? '',
         clientType: clientTypeLabel,
         outcome,
+        _outcomeRaw: outcomeRaw,
         reportSubmitted: report?.status === 'completed' ? 'Yes' : 'No',
         reportSubmittedAt: fmtDateTime(report?.completed_at),
         flagged: report?.status === 'flagged' ? 'Yes' : 'No',
@@ -287,6 +303,9 @@ export async function GET(request: NextRequest) {
         hourlyRate: rate,
         amountOwed,
         cancelledAt: fmtDateTime(l.cancelled_at),
+        // RAW stored value, not passed through getCancellationLabel - proves what was stored.
+        cancelledBy: l.cancelled_by ?? '',
+        hoursRefunded: l.hours_refunded === true ? 'Yes' : 'No',
         cancellationWindow,
         policyApplied,
         billableUnderPolicy,
@@ -298,7 +317,7 @@ export async function GET(request: NextRequest) {
 
     // --- JS-side filters: outcome + client type ---
     let rows = derived;
-    if (outcomeFilter) rows = rows.filter((r) => r.outcome === outcomeFilter);
+    if (outcomeFilter) rows = rows.filter((r) => r._outcomeRaw === outcomeFilter);
     if (clientType === 'company') rows = rows.filter((r) => r._isCompany);
     else if (clientType === 'private') rows = rows.filter((r) => !r._isCompany);
 
@@ -320,6 +339,9 @@ export async function GET(request: NextRequest) {
       { header: 'Student', key: 'student', width: 22 },
       { header: 'Client Type', key: 'clientType', width: 20 },
       { header: 'Class Outcome', key: 'outcome', width: 20 },
+      { header: `Cancelled At (${exportTzLabel})`, key: 'cancelledAt', width: 24 },
+      { header: 'Cancelled By', key: 'cancelledBy', width: 14 },
+      { header: 'Hours Refunded', key: 'hoursRefunded', width: 16 },
       { header: 'Report Submitted', key: 'reportSubmitted', width: 16 },
       { header: `Report Submitted At (${exportTzLabel})`, key: 'reportSubmittedAt', width: 24 },
       { header: 'Flagged', key: 'flagged', width: 10 },
@@ -330,7 +352,6 @@ export async function GET(request: NextRequest) {
       { header: 'Teacher Billable', key: 'teacherBillable', width: 16 },
       { header: 'Hourly Rate', key: 'hourlyRate', width: 12, format: 'decimal2' },
       { header: 'Amount Owed to Teacher', key: 'amountOwed', width: 22, format: 'decimal2' },
-      { header: `Cancelled At (${exportTzLabel})`, key: 'cancelledAt', width: 24 },
       { header: 'Cancellation Window', key: 'cancellationWindow', width: 18 },
       { header: 'Cancellation Policy Applied', key: 'policyApplied', width: 24 },
       { header: 'Billable Under Policy', key: 'billableUnderPolicy', width: 18 },
