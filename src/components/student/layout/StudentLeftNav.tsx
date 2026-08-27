@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link, { useLinkStatus } from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { getFeedback } from '@sentry/nextjs'
 import { createClient } from '@/lib/supabase/client'
 import {
   CalendarDays,
@@ -13,6 +14,7 @@ import {
   User,
   LogOut,
   Loader2,
+  MessageCircleWarning,
 } from 'lucide-react'
 
 const navItems = [
@@ -104,6 +106,28 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
   // re-count. The badge value is the server prop; realtime only triggers the
   // refresh that re-runs the layout query feeding BOTH nav badges.
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Sentry User Feedback. getFeedback() is undefined when no DSN is configured
+  // (local dev), so gate rendering on it — a button that opens nothing is worse
+  // than no button at all.
+  const feedbackBtnRef = useRef<HTMLButtonElement>(null)
+  const [hasFeedback, setHasFeedback] = useState(false)
+
+  useEffect(() => {
+    setHasFeedback(!!getFeedback())
+  }, [])
+
+  // Runs only after the button is in the DOM (hasFeedback flipped true on the
+  // previous render), which is what attachTo needs to bind to.
+  useEffect(() => {
+    if (!hasFeedback || !feedbackBtnRef.current) return
+    const unsubscribe = getFeedback()?.attachTo(feedbackBtnRef.current, {
+      tags: { portal: 'student', role: 'student', user_id: userId ?? 'unknown' },
+    })
+    return () => {
+      unsubscribe?.()
+    }
+  }, [hasFeedback, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -255,6 +279,33 @@ export default function StudentLeftNav({ unreadMessageCount = 0, userId }: Stude
           padding: '8px 8px 0',
         }}
       >
+        {hasFeedback && (
+          <>
+            <button
+              ref={feedbackBtnRef}
+              type="button"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '10px 12px',
+                width: '100%',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#4b5563',
+                background: 'none',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <MessageCircleWarning size={18} style={{ color: '#9ca3af' }} />
+              Report a problem
+            </button>
+            <div style={{ height: '1px', backgroundColor: '#E0DFDC', margin: '6px 0' }} />
+          </>
+        )}
         <button
           onClick={handleLogout}
           style={{
