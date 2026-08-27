@@ -3,7 +3,8 @@
 import Link, { useLinkStatus } from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { getFeedback } from '@sentry/nextjs'
 import { createClient } from '@/lib/supabase/client'
 import {
   LayoutDashboard,
@@ -18,6 +19,7 @@ import {
   ShieldCheck,
   Loader2,
   History,
+  MessageCircleWarning,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -103,6 +105,28 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
   // re-count. The badge value is the server prop; realtime only triggers the
   // refresh that re-runs the layout query feeding BOTH nav badges.
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Sentry User Feedback. getFeedback() is undefined when no DSN is configured
+  // (local dev), so gate rendering on it — a button that opens nothing is worse
+  // than no button at all.
+  const feedbackBtnRef = useRef<HTMLButtonElement>(null)
+  const [hasFeedback, setHasFeedback] = useState(false)
+
+  useEffect(() => {
+    setHasFeedback(!!getFeedback())
+  }, [])
+
+  // Runs only after the button is in the DOM (hasFeedback flipped true on the
+  // previous render), which is what attachTo needs to bind to.
+  useEffect(() => {
+    if (!hasFeedback || !feedbackBtnRef.current) return
+    const unsubscribe = getFeedback()?.attachTo(feedbackBtnRef.current, {
+      tags: { portal: 'teacher', role: userRole, user_id: userId ?? 'unknown' },
+    })
+    return () => {
+      unsubscribe?.()
+    }
+  }, [hasFeedback, userRole, userId])
 
   useEffect(() => {
     if (!userId) return
@@ -218,6 +242,19 @@ export default function LeftNav({ userRole, unreadMessageCount = 0, userId }: Le
       </ul>
 
       <div className="p-3 border-t border-r border-brand-grey">
+        {hasFeedback && (
+          <>
+            <button
+              ref={feedbackBtnRef}
+              type="button"
+              className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-brand-grey hover:text-gray-900 transition-colors"
+            >
+              <MessageCircleWarning size={18} className="text-gray-400" />
+              Report a problem
+            </button>
+            <div style={{ height: '1px', backgroundColor: '#E0DFDC', margin: '6px 0' }} />
+          </>
+        )}
         <button
           onClick={handleLogout}
           className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-red-50 hover:text-red-600 transition-colors"
