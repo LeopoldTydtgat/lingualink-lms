@@ -91,6 +91,7 @@ export async function GET(
           { header: 'Booked At', key: 'Booked At', width: 18 },
           { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
           { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Hours Refunded', key: 'Hours Refunded', width: 16 },
           { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
           { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
           { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
@@ -105,7 +106,7 @@ export async function GET(
           .from('lessons')
           .select(`
             id, scheduled_at, duration_minutes, status,
-            cancelled_at, cancellation_reason, cancelled_by, rescheduled_by,
+            cancelled_at, cancellation_reason, cancelled_by, rescheduled_by, hours_refunded,
             teacher_id, student_id, training_id,
             created_at, rescheduled_at, teams_join_url
           `)
@@ -207,6 +208,16 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          // Refund outcome belongs on the Status cell so it reads like the old LearnCube
+          // Past Classes export. Only TRUE cancellations carry it. Reschedule legs
+          // (rescheduled_by set) move the hours to the new booking and refund nothing, so
+          // they keep the plain "Rescheduled by ..." label. Display only - getBillability
+          // above is untouched and does not read hours_refunded.
+          const isRescheduleLeg = l.rescheduled_by === 'student' || l.rescheduled_by === 'admin'
+          if (cancelLabel !== null && !isRescheduleLeg) {
+            statusLabel = `${statusLabel} - ${l.hours_refunded ? 'refunded' : 'not refunded'}`
+          }
+
           // Earliest join click per user_type. Logic DUPLICATED from
           // api/admin/reports/export/route.ts:252-268, where it is a local closure
           // and not exported; adapted to the flat array built above because this
@@ -254,6 +265,7 @@ export async function GET(
             // deliberately NOT passed through getCancellationLabel and not derived
             // from status — this column has to prove what was stored.
             'Cancelled By': l.cancelled_by ?? '',
+            'Hours Refunded': l.hours_refunded ? 'Yes' : 'No',
             'Cancellation Window': cancellationWindow,
             'Rescheduled At': fmtInstant(l.rescheduled_at),
             'Teacher Joined At': fmtInstant(teacherJoinedAt),
@@ -587,6 +599,7 @@ export async function GET(
           { header: 'Booked At', key: 'Booked At', width: 18 },
           { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
           { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
+          { header: 'Hours Refunded', key: 'Hours Refunded', width: 16 },
           { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
           { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
           { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
@@ -624,7 +637,7 @@ export async function GET(
 
         let lessonsQuery = supabase
           .from('lessons')
-          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, student_id, teacher_id, cancellation_reason, rescheduled_at, created_at, teams_join_url')
+          .select('id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, hours_refunded, student_id, teacher_id, cancellation_reason, rescheduled_at, created_at, teams_join_url')
           .in('student_id', studentIds)
           .order('scheduled_at', { ascending: false })
 
@@ -716,6 +729,16 @@ export async function GET(
           else if (st === 'missed') statusLabel = 'Missed'
           else statusLabel = st
 
+          // Refund outcome belongs on the Status cell so it reads like the old LearnCube
+          // Past Classes export. Only TRUE cancellations carry it. Reschedule legs
+          // (rescheduled_by set) move the hours to the new booking and refund nothing, so
+          // they keep the plain "Rescheduled by ..." label. Display only - getBillability
+          // above is untouched and does not read hours_refunded.
+          const isRescheduleLeg = l.rescheduled_by === 'student' || l.rescheduled_by === 'admin'
+          if (cancelLabel !== null && !isRescheduleLeg) {
+            statusLabel = `${statusLabel} - ${l.hours_refunded ? 'refunded' : 'not refunded'}`
+          }
+
           const report = reportMap[l.id]
 
           // Earliest join click per user_type. Logic DUPLICATED from the
@@ -777,6 +800,7 @@ export async function GET(
             // was stored. The 'Status' column above keeps the prose label; both are
             // intended, side by side.
             'Cancelled By': l.cancelled_by ?? '',
+            'Hours Refunded': l.hours_refunded ? 'Yes' : 'No',
             'Cancellation Window': cancellationWindow,
             'Cancellation Reason': l.cancellation_reason ?? '',
             'Rescheduled At': fmtInstant(l.rescheduled_at),
