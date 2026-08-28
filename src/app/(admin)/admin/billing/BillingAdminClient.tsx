@@ -39,6 +39,10 @@ interface TeacherProfile {
   // which must be right BEFORE Detail is expanded — the per-lesson currency from the
   // entities route only exists once that row's lessons have loaded.
   currency: string | null
+  // Also non-sensitive (column-level SELECT grant on authenticated). Selected only to
+  // partition this very list: a flagged profile never reaches state — its id goes to
+  // testTeacherIds instead — so every row that survives into `teachers` carries false.
+  is_test: boolean
 }
 
 interface Company {
@@ -52,6 +56,9 @@ interface StudentRow {
   full_name: string
   email: string
   company_id: string | null
+  // Same as TeacherProfile.is_test above: selected to partition the list, and always
+  // false on a row that survives into `students`.
+  is_test: boolean
 }
 
 interface LessonRow {
@@ -395,6 +402,20 @@ export default function BillingAdminClient({
   // ── Shared reference data ──────────────────────────────────────────────────
   const [teachers, setTeachers] = useState<TeacherProfile[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
+
+  // Test accounts (profiles.is_test / students.is_test). The `teachers` and
+  // `students` lists above and below hold the REAL rows only — these two sets keep
+  // the flagged ids that were filtered out of them, because a lesson still carries
+  // teacher_id / student_id and both tabs have to recognise those ids to drop the
+  // lesson. Populated by the same two fetches that build the lists, so there is one
+  // read per table, not two.
+  //
+  // LIMITATION, matching the reconcile effects below: if either fetch fails, its set
+  // stays empty and that side stops being excluded for the visit. A failed teachers
+  // load already raises dataError, and a failed students load already leaves the
+  // Student dropdown empty, so neither failure is silent.
+  const [testTeacherIds, setTestTeacherIds] = useState<Set<string>>(new Set())
+  const [testStudentIds, setTestStudentIds] = useState<Set<string>>(new Set())
   const [templateUrl, setTemplateUrl] = useState<string | null>(null)
   const templateInputRef = useRef<HTMLInputElement>(null)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
@@ -599,7 +620,7 @@ export default function BillingAdminClient({
       await Promise.all([
         supabase
           .from('profiles')
-          .select('id, full_name, timezone, currency')
+          .select('id, full_name, timezone, currency, is_test')
           .in('role', ['teacher', 'admin'])
           .order('full_name'),
         supabase.from('companies').select('id, name').order('name'),
@@ -628,9 +649,20 @@ export default function BillingAdminClient({
       setDataError(null)
     }
 
-    setTeachers(teacherData || [])
+    // Test teachers leave the dropdown AND the invoice list. Both are derived from
+    // the SAME response here rather than from state, so the invoice filter can never
+    // run before the set it filters on has landed.
+    //
+    // The role filter above cannot hide a test teacher who matters: lessons.teacher_id
+    // and invoices.teacher_id only ever point at a teacher or admin profile.
+    const testTeachers = new Set<string>(
+      (teacherData || []).filter((t: { is_test?: boolean }) => t.is_test).map((t: { id: string }) => t.id)
+    )
+    setTestTeacherIds(testTeachers)
+
+    setTeachers((teacherData || []).filter((t: { id: string }) => !testTeachers.has(t.id)))
     setCompanies(companyData || [])
-    setInvoices(invoiceData || [])
+    setInvoices((invoiceData || []).filter((inv: { teacher_id: string }) => !testTeachers.has(inv.teacher_id)))
 
     if (settingsData?.value) {
       const { data: urlData } = supabase.storage.from('templates').getPublicUrl(settingsData.value)
@@ -643,12 +675,20 @@ export default function BillingAdminClient({
   // Load students list for the Student Billing filter dropdown.
   // cancellation_policy is intentionally omitted — it is fetched server-side
   // via the entities API route only when building billing calculations.
+  // is_test is non-sensitive (authenticated holds a column-level SELECT grant), so it
+  // is selected directly here alongside the other four columns. Test students leave
+  // the dropdown; their ids are kept in testStudentIds so the Student Billing tab can
+  // still recognise a lesson that points at one.
   useEffect(() => {
     supabase
       .from('students')
-      .select('id, full_name, email, company_id')
+      .select('id, full_name, email, company_id, is_test')
       .order('full_name')
-      .then(({ data }) => setStudents(data || []))
+      .then(({ data }) => {
+        const rows = data || []
+        setTestStudentIds(new Set<string>(rows.filter(s => s.is_test).map(s => s.id)))
+        setStudents(rows.filter(s => !s.is_test))
+      })
   }, [])
 
   // ── Hydrate a raw lessons result with teacher/student/company names ─────────
@@ -941,7 +981,15 @@ export default function BillingAdminClient({
         return
       }
 
-      const hydrated = await hydrateLessons(raw || [])
+      // Test-account exclusion. This query is not scoped to one student unless the
+      // admin picked one, so it is the one place a test lesson can arrive; both sides
+      // are checked because either alone disqualifies the row. Applied to the RAW
+      // rows, before hydrateLessons, so no test id is ever sent to the entities route.
+      const visible = (raw || []).filter(
+        l => !testTeacherIds.has(l.teacher_id) && !testStudentIds.has(l.student_id)
+      )
+
+      const hydrated = await hydrateLessons(visible)
       setSbLessons(hydrated)
       setSbLoaded(true)
       setDataError(null)
@@ -956,7 +1004,7 @@ export default function BillingAdminClient({
     } finally {
       setSbLoading(false)
     }
-  }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, exportTz, hydrateLessons])
+  }, [sbFilterStudent, sbFilterDateFrom, sbFilterDateTo, exportTz, hydrateLessons, testTeacherIds, testStudentIds])
 
   // ── Load Company Billing lessons ───────────────────────────────────────────
   const loadCompanyBilling = useCallback(async () => {
@@ -965,10 +1013,15 @@ export default function BillingAdminClient({
     setRateFallbackNote(null)
 
     try {
+      // Test students are excluded IN the query, not after it: studentIds below scopes
+      // the lessons fetch, so dropping them here means a test student's classes are
+      // never fetched at all. Filtering on is_test needs no projection change — the
+      // select stays the explicit single column it was.
       let studentsQuery = supabase
         .from('students')
         .select('id')
         .not('company_id', 'is', null)
+        .eq('is_test', false)
 
       if (cbFilterCompany) studentsQuery = studentsQuery.eq('company_id', cbFilterCompany)
 
@@ -1021,7 +1074,11 @@ export default function BillingAdminClient({
         return
       }
 
-      const hydrated = await hydrateLessons(raw || [])
+      // The student side is already gone (excluded from studentIds above); this drops
+      // a B2B class taught BY a test teacher, which the student scope cannot catch.
+      const visible = (raw || []).filter(l => !testTeacherIds.has(l.teacher_id))
+
+      const hydrated = await hydrateLessons(visible)
       setCbLessons(hydrated)
       setCbLoaded(true)
       // Snapshot the filters that produced these rows, in lockstep with cbLoaded.
@@ -1041,7 +1098,7 @@ export default function BillingAdminClient({
     } finally {
       setCbLoading(false)
     }
-  }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, exportTz, hydrateLessons])
+  }, [cbFilterCompany, cbFilterDateFrom, cbFilterDateTo, exportTz, hydrateLessons, testTeacherIds])
 
   // ── Export download helper ─────────────────────────────────────────────────
   // Uses fetch + blob (not window.open) so a failed export surfaces a friendly
