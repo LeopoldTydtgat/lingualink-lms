@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
     const adminClient = createAdminClient()
     let query = adminClient
       .from('invoices')
-      .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency)')
+      .select('id, billing_month, amount_eur, status, file_path, uploaded_at, paid_at, reference_number, teacher_id, profiles!invoices_teacher_id_fkey(full_name, email, currency, is_test)')
       .order('billing_month', { ascending: false })
 
     if (teacherId) query = query.eq('teacher_id', teacherId)
@@ -158,7 +158,13 @@ export async function GET(req: NextRequest) {
     const { data: invoices, error: invoicesErr } = await query
     if (invoicesErr) throw invoicesErr
 
-    rows = (invoices || []).map(inv => {
+    // An invoice belonging to a test teacher (profiles.is_test) never reaches an export.
+    const realInvoices = (invoices || []).filter(inv => {
+      const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
+      return !teacher?.is_test
+    })
+
+    rows = realInvoices.map(inv => {
       const teacher = Array.isArray(inv.profiles) ? inv.profiles[0] : inv.profiles
       return {
         'Reference': inv.reference_number,
@@ -229,15 +235,19 @@ export async function GET(req: NextRequest) {
 
     const { data: companyStudents, error: companyStudentsErr } = await adminClient
       .from('students')
-      .select('id, full_name, company_id, cancellation_policy')
+      .select('id, full_name, company_id, cancellation_policy, is_test')
       .not('company_id', 'is', null)
     if (companyStudentsErr) throw companyStudentsErr
 
-    const studentIds = (companyStudents || []).map(s => s.id)
+    // Test students (students.is_test) never reach an export. Dropped here, before
+    // studentIds is built, so the lessons query below cannot fetch their classes.
+    const realCompanyStudents = (companyStudents || []).filter(s => !s.is_test)
+
+    const studentIds = realCompanyStudents.map(s => s.id)
 
     let lessonsQuery = adminClient
       .from('lessons')
-      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency)')
+      .select('id, student_id, teacher_id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, profiles!lessons_teacher_id_fkey(full_name, hourly_rate, currency, is_test)')
       .in('student_id', studentIds.length ? studentIds : ['00000000-0000-0000-0000-000000000000'])
 
     if (dateGteIso) lessonsQuery = lessonsQuery.gte('scheduled_at', dateGteIso)
@@ -251,13 +261,16 @@ export async function GET(req: NextRequest) {
     const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map(l => l.id))
 
     for (const company of (companies || [])) {
-      const cStudents = (companyStudents || []).filter(s => s.company_id === company.id)
+      const cStudents = realCompanyStudents.filter(s => s.company_id === company.id)
 
       for (const student of cStudents) {
         const sLessons = (lessons || []).filter(l => l.student_id === student.id)
 
         for (const lesson of sLessons) {
           const teacher = Array.isArray(lesson.profiles) ? lesson.profiles[0] : lesson.profiles
+
+          // A class taught by a test teacher is dropped even when its student is real.
+          if (teacher?.is_test) continue
 
           const bill = getBillability({
             status: lesson.status,

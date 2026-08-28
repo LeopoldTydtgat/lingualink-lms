@@ -276,7 +276,7 @@ export async function fetchWhatsNew(
         new Date(l.scheduled_at).getTime() - new Date(l.cancelled_at).getTime() < 24 * 60 * 60 * 1000
       cancelledText = shortNotice
         ? `${nameOf(l.student_id)} cancelled with less than 24 hours' notice`
-        : `${nameOf(l.student_id)} cancelled with more than 24 hours' notice`
+        : `${nameOf(l.student_id)} cancelled a class on ${formatClassMoment(l.scheduled_at, tz)}`
     } else {
       // No branch here makes a pay claim. The client had pay and invoice wording stripped
       // from the teacher cancellation email and the Upcoming Classes card on the same

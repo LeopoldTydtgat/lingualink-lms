@@ -101,6 +101,13 @@ async function ensureInvoiceRow(
 // drains the April bucket and lands in May. Both invoice rows are then
 // reconciled in the same pass — the destination row is created here if the
 // month didn't have one.
+//
+// TEST ACCOUNTS: this function deliberately does NOT check profiles.is_test.
+// Called with an explicit teacher id it must keep working for a test teacher —
+// the teacher portal legitimately recomputes the test account's own invoice when
+// signed in as her, and every caller here passes a specific id. The is_test skip
+// belongs to recomputeInvoiceAmountsForAllTeachers below, the only caller that
+// fans out across teachers nobody named.
 export async function recomputeInvoiceAmountsForTeacher(teacherId: string): Promise<void> {
   const admin = createAdminClient()
 
@@ -224,10 +231,13 @@ export async function recomputeInvoiceAmountsForAllTeachers(): Promise<void> {
   const admin = createAdminClient()
   const { data: teachers } = await admin
     .from('profiles')
-    .select('id')
+    .select('id, is_test')
     .in('role', ['teacher', 'admin'])
 
-  const ids = (teachers || []).map(t => t.id)
+  // Test teachers (profiles.is_test) get no invoice recompute from this fan-out:
+  // nobody asked for them by name here. recomputeInvoiceAmountsForTeacher above is
+  // deliberately NOT gated, so an explicit id still recomputes a test account.
+  const ids = (teachers || []).filter(t => !t.is_test).map(t => t.id)
 
   const BATCH = 5
   for (let i = 0; i < ids.length; i += BATCH) {
