@@ -2138,6 +2138,12 @@ export default function BookingGridClient({
                                   setSnapNotice(CURRENT_TIME_NOTICE)
                                   return
                                 }
+                                // Tapping the run's own start cell again clears the selection.
+                                if (isSelected) {
+                                  setSelectedStartIso(null)
+                                  setSnapNotice(null)
+                                  return
+                                }
                                 if (slot.bookable) {
                                   setSelectedStartIso(slot.startIso)
                                   setSnapNotice(null)
@@ -2208,6 +2214,8 @@ export default function BookingGridClient({
                                 // legitimate target.
                                 isOriginalStart
                                   ? 'Current class time - choose a different slot'
+                                  : isSelected
+                                  ? `Clear selection ${slotTime}`
                                   : slot.bookable
                                   ? `Book ${slotTime}`
                                   : `Book a class around ${slotTime}`
@@ -2483,12 +2491,35 @@ export default function BookingGridClient({
                 }}
               >
                 {/* Date & time */}
-                <div style={{ paddingBottom: '9px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingBottom: '9px' }}>
                   {renderCell(
                     Calendar,
                     'Date & time',
                     `${longDateFormatter.format(selectedStart)} · ${timeFormatter.format(selectedStart)} – ${timeFormatter.format(selectedEnd)}`
                   )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStartIso(null)
+                      setSnapNotice(null)
+                      setSubmitError(null)
+                    }}
+                    disabled={isSubmitting}
+                    aria-label="Clear selected time"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '0',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      color: '#6b7280',
+                      textDecoration: 'underline',
+                      cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Clear
+                  </button>
                 </div>
 
                 {/* Duration */}
