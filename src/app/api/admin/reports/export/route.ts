@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
       .from('lessons')
       .select(`
         id, scheduled_at, duration_minutes, status, cancelled_at, cancelled_by, rescheduled_by, hours_refunded, teacher_id, student_id,
-        profiles!lessons_teacher_id_fkey ( full_name, hourly_rate ),
+        profiles!lessons_teacher_id_fkey ( full_name, hourly_rate, is_test ),
         reports ( status, completed_at, feedback_text, did_class_happen, no_show_type, flagged_at ),
         lesson_join_clicks ( user_type, clicked_at )
       `)
@@ -137,7 +137,7 @@ export async function GET(request: NextRequest) {
     const { data: studentsData } = studentIds.length
       ? await admin
           .from('students')
-          .select('id, full_name, company_id, is_private, cancellation_policy')
+          .select('id, full_name, company_id, is_private, cancellation_policy, is_test')
           .in('id', studentIds)
       : { data: [] };
     const students = studentsData ?? [];
@@ -157,8 +157,19 @@ export async function GET(request: NextRequest) {
       : { data: [] };
     const reviewedLessonIds = new Set((reviewsData ?? []).map((r) => r.class_id));
 
+    // --- Test-account exclusion ---
+    // A lesson is dropped when EITHER side of it is flagged (profiles.is_test /
+    // students.is_test). Runs after the students fetch above because the student
+    // flag only exists in studentMap; the teacher flag rides the embedded join.
+    const visibleLessons = lessons.filter((l) => {
+      const teacher = firstOf(l.profiles);
+      if (teacher?.is_test) return false;
+      const student = l.student_id ? studentMap[l.student_id] ?? null : null;
+      return !student?.is_test;
+    });
+
     // --- Derive one row object per lesson ---
-    const derived = lessons.map((l) => {
+    const derived = visibleLessons.map((l) => {
       const teacher  = firstOf(l.profiles);
       const report   = firstOf(l.reports);
       const student  = l.student_id ? studentMap[l.student_id] ?? null : null;

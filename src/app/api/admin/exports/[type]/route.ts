@@ -131,8 +131,8 @@ export async function GET(
         // reaches this table. requireAdmin() above has already gated access.
         const joinClickClient = createAdminClient()
         const [teacherRes, studentRes, reportRes, joinClickRes] = await Promise.all([
-          supabase.from('profiles').select('id, full_name').in('id', teacherIds),
-          supabase.from('students').select('id, full_name, company_id').in('id', studentIds),
+          supabase.from('profiles').select('id, full_name, is_test').in('id', teacherIds),
+          supabase.from('students').select('id, full_name, company_id, is_test').in('id', studentIds),
           supabase.from('reports').select('lesson_id, status, did_class_happen, no_show_type, deadline_at, completed_at, flagged_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
           joinClickClient.from('lesson_join_clicks').select('lesson_id, user_type, clicked_at').in('lesson_id', (lessons ?? []).map((l: any) => l.id)),
         ])
@@ -146,6 +146,13 @@ export async function GET(
 
         const studentMap: Record<string, { name: string; companyId: string | null }> = {}
         studentRes.data?.forEach((s: any) => { studentMap[s.id] = { name: s.full_name, companyId: s.company_id } })
+
+        // Test accounts (profiles.is_test / students.is_test) never reach an export.
+        // Built as id sets so the name/company maps above keep their existing shape.
+        const testTeacherIds = new Set<string>()
+        teacherRes.data?.forEach((p: any) => { if (p.is_test) testTeacherIds.add(p.id) })
+        const testStudentIds = new Set<string>()
+        studentRes.data?.forEach((s: any) => { if (s.is_test) testStudentIds.add(s.id) })
 
         const companyIds = [...new Set(Object.values(studentMap).map(s => s.companyId).filter(Boolean))] as string[]
         const companyRes = companyIds.length > 0
@@ -172,10 +179,16 @@ export async function GET(
         const fmtInstant = (value: string | null | undefined): string =>
           value ? formatInstantInTz(value, exportTz) : ''
 
+        // A lesson is dropped when EITHER side of it is a test account. Applied
+        // before the company filter below, which is left exactly as it was.
+        const realLessons = (lessons ?? []).filter(
+          (l: any) => !testTeacherIds.has(l.teacher_id) && !testStudentIds.has(l.student_id)
+        )
+
         // Filter by company if requested
         const filtered = companyId
-          ? (lessons ?? []).filter((l: any) => studentMap[l.student_id]?.companyId === companyId)
-          : (lessons ?? [])
+          ? realLessons.filter((l: any) => studentMap[l.student_id]?.companyId === companyId)
+          : realLessons
 
         rows = filtered.map((l: any) => {
           const report = reportMap[l.id]
@@ -341,7 +354,7 @@ export async function GET(
             ? supabase.from('reports').select('lesson_id, did_class_happen, no_show_type').in('lesson_id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency, timezone').in('id', tIds)
+            ? adminClient.from('profiles').select('id, full_name, hourly_rate, currency, timezone, is_test').in('id', tIds)
             : { data: [] },
         ])
         if ('error' in reportRes && reportRes.error) throw reportRes.error
@@ -352,6 +365,12 @@ export async function GET(
 
         const profileMap: Record<string, { name: string; rate: number; currency: string; timezone: string | null }> = {}
         profileRes.data?.forEach((p: any) => { profileMap[p.id] = { name: p.full_name, rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR', timezone: p.timezone ?? null } })
+
+        // Test teachers (profiles.is_test) never reach an export. No students fetch is
+        // added here: test students only ever have lessons with test teachers (verified
+        // in DB 28 Aug 2026), so excluding the teacher side covers them.
+        const testTeacherIds = new Set<string>()
+        profileRes.data?.forEach((p: any) => { if (p.is_test) testTeacherIds.add(p.id) })
 
         // Group by teacher × month
         type EarningKey = string
@@ -376,6 +395,10 @@ export async function GET(
         for (const lesson of lessons ?? []) {
           const report = reportMap[lesson.id]
           const profile = profileMap[lesson.teacher_id]
+
+          // Test-teacher exclusion sits ABOVE the timezone guard on purpose: a test
+          // account with no timezone set must not 422 an otherwise valid export.
+          if (testTeacherIds.has(lesson.teacher_id)) continue
 
           // Checked FIRST: the teacher's timezone now scopes the range as well as
           // the month bucket, so a lesson cannot be range-filtered without it.
@@ -530,12 +553,16 @@ export async function GET(
 
         const sIds = [...new Set((trainings ?? []).map((t: any) => t.student_id).filter(Boolean))]
         const studentRes = sIds.length > 0
-          ? await supabase.from('students').select('id, full_name, company_id').in('id', sIds)
+          ? await supabase.from('students').select('id, full_name, company_id, is_test').in('id', sIds)
           : { data: [] }
         if ('error' in studentRes && studentRes.error) throw studentRes.error
 
         const sMap: Record<string, { name: string; companyId: string | null }> = {}
         studentRes.data?.forEach((s: any) => { sMap[s.id] = { name: s.full_name, companyId: s.company_id } })
+
+        // Test students (students.is_test) never reach an export.
+        const testStudentIds = new Set<string>()
+        studentRes.data?.forEach((s: any) => { if (s.is_test) testStudentIds.add(s.id) })
 
         const cIds = [...new Set(Object.values(sMap).map(s => s.companyId).filter(Boolean))] as string[]
         const cRes = cIds.length > 0
@@ -545,9 +572,12 @@ export async function GET(
         const cMap: Record<string, string> = {}
         cRes.data?.forEach((c: any) => { cMap[c.id] = c.name })
 
+        // Applied before the company filter below, which is left exactly as it was.
+        const realTrainings = (trainings ?? []).filter((t: any) => !testStudentIds.has(t.student_id))
+
         const filtered = companyId
-          ? (trainings ?? []).filter((t: any) => sMap[t.student_id]?.companyId === companyId)
-          : (trainings ?? [])
+          ? realTrainings.filter((t: any) => sMap[t.student_id]?.companyId === companyId)
+          : realTrainings
 
         rows = filtered.map((t: any) => {
           const student = sMap[t.student_id]
@@ -618,18 +648,22 @@ export async function GET(
         // Get all B2B students (those with a company_id)
         let studentQuery = adminClient
           .from('students')
-          .select('id, full_name, company_id, cancellation_policy')
+          .select('id, full_name, company_id, cancellation_policy, is_test')
           .not('company_id', 'is', null)
 
         if (companyId) studentQuery = studentQuery.eq('company_id', companyId)
         const { data: students, error: sErr } = await studentQuery
         if (sErr) throw sErr
 
-        const studentIds = (students ?? []).map((s: any) => s.id)
+        // Test students (students.is_test) never reach an export. Dropped here, before
+        // studentIds is built, so the lessons query below cannot fetch their classes.
+        const realStudents = (students ?? []).filter((s: any) => !s.is_test)
+
+        const studentIds = realStudents.map((s: any) => s.id)
         // No B2B students in scope — emit the empty workbook (title block + headers).
         if (studentIds.length === 0) break
 
-        const cIds = [...new Set((students ?? []).map((s: any) => s.company_id).filter(Boolean))] as string[]
+        const cIds = [...new Set(realStudents.map((s: any) => s.company_id).filter(Boolean))] as string[]
         const cRes = await supabase.from('companies').select('id, name').in('id', cIds)
         if (cRes.error) throw cRes.error
         const cMap: Record<string, string> = {}
@@ -682,20 +716,28 @@ export async function GET(
         // company-owed Amount can be computed from getBillability's single source.
         const teacherIds = [...new Set((lessons ?? []).map((l: any) => l.teacher_id).filter(Boolean))] as string[]
         const teacherRes = teacherIds.length > 0
-          ? await adminClient.from('profiles').select('id, full_name, hourly_rate, currency').in('id', teacherIds)
+          ? await adminClient.from('profiles').select('id, full_name, hourly_rate, currency, is_test').in('id', teacherIds)
           : { data: [] }
         if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
         const teacherMap: Record<string, { name: string; rate: number; currency: string }> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = { name: p.full_name ?? '', rate: Number(p.hourly_rate ?? 0), currency: p.currency ?? 'EUR' } })
+
+        // Test teachers (profiles.is_test) never reach an export. The student side is
+        // already excluded above, before studentIds was built.
+        const testTeacherIds = new Set<string>()
+        teacherRes.data?.forEach((p: any) => { if (p.is_test) testTeacherIds.add(p.id) })
 
         // Per-lesson pay rate from lesson_rate_snapshots (adminClient — deny-all RLS).
         // teacherMap rate (live profiles.hourly_rate) is the fallback only (NEW268 D1).
         const rateMap = await fetchLessonRateMap(adminClient, (lessons ?? []).map((l: { id: string }) => l.id))
 
         const sMap: Record<string, any> = {}
-        students?.forEach((s: any) => { sMap[s.id] = s })
+        realStudents.forEach((s: any) => { sMap[s.id] = s })
 
-        const billingRows = (lessons ?? []).map((l: any) => {
+        // A class taught by a test teacher is dropped even when its student is real.
+        const realLessons = (lessons ?? []).filter((l: any) => !testTeacherIds.has(l.teacher_id))
+
+        const billingRows = realLessons.map((l: any) => {
           const student = sMap[l.student_id]
 
           // company-standard billing intentionally tracks billableToTeacher; the 48hr B2B split is billable48hr — single source of truth, do not reintroduce inline arithmetic.
@@ -877,7 +919,7 @@ export async function GET(
             ? supabase.from('lessons').select('id, student_id, scheduled_at').in('id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? supabase.from('profiles').select('id, full_name').in('id', tIds)
+            ? supabase.from('profiles').select('id, full_name, is_test').in('id', tIds)
             : { data: [] },
         ])
         if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
@@ -889,21 +931,31 @@ export async function GET(
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
 
+        // Test accounts (profiles.is_test / students.is_test) never reach an export.
+        const testTeacherIds = new Set<string>()
+        teacherRes.data?.forEach((p: any) => { if (p.is_test) testTeacherIds.add(p.id) })
+
         const sIds = [...new Set(Object.values(lessonMap).map(l => l.studentId).filter(Boolean))]
         const filteredSIds = studentId ? [studentId] : sIds as string[]
 
         const studentRes2 = filteredSIds.length > 0
-          ? await supabase.from('students').select('id, full_name').in('id', filteredSIds)
+          ? await supabase.from('students').select('id, full_name, is_test').in('id', filteredSIds)
           : { data: [] }
         if ('error' in studentRes2 && studentRes2.error) throw studentRes2.error
         const studentMap: Record<string, string> = {}
         studentRes2.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
+
+        const testStudentIds = new Set<string>()
+        studentRes2.data?.forEach((s: any) => { if (s.is_test) testStudentIds.add(s.id) })
 
         rows = []
 
         for (const report of reports ?? []) {
           const lesson = lessonMap[report.lesson_id]
           if (!lesson) continue
+          // Dropped when EITHER side of the class is a test account.
+          if (testTeacherIds.has(report.teacher_id)) continue
+          if (testStudentIds.has(lesson.studentId)) continue
           if (studentId && lesson.studentId !== studentId) continue
 
           const ld = report.level_data as Record<string, string> | null
@@ -968,7 +1020,7 @@ export async function GET(
             ? supabase.from('lessons').select('id, student_id, scheduled_at').in('id', lessonIds)
             : { data: [] },
           tIds.length > 0
-            ? supabase.from('profiles').select('id, full_name').in('id', tIds)
+            ? supabase.from('profiles').select('id, full_name, is_test').in('id', tIds)
             : { data: [] },
         ])
         if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
@@ -980,17 +1032,32 @@ export async function GET(
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
 
+        // Test accounts (profiles.is_test / students.is_test) never reach an export.
+        const testTeacherIds = new Set<string>()
+        teacherRes.data?.forEach((p: any) => { if (p.is_test) testTeacherIds.add(p.id) })
+
         const sIds = [...new Set(Object.values(lessonMap).map(l => l.studentId).filter(Boolean))] as string[]
         const studentRes = sIds.length > 0
-          ? await supabase.from('students').select('id, full_name').in('id', sIds)
+          ? await supabase.from('students').select('id, full_name, is_test').in('id', sIds)
           : { data: [] }
         if ('error' in studentRes && studentRes.error) throw studentRes.error
         const studentMap: Record<string, string> = {}
         studentRes.data?.forEach((s: any) => { studentMap[s.id] = s.full_name })
 
+        const testStudentIds = new Set<string>()
+        studentRes.data?.forEach((s: any) => { if (s.is_test) testStudentIds.add(s.id) })
+
         const now = Date.now()
 
-        rows = (reports ?? []).map((r: any) => {
+        // A report whose lesson row is missing still lists (as before) unless its own
+        // teacher is a test account — the student side cannot be resolved without it.
+        const visibleReports = (reports ?? []).filter((r: any) => {
+          if (testTeacherIds.has(r.teacher_id)) return false
+          const lesson = lessonMap[r.lesson_id]
+          return !(lesson && testStudentIds.has(lesson.studentId))
+        })
+
+        rows = visibleReports.map((r: any) => {
           const lesson = lessonMap[r.lesson_id]
           const classEndTime = lesson
             ? new Date(lesson.scheduledAt).getTime()
