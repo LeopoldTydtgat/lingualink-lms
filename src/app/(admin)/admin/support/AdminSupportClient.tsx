@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import SafeHtml from '@/components/SafeHtml'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { readEditorHtml } from '@/lib/messages/readEditorHtml'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import ReadTicks from '@/components/messages/ReadTicks'
@@ -534,7 +535,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
 
   const handleSend = async () => {
     if (!editor || !selectedConv || sending) return
-    const html = editor.getHTML()
+    const html = readEditorHtml(editor)
     // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
     const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
     if (isEmpty && pendingAttachments.length === 0) return
@@ -621,7 +622,7 @@ export default function AdminSupportClient({ adminProfile, conversations: initia
     const target = messages.find(m => m.id === editingMessageId)
     if (!target) return
 
-    const html = editEditor.getHTML()
+    const html = readEditorHtml(editEditor)
     // Same emptiness rule as handleSend; empty is allowed only when the message
     // keeps its attachments (attachment-only messages store '').
     const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
