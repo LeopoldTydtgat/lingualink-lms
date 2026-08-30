@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, EyeOff } from 'lucide-react'
-import { sanitizeHtml } from '@/lib/sanitize'
+import SafeHtml from '@/components/SafeHtml'
 import { EmailBounceNotice } from '@/components/EmailBounceBadge'
 import TasksMini from '@/components/admin/TasksMini'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
@@ -441,14 +441,14 @@ function MessageThread({
               )}
               <div className={`flex ${isFromTeacher ? 'justify-end' : 'justify-start'}`}>
                 <div className="max-w-[72%]">
-                  <div
+                  <SafeHtml
                     className="admin-msg-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                     style={
                       isFromTeacher
                         ? { backgroundColor: '#FF8303', color: 'white', borderBottomRightRadius: '4px' }
                         : { backgroundColor: '#1F2937', color: 'white', borderBottomLeftRadius: '4px' }
                     }
-                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
+                    html={msg.content}
                   />
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="mt-1 flex flex-col gap-1">

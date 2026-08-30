@@ -2,7 +2,7 @@ import sanitizeHtmlLib from 'sanitize-html'
 
 // Server-side HTML sanitiser. Uses sanitize-html (htmlparser2-based, no jsdom)
 // so it runs reliably on Vercel's serverless runtime. Mirrors the allowlist of
-// the isomorphic-dompurify version in src/lib/sanitize.ts so saved content is
+// the dompurify version in src/lib/sanitize.ts so saved content is
 // identical regardless of which sanitiser cleaned it.
 
 const ALLOWED_TAGS = [

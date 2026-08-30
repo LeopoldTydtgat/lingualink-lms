@@ -11,8 +11,9 @@ import dynamic from 'next/dynamic'
 import data from '@emoji-mart/data'
 import { toast } from 'sonner'
 import { createClient } from '@/lib/supabase/client'
-import { sanitizeHtml } from '@/lib/sanitize'
+import SafeHtml from '@/components/SafeHtml'
 import { isEmojiOnly } from '@/lib/messages/isEmojiOnly'
+import { readEditorHtml } from '@/lib/messages/readEditorHtml'
 import { messageAttachmentHref } from '@/lib/messages/attachmentHref'
 import { EDIT_WINDOW_ERROR, isWithinEditWindow } from '@/lib/messages/editWindow'
 import { sendMessage, editMessage, markMessagesAsRead } from './actions'
@@ -393,7 +394,7 @@ export default function StudentMessagesClient({
 
   const handleSend = async () => {
     if (!editor || !selectedContact || sending) return
-    const html = editor.getHTML()
+    const html = readEditorHtml(editor)
     // Treat tag-only / whitespace-only HTML as empty (emoji-only still counts as content).
     const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
     if (isEmpty && pendingAttachments.length === 0) return
@@ -470,7 +471,7 @@ export default function StudentMessagesClient({
     const target = messages.find(m => m.id === editingMessageId)
     if (!target) return
 
-    const html = editEditor.getHTML()
+    const html = readEditorHtml(editEditor)
     // Same emptiness rule as handleSend; empty is allowed only when the message
     // keeps its attachments (attachment-only messages store '').
     const isEmpty = !html || (html.replace(/<[^>]*>/g, '').trim().length === 0 && !isEmojiOnly(html))
@@ -792,11 +793,11 @@ export default function StudentMessagesClient({
                               className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed inline-flex items-end"
                               style={{ backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }}
                             >
-                              <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }} />
+                              <SafeHtml html={msg.content} />
                               <ReadTicks readAt={msg.read_at} variant="bubble" className="self-end ml-1" />
                             </div>
                           ) : (
-                          <div
+                          <SafeHtml
                             className="student-bubble px-4 py-2.5 rounded-2xl text-sm leading-relaxed"
                             style={isEmojiOnly(msg.content)
                               ? { fontSize: '2rem', background: 'none', padding: '4px 8px' }
@@ -804,7 +805,7 @@ export default function StudentMessagesClient({
                                 ? { backgroundColor: '#1f2937', color: '#f9fafb', borderBottomRightRadius: '4px' }
                                 : { backgroundColor: '#ffffff', color: '#1f2937', border: '1px solid #E0DFDC', borderBottomLeftRadius: '4px' }
                             }
-                            dangerouslySetInnerHTML={{ __html: sanitizeHtml(msg.content) }}
+                            html={msg.content}
                           />
                           )
                           )}

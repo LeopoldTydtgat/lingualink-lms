@@ -294,3 +294,17 @@
   outline: 2px solid #000000;
   outline-offset: 2px;
 }
+
+/* Links inside message bubbles: inherit the bubble text colour (white on dark,
+   dark on light), underlined so they read as links, and wrap so a long URL
+   cannot run past the bubble edge. */
+.message-bubble a,
+.student-bubble a,
+.widget-bubble a,
+.admin-msg-bubble a,
+.admin-support-bubble a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
