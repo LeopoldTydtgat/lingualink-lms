@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { getCancellationLabel } from '@/lib/lessons/statusLabel';
 import { DateRangeFilter } from '../_components/DateRangeFilter';
 import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence';
@@ -190,6 +191,11 @@ const CLASS_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'teacher_no_show', label: 'Teacher No-Show' },
 ];
 
+// The two directions the Class Date header toggles between, and the only two values the
+// GET route's ?sort= allow-list accepts. Same vocabulary as the Classes list, deliberately:
+// one param name and one pair of values across both admin lists.
+type SortDir = 'asc' | 'desc';
+
 // Page-scoped, so each admin list keeps its own record (cf. 'll-admin-classes-filters').
 const FILTERS_STORAGE_KEY = 'll-admin-reports-filters';
 
@@ -209,40 +215,63 @@ const FILTERS_STORAGE_KEY = 'll-admin-reports-filters';
  * does NOT survive navigation, the admin re-picks it, and every landing in between opens
  * on month-to-date. Client decision, 22 Aug, matching the Classes and Billing lists.
  *
- * Records written BEFORE dates left this key still carry preset/from/to.
- * parseStoredFilters below reads the three fields it knows and ignores the rest rather
- * than rejecting the record, so an admin mid-session keeps the selection they had. That
- * is also why the storage key is deliberately unchanged: there is no incompatible shape
- * to fence off, only three fields nothing reads any more.
+ * THE SORT DIRECTION is stored, unlike the date range: it is a view choice the admin made
+ * deliberately rather than a default the server recomputes on every visit. It earns its
+ * place here more than it does on the Classes list, because the Live Classes Trace tab
+ * unmounts this component outright - with nothing stored, flipping the column and glancing
+ * at the trace would snap the order back to descending on the way back.
+ *
+ * Records written BEFORE dates left this key still carry preset/from/to, and records
+ * written before the sort toggle existed carry no sortDir at all. parseStoredFilters below
+ * reads the fields it knows and ignores the rest rather than rejecting the record, so an
+ * admin mid-session keeps the selection they had - and a missing sortDir reads as 'desc',
+ * which is the order the list opens on anyway. That is also why the storage key is
+ * deliberately unchanged: there is no incompatible shape to fence off, only three fields
+ * nothing reads any more.
  */
 interface StoredFilters {
   status:      string;
   teacher:     string;
   classStatus: string;
+  sortDir:     SortDir;
 }
 
 const DEFAULT_STORED_FILTERS: StoredFilters = {
   status:      '',
   teacher:     '',
   classStatus: '',
+  // 'desc' is the order this list opens on, the order the server seed is hardcoded to and
+  // the order the GET route applies with no ?sort=, so a record holding it still means "no
+  // filters" and the hook still REMOVES the key rather than writing one.
+  sortDir:     'desc',
 };
 
-// The five list-filter params, built in ONE place. fetchReports sends them, and the mount
+// The list-request params, built in ONE place. fetchReports sends them, and the mount
 // effect compares them against what the server already rendered to decide whether that
 // fetch is worth making at all. Those two must never disagree about what a given filter
 // state asks for - which is exactly what a second copy of this if-chain would eventually do,
 // the first time a filter is added to one of them and not the other.
 //
 // Names and order are the GET route's own (status, teacher_id, class_status, date_from,
-// date_to; each set only when non-empty). `page` is deliberately NOT here: it is appended
-// by the fetch and is not part of what identifies a view.
-function buildFilterParams(status: string, teacher: string, classStatus: string, from: string, to: string): string {
+// date_to; each set only when non-empty), with `sort` last.
+//
+// `sort` is the one param set UNCONDITIONALLY - sortDir is always one of the two values the
+// route's allow-list accepts, so there is no "unset" state to omit, the same call the
+// classes client makes. It belongs in THIS string rather than beside `page` because the
+// direction IS part of what identifies a view: the skip test below compares against a
+// server seed that is always descending, and a restored 'asc' has to be able to disagree
+// with it.
+//
+// `page` is deliberately NOT here: it is appended by the fetch and is not part of what
+// identifies a view.
+function buildFilterParams(status: string, teacher: string, classStatus: string, from: string, to: string, sortDir: SortDir): string {
   const params = new URLSearchParams();
   if (status)      params.set('status',       status);
   if (teacher)     params.set('teacher_id',   teacher);
   if (classStatus) params.set('class_status', classStatus);
   if (from)        params.set('date_from',    from);
   if (to)          params.set('date_to',      to);
+  params.set('sort', sortDir);
   return params.toString();
 }
 
@@ -336,6 +365,14 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   const [dateFrom,          setDateFrom]          = useState(initialDateFrom);
   const [dateTo,            setDateTo]            = useState(initialDateTo);
 
+  // Which way the Class Date column runs. SERVER-side: it rides on the request as ?sort=
+  // and the route turns it into the direction of BOTH its .order() calls, so it reorders
+  // the whole result set rather than the rows this list happens to have loaded - which
+  // matters more here than on a paged list, because Load More appends pages onto the end.
+  // 'desc' is the order this list opens on and the order the server seed is hardcoded to,
+  // which is what makes the seededParams comparison below meaningful on the first run.
+  const [sortDir,           setSortDir]           = useState<SortDir>('desc');
+
   // The record handed to sessionStorage, rebuilt only when a PERSISTED filter moves.
   // Both dates are absent from the deps on purpose: neither is stored any more, so neither
   // should cost a rebuild or a write.
@@ -343,7 +380,8 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     status:      statusFilter,
     teacher:     teacherFilter,
     classStatus: classStatusFilter,
-  }), [statusFilter, teacherFilter, classStatusFilter]);
+    sortDir,
+  }), [statusFilter, teacherFilter, classStatusFilter, sortDir]);
 
   /**
    * Shape validation for a decoded stored record. Null rejects the whole record and the
@@ -359,10 +397,12 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
    * absent from the dropdown would filter the list by an invisible selection - the select
    * would render blank while the fetch quietly narrowed the results.
    *
-   * OLD-SHAPE RECORDS PARSE. A record still carrying preset/from/to from before the date
-   * range left this key is read for status, teacher and classStatus and nothing else:
-   * those three keys are never read, never validated, and never a reason to reject. The
-   * next write replaces the record with the current shape, so the migration costs nothing.
+   * OLD-SHAPE RECORDS PARSE, in both directions. A record still carrying preset/from/to
+   * from before the date range left this key is read for status, teacher, classStatus and
+   * sortDir and nothing else: those three keys are never read, never validated, and never
+   * a reason to reject. A record MISSING sortDir - every record written before the sort
+   * toggle existed - parses just as readily and lands on 'desc'. The next write replaces
+   * either with the current shape, so the migration costs nothing in either direction.
    */
   function parseStoredFilters(raw: unknown): StoredFilters | null {
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
@@ -378,6 +418,13 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       status:      STATUS_OPTIONS.some((o) => o.value === status) ? status : '',
       teacher:     teachers.some((t) => t.id === teacher) ? teacher : '',
       classStatus: CLASS_STATUS_OPTIONS.some((o) => o.value === classStatus) ? classStatus : '',
+      // Deliberately NOT one of the structural rejects above. Every record written before
+      // this field existed has no sortDir, and rejecting those would throw away the status,
+      // teacher and class type an admin mid-session still has on screen. Missing,
+      // wrong-typed and unrecognised all land on 'desc' - the order the list opens on and
+      // the order the server seeded - so the worst case is the default, never a direction
+      // the header cannot display.
+      sortDir:     record.sortDir === 'asc' ? 'asc' : 'desc',
     };
   }
 
@@ -386,15 +433,17 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
    * never during render. loadedPageRef is untouched: a restore only ever happens on mount,
    * and the page-1 fetch it provokes resets that ref itself.
    *
-   * Status, teacher and class type ONLY. It must NOT touch dateFrom/dateTo, and that is
-   * the whole point of taking dates out of the record: the seeded landing range stays in
-   * place under a restore instead of being overwritten a frame later by a range from an
-   * earlier visit. In the browser that reads as "teacher/status remembered, dates reset".
+   * Status, teacher, class type and sort direction ONLY. It must NOT touch dateFrom/dateTo,
+   * and that is the whole point of taking dates out of the record: the seeded landing range
+   * stays in place under a restore instead of being overwritten a frame later by a range
+   * from an earlier visit. In the browser that reads as "teacher/status/order remembered,
+   * dates reset".
    */
   function applyStoredFilters(stored: StoredFilters) {
     setStatusFilter(stored.status);
     setTeacherFilter(stored.teacher);
     setClassStatusFilter(stored.classStatus);
+    setSortDir(stored.sortDir);
   }
 
   // RESTORE RACE - already covered by the request token below, deliberately and with no
@@ -435,7 +484,13 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   // What the SERVER seed asked for: the ?filter= status, plus - on a plain landing - the
   // month-to-date bounds the seed query applied to the embedded lessons.scheduled_at.
   // Teacher and class type are '' by construction: the seed query filters on neither.
-  const seededParams = buildFilterParams(initialStatusFilter, '', '', initialDateFrom, initialDateTo);
+  //
+  // 'desc' is HARDCODED rather than read from sortDir, because the seed query itself is
+  // hardcoded descending (admin/reports/page.tsx) and this string has to describe what the
+  // server actually rendered, not what the client currently wants. That difference is the
+  // whole mechanism: a restored 'asc' makes the live filter params disagree with this
+  // string, which is what stops the skip from standing over rows in the wrong order.
+  const seededParams = buildFilterParams(initialStatusFilter, '', '', initialDateFrom, initialDateTo, 'desc');
 
   // The filter-param string that produced the rows CURRENTLY on screen, seeded from the
   // server render when that seed is usable. null means "unknown" - the seed query failed,
@@ -450,7 +505,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     const requestId = ++reportsRequestIdRef.current;
     // Through the shared builder, so this request and the mount effect's skip test can
     // never describe the same filter state differently.
-    const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo);
+    const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, sortDir);
     // Whether this fetch is about to show the SAME view that is already rendered.
     // Meaningless for page > 1, which appends to that view and touches neither flag.
     const isSameView = filterParams === displayedParamsRef.current;
@@ -466,7 +521,9 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
     }
     setListError('');
     // page FIRST, then the filter portion - the exact param order this request has always
-    // used, so the URL stays byte-identical to the pre-refactor one for every filter state.
+    // used. filterParams can no longer be empty now that `sort` is unconditional, so the
+    // second arm is unreachable today; it is kept rather than deleted because it is still
+    // the correct answer if the builder ever goes back to emitting nothing.
     const queryString = filterParams ? `page=${page}&${filterParams}` : `page=${page}`;
     try {
       const res = await fetch(`/api/admin/reports?${queryString}`);
@@ -523,16 +580,18 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
       // `loading` and never touch this flag.
       if (page > 1) setLoadingMore(false);
     }
-  }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
+  }, [statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, sortDir]);
 
   // The mount fetch, with ONE skip: the first run after a full page load, when the
   // server-rendered rows already ARE what this fetch would return.
   //
   // (a) This effect's FIRST run always sees the server-seeded filter state. The persistence
   //     restore runs from an earlier effect in the same mount pass, but its setState lands a
-  //     render later - so statusFilter is still initialStatusFilter here and the dates are
-  //     still initialDateFrom/initialDateTo, with teacher and class type still ''. That is
-  //     what makes the comparison against seededParams meaningful.
+  //     render later - so statusFilter is still initialStatusFilter here, the dates are
+  //     still initialDateFrom/initialDateTo, teacher and class type are still '', and
+  //     sortDir is still 'desc', which is the direction seededParams is built with and the
+  //     direction the server actually rendered. That is what makes the comparison against
+  //     seededParams meaningful.
   // (b) A restore that CHANGES a filter re-memoises fetchReports and re-runs this effect.
   //     seedFreshRef is already false by then, so that run fetches - and with the honest
   //     spinner, because displayedParamsRef still holds the seeded params and cannot match.
@@ -548,11 +607,22 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
   useEffect(() => {
     if (seedFreshRef.current) {
       seedFreshRef.current = false;
-      const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo);
+      const filterParams = buildFilterParams(statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, sortDir);
       if (initialTotal !== null && filterParams === seededParams) return;
     }
     fetchReports();
-  }, [fetchReports, initialTotal, seededParams, seedFreshRef, statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo]);
+  }, [fetchReports, initialTotal, seededParams, seedFreshRef, statusFilter, teacherFilter, classStatusFilter, dateFrom, dateTo, sortDir]);
+
+  // The Class Date header's toggle. There is no page reset to make and none is needed:
+  // this list owns no page state - Load More tracks its position in loadedPageRef - and
+  // any change to sortDir re-memoises fetchReports, whose effect refetches PAGE 1. That
+  // page-1 path REPLACES the list outright and resets loadedPageRef to 1 with it, so the
+  // extra pages an admin had loaded are dropped rather than left stranded in the old
+  // order. Exactly the path a filter change takes, for the reason the DateRangeFilter
+  // comment below spells out.
+  function toggleSortDir() {
+    setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'));
+  }
 
   async function handleReopen(reportId: string) {
     setReopenError('');
@@ -608,7 +678,7 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
           onChange={(f, t) => { setDateFrom(f); setDateTo(t); }}
           tz={adminTzRaw}
         />
-        {(statusFilter || teacherFilter || classStatusFilter || dateFrom || dateTo) && (
+        {(statusFilter || teacherFilter || classStatusFilter || dateFrom || dateTo || sortDir !== 'desc') && (
           // clearStoredFilters() alongside the state resets: "Clear" has to mean cleared
           // for the next visit too, and without it the only thing wiping the key would be
           // the hook noticing the state fell back to its defaults - which it cannot notice
@@ -622,7 +692,15 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
           // differs from what the page actually landed on (?filter= / ?reopen= open with no
           // date bound), exactly as it does on the Classes list. Both props are '' on a
           // timezone-less profile, so Clear empties the two inputs there as it always did.
-          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(defaultDateFrom); setDateTo(defaultDateTo); clearStoredFilters(); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
+          //
+          // The SORT DIRECTION goes back to 'desc' with them, matching ClassesListClient's
+          // clearFilters: "as I landed" means the landing order too. It is also what keeps
+          // clearStoredFilters() honest - sortDir is part of the persisted record, so a
+          // left-behind 'asc' would put the state back out of step with
+          // DEFAULT_STORED_FILTERS and the hook would immediately re-write the key this
+          // handler just removed. That is why sortDir joins the render gate above: without
+          // it the button would be hidden in exactly the state it needs to be offered in.
+          <button onClick={() => { setStatusFilter(''); setTeacherFilter(''); setClassStatusFilter(''); setDateFrom(defaultDateFrom); setDateTo(defaultDateTo); setSortDir('desc'); clearStoredFilters(); }} className="text-sm font-medium hover:underline" style={{ color: '#FF8303' }}>
             Clear filters
           </button>
         )}
@@ -647,7 +725,49 @@ function ReportsList({ initialReports, teachers, initialStatusFilter, initialReo
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100">
-                    <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Class Date</th>
+                    {/* aria-sort lands on a REAL <th> here, so assistive tech honours it -
+                        unlike the Classes list, whose header is a CSS grid of spans. It
+                        states the direction the column is CURRENTLY running; the button's
+                        aria-label states what pressing it will do. */}
+                    <th
+                      className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide"
+                      aria-sort={sortDir === 'asc' ? 'ascending' : 'descending'}
+                    >
+                      <button
+                        type="button"
+                        onClick={toggleSortDir}
+                        aria-label={sortDir === 'asc' ? 'Sort by date descending' : 'Sort by date ascending'}
+                        style={{
+                          // font, colour, letter-spacing and text-transform INHERIT from the
+                          // th's Tailwind classes rather than being restated here: a button
+                          // carries its own UA font and colour, and restating them is how
+                          // this one header drifts out of step with the six beside it the
+                          // next time the row is restyled.
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: 0,
+                          border: 'none',
+                          background: 'none',
+                          font: 'inherit',
+                          color: 'inherit',
+                          letterSpacing: 'inherit',
+                          textTransform: 'inherit',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Class Date
+                        {/* Tailwind v4 does not emit dynamically built colour classes, so
+                            the active colour is an inline style. aria-hidden: the direction
+                            is already carried by the two labels above, and a second
+                            announcement of it is noise. */}
+                        {sortDir === 'asc' ? (
+                          <ArrowUp size={12} strokeWidth={2.5} aria-hidden="true" style={{ color: '#FF8303' }} />
+                        ) : (
+                          <ArrowDown size={12} strokeWidth={2.5} aria-hidden="true" style={{ color: '#FF8303' }} />
+                        )}
+                      </button>
+                    </th>
                     <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Teacher</th>
                     <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Student</th>
                     <th className="text-left py-3 px-3 font-medium text-gray-500 text-xs uppercase tracking-wide">Duration</th>

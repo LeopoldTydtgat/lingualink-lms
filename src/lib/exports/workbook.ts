@@ -10,7 +10,10 @@
 //      XLSX carries its encoding inside the container, so the question does not
 //      arise.
 //   2. CSV forces every value to a string. Numbers written here stay numbers
-//      with a number FORMAT, so they sort and sum in Excel.
+//      with a number FORMAT, so they sort and sum in Excel. The 'date' format
+//      below extends the same idea to dates: the cell holds a real Date, so
+//      Excel sorts and date-filters the column chronologically instead of
+//      lexically ('1 April' before '2 March' is what a text column would give).
 //
 // Because string cells in XLSX are inline/shared strings and are never parsed
 // as formulas, the CSV leading-=/+/@ escaping guard is not needed and must not
@@ -20,13 +23,17 @@ import ExcelJS from 'exceljs'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type ExportCellFormat = 'text' | 'integer' | 'decimal1' | 'decimal2' | 'money2'
+export type ExportCellFormat = 'text' | 'integer' | 'decimal1' | 'decimal2' | 'money2' | 'date'
 
 export interface ExportColumn {
   header: string
   key: string
   width: number
-  format?: ExportCellFormat // default 'text'
+  // default 'text'. 'date' expects a real Date value (build it with
+  // zonedCalendarDateForExcel or ymdForExcel in @/lib/exportTime — both anchor
+  // the Date at midnight UTC, which is what ExcelJS serialises as a whole-number
+  // date serial); null renders as an empty cell.
+  format?: ExportCellFormat
   wrap?: boolean            // default false; true for long free-text columns
 }
 
@@ -66,6 +73,14 @@ const BORDER_SOFT = 'FFF3F4F6'
 const BAND_FILL = 'FFFAFAFA'
 const TOTALS_FILL = 'FFF3F4F6'
 
+// Display format for 'date' columns: '21 August 2026'. Applied per DATA cell,
+// not at column level like NUM_FMT below — a date column may be column 1 (it is,
+// on All Classes and Company Billing), and column 1 also carries the merged
+// title / generated-at / filters banner cells. Those are strings and a date
+// numFmt would be inert on them, but scoping the format to the data cells keeps
+// the banner rows provably untouched.
+export const DATE_NUM_FMT = 'd mmmm yyyy'
+
 // numFmt only affects NUMERIC cells. A column may legitimately hold a string in
 // some rows (the literal 'varies', or 'Mixed currencies - see rows'); those stay
 // text and are left exactly as the caller passed them — never coerced.
@@ -75,6 +90,7 @@ const NUM_FMT: Record<ExportCellFormat, string | null> = {
   decimal1: '0.0',
   decimal2: '0.00',
   money2: '#,##0.00',
+  date: null, // see DATE_NUM_FMT — set per data cell, not on the column
 }
 
 function thin(argb: string): ExcelJS.Border {
@@ -174,7 +190,11 @@ export async function buildExportWorkbook(opts: BuildWorkbookOptions): Promise<B
       columns.forEach((c, i) => {
         const cell = excelRow.getCell(i + 1)
         const value = row[c.key]
+        // Date values pass through untouched — ExcelJS types a Date cell as
+        // ValueType.Date and writes the date serial itself. undefined and null
+        // both become an empty cell.
         cell.value = (value === undefined ? null : value) as ExcelJS.CellValue
+        if (c.format === 'date') cell.numFmt = DATE_NUM_FMT
         cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: c.wrap ?? false }
         cell.border = { bottom: thin(BORDER_SOFT) }
         if (stateFill) cell.fill = solidFill(stateFill)

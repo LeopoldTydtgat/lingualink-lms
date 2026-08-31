@@ -143,6 +143,13 @@ export default async function AdminReportsPage({
     // is BOOKED, not when the class happens. Both .order() calls are TOP level, so this
     // emits the route's exact order param - which is what keeps the MIRRORS claim above
     // true, and with it the client's seed-skip.
+    //
+    // ALWAYS descending, and deliberately not a parameter: this seed renders the DEFAULT
+    // view and has no sort direction to read. A restored sortDir of 'asc' therefore
+    // disagrees with these rows - it makes the client's filter-param string differ from
+    // the seededParams it compares against, so the client's mount fetch runs and replaces
+    // them. The seed-skip leaves these rows standing only when the restored direction is
+    // 'desc' too.
     .order('lessons(scheduled_at)', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(50);

@@ -4,7 +4,15 @@ import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { getBillability } from '@/lib/billing/billability'
 import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates'
 import { getDayKeyInTz, getMonthKeyInTz } from '@/lib/billing/monthRange'
-import { getExportTimezone, formatInstantInTz, formatDateInTz, tzLabel } from '@/lib/exportTime'
+import {
+  getExportTimezone,
+  formatInstantInTz,
+  formatLongInstantInTz,
+  formatTimeRangeInTz,
+  zonedCalendarDateForExcel,
+  ymdForExcel,
+  tzLabel,
+} from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { buildFilterLines } from '@/lib/exports/filterLines'
 import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook'
@@ -14,13 +22,12 @@ import * as Sentry from '@sentry/nextjs'
 // ExcelJS is Node-only (Buffer, zlib) — this route must not run on Edge.
 export const runtime = 'nodejs'
 
-// Date-only helper — used for `date`-typed columns (training start/end) that are
-// NOT instants and must stay exactly as stored. Instant (timestamptz) columns are
-// rendered in the resolved export timezone via formatInstantInTz / formatDateInTz.
-function formatDate(iso: string | null): string {
-  if (!iso) return ''
-  return iso.slice(0, 10)
-}
+// Date-only columns (training start/end) are `date`-typed: no instant, no zone,
+// so they must stay exactly as stored. They become REAL Excel date cells through
+// ymdForExcel, which applies no timezone conversion. Instant (timestamptz)
+// columns render in the resolved export timezone via zonedCalendarDateForExcel
+// (the Lesson Date cell), formatTimeRangeInTz (the Lesson Time range) and
+// formatLongInstantInTz (every single-instant proof column).
 
 // Teacher billability comes from the canonical getBillability() in @/lib/billing/billability — do not reintroduce a local copy.
 
@@ -75,8 +82,10 @@ export async function GET(
         const timeHeader = `Time (${exportTzLabel})`
 
         columns = [
-          { header: dateHeader, key: dateHeader, width: 14 },
-          { header: timeHeader, key: timeHeader, width: 14 },
+          // A REAL Excel date cell (format 'date'), not text: the column sorts and
+          // date-filters chronologically. Time is a separate text range column.
+          { header: dateHeader, key: dateHeader, width: 18, format: 'date' },
+          { header: timeHeader, key: timeHeader, width: 16 },
           { header: 'Teacher', key: 'Teacher', width: 24 },
           { header: 'Student', key: 'Student', width: 24 },
           { header: 'Company', key: 'Company', width: 24 },
@@ -86,20 +95,21 @@ export async function GET(
           { header: 'Billable to Teacher', key: 'Billable to Teacher', width: 20 },
           { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
           // Proof columns: what the system actually recorded, for dispute resolution.
-          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower)
+          // as '21 August 2026, 14:05' — hence width 24 on each of them.
           { header: 'Class ID', key: 'Class ID', width: 38 },
-          { header: 'Booked At', key: 'Booked At', width: 18 },
-          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Booked At', key: 'Booked At', width: 24 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 24 },
           { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
           { header: 'Hours Refunded', key: 'Hours Refunded', width: 16 },
           { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
-          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
-          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
-          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 24 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 24 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 24 },
           { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
-          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
-          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
-          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 24 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 24 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 24 },
         ]
 
         let query = supabase
@@ -173,11 +183,13 @@ export async function GET(
           joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
         })
 
-        // Null-safe wrapper around the instant formatter this branch already uses
-        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
-        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        // Null-safe wrapper around the long instant formatter used for every
+        // single-timestamp proof column: '21 August 2026, 14:05', in exportTz. A
+        // null timestamptz renders as an empty cell — never 'null', never
+        // 'Invalid Date'. The lesson's own date/time do NOT come through here:
+        // they are a date cell plus a start-end range (see the return below).
         const fmtInstant = (value: string | null | undefined): string =>
-          value ? formatInstantInTz(value, exportTz) : ''
+          value ? formatLongInstantInTz(value, exportTz) : ''
 
         // A lesson is dropped when EITHER side of it is a test account. Applied
         // before the company filter below, which is left exactly as it was.
@@ -261,8 +273,12 @@ export async function GET(
           }
 
           return {
-            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
-            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            // Real Date (the 'date' column format above renders it '21 August
+            // 2026'); the time is its own '13:30 - 14:30' range. End derived from
+            // duration_minutes, exactly as public.lesson_end_time does — lessons
+            // has no end column.
+            [dateHeader]: zonedCalendarDateForExcel(l.scheduled_at, exportTz),
+            [timeHeader]: formatTimeRangeInTz(l.scheduled_at, l.duration_minutes, exportTz),
             'Teacher': teacherMap[l.teacher_id] ?? '',
             'Student': student?.name ?? '',
             'Company': student?.companyId ? companyMap[student.companyId] ?? '' : 'Private',
@@ -533,8 +549,10 @@ export async function GET(
           { header: 'Total Hours', key: 'Total Hours', width: 14, format: 'decimal2' },
           { header: 'Hours Used', key: 'Hours Used', width: 14, format: 'decimal2' },
           { header: 'Hours Remaining', key: 'Hours Remaining', width: 16, format: 'decimal2' },
-          { header: 'Start Date', key: 'Start Date', width: 14 },
-          { header: 'End Date', key: 'End Date', width: 14 },
+          // Real Excel date cells built from the stored YYYY-MM-DD with NO timezone
+          // conversion — a `date` column has no instant to convert.
+          { header: 'Start Date', key: 'Start Date', width: 18, format: 'date' },
+          { header: 'End Date', key: 'End Date', width: 18, format: 'date' },
           { header: 'Status', key: 'Status', width: 22 },
         ]
 
@@ -589,8 +607,8 @@ export async function GET(
             'Total Hours': Number(Number(t.total_hours).toFixed(2)),
             'Hours Used': Number(Number(t.hours_consumed).toFixed(2)),
             'Hours Remaining': Number(remaining.toFixed(2)),
-            'Start Date': formatDate(t.start_date),
-            'End Date': formatDate(t.end_date),
+            'Start Date': ymdForExcel(t.start_date),
+            'End Date': ymdForExcel(t.end_date),
             'Status': t.status,
           }
         })
@@ -612,8 +630,10 @@ export async function GET(
           { header: 'Company', key: 'Company', width: 24 },
           { header: 'Student', key: 'Student', width: 24 },
           { header: 'Teacher', key: 'Teacher', width: 24 },
-          { header: dateHeader, key: dateHeader, width: 14 },
-          { header: timeHeader, key: timeHeader, width: 14 },
+          // A REAL Excel date cell (format 'date'), not text: the column sorts and
+          // date-filters chronologically. Time is a separate text range column.
+          { header: dateHeader, key: dateHeader, width: 18, format: 'date' },
+          { header: timeHeader, key: timeHeader, width: 16 },
           { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
           { header: 'Status', key: 'Status', width: 22 },
           { header: 'Billable (standard)', key: 'Billable (standard)', width: 20 },
@@ -623,22 +643,23 @@ export async function GET(
           { header: 'Hourly Rate', key: 'Hourly Rate', width: 14, format: 'money2' },
           { header: 'Amount Owed to Teacher', key: 'Amount Owed to Teacher', width: 24, format: 'money2' },
           // Proof columns: what the system actually recorded, for dispute resolution.
-          // Every timestamp below renders in exportTz via fmtInstant (defined lower).
+          // Every timestamp below renders in exportTz via fmtInstant (defined lower)
+          // as '21 August 2026, 14:05' — hence width 24 on each of them.
           // Deliberately absent from the totals block — they render blank there.
           { header: 'Class ID', key: 'Class ID', width: 38 },
-          { header: 'Booked At', key: 'Booked At', width: 18 },
-          { header: 'Cancelled At', key: 'Cancelled At', width: 18 },
+          { header: 'Booked At', key: 'Booked At', width: 24 },
+          { header: 'Cancelled At', key: 'Cancelled At', width: 24 },
           { header: 'Cancelled By', key: 'Cancelled By', width: 14 },
           { header: 'Hours Refunded', key: 'Hours Refunded', width: 16 },
           { header: 'Cancellation Window', key: 'Cancellation Window', width: 20 },
           { header: 'Cancellation Reason', key: 'Cancellation Reason', width: 45, wrap: true },
-          { header: 'Rescheduled At', key: 'Rescheduled At', width: 18 },
-          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 18 },
-          { header: 'Student Joined At', key: 'Student Joined At', width: 18 },
+          { header: 'Rescheduled At', key: 'Rescheduled At', width: 24 },
+          { header: 'Teacher Joined At', key: 'Teacher Joined At', width: 24 },
+          { header: 'Student Joined At', key: 'Student Joined At', width: 24 },
           { header: 'Teams Link Created', key: 'Teams Link Created', width: 18 },
-          { header: 'Report Deadline', key: 'Report Deadline', width: 18 },
-          { header: 'Report Submitted At', key: 'Report Submitted At', width: 18 },
-          { header: 'Report Flagged At', key: 'Report Flagged At', width: 18 },
+          { header: 'Report Deadline', key: 'Report Deadline', width: 24 },
+          { header: 'Report Submitted At', key: 'Report Submitted At', width: 24 },
+          { header: 'Report Flagged At', key: 'Report Flagged At', width: 24 },
         ]
 
         // cancellation_policy has a column-level REVOKE on `authenticated` — must use
@@ -705,11 +726,13 @@ export async function GET(
           joinClickMap[c.lesson_id].push({ user_type: c.user_type, clicked_at: c.clicked_at })
         })
 
-        // Null-safe wrapper around the instant formatter this branch already uses
-        // for scheduled_at. Same formatter, same exportTz; a null timestamptz
-        // renders as an empty cell — never 'null', never 'Invalid Date'.
+        // Null-safe wrapper around the long instant formatter used for every
+        // single-timestamp proof column: '21 August 2026, 14:05', in exportTz. A
+        // null timestamptz renders as an empty cell — never 'null', never
+        // 'Invalid Date'. The lesson's own date/time do NOT come through here:
+        // they are a date cell plus a start-end range (see the return below).
         const fmtInstant = (value: string | null | undefined): string =>
-          value ? formatInstantInTz(value, exportTz) : ''
+          value ? formatLongInstantInTz(value, exportTz) : ''
 
         // hourly_rate has a column-level REVOKE on `authenticated` — fetch the
         // teacher rate+currency via the admin client (role-gated above) so the
@@ -820,8 +843,12 @@ export async function GET(
             'Company': student?.company_id ? cMap[student.company_id] ?? '' : '',
             'Student': student?.full_name ?? '',
             'Teacher': teacherMap[l.teacher_id]?.name ?? '',
-            [dateHeader]: formatDateInTz(l.scheduled_at, exportTz),
-            [timeHeader]: formatInstantInTz(l.scheduled_at, exportTz).slice(11),
+            // Real Date (the 'date' column format above renders it '21 August
+            // 2026'); the time is its own '13:30 - 14:30' range. End derived from
+            // duration_minutes, exactly as public.lesson_end_time does — lessons
+            // has no end column.
+            [dateHeader]: zonedCalendarDateForExcel(l.scheduled_at, exportTz),
+            [timeHeader]: formatTimeRangeInTz(l.scheduled_at, l.duration_minutes, exportTz),
             'Duration (min)': l.duration_minutes,
             'Status': statusLabel,
             'Billable (standard)': billable24 ? 'Yes' : 'No',
@@ -883,10 +910,13 @@ export async function GET(
         freezeColumns = 1 // Student stays visible
 
         const classDateHeader = `Class Date (${exportTzLabel})`
+        const classTimeHeader = `Class Time (${exportTzLabel})`
 
         columns = [
           { header: 'Student', key: 'Student', width: 24 },
-          { header: classDateHeader, key: classDateHeader, width: 20 },
+          // A REAL Excel date cell (format 'date'), then the start-end time range.
+          { header: classDateHeader, key: classDateHeader, width: 18, format: 'date' },
+          { header: classTimeHeader, key: classTimeHeader, width: 16 },
           { header: 'Teacher', key: 'Teacher', width: 24 },
           { header: 'Grammar', key: 'Grammar', width: 14 },
           { header: 'Expression', key: 'Expression', width: 14 },
@@ -915,8 +945,11 @@ export async function GET(
         const tIds = [...new Set((reports ?? []).map((r: any) => r.teacher_id).filter(Boolean))]
 
         const [lessonRes, teacherRes] = await Promise.all([
+          // duration_minutes joins the select so the Class Time column can show the
+          // END as well as the start — lessons has no end column, so the end is
+          // derived exactly as public.lesson_end_time derives it.
           lessonIds.length > 0
-            ? supabase.from('lessons').select('id, student_id, scheduled_at').in('id', lessonIds)
+            ? supabase.from('lessons').select('id, student_id, scheduled_at, duration_minutes').in('id', lessonIds)
             : { data: [] },
           tIds.length > 0
             ? supabase.from('profiles').select('id, full_name, is_test').in('id', tIds)
@@ -925,8 +958,8 @@ export async function GET(
         if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
         if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
 
-        const lessonMap: Record<string, { studentId: string; scheduledAt: string }> = {}
-        lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at } })
+        const lessonMap: Record<string, { studentId: string; scheduledAt: string; durationMinutes: number | null }> = {}
+        lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at, durationMinutes: l.duration_minutes ?? null } })
 
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
@@ -963,7 +996,8 @@ export async function GET(
 
           rows.push({
             'Student': studentMap[lesson.studentId] ?? '',
-            [classDateHeader]: lesson.scheduledAt ? formatDateInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson.scheduledAt ? zonedCalendarDateForExcel(lesson.scheduledAt, exportTz) : null,
+            [classTimeHeader]: lesson.scheduledAt ? formatTimeRangeInTz(lesson.scheduledAt, lesson.durationMinutes, exportTz) : '',
             'Teacher': teacherMap[report.teacher_id] ?? '',
             'Grammar': ld.grammar ?? '',
             'Expression': ld.expression ?? '',
@@ -986,17 +1020,21 @@ export async function GET(
         freezeColumns = 1 // Teacher stays visible
 
         const classDateHeader = `Class Date (${exportTzLabel})`
+        const classTimeHeader = `Class Time (${exportTzLabel})`
         const deadlineHeader = `Deadline (${exportTzLabel})`
         const flaggedAtHeader = `Flagged At (${exportTzLabel})`
 
         columns = [
           { header: 'Teacher', key: 'Teacher', width: 24 },
           { header: 'Student', key: 'Student', width: 24 },
-          { header: classDateHeader, key: classDateHeader, width: 20 },
+          // Was ONE column carrying date and time as text. Now a REAL Excel date
+          // cell plus the start-end range, matching every other lesson sheet.
+          { header: classDateHeader, key: classDateHeader, width: 18, format: 'date' },
+          { header: classTimeHeader, key: classTimeHeader, width: 16 },
           { header: 'Hours Since Class', key: 'Hours Since Class', width: 18, format: 'decimal1' },
           { header: 'Report Status', key: 'Report Status', width: 22 },
-          { header: deadlineHeader, key: deadlineHeader, width: 20 },
-          { header: flaggedAtHeader, key: flaggedAtHeader, width: 20 },
+          { header: deadlineHeader, key: deadlineHeader, width: 24 },
+          { header: flaggedAtHeader, key: flaggedAtHeader, width: 24 },
         ]
 
         let query = supabase
@@ -1016,8 +1054,11 @@ export async function GET(
         const tIds = [...new Set((reports ?? []).map((r: any) => r.teacher_id).filter(Boolean))]
 
         const [lessonRes, teacherRes] = await Promise.all([
+          // duration_minutes joins the select so the Class Time column can show the
+          // END as well as the start — lessons has no end column, so the end is
+          // derived exactly as public.lesson_end_time derives it.
           lessonIds.length > 0
-            ? supabase.from('lessons').select('id, student_id, scheduled_at').in('id', lessonIds)
+            ? supabase.from('lessons').select('id, student_id, scheduled_at, duration_minutes').in('id', lessonIds)
             : { data: [] },
           tIds.length > 0
             ? supabase.from('profiles').select('id, full_name, is_test').in('id', tIds)
@@ -1026,8 +1067,8 @@ export async function GET(
         if ('error' in lessonRes && lessonRes.error) throw lessonRes.error
         if ('error' in teacherRes && teacherRes.error) throw teacherRes.error
 
-        const lessonMap: Record<string, { studentId: string; scheduledAt: string }> = {}
-        lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at } })
+        const lessonMap: Record<string, { studentId: string; scheduledAt: string; durationMinutes: number | null }> = {}
+        lessonRes.data?.forEach((l: any) => { lessonMap[l.id] = { studentId: l.student_id, scheduledAt: l.scheduled_at, durationMinutes: l.duration_minutes ?? null } })
 
         const teacherMap: Record<string, string> = {}
         teacherRes.data?.forEach((p: any) => { teacherMap[p.id] = p.full_name })
@@ -1071,11 +1112,12 @@ export async function GET(
           return {
             'Teacher': teacherMap[r.teacher_id] ?? '',
             'Student': lesson ? studentMap[lesson.studentId] ?? '' : '',
-            [classDateHeader]: lesson ? formatInstantInTz(lesson.scheduledAt, exportTz) : '',
+            [classDateHeader]: lesson ? zonedCalendarDateForExcel(lesson.scheduledAt, exportTz) : null,
+            [classTimeHeader]: lesson ? formatTimeRangeInTz(lesson.scheduledAt, lesson.durationMinutes, exportTz) : '',
             'Hours Since Class': hoursSinceClass,
             'Report Status': r.status,
-            [deadlineHeader]: r.deadline_at ? formatInstantInTz(r.deadline_at, exportTz) : '',
-            [flaggedAtHeader]: r.flagged_at ? formatInstantInTz(r.flagged_at, exportTz) : '',
+            [deadlineHeader]: r.deadline_at ? formatLongInstantInTz(r.deadline_at, exportTz) : '',
+            [flaggedAtHeader]: r.flagged_at ? formatLongInstantInTz(r.flagged_at, exportTz) : '',
           }
         })
 

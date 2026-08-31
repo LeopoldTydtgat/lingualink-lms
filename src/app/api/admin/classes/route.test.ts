@@ -44,6 +44,17 @@ type QueryCall = {
   updateValues: Record<string, unknown> | null
 }
 
+// GET's lessons list query, reduced to the parts these tests judge it by. Separate
+// from QueryCall above rather than folded into it: that record describes the
+// service-role client POST drives, and GET never touches the service-role client at
+// all - the two handlers share no query path, so they share no record shape.
+type ListQuery = {
+  columns: string
+  filters: Array<[string, string, unknown]>
+  orders: Array<{ column: string; ascending: boolean; nullsFirst?: boolean }>
+  ranges: Array<[number, number]>
+}
+
 const store = vi.hoisted(() => ({
   froms: [] as string[],
   // Only awaited queries land here. A builder that was constructed and never
@@ -72,6 +83,14 @@ const store = vi.hoisted(() => ({
   teamsMeeting: { joinUrl: '', meetingId: '' },
   teamsFails: false,
   adminClientCount: 0,
+  // -- GET harness -----------------------------------------------------------
+  // The calling admin's own profile row, read by GET for its date-filter edges.
+  adminProfile: null as unknown,
+  // What the lessons list query resolves to, and the exact count beside it.
+  lessonsList: [] as unknown[],
+  lessonsListCount: 0 as number | null,
+  // Every lessons list query that actually RESOLVED, in issue order.
+  lessonsListQueries: [] as ListQuery[],
 }))
 
 // -- Fake service-role client ------------------------------------------------
@@ -201,24 +220,109 @@ vi.mock('@/lib/supabase/admin', () => {
   return { createAdminClient: () => makeClient() }
 })
 
-// The anon/SSR client: the auth check and the trainings ownership+balance read.
+// The anon/SSR client. POST drives it for the auth check and the trainings
+// ownership+balance read; GET drives it for everything it does, because the GET handler
+// never constructs a service-role client at all.
+//
+// The trainings branch below is byte-identical to the one the POST tests have always
+// driven. The two branches beside it are purely additive and unreachable from POST,
+// which reads neither profiles nor lessons through this client - so no existing test
+// changes behaviour.
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: {
       getUser: async () => ({ data: { user: { id: 'auth-admin-1' } }, error: null }),
     },
     from(table: string) {
-      if (table !== 'trainings') throw new Error(`unexpected table in test: ${table}`)
-      const builder = {
-        select() {
-          return builder
-        },
-        eq() {
-          return builder
-        },
-        maybeSingle: async () => ({ data: store.training, error: store.trainingError }),
+      if (table === 'trainings') {
+        const builder = {
+          select() {
+            return builder
+          },
+          eq() {
+            return builder
+          },
+          maybeSingle: async () => ({ data: store.training, error: store.trainingError }),
+        }
+        return builder
       }
-      return builder
+
+      // GET's admin-timezone read. Only the date-filter edges consult the value, and
+      // the sort tests send no date params, so this exists to keep the handler running
+      // rather than to be asserted on.
+      if (table === 'profiles') {
+        const builder = {
+          select() {
+            return builder
+          },
+          eq() {
+            return builder
+          },
+          maybeSingle: async () => ({ data: store.adminProfile, error: null }),
+        }
+        return builder
+      }
+
+      // GET's list query. It records the .order() calls in the order they were issued,
+      // which is the whole point of this harness: .order() is the only place a ?sort=
+      // value can reach the database, so asserting on the recorded { column, ascending }
+      // pairs is what proves the raw string never got there itself.
+      //
+      // Recorded on RESOLVE, not on construction - the same discipline as the
+      // service-role fake above. A builder that was never awaited is not a query, and
+      // the rejected-sort test turns on that distinction.
+      if (table === 'lessons') {
+        const query: ListQuery = { columns: '', filters: [], orders: [], ranges: [] }
+        const builder = {
+          select(columns: string) {
+            query.columns = columns
+            return builder
+          },
+          eq(column: string, value: unknown) {
+            query.filters.push(['eq', column, value])
+            return builder
+          },
+          in(column: string, value: unknown) {
+            query.filters.push(['in', column, value])
+            return builder
+          },
+          or(expression: string) {
+            query.filters.push(['or', expression, null])
+            return builder
+          },
+          gte(column: string, value: unknown) {
+            query.filters.push(['gte', column, value])
+            return builder
+          },
+          lt(column: string, value: unknown) {
+            query.filters.push(['lt', column, value])
+            return builder
+          },
+          lte(column: string, value: unknown) {
+            query.filters.push(['lte', column, value])
+            return builder
+          },
+          order(column: string, options: { ascending: boolean; nullsFirst?: boolean }) {
+            query.orders.push({
+              column,
+              ascending: options.ascending,
+              nullsFirst: options.nullsFirst,
+            })
+            return builder
+          },
+          range(from: number, to: number) {
+            query.ranges.push([from, to])
+            return builder
+          },
+          then(resolve: (r: { data: unknown; error: unknown; count: number | null }) => void) {
+            store.lessonsListQueries.push(query)
+            resolve({ data: store.lessonsList, error: null, count: store.lessonsListCount })
+          },
+        }
+        return builder
+      }
+
+      throw new Error(`unexpected table in test: ${table}`)
     },
   }),
 }))
@@ -261,7 +365,7 @@ vi.mock('@/lib/admin/raiseReconciliationTask', () => ({
 // the content functions and LOGO_URL is a literal).
 
 // Imported AFTER the mocks are registered.
-import { POST } from './route'
+import { GET, POST } from './route'
 import { cancelTeamsMeeting, createTeamsMeeting } from '@/lib/microsoft/graph'
 import { raiseReconciliationTask } from '@/lib/admin/raiseReconciliationTask'
 import { localToUtc } from '@/lib/utils/timezone'
@@ -296,6 +400,20 @@ function makeRequest(body: unknown = BODY): NextRequest {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+// GET takes everything from the URL, so a request IS its query string. `query` is the
+// raw string without the leading '?'; '' means no params at all, which is the "no
+// ?sort=" case.
+function makeGetRequest(query: string): NextRequest {
+  return new NextRequest(`http://localhost/api/admin/classes${query ? `?${query}` : ''}`)
+}
+
+// The single lessons list query a successful GET issues. Asserts the count rather than
+// indexing blindly, so a test that expected a query and got none fails saying so.
+function listQuery(): ListQuery {
+  expect(store.lessonsListQueries).toHaveLength(1)
+  return store.lessonsListQueries[0]
 }
 
 // A clash check is the only lessons query carrying an `lt` on scheduled_at;
@@ -386,6 +504,11 @@ beforeEach(() => {
   }
   store.teamsFails = false
   store.adminClientCount = 0
+
+  store.adminProfile = { timezone: TEACHER_TZ }
+  store.lessonsList = []
+  store.lessonsListCount = 0
+  store.lessonsListQueries = []
 
   errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -955,5 +1078,94 @@ describe('POST /api/admin/classes - an ambiguous deduction failure is resolved b
 
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'This training is no longer active.' })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET: the Date & Time sort direction
+// ---------------------------------------------------------------------------
+//
+// This file had no GET harness - the anon/SSR mock answered for `trainings` and threw
+// on every other table, because POST was the only handler ever driven here. The two
+// branches added to that mock are the minimum GET needs (its profile-timezone read and
+// its lessons list query); the service-role fake and every POST fixture are untouched.
+//
+// What each test pins is the .order() call the route actually issued. That is the ONE
+// place a ?sort= value can reach the database, so asserting on the recorded direction is
+// what proves the allow-list holds and the raw string is never passed through. The
+// .range() and the response body are asserted alongside it because the sort param must
+// not disturb pagination or the exact count.
+
+describe('GET /api/admin/classes - Date & Time sort direction', () => {
+  it('no ?sort= keeps the descending order this endpoint has always returned', async () => {
+    const res = await GET(makeGetRequest(''))
+
+    expect(res.status).toBe(200)
+    expect(listQuery().orders).toEqual([
+      { column: 'scheduled_at', ascending: false, nullsFirst: undefined },
+    ])
+    // Untouched by the sort param: page 1 is still rows 0-49 and the count is still exact.
+    expect(listQuery().ranges).toEqual([[0, 49]])
+    expect(await res.json()).toEqual({ lessons: [], total: 0, page: 1, pageSize: 50 })
+  })
+
+  it("?sort=asc orders scheduled_at ascending", async () => {
+    const res = await GET(makeGetRequest('sort=asc'))
+
+    expect(res.status).toBe(200)
+    expect(listQuery().orders).toEqual([
+      { column: 'scheduled_at', ascending: true, nullsFirst: undefined },
+    ])
+    expect(listQuery().ranges).toEqual([[0, 49]])
+  })
+
+  it("?sort=desc orders scheduled_at descending, identically to sending nothing", async () => {
+    const res = await GET(makeGetRequest('sort=desc'))
+
+    expect(res.status).toBe(200)
+    expect(listQuery().orders).toEqual([
+      { column: 'scheduled_at', ascending: false, nullsFirst: undefined },
+    ])
+    expect(listQuery().ranges).toEqual([[0, 49]])
+  })
+
+  it('the cancelled branch carries the direction on BOTH keys, and leaves nullsFirst alone', async () => {
+    // cancelled_at is the primary key on this branch and scheduled_at its fallback for
+    // legacy rows. If only one took the direction the list would run two ways at once.
+    // nullsFirst is deliberately NOT flipped with it: it decides where the legacy
+    // null-cancelled_at rows land, not which way the column runs.
+    const res = await GET(makeGetRequest('status=cancelled&sort=asc'))
+
+    expect(res.status).toBe(200)
+    expect(listQuery().orders).toEqual([
+      { column: 'cancelled_at', ascending: true, nullsFirst: false },
+      { column: 'scheduled_at', ascending: true, nullsFirst: undefined },
+    ])
+  })
+
+  it('the cancelled branch with no ?sort= is byte-for-byte what it always was', async () => {
+    const res = await GET(makeGetRequest('status=cancelled'))
+
+    expect(res.status).toBe(200)
+    expect(listQuery().orders).toEqual([
+      { column: 'cancelled_at', ascending: false, nullsFirst: false },
+      { column: 'scheduled_at', ascending: false, nullsFirst: undefined },
+    ])
+  })
+
+  it('an unrecognised ?sort= is rejected with a 400 and issues no query at all', async () => {
+    // The allow-list is exact: case variants and long forms are not silently understood,
+    // and an EMPTY ?sort= is a malformed value rather than an absent one - only a param
+    // that is not present at all falls back to the descending default.
+    for (const value of ['garbage', 'ASC', 'ascending', '']) {
+      const res = await GET(makeGetRequest(`sort=${value}`))
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({ error: 'Invalid sort' })
+    }
+
+    // The 400 is returned above the search pre-resolution and above the lessons query,
+    // so a rejected value never reaches .order() - or any other query.
+    expect(store.lessonsListQueries).toHaveLength(0)
   })
 })
