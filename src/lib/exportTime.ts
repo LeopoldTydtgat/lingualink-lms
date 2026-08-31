@@ -3,14 +3,35 @@
 // Shared timezone formatting for ALL admin exports (CSV + XLSX). Every export
 // renders instant (timestamptz) columns in one settings-driven timezone so the
 // four export routes agree exactly. Date-only fields (billing months, training
-// start/end dates) are NOT instants and must never pass through these helpers.
+// start/end dates) are NOT instants and must never pass through the instant
+// helpers — they have their own pair (ymdForExcel / formatLongDateOnly).
+//
+// Two families live here:
+//
+//   TEXT formatters — return a string for a text cell.
+//     formatInstantInTz      'DD/MM/YYYY HH:MM'      (SCREEN consumers, frozen)
+//     formatDateInTz         'DD/MM/YYYY'            (SCREEN consumers, frozen)
+//     formatLongDateInTz     '21 August 2026'
+//     formatTimeInTz         '13:30'
+//     formatTimeRangeInTz    '13:30 - 14:30'
+//     formatLongInstantInTz  '21 August 2026, 14:05'
+//     formatLongDateOnly     '1 August 2026'         (from a bare YYYY-MM-DD)
+//
+//   EXCEL DATE builders — return a Date the XLSX writer stores as a REAL date
+//   cell, so Excel sorts and filters it chronologically instead of lexically.
+//     zonedCalendarDateForExcel  (from a timestamptz instant, in tz)
+//     ymdForExcel                (from a bare YYYY-MM-DD, no tz conversion)
+//
+// formatInstantInTz and formatDateInTz are FROZEN: BillingClient.tsx,
+// ClassesListClient.tsx, BillingAdminClient.tsx and reports/[id]/page.tsx all
+// render on-screen values through them. The export columns moved to the long
+// formatters above; the screen ones deliberately did not.
 //
 // getExportTimezone() is SERVER-ONLY — it reads the setting via the service-role
-// admin client. The formatInstantInTz / formatDateInTz / tzLabel /
-// zonedDayRangeToUtcBounds helpers are pure (Intl only) and safe to import into
-// client components. To keep the service-role client out of any client bundle
-// that imports the pure helpers, getExportTimezone loads the admin client through
-// a dynamic import() rather than a top-level import.
+// admin client. Every other helper here is pure (Intl only) and safe to import
+// into client components. To keep the service-role client out of any client
+// bundle that imports the pure helpers, getExportTimezone loads the admin client
+// through a dynamic import() rather than a top-level import.
 
 export const EXPORT_TZ_FALLBACK = 'Africa/Johannesburg'
 
@@ -49,9 +70,19 @@ function toDate(value: string | Date): Date {
   return value instanceof Date ? value : new Date(value)
 }
 
+// True for a Date that Intl can format. Intl.DateTimeFormat.formatToParts throws
+// RangeError('Invalid time value') on an unparseable value, which inside an
+// export route means a 500 for the whole workbook rather than one blank cell.
+function isValidDate(d: Date): boolean {
+  return !Number.isNaN(d.getTime())
+}
+
 // 'DD/MM/YYYY HH:MM' for a timestamptz instant, rendered in `tz`.
 // Modelled on Route D's SAST formatters (en-GB, hour12:false) so every export
 // converts an instant to the same wall-clock. Guards the Intl "24:00" quirk.
+//
+// FROZEN — on-screen consumers depend on this exact shape. Export columns use
+// formatLongInstantInTz instead.
 export function formatInstantInTz(value: string | Date, tz: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: tz,
@@ -68,6 +99,9 @@ export function formatInstantInTz(value: string | Date, tz: string): string {
 }
 
 // 'DD/MM/YYYY' — the date portion of a timestamptz instant, rendered in `tz`.
+//
+// FROZEN — on-screen consumers depend on this exact shape. Export columns use
+// zonedCalendarDateForExcel (a real date cell) or formatLongDateInTz instead.
 export function formatDateInTz(value: string | Date, tz: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: tz,
@@ -77,6 +111,198 @@ export function formatDateInTz(value: string | Date, tz: string): string {
   }).formatToParts(toDate(value))
   const get = (t: string) => parts.find(p => p.type === t)?.value ?? ''
   return `${get('day')}/${get('month')}/${get('year')}`
+}
+
+// ---------------------------------------------------------------------------
+// Long-form export formatters
+//
+// The export columns read as prose ('21 August 2026') rather than as the
+// all-numeric DD/MM/YYYY, which a US-locale reader parses as the wrong date
+// whenever the day is <= 12. The lesson DATE column is not a string at all any
+// more (see zonedCalendarDateForExcel); these cover the single instants and the
+// CSV, neither of which has a cell type to lean on.
+// ---------------------------------------------------------------------------
+
+// '21 August 2026' — the date portion of a timestamptz instant, rendered in `tz`.
+export function formatLongDateInTz(value: string | Date, tz: string): string {
+  const date = toDate(value)
+  if (!isValidDate(date)) return ''
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
+}
+
+// '13:30' — the wall-clock time of a timestamptz instant, rendered in `tz`.
+// Guards the Intl "24" hour quirk exactly as formatInstantInTz does: some
+// en-GB/ICU builds render midnight as hour 24 of the SAME date, so 24 means 00.
+export function formatTimeInTz(value: string | Date, tz: string): string {
+  const date = toDate(value)
+  if (!isValidDate(date)) return ''
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const get = (t: string) => parts.find(p => p.type === t)?.value ?? ''
+  const hour = get('hour') === '24' ? '00' : get('hour')
+  return `${hour}:${get('minute')}`
+}
+
+// '13:30 - 14:30' — a lesson's start and end wall-clock, rendered in `tz`.
+//
+// public.lessons has NO end column; the end is derived exactly as the database's
+// own public.lesson_end_time(starts_at, duration_minutes) derives it:
+// start + duration_minutes. Instant math on an absolute instant, never a local
+// date reconstruction, so a lesson running across midnight or across a DST
+// transition still ends at the true wall-clock of its end instant.
+//
+// A duration that is absent, non-finite or non-positive yields the START time
+// alone — never '13:30 - 13:30', which would assert a zero-length class, and
+// never a dangling hyphen, which reads as missing data.
+export function formatTimeRangeInTz(
+  start: string | Date,
+  durationMinutes: number | null | undefined,
+  tz: string,
+): string {
+  const startDate = toDate(start)
+  if (!isValidDate(startDate)) return ''
+  const startText = formatTimeInTz(startDate, tz)
+  if (
+    typeof durationMinutes !== 'number' ||
+    !Number.isFinite(durationMinutes) ||
+    durationMinutes <= 0
+  ) {
+    return startText
+  }
+  const endDate = new Date(startDate.getTime() + durationMinutes * 60000)
+  if (!isValidDate(endDate)) return startText
+  return `${startText} - ${formatTimeInTz(endDate, tz)}`
+}
+
+// '21 August 2026, 14:05' — a single timestamptz instant rendered in `tz`.
+// Composed from the two helpers above rather than from one combined Intl
+// pattern, because en-GB inserts ' at ' between a long date and a time; the
+// comma form is what the export columns use.
+export function formatLongInstantInTz(value: string | Date, tz: string): string {
+  const date = toDate(value)
+  if (!isValidDate(date)) return ''
+  return `${formatLongDateInTz(date, tz)}, ${formatTimeInTz(date, tz)}`
+}
+
+// ---------------------------------------------------------------------------
+// Excel date-cell builders
+//
+// ExcelJS writes a Date cell through utils.dateToExcel (node_modules/exceljs/
+// lib/utils/utils.js:55), called from cell-xform.js:249 for ValueType.Date:
+//
+//     dateToExcel(d, date1904) {
+//       return 25569 + ( d.getTime() / (24 * 3600 * 1000) ) - (date1904 ? 1462 : 0);
+//     }
+//
+// It reads d.getTime() — the ABSOLUTE epoch instant — not the Date's local or
+// UTC calendar components. 25569 is the day count from the Excel epoch to
+// 1970-01-01T00:00:00Z, so the serial lands on a whole number (midnight, no
+// time fraction) only when the Date IS exactly midnight UTC of the target day.
+// date1904 is undefined here: Workbook's constructor sets `this.properties = {}`
+// (lib/doc/workbook.js:23), xlsx.js:620 passes model.properties.date1904 through,
+// and buildExportWorkbook never sets it — so the 1900 system applies and no 1462
+// correction is subtracted.
+//
+// Hence Date.UTC(y, m - 1, d). Building the Date with the local constructor
+// (new Date(y, m - 1, d)) shifts the serial by the HOST's offset — on a UTC+2
+// box 21 Aug becomes serial 46254.9166…, i.e. 20 Aug 22:00 — so the exported day
+// would depend on which machine rendered it. Verified against exceljs 4.x by
+// round-tripping a cell: Date.UTC(2026, 7, 21) writes serial 46255 and reads
+// back as 2026-08-21T00:00:00.000Z, type 4 (ValueType.Date).
+// ---------------------------------------------------------------------------
+
+// The calendar y/m/d that an instant falls on in `tz`. Date parts only — with no
+// hour requested there is no "24" quirk to guard on this path.
+function ymdPartsInTz(date: Date, tz: string): { y: number; m: number; d: number } | null {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).formatToParts(date)
+  const get = (t: string) => Number(parts.find(p => p.type === t)?.value)
+  const y = get('year')
+  const m = get('month')
+  const d = get('day')
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null
+  return { y, m, d }
+}
+
+// A timestamptz instant as a REAL Excel date cell for the calendar day it falls
+// on in `tz`. Returns midnight UTC of that day, which ExcelJS serialises as a
+// whole-number serial (see the dateToExcel note above) — so 20 Aug 23:30 UTC
+// exports as 21 August 2026 for Africa/Johannesburg, the same day the Time
+// column shows, and Excel sorts the column chronologically.
+//
+// null (never an Invalid Date) for an unparseable value: dateToExcel would turn
+// NaN into a NaN serial and write <v>NaN</v>, which Excel refuses to open.
+// buildExportWorkbook renders null as an empty cell.
+export function zonedCalendarDateForExcel(value: string | Date, tz: string): Date | null {
+  const date = toDate(value)
+  if (!isValidDate(date)) return null
+  let ymd: { y: number; m: number; d: number } | null = null
+  try {
+    ymd = ymdPartsInTz(date, tz)
+  } catch {
+    // Unknown IANA zone — Intl throws RangeError. One bad setting must not take
+    // the whole workbook down with it.
+    return null
+  }
+  if (!ymd) return null
+  return new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d))
+}
+
+// Parse the leading 'YYYY-MM-DD' of a date-only value. Tolerates a trailing time
+// (the formatDate this replaced did iso.slice(0, 10)) and rejects a date that
+// does not exist — '2026-02-31' would otherwise roll silently into March.
+function parseYmdString(value: string | null | undefined): { y: number; m: number; d: number } | null {
+  if (!value) return null
+  const [ys, ms, ds] = value.slice(0, 10).split('-')
+  if (ys?.length !== 4 || ms?.length !== 2 || ds?.length !== 2) return null
+  const y = Number(ys)
+  const m = Number(ms)
+  const d = Number(ds)
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null
+  const probe = new Date(Date.UTC(y, m - 1, d))
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return null
+  }
+  return { y, m, d }
+}
+
+// A date-only 'YYYY-MM-DD' (a Postgres `date` column: training start/end) as a
+// REAL Excel date cell. NO timezone conversion — a `date` has no instant and no
+// zone, so shifting it by an export timezone would move a training's start date
+// by a day. Same Date.UTC construction as zonedCalendarDateForExcel, for the
+// same dateToExcel reason. null on empty or malformed input.
+export function ymdForExcel(ymd: string | null | undefined): Date | null {
+  const parts = parseYmdString(ymd)
+  if (!parts) return null
+  return new Date(Date.UTC(parts.y, parts.m - 1, parts.d))
+}
+
+// '1 August 2026' from a date-only 'YYYY-MM-DD', for the CSV export, which has
+// no cell type and must carry the long text form. Formatted with timeZone 'UTC'
+// against the same Date.UTC construction, so the rendered day is exactly the
+// stored day in every host timezone. '' on empty or malformed input.
+export function formatLongDateOnly(ymd: string | null | undefined): string {
+  const date = ymdForExcel(ymd)
+  if (!date) return ''
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'UTC',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
 }
 
 function isValidTimeZone(tz: string): boolean {
