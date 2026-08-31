@@ -3,7 +3,15 @@
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireAdmin } from '@/lib/auth/requireAdmin';
-import { getExportTimezone, tzLabel, formatInstantInTz, zonedDayRangeToUtcBounds } from '@/lib/exportTime';
+import {
+  getExportTimezone,
+  tzLabel,
+  formatInstantInTz,
+  formatLongInstantInTz,
+  formatTimeRangeInTz,
+  zonedCalendarDateForExcel,
+  zonedDayRangeToUtcBounds,
+} from '@/lib/exportTime';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook';
 import { buildFilterLines } from '@/lib/exports/filterLines';
@@ -13,10 +21,18 @@ import { fetchLessonRateMap, resolveLessonRate } from '@/lib/billing/lessonRates
 
 export const runtime = 'nodejs';
 
-// Display formatters are built PER REQUEST inside GET() from the settings-driven
-// export timezone (was a hardcoded Africa/Johannesburg/SAST). Format style is
-// unchanged (en-GB, month:'short', hour12:false); only the zone + header labels
-// are now dynamic. NEW273: the calendar-day QUERY BOUNDS below now resolve in
+// Date/time rendering comes from the shared helpers in @/lib/exportTime, which
+// every tabular export now uses, rather than from local Intl formatters:
+//   Class Date  a REAL Excel date cell (zonedCalendarDateForExcel + the writer's
+//               'date' column format) so the column sorts and date-filters
+//               chronologically instead of lexically;
+//   Class Time  '13:30 - 14:30' (formatTimeRangeInTz) — start AND end, the end
+//               derived from duration_minutes exactly as public.lesson_end_time
+//               derives it, since lessons has no end column;
+//   every single instant  '21 August 2026, 14:05' (formatLongInstantInTz).
+// All three resolve in the settings-driven export timezone (was a hardcoded
+// Africa/Johannesburg/SAST); only the zone + header labels are dynamic.
+// NEW273: the calendar-day QUERY BOUNDS below now resolve in
 // that SAME settings-driven zone (were hardcoded +02:00). Scoping and display
 // therefore agree — previously a non-SAST export zone scoped rows by SAST days
 // while rendering them in another zone, so boundary-day rows (each carrying an
@@ -74,31 +90,18 @@ export async function GET(request: NextRequest) {
     // --- Data queries: service-role admin client (all three snapshot/log tables are admin-only) ---
     const admin = createAdminClient();
 
-    // Resolve the settings-driven export timezone once and build the display
-    // formatters in that zone. Format style matches the previous SAST formatters
-    // exactly (en-GB, month:'short', hour12:false); only the timezone and the
-    // column-header labels are now dynamic.
+    // Resolve the settings-driven export timezone once. The local dateFmt /
+    // timeFmt / fmtDate / fmtTime / fmtDateTime formatters this file used to
+    // carry are gone: every date and time now renders through the shared helpers
+    // in @/lib/exportTime, so this sheet cannot drift from the other exports.
     const exportTz = await getExportTimezone();
     const exportTzLabel = tzLabel(exportTz);
-    const dateFmt = new Intl.DateTimeFormat('en-GB', {
-      timeZone: exportTz,
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    });
-    const timeFmt = new Intl.DateTimeFormat('en-GB', {
-      timeZone: exportTz,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    const fmtDate = (iso: string | null | undefined): string => (iso ? dateFmt.format(new Date(iso)) : '');
-    const fmtTime = (iso: string | null | undefined): string => (iso ? timeFmt.format(new Date(iso)) : '');
-    const fmtDateTime = (iso: string | null | undefined): string => {
-      if (!iso) return '';
-      const d = new Date(iso);
-      return `${dateFmt.format(d)}, ${timeFmt.format(d)}`;
-    };
+
+    // Null-safe wrapper for the single-instant columns: '21 August 2026, 14:05',
+    // in exportTz. A null timestamptz renders as an empty cell — never 'null',
+    // never 'Invalid Date'.
+    const fmtInstant = (iso: string | null | undefined): string =>
+      iso ? formatLongInstantInTz(iso, exportTz) : '';
 
     // Calendar-day bounds resolved in the export timezone (NEW273). Half-open:
     // [local 00:00 on dateFrom, local 00:00 on the day after dateTo) — both ends
@@ -295,8 +298,11 @@ export async function GET(request: NextRequest) {
       const studentJoinedAt = earliest('student');
 
       return {
-        classDate: fmtDate(l.scheduled_at),
-        classTime: fmtTime(l.scheduled_at),
+        // Real Date (the 'date' column format below renders it '21 August 2026');
+        // the time is its own '13:30 - 14:30' range, end derived from
+        // duration_minutes exactly as public.lesson_end_time does.
+        classDate: zonedCalendarDateForExcel(l.scheduled_at, exportTz),
+        classTime: formatTimeRangeInTz(l.scheduled_at, l.duration_minutes, exportTz),
         duration: l.duration_minutes,
         teacher: teacher?.full_name ?? '',
         student: student?.full_name ?? '',
@@ -304,16 +310,16 @@ export async function GET(request: NextRequest) {
         outcome,
         _outcomeRaw: outcomeRaw,
         reportSubmitted: report?.status === 'completed' ? 'Yes' : 'No',
-        reportSubmittedAt: fmtDateTime(report?.completed_at),
+        reportSubmittedAt: fmtInstant(report?.completed_at),
         flagged: report?.status === 'flagged' ? 'Yes' : 'No',
         feedback: report?.feedback_text ?? '',
-        teacherJoinedAt: fmtDateTime(teacherJoinedAt),
-        studentJoinedAt: fmtDateTime(studentJoinedAt),
+        teacherJoinedAt: fmtInstant(teacherJoinedAt),
+        studentJoinedAt: fmtInstant(studentJoinedAt),
         reviewSubmitted: reviewedLessonIds.has(l.id) ? 'Yes' : 'No',
         teacherBillable,
         hourlyRate: rate,
         amountOwed,
-        cancelledAt: fmtDateTime(l.cancelled_at),
+        cancelledAt: fmtInstant(l.cancelled_at),
         // RAW stored value, not passed through getCancellationLabel - proves what was stored.
         cancelledBy: l.cancelled_by ?? '',
         hoursRefunded: l.hours_refunded === true ? 'Yes' : 'No',
@@ -343,8 +349,10 @@ export async function GET(request: NextRequest) {
     // over "Amount Owed to Teacher" would silently sum across currencies the
     // moment any teacher is non-EUR.
     const columns: ExportColumn[] = [
-      { header: `Class Date (${exportTzLabel})`, key: 'classDate', width: 16 },
-      { header: `Class Time (${exportTzLabel})`, key: 'classTime', width: 12 },
+      // A REAL Excel date cell (format 'date'), not text: the column sorts and
+      // date-filters chronologically. Time is a separate text range column.
+      { header: `Class Date (${exportTzLabel})`, key: 'classDate', width: 18, format: 'date' },
+      { header: `Class Time (${exportTzLabel})`, key: 'classTime', width: 16 },
       { header: 'Duration (mins)', key: 'duration', width: 14, format: 'integer' },
       { header: 'Teacher', key: 'teacher', width: 22 },
       { header: 'Student', key: 'student', width: 22 },
