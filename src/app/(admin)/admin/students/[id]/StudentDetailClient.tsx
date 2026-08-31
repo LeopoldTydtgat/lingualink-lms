@@ -2271,7 +2271,7 @@ export default function StudentDetailClient({
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Balance After</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Reference</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Notes</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600">Date & Time</th>
                 </tr>
               </thead>
               <tbody>
@@ -2304,9 +2304,10 @@ export default function StudentDetailClient({
                       <td className="px-4 py-3 text-gray-700">{entry.balance_after}h</td>
                       <td className="px-4 py-3 text-gray-500">{entry.invoice_reference || '—'}</td>
                       <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{entry.notes || '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">
-                        {new Date(entry.created_at).toLocaleDateString('en-GB', {
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(entry.created_at).toLocaleString('en-GB', {
                           day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
                           timeZone: adminTz,
                         })}
                       </td>
