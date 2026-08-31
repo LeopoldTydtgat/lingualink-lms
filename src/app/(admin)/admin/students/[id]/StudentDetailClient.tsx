@@ -1740,6 +1740,18 @@ export default function StudentDetailClient({
               {activeTrain ? (
                 <>
                   <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
+                  <InfoRow
+                    label="Created"
+                    value={
+                      activeTrain.created_at
+                        ? new Date(activeTrain.created_at).toLocaleString('en-GB', {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                            timeZone: adminTz,
+                          })
+                        : null
+                    }
+                  />
                   <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
                   <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
                   <InfoRow
