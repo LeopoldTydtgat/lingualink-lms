@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { getBillability, SETTLED_LESSON_STATUSES } from '@/lib/billing/billability'
 import { getMonthRangeInTz } from '@/lib/billing/monthRange'
-import { formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
+import { formatInstantInTz, formatLongDateInTz, formatTimeRangeInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
 import { getCancellationLabel } from '@/lib/lessons/statusLabel'
 import { DateRangeFilter } from '../_components/DateRangeFilter'
 import { useFilterPersistence } from '@/lib/hooks/useFilterPersistence'
@@ -1140,13 +1140,17 @@ export default function BillingAdminClient({
   // same per-row currency, the same status labels. Deliberately NOT a server-route
   // export - that would recompute billing in a second place and risk drifting
   // from the numbers the admin sees here.
-  // NEW271: the Date & Time column renders in the settings-driven export timezone
-  // (formatInstantInTz + exportTz) to agree with the server-route exports; the
-  // on-screen column now renders in that same exportTz (see formatDateTime in the
-  // component), so the table and this CSV always agree on a timestamp.
-  // The billing numbers still match 1:1.
+  // NEW271: the date and time render in the settings-driven export timezone, the
+  // same zone the on-screen column uses (see formatDateTime in the component), so
+  // the table and this CSV always describe the same instant. The billing numbers
+  // still match 1:1.
+  // The single 'Date & Time' column is now a 'Date' column ('21 August 2026') and
+  // a 'Time' column ('13:30 - 14:30', end derived from duration_minutes exactly as
+  // public.lesson_end_time does), matching the XLSX exports. A CSV has no cell
+  // types, so both are text here — the long date form is what keeps '01/08' from
+  // being read as 8 January by a US-locale reader.
   const buildStudentBillingCSV = (): string => {
-    const headers = ['Student', 'Teacher', `Date & Time (${tzLabel(exportTz)})`, 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
+    const headers = ['Student', 'Teacher', `Date (${tzLabel(exportTz)})`, `Time (${tzLabel(exportTz)})`, 'Duration (min)', 'Class Status', 'Billable', 'Billable Amount', 'Currency']
     const rows = sbLessons.map(l => {
       const bill = getBillability({
         status: l.status,
@@ -1161,7 +1165,8 @@ export default function BillingAdminClient({
       return [
         l.studentName,
         l.teacherName,
-        formatInstantInTz(l.scheduled_at, exportTz),
+        formatLongDateInTz(l.scheduled_at, exportTz),
+        formatTimeRangeInTz(l.scheduled_at, l.duration_minutes, exportTz),
         l.duration_minutes,
         getLessonStatusLabel(l),
         bill.label,
