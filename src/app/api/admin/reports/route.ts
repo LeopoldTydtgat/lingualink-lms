@@ -36,6 +36,26 @@ export async function GET(request: NextRequest) {
   const dateTo      = searchParams.get('date_to');     // yyyy-mm-dd calendar day, admin-local (inclusive)
   const classStatus = searchParams.get('class_status');
 
+  // Sort direction for the list's Class Date column. An ALLOW-LIST, and the raw string
+  // never reaches .order(): what crosses into the query below is a boolean and nothing
+  // else, so a hand-crafted ?sort= cannot name a column or smuggle PostgREST order syntax
+  // into the request. Same param name, same two values and the same 400 body as the admin
+  // classes GET - one vocabulary across both admin lists rather than a second dialect.
+  //
+  // Absent means 'desc' - the newest-class-first order this endpoint has always returned -
+  // so every caller that predates this param behaves exactly as before.
+  //
+  // An unrecognised value is REJECTED rather than quietly coerced to the default: a typo
+  // that returned the opposite order is the kind of thing nobody notices. Returned here,
+  // above the list query and above the two badge counts, so a rejected request builds no
+  // query at all. (The admin's own profile-timezone read above it has already run, exactly
+  // as it does in the classes route.)
+  const sort = searchParams.get('sort');
+  if (sort !== null && sort !== 'asc' && sort !== 'desc') {
+    return NextResponse.json({ error: 'Invalid sort' }, { status: 400 });
+  }
+  const sortAscending = sort === 'asc';
+
   const from = (page - 1) * limit;
   const to   = from + limit - 1;
 
@@ -81,19 +101,24 @@ export async function GET(request: NextRequest) {
       )
     `, { count: 'exact' })
     // Ordered by the CLASS date - the joined lessons.scheduled_at this list renders in its
-    // "Class Date" column - newest class first. created_at is the WRONG key on its own:
-    // report rows are written by the trg_create_pending_report AFTER INSERT ON lessons
-    // trigger, so created_at records when the lesson was BOOKED, not when the class
+    // "Class Date" column - newest class first by default. created_at is the WRONG key on
+    // its own: report rows are written by the trg_create_pending_report AFTER INSERT ON
+    // lessons trigger, so created_at records when the lesson was BOOKED, not when the class
     // happened - a list showing class dates came back in booking order, which looks
     // random. created_at survives only as the tiebreaker for two classes at the same
     // instant, which keeps range() pagination deterministic across pages.
     //
-    // Both .order() calls are TOP level (no referencedTable on either), so postgrest-js
-    // emits a single order param: order=lessons(scheduled_at).desc,created_at.desc -
-    // PostgREST's documented to-one embedded sort syntax. It needs no !inner, so the
-    // lessonsEmbed conditional above is deliberately left alone.
-    .order('lessons(scheduled_at)', { ascending: false })
-    .order('created_at', { ascending: false })
+    // BOTH keys take the requested direction. A tiebreaker running opposite to the key it
+    // breaks ties for would make the row order within one instant - and with it where the
+    // page boundaries fall - depend on which way the column happens to be pointing.
+    //
+    // Both .order() calls are still TOP level (no referencedTable on either), so postgrest-js
+    // emits a single order param: order=lessons(scheduled_at).desc,created_at.desc by
+    // default, and the matching .asc pair under ?sort=asc - PostgREST's documented to-one
+    // embedded sort syntax either way. It needs no !inner, so the lessonsEmbed conditional
+    // above is deliberately left alone.
+    .order('lessons(scheduled_at)', { ascending: sortAscending })
+    .order('created_at', { ascending: sortAscending })
     .range(from, to);
 
   if (status)    query = query.eq('status', status);
