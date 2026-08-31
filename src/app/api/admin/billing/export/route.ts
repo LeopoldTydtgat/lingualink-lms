@@ -9,7 +9,15 @@ import {
   recomputeInvoiceAmountsForTeacher,
   recomputeInvoiceAmountsForAllTeachers,
 } from '@/lib/billing/recomputeAmounts'
-import { getExportTimezone, formatInstantInTz, tzLabel, zonedDayRangeToUtcBounds } from '@/lib/exportTime'
+import {
+  getExportTimezone,
+  formatInstantInTz,
+  formatLongInstantInTz,
+  formatTimeRangeInTz,
+  zonedCalendarDateForExcel,
+  tzLabel,
+  zonedDayRangeToUtcBounds,
+} from '@/lib/exportTime'
 import { buildExportWorkbook, type ExportColumn } from '@/lib/exports/workbook'
 import { buildFilterLines } from '@/lib/exports/filterLines'
 
@@ -27,8 +35,9 @@ export const runtime = 'nodejs'
 const INVOICE_STATUSES: readonly string[] = ['pending', 'uploaded', 'paid', 'overdue']
 
 // Instant (timestamptz) columns render in the resolved export timezone via
-// formatInstantInTz. billing_month below is a date-only value (YYYY-MM-01) and
-// is NOT an instant, so it keeps its own month formatter.
+// formatLongInstantInTz ('21 August 2026, 14:05'). billing_month below is a
+// date-only value (YYYY-MM-01) and is NOT an instant, so it keeps its own month
+// formatter — 'August 2026' is the whole point of that column, not a day.
 function formatMonthLabel(dateStr: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'UTC',
@@ -137,8 +146,9 @@ export async function GET(req: NextRequest) {
       { header: 'Amount', key: 'Amount', width: 14, format: 'money2' },
       { header: 'Currency', key: 'Currency', width: 10 },
       { header: 'Status', key: 'Status', width: 14 },
-      { header: uploadedAtHeader, key: uploadedAtHeader, width: 20 },
-      { header: paidAtHeader, key: paidAtHeader, width: 20 },
+      // '21 August 2026, 14:05' needs 24, not 20.
+      { header: uploadedAtHeader, key: uploadedAtHeader, width: 24 },
+      { header: paidAtHeader, key: paidAtHeader, width: 24 },
     ]
 
     // The embedded profiles join exposes teacher email — read it on the admin
@@ -177,8 +187,8 @@ export async function GET(req: NextRequest) {
         'Amount': inv.amount_eur != null ? Number(inv.amount_eur) : 0,
         'Currency': (teacher as { full_name: string; email: string; currency?: string | null } | null)?.currency || 'EUR',
         'Status': inv.status,
-        [uploadedAtHeader]: inv.uploaded_at ? formatInstantInTz(inv.uploaded_at, exportTz) : '',
-        [paidAtHeader]: inv.paid_at ? formatInstantInTz(inv.paid_at, exportTz) : '',
+        [uploadedAtHeader]: inv.uploaded_at ? formatLongInstantInTz(inv.uploaded_at, exportTz) : '',
+        [paidAtHeader]: inv.paid_at ? formatLongInstantInTz(inv.paid_at, exportTz) : '',
       }
     })
 
@@ -201,7 +211,11 @@ export async function GET(req: NextRequest) {
     filename = 'company-billing.xlsx'
     freezeColumns = 3 // Company + Student + Teacher stay visible when scrolling right
 
-    const dateTimeHeader = `Date & Time (${exportTzLabel})`
+    // Was ONE 'Date & Time' text column. Split so the date can be a REAL Excel
+    // date cell (sorts and date-filters chronologically) and the time can carry
+    // the class END as well as its start.
+    const dateHeader = `Date (${exportTzLabel})`
+    const timeHeader = `Time (${exportTzLabel})`
 
     // No totals row on this sheet: Amount is per-lesson in the TEACHER's currency,
     // so one sum would silently add GBP or USD rows into a euro figure the moment
@@ -210,7 +224,8 @@ export async function GET(req: NextRequest) {
       { header: 'Company', key: 'Company', width: 24 },
       { header: 'Student', key: 'Student', width: 24 },
       { header: 'Teacher', key: 'Teacher', width: 24 },
-      { header: dateTimeHeader, key: dateTimeHeader, width: 20 },
+      { header: dateHeader, key: dateHeader, width: 18, format: 'date' },
+      { header: timeHeader, key: timeHeader, width: 16 },
       { header: 'Duration (min)', key: 'Duration (min)', width: 14, format: 'integer' },
       { header: 'Status', key: 'Status', width: 22 },
       { header: 'Billable (24hr)', key: 'Billable (24hr)', width: 16 },
@@ -290,7 +305,12 @@ export async function GET(req: NextRequest) {
             'Company': company.name,
             'Student': student.full_name,
             'Teacher': teacher?.full_name || '',
-            [dateTimeHeader]: formatInstantInTz(lesson.scheduled_at, exportTz),
+            // Real Date (the 'date' column format above renders it '21 August
+            // 2026'); the time is its own '13:30 - 14:30' range. End derived from
+            // duration_minutes, exactly as public.lesson_end_time does — lessons
+            // has no end column.
+            [dateHeader]: zonedCalendarDateForExcel(lesson.scheduled_at, exportTz),
+            [timeHeader]: formatTimeRangeInTz(lesson.scheduled_at, lesson.duration_minutes, exportTz),
             'Duration (min)': lesson.duration_minutes,
             'Status': lesson.status,
             'Billable (24hr)': bill.billableToTeacher ? 'Yes' : 'No',
