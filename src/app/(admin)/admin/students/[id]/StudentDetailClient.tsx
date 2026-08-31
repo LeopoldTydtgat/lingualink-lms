@@ -1684,7 +1684,19 @@ export default function StudentDetailClient({
                     below renders, including its deliberate newest-any-status fallback, so
                     the panel and the card can never show different hours. Values are
                     strings, so they render via GlanceTile's string branch. */}
-                <GlanceTile label="Hours purchased" value={activeTrain ? `${activeTrain.total_hours}h` : '—'} />
+                <GlanceTile
+                  label="Hours purchased"
+                  value={activeTrain ? `${activeTrain.total_hours}h` : '—'}
+                  caption={
+                    activeTrain?.created_at
+                      ? `Training created ${new Date(activeTrain.created_at).toLocaleString('en-GB', {
+                          day: '2-digit', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: adminTz,
+                        })}`
+                      : undefined
+                  }
+                />
                 <GlanceTile label="Hours used" value={activeTrain ? `${activeTrain.hours_consumed}h` : '—'} />
                 <GlanceTile
                   label="Hours remaining"
@@ -1728,6 +1740,18 @@ export default function StudentDetailClient({
               {activeTrain ? (
                 <>
                   <InfoRow label="Package" value={activeTrain.package_name ?? activeTrain.package_type} />
+                  <InfoRow
+                    label="Created"
+                    value={
+                      activeTrain.created_at
+                        ? new Date(activeTrain.created_at).toLocaleString('en-GB', {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                            timeZone: adminTz,
+                          })
+                        : null
+                    }
+                  />
                   <InfoRow label="Total Hours" value={`${activeTrain.total_hours}h`} />
                   <InfoRow label="Hours Used" value={`${activeTrain.hours_consumed}h`} />
                   <InfoRow
@@ -2113,6 +2137,40 @@ export default function StudentDetailClient({
         <div className="space-y-4">
           {hoursLogCapped && (
             <p className="text-sm text-gray-400">Showing the most recent 1000 entries.</p>
+          )}
+          {/* When this student's hours were issued. The opening package is NOT a
+              hours_log row (locked decision: create_training_atomic writes none), so
+              a student with a fresh package shows an empty ledger and no record of
+              when the hours arrived. Rendered OUTSIDE the table on purpose: it is not
+              a transaction, must not be counted in "Showing X of Y", and must not be
+              subject to the date range filter below.
+              "Current total", not "opening balance": Add Hours raises total_hours, so
+              after any top-up this figure is no longer the original package. No
+              arithmetic is done here - only what the training row says.
+              activeTrain falls back to the newest training of any status, so the
+              package name is shown to make clear which training this describes.
+              Timezone is passed explicitly, so server and client render the same
+              string - the same rule the Classes tab column follows. */}
+          {activeTrain && (
+            <div className="card-elevated p-4">
+              <p className="text-sm text-gray-800">
+                <span className="font-semibold">Training created:</span>{' '}
+                {activeTrain.created_at
+                  ? new Date(activeTrain.created_at).toLocaleString('en-GB', {
+                      day: '2-digit', month: 'short', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                      timeZone: adminTz,
+                    })
+                  : 'date unavailable'}
+                <span className="mx-2 text-gray-400">|</span>
+                <span className="font-semibold">Current total:</span>{' '}
+                {activeTrain.total_hours}h
+                {' '}({activeTrain.package_name ?? activeTrain.package_type ?? 'training'})
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                The opening package is not a ledger entry. Every top-up or deduction made after this date is listed in the table below.
+              </p>
+            </div>
           )}
           {/* Add / Remove buttons. Both post a training_id to the hours route,
               which requires a uuid — with no active training the click could
