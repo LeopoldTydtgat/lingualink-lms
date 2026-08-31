@@ -51,6 +51,24 @@ export async function GET(request: NextRequest) {
   const page = parseInt(searchParams.get('page') ?? '1')
   const pageSize = 50
 
+  // Sort direction for the list's Date & Time column. An ALLOW-LIST, and the raw string
+  // never reaches .order(): what crosses into the query below is a boolean and nothing
+  // else, so a hand-crafted ?sort= cannot name a column or smuggle PostgREST order
+  // syntax into the request.
+  //
+  // Absent means 'desc' - the newest-class-first order this endpoint has always
+  // returned - so every caller that predates this param behaves exactly as before.
+  //
+  // An unrecognised value is REJECTED rather than quietly coerced to the default: a
+  // typo that returned the opposite order is the kind of thing nobody notices. The 400
+  // is returned HERE, above the search pre-resolution, so a rejected request issues no
+  // query at all.
+  const sort = searchParams.get('sort')
+  if (sort !== null && sort !== 'asc' && sort !== 'desc') {
+    return NextResponse.json({ error: 'Invalid sort' }, { status: 400 })
+  }
+  const sortAscending = sort === 'asc'
+
   // Pre-resolve the free-text search into teacher/student id lists BEFORE the
   // lessons query runs, so the filter composes with .range() and the exact count.
   // The previous approach filtered in JS after the page was sliced: pages came
@@ -207,13 +225,19 @@ export async function GET(request: NextRequest) {
     query = query.eq('status', 'missed')
   }
 
-  // Cancelled lessons sort by most recently cancelled first; legacy rows with null cancelled_at fall back to scheduled_at
+  // Cancelled lessons sort by cancellation time; legacy rows with null cancelled_at fall
+  // back to scheduled_at. BOTH keys take the requested direction, so the primary key and
+  // its fallback can never run opposite ways within one list - descending still gives the
+  // most recently cancelled first, exactly as it always has, and ascending gives the
+  // oldest. nullsFirst stays false in both directions on purpose: it decides where the
+  // legacy null-cancelled_at rows land, not which way the column runs, and flipping it
+  // with the direction would float those rows to the top of an ascending list.
   if (status === 'cancelled') {
     query = query
-      .order('cancelled_at', { ascending: false, nullsFirst: false })
-      .order('scheduled_at', { ascending: false })
+      .order('cancelled_at', { ascending: sortAscending, nullsFirst: false })
+      .order('scheduled_at', { ascending: sortAscending })
   } else {
-    query = query.order('scheduled_at', { ascending: false })
+    query = query.order('scheduled_at', { ascending: sortAscending })
   }
   query = query.range((page - 1) * pageSize, page * pageSize - 1)
 
