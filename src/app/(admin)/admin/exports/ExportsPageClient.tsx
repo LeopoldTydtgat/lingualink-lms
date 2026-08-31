@@ -48,9 +48,9 @@ const EXPORTS: ExportDef[] = [
   {
     type: 'all-classes',
     title: 'All Classes Report',
-    description: 'Every class across all teachers — with status, report status, and billability flag.',
+    description: 'Every class across all teachers, including cancellations and no-shows - with cancellation time, who cancelled, refund outcome and notice window.',
     filters: ['from', 'to', 'teacher', 'student', 'company'],
-    columns: ['Date', 'Time', 'Teacher', 'Student', 'Company', 'Duration', 'Status', 'Report Status', 'Billable to Teacher', 'Cancellation Reason'],
+    columns: ['Date', 'Time', 'Teacher', 'Student', 'Company', 'Duration', 'Status', 'Report Status', 'Billable to Teacher', 'Cancellation Reason', 'Class ID', 'Booked At', 'Cancelled At', 'Cancelled By', 'Hours Refunded', 'Cancellation Window', 'Rescheduled At', 'Teacher Joined At', 'Student Joined At', 'Teams Link Created', 'Report Deadline', 'Report Submitted At', 'Report Flagged At'],
   },
   {
     type: 'teacher-earnings',
@@ -71,7 +71,7 @@ const EXPORTS: ExportDef[] = [
     title: 'Company Billing Report',
     description: 'Billable classes per B2B company — includes 48hr cancellation policy flags.',
     filters: ['from', 'to', 'company'],
-    columns: ['Company', 'Student', 'Date', 'Time', 'Duration', 'Status', 'Billable (standard)', 'Billable cancellation (48hr policy)'],
+    columns: ['Company', 'Student', 'Teacher', 'Date', 'Time', 'Duration', 'Status', 'Billable (standard)', 'Billable cancellation (48hr policy)', 'Amount', 'Currency', 'Hourly Rate', 'Amount Owed to Teacher', 'Class ID', 'Booked At', 'Cancelled At', 'Cancelled By', 'Hours Refunded', 'Cancellation Window', 'Cancellation Reason', 'Rescheduled At', 'Teacher Joined At', 'Student Joined At', 'Teams Link Created', 'Report Deadline', 'Report Submitted At', 'Report Flagged At'],
   },
   {
     type: 'student-progress',
